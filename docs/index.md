@@ -139,6 +139,14 @@ use-case-examples/sql-lora-finetuning-and-deployment/README.md
 ```
 
 ```{toctree}
+:caption: Sovereign AI Customization
+:hidden:
+
+nemotron/customization/index.md
+nemotron/customization/sovereign-ai-onboarding.md
+```
+
+```{toctree}
 :caption: Training Recipes
 :hidden:
 

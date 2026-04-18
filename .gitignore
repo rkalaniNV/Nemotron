@@ -73,6 +73,7 @@ checkpoints/
 data/
 !src/nemotron/cli/nano3/data/
 !src/nemotron/cli/embed/data/
+!src/nemotron/customization_recipes/nemotron/planning/sovereign-ai-onboarding.md
 workspace/
 wandb/
 .nemotron/
