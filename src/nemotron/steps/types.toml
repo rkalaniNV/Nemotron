@@ -1,0 +1,35 @@
+[types.text_jsonl]
+description = "JSONL corpus with one text-bearing row per line."
+extensions = [".jsonl"]
+
+[types.chat_jsonl]
+description = "JSONL corpus with nested chat turns, typically messages.*.content."
+extensions = [".jsonl"]
+is_a = ["text_jsonl"]
+
+[types.text_parquet]
+description = "Parquet corpus with text-bearing columns."
+extensions = [".parquet"]
+
+[types.translated_text_jsonl]
+description = "JSONL corpus translated to a target language."
+extensions = [".jsonl"]
+is_a = ["text_jsonl"]
+
+[types.translated_chat_jsonl]
+description = "Chat JSONL corpus translated in place while preserving chat structure."
+extensions = [".jsonl"]
+is_a = ["translated_text_jsonl", "chat_jsonl"]
+
+[types.translation_report]
+description = "Metadata-rich translation output with optional FAITH or runtime scores."
+
+[types.mcq_benchmark_jsonl]
+description = "JSONL benchmark where each row contains a question, options, and answer."
+extensions = [".jsonl"]
+
+[types.translated_mcq_benchmark_jsonl]
+description = "Translated MCQ benchmark with the original schema preserved."
+extensions = [".jsonl"]
+is_a = ["mcq_benchmark_jsonl"]
+

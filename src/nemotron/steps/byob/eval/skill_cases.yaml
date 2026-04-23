@@ -1,0 +1,4 @@
+cases:
+  - id: choose-byob-step
+    request: Translate a generated MCQ benchmark to Japanese for evaluation only.
+    expected_step_id: nemotron.steps.byob

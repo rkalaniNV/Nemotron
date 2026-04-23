@@ -1,0 +1,13 @@
+cases:
+  - id: corpus-chat-translation
+    request: Translate a multi-turn chat corpus from English to Thai before SFT.
+    expected_step_id: nemotron.steps.translation
+    expected_patterns:
+      - translate-training-corpus
+      - prefer-llm-for-structured-chat
+  - id: corpus-large-plain-text
+    request: Translate a large English news corpus to Hindi with a local NMT server.
+    expected_step_id: nemotron.steps.translation
+    expected_patterns:
+      - translate-training-corpus
+      - prefer-nmt-for-large-corpora

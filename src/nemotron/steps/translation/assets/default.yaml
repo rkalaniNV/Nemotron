@@ -1,0 +1,54 @@
+# =============================================================================
+# Translation Step — Corpus Translation
+# =============================================================================
+
+translation:
+  source_lang: en
+  target_lang: hi
+
+  backend: llm                 # llm | google | aws | nmt
+  segmentation_mode: coarse    # coarse | fine
+  min_segment_chars: 0
+  input_format: auto           # auto | jsonl | parquet
+  output_format: jsonl         # jsonl | parquet
+
+  text_field: text
+  output_field: translated_text
+  translation_column: translated_text
+  reconstruct_messages: false
+  messages_field: messages
+  messages_content_field: content
+
+  server:
+    url: https://integrate.api.nvidia.com/v1
+    model: mistralai/mistral-small-3.1-24b-instruct
+    api_key: ${oc.env:NVIDIA_API_KEY,}
+
+  max_concurrent_requests: 64
+  skip_translated: false
+  files_per_partition: null
+  blocksize: null
+
+  faith_eval:
+    enabled: false
+    threshold: 2.5
+    model_name: ""
+    segment_level: false      # score exploded translation segments before reassembly
+    filter_enabled: true
+
+  output_mode: both
+  merge_scores: true
+
+  google:
+    project_id: ""
+    api_version: v2
+
+  aws:
+    region: ${oc.env:AWS_DEFAULT_REGION,us-east-2}
+
+  nmt:
+    server_url: http://localhost:5000
+    batch_size: 32
+
+  input_path: /workspace/data/source
+  output_dir: /workspace/data/translated

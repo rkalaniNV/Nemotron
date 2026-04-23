@@ -1,0 +1,33 @@
+patterns:
+  - id: translate-training-corpus
+    step_ids: [nemotron.steps.translation]
+    confidence: high
+    triggers:
+      - translate training data
+      - translate corpus before cpt
+      - translate data before sft
+      - multilingual customization data
+  - id: prefer-llm-for-structured-chat
+    step_ids: [nemotron.steps.translation]
+    confidence: medium
+    triggers:
+      - chat messages
+      - messages.*.content
+      - tool calling transcript
+      - nested json chat data
+  - id: prefer-nmt-for-large-corpora
+    step_ids: [nemotron.steps.translation]
+    confidence: medium
+    triggers:
+      - large corpus
+      - millions of rows
+      - local translation server
+      - throughput over nuance
+  - id: enable-faith-for-high-value-data
+    step_ids: [nemotron.steps.translation]
+    confidence: medium
+    triggers:
+      - high quality translation
+      - needs quality scoring
+      - faith evaluation
+      - governance review

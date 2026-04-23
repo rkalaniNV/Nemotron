@@ -1,0 +1,24 @@
+patterns:
+  - id: translate-benchmark-only
+    step_ids: [nemotron.steps.byob]
+    confidence: high
+    triggers:
+      - translate benchmark only
+      - translate mcq benchmark
+      - translate byob benchmark
+      - keep benchmark schema intact
+  - id: enable-faith-for-high-value-data
+    step_ids: [nemotron.steps.byob]
+    confidence: medium
+    triggers:
+      - high quality translation
+      - needs quality scoring
+      - faith evaluation
+      - governance review
+  - id: disable-faith-filter-for-byob
+    step_ids: [nemotron.steps.byob]
+    confidence: high
+    triggers:
+      - byob translation with scoring
+      - preserve mcq row count
+      - benchmark reassembly

@@ -1,0 +1,13 @@
+cases:
+  - id: benchmark-only-translation
+    request: Translate only the MCQ benchmark to Hindi and keep the original question-answer schema.
+    expected_step_id: nemotron.steps.byob
+    expected_patterns:
+      - translate-benchmark-only
+      - disable-faith-filter-for-byob
+  - id: benchmark-with-roundtrip-metrics
+    request: Translate the sovereign benchmark to Thai and attach backtranslation quality metrics.
+    expected_step_id: nemotron.steps.byob
+    expected_patterns:
+      - translate-benchmark-only
+      - enable-faith-for-high-value-data
