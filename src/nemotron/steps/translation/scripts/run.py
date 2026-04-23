@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 
 from nemotron.kit.train_script import (
@@ -33,22 +32,25 @@ from nemotron.kit.train_script import (
     load_omegaconf_yaml,
     parse_config_and_overrides,
 )
-from nemotron.steps.translation.scripts.driver import translate_data
+from nemotron.steps.translation.scripts.runtime import translate_data
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "assets" / "default.yaml"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Load config, apply CLI overrides, and run corpus translation."""
     try:
-        config_path, cli_overrides = parse_config_and_overrides(default_config=DEFAULT_CONFIG_PATH)
+        config_path, cli_overrides = parse_config_and_overrides(
+            argv=argv,
+            default_config=DEFAULT_CONFIG_PATH,
+        )
         config = load_omegaconf_yaml(config_path)
         config = apply_hydra_overrides(config, cli_overrides)
     except FileNotFoundError as exc:
         logger.error(str(exc))
-        sys.exit(1)
+        raise SystemExit(1) from exc
 
     output_path = translate_data(config)
     logger.info("Translation complete. Output: %s", output_path)

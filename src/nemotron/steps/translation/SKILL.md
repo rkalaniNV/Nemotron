@@ -20,7 +20,7 @@ Use this skill for corpus translation, not benchmark-only translation.
 4. Run:
 
 ```bash
-python -m nemotron.steps.translation.scripts.run
+nemotron steps translation
 ```
 
 Apply only the overrides needed by the request.
@@ -28,7 +28,7 @@ Apply only the overrides needed by the request.
 Example direct invocation:
 
 ```bash
-python -m nemotron.steps.translation.scripts.run \
+nemotron steps translation \
   translation.input_path=/workspace/data/*.jsonl \
   translation.output_dir=/workspace/out \
   translation.source_lang=en \

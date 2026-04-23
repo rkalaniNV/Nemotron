@@ -48,7 +48,7 @@ def test_translation_step_assets_exist() -> None:
     expected = [
         STEPS_ROOT / "translation" / "SKILL.md",
         STEPS_ROOT / "translation" / "scripts" / "run.py",
-        STEPS_ROOT / "translation" / "scripts" / "driver.py",
+        STEPS_ROOT / "translation" / "scripts" / "runtime.py",
         STEPS_ROOT / "translation" / "references" / "STEP.md",
         STEPS_ROOT / "translation" / "references" / "guide.md",
         STEPS_ROOT / "translation" / "assets" / "default.yaml",

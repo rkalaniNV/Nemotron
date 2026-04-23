@@ -37,7 +37,7 @@ compute:
     - local NMT server
 source:
   - repo: Nemotron
-    path: src/nemotron/steps/translation/scripts/driver.py
+    path: src/nemotron/steps/translation/scripts/runtime.py
   - repo: Curator
     path: nemo_curator/stages/text/translation/
 ---
