@@ -21,10 +21,10 @@ import re
 
 from pydantic import BaseModel
 
-from speaker.core.byob.config import ByobConfig, ByobTranslationConfig
-from speaker.core.byob.mcq.formatters import format_qa, format_qa_batch
-from speaker.core.byob.mcq.response_model import QuestionAnswerFourChoices
-from speaker.core.byob.translation.utils import get_language
+from nemotron.data_prep.stages.byob.config import ByobConfig, ByobTranslationConfig
+from nemotron.data_prep.stages.byob.mcq.formatters import format_qa, format_qa_batch
+from nemotron.data_prep.stages.byob.mcq.response_model import QuestionAnswerFourChoices
+from nemotron.data_prep.stages.byob.translation.utils import get_language
 
 def prepare_generation_seed_dataset(config: ByobConfig):
     """Prepare the seed dataset for question generation.

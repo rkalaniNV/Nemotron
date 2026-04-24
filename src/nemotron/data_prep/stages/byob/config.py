@@ -21,8 +21,12 @@ import os
 import yaml
 from dataclasses import dataclass, field
 
-from speaker.core.byob.constants import ALLOWED_HF_DATASETS, HF_DATASET_TO_SUBSET, AVAILABLE_QUALITY_METRICS
-from speaker.core.byob.hf_utils import get_subjects
+from nemotron.data_prep.stages.byob.constants import (
+    ALLOWED_HF_DATASETS,
+    AVAILABLE_QUALITY_METRICS,
+    HF_DATASET_TO_SUBSET,
+)
+from nemotron.data_prep.stages.byob.hf_utils import get_subjects
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +205,7 @@ class ByobConfig:
                 assert isinstance(config['prompt_config'][stage]['system_prompt'], str), f"Field `system_prompt` must be a string for stage {stage}"
                 assert isinstance(config['prompt_config'][stage]['prompt'], str), f"Field `prompt` must be a string for stage {stage}"
         else:
-            from speaker.core.byob.mcq.prompts.utils import get_prompts
+            from nemotron.data_prep.stages.byob.mcq.prompts.utils import get_prompts
             config['prompt_config'] = get_prompts()
 
         # Set to all subjects if not specified

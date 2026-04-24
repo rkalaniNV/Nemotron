@@ -16,9 +16,9 @@
 
 import pandas as pd
 
-from speaker.core.byob.deduplication import TextSemanticDeduplication
-from speaker.core.byob.config import ByobConfig
-from speaker.core.byob.mcq.formatters import format_qa
+from nemotron.data_prep.stages.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.deduplication import TextSemanticDeduplication
+from nemotron.data_prep.stages.byob.mcq.formatters import format_qa
 
 class TextSemanticDeduplicationMCQ(TextSemanticDeduplication):
     """Semantic deduplication for MCQ datasets.

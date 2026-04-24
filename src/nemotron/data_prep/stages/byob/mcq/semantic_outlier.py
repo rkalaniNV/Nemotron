@@ -27,7 +27,7 @@ from nemo_curator.stages.text.io.reader import ParquetReader
 from nemo_curator.stages.text.io.writer import ParquetWriter
 from nemo_curator.stages.text.embedders import EmbeddingCreatorStage
 
-from speaker.core.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.config import ByobConfig
 
 logger = logging.getLogger(__name__)
 

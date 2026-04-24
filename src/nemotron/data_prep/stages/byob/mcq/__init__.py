@@ -14,4 +14,6 @@
 # limitations under the License.
 
 
-from speaker.core.byob.mcq.dataset import McqByobDataset as ByobDataset
+from nemotron.data_prep.stages.byob.mcq.dataset import McqByobDataset as ByobDataset
+
+__all__ = ["ByobDataset"]

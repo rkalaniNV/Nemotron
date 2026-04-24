@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 import data_designer.config as dd
 
-from speaker.core.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.config import ByobConfig
 
 def setup_model_config(model_config: dict):
     """Convert a model configuration dictionary to DataDesigner ModelConfig object.

@@ -16,10 +16,10 @@
 
 import pandas as pd
 
-from speaker.core.byob.config import ByobConfig
-from speaker.core.byob.text_coverage import TextCoverage
-from speaker.core.byob.mcq.dataset import McqByobDataset
-from speaker.core.byob.mcq.formatters import format_qa
+from nemotron.data_prep.stages.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.mcq.dataset import McqByobDataset
+from nemotron.data_prep.stages.byob.mcq.formatters import format_qa
+from nemotron.data_prep.stages.byob.text_coverage import TextCoverage
 
 class TextCoverageMCQ(TextCoverage):
     """Text coverage analysis for MCQ datasets.

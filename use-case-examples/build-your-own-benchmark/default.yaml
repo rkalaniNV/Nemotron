@@ -13,42 +13,55 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# BYOB MCQ — configuration for `build_mcq_benchmark.ipynb`
+# ------------------------------------------------------------------------------
+# All paths below are relative to the notebook working directory:
+#   Nemotron/use-case-examples/build-your-own-benchmark
+# Run Jupyter with that folder as cwd so `./assets/...` resolves correctly.
 
-expt_name: mmlu_base # Identifier for the experiment
-random_seed: 42 # Random seed for reproducibility
-ndd_batch_size: 32 # Batch size for NeMo Data Designer jobs
+expt_name: mmlu_base # Run name; creates a subdirectory under output_dir
+random_seed: 42
+ndd_batch_size: 32 # Rows per batch for NeMo Data Designer (LLM) calls
 
-# STAGE 1: Prepare data
-split: test # Dataset split to use
-subset: all # Optional: Dataset subset to use. Leave empty or set to `null` to use the default.
-# Paths below are workspace defaults. The build_mcq_benchmark notebook rewrites
-# input_dir, output_dir, metadata_file, and prompt_config to absolute paths under
-# your current working directory and local assets/ layout.
-input_dir: /workspace/speaker/egs/byob/mcq/datasets
-output_dir: /workspace/speaker/egs/byob/mcq/outputs
-hf_dataset: cais/mmlu # Hugging Face dataset
-language: en-IN # Language of the questions to generate
-metadata_file: /workspace/speaker/egs/byob/mcq/datasets/metadata.csv
-source_subjects: [] # The subsets to be used for few-shot prompts. Leave empty or set to `null` to use all subsets.
+# --- Data and corpus layout (prepare / seed stage) ---
+split: test # HF benchmark split used for few-shot examples (e.g. MMLU test)
+subset: all # HF subset/config name; use null to fall back to the dataset default
+# input_dir: parent folder for each key under target_source_mapping. Each key must
+# be a directory under this path containing at least one *.txt (or a .parquet).
+input_dir: ./assets
+# output_dir: parent for this run. BYOB writes:
+#   <output_dir>/<expt_name>/seed.parquet
+#   <output_dir>/<expt_name>/stage_cache/*.parquet   (notebook stage chain)
+#   <output_dir>/<expt_name>/artifacts/             (embeddings, Data Designer, etc.)
+#   <output_dir>/<expt_name>/benchmark*.parquet
+output_dir: ./assets/output
+hf_dataset: cais/mmlu # Few-shot source benchmark (must be supported by BYOB)
+language: en-IN # Locale tag for generated questions
+# metadata_file: optional CSV for tag-weighted sampling; must set tags in mapping if set
+metadata_file: null
+# source_subjects: MMLU (etc.) subject names for few-shot; empty list = all subjects
+source_subjects: []
 
-# The mapping of target subjects to source subjects.
-# Each key must match a subdirectory of input_dir containing *.txt documents
-# (for example assets/wikipedia_finance_india/ when input_dir is assets/).
-# The key `subjects` is mandatory. Use [] to sample uniformly from all MMLU subjects.
-# Omit `tags` unless metadata_file is set and you use tag-based weighting.
+# target_source_mapping: which on-disk corpus (under input_dir) to generate for.
+# Each top-level key = directory name under input_dir with *.txt files.
+# subjects: which HF benchmark subjects supply few-shots; [] = uniform over source_subjects.
+# Do not set tags here unless metadata_file points to a real CSV.
 target_source_mapping:
   wikipedia_finance_india:
     subjects: []
-few_shot_samples_per_query: 1 # Number of samples to use for few-shot prompting
-queries_per_target_subject_document: 1 # Number of queries to be used for each target subject document to generate questions
-num_questions_per_query: 2 # Number of questions to generate for each query
-# The total number of questions to generate is queries_per_target_subject_document * num_questions_per_query * number of documents
+few_shot_samples_per_query: 1
+queries_per_target_subject_document: 1
+num_questions_per_query: 2
+# Approximate total drafts ≈ above three fields × (number of *.txt under each target key)
 chunking_config:
-  window_size: 4096 # The window size to use for random chunking of the input text. Set to `null` to disable chunking.
-prompt_config: /workspace/speaker/egs/byob/mcq/prompts/generation.yaml # Overridden by the notebook to local Speaker paths when present
+  window_size: 4096 # Random chunk size for long texts; null disables chunking
+# prompt_config: null loads packaged defaults (Python). For overrides, set to a YAML
+# file defining qa_generation, question_judge, hallucination_filter, easiness_filter,
+# distractor_expansion, distractor_validity (each with system_prompt and prompt).
+prompt_config: null
 
-# STAGE 2: Generate questions
-generation_model_config: # Config for question generation model
+# --- LLM: question generation (Data Designer) ---
+generation_model_config:
   alias: gpt-oss-120b
   model: openai/gpt-oss-120b
   provider: nvidia
@@ -62,8 +75,8 @@ generation_model_config: # Config for question generation model
         high: 1.0
     top_p: 1.0
 
-# STAGE 2.1: Judge questions
-judge_model_config: # Config for question judgement model
+# --- LLM: judge / refine drafts ---
+judge_model_config:
   alias: gpt-oss-120b
   model: openai/gpt-oss-120b
   provider: nvidia
@@ -77,16 +90,16 @@ judge_model_config: # Config for question judgement model
         high: 1.0
     top_p: 1.0
 
-# STAGE 2.2: Semantic deduplication of questions
+# --- Semantic deduplication (embeddings + clustering) ---
 semantic_deduplication_config:
   model_identifier: sentence-transformers/all-MiniLM-L6-v2
-  n_clusters: 1
-  eps: 0.07
-  remove_duplicates: false
+  n_clusters: 1 # Cluster count for grouping similar items before dedup
+  eps: 0.07 # Distance threshold within a cluster (0–1 scale; tune with model)
+  remove_duplicates: false # If true, drop rows marked as near-duplicates
 
-# STAGE 3: Expand distractors
-do_distractor_expansion: true # Whether to expand distractors
-distractor_expansion_model_config: # Config for distractor expansion model
+# --- Optional: expand 4-way MCQ to 10 choices (LLM) ---
+do_distractor_expansion: true
+distractor_expansion_model_config:
   alias: gpt-oss-120b
   model: openai/gpt-oss-120b
   provider: nvidia
@@ -100,15 +113,14 @@ distractor_expansion_model_config: # Config for distractor expansion model
         high: 1.0
     top_p: 1.0
 
-
-# STAGE 4: Test coverage of questions
-do_coverage_check: true # Whether to test coverage of questions generated
+# --- Optional: embedding-based coverage vs source windows (heavier) ---
+do_coverage_check: true
 coverage_check_config:
   model_identifier: sentence-transformers/all-MiniLM-L6-v2
-  window_size: 1024 # The window size to use for creating subdocuments
+  window_size: 1024 # Source text window size for coverage scoring
 
-# STAGE 5: Check distractor validity
-distractor_validity_model_config: # Config for distractor validity model
+# --- LLM: check distractor plausibility / correctness ---
+distractor_validity_model_config:
   alias: gpt-oss-120b
   model: openai/gpt-oss-120b
   provider: nvidia
@@ -121,18 +133,18 @@ distractor_validity_model_config: # Config for distractor validity model
         low: 0.9
         high: 1.0
 
-# STAGE 6: Semantic outlier detection in choices
+# --- Embedding-based: flag answer choices that sit apart from the others ---
 semantic_outlier_detection_config:
   model_identifier: sentence-transformers/all-MiniLM-L6-v2
-  n_neighbours_min: 1 # Minimum number of neighbours the answer should have to be considered not an outlier
-  remove_outliers: true # Whether to remove outliers from the dataset
+  n_neighbours_min: 1 # Minimum nearby choices embedding-wise for the keyed answer
+  remove_outliers: true # Drop rows flagged as outlier-heavy
 
-# STAGE 7: Filter questions
-easiness_threshold: 0.8 # Fraction of models that can answer the question to consider the question easy
-hallucination_threshold: 0.5 # Fraction of models that need to agree on the answer to consider the question as not hallucinated
-remove_hallucinated: true # Whether to drop hallucinated questions from the dataset
-remove_easy: false # Whether to drop easy questions from the dataset
-filtering_model_configs: # The config for the swarm of LLMs to filter questions
+# --- LLM panel: hallucination and “too easy” filters ---
+easiness_threshold: 0.8 # If this fraction of easiness models answer correctly → “easy”
+hallucination_threshold: 0.5 # Agreement bar among hallucination models → “not hallucinated”
+remove_hallucinated: true
+remove_easy: false
+filtering_model_configs:
   hallucination:
     - alias: hal_1
       model: openai/gpt-oss-120b
@@ -146,7 +158,7 @@ filtering_model_configs: # The config for the swarm of LLMs to filter questions
             low: 0.9
             high: 1.0
         top_p: 1.0
-  # Add more models here if needed
+  # Duplicate the list entry pattern above to add more hallucination-check models
   easiness:
     - alias: eas_1
       model: openai/gpt-oss-120b
@@ -172,4 +184,4 @@ filtering_model_configs: # The config for the swarm of LLMs to filter questions
             low: 0.9
             high: 1.0
         top_p: 1.0
-  # Add more models here if needed
+  # Duplicate list entries to add more easiness judges

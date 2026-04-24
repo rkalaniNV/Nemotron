@@ -27,7 +27,7 @@ from nemo_curator.pipeline import Pipeline
 from nemo_curator.stages.text.io.writer import ParquetWriter
 from nemo_curator.stages.text.io.reader import ParquetReader
 
-from speaker.core.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.config import ByobConfig
 
 def segment_text(text: str, window_size: int, hop_size: int = None, id_prefix: str = ''):
     """Segment text into overlapping or non-overlapping windows.

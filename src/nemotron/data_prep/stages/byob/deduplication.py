@@ -24,7 +24,7 @@ from abc import ABC, abstractmethod
 from nemo_curator.stages.text.deduplication.semantic import TextSemanticDeduplicationWorkflow
 from nemo_curator.backends.experimental.ray_data import RayDataExecutor
 
-from speaker.core.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.config import ByobConfig
 
 logger = logging.getLogger(__name__)
 

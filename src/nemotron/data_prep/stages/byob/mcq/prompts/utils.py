@@ -13,12 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .qa_generation import SYSTEM_PROMPT as SYSTEM_PROMPT_QA, PROMPT as PROMPT_QA
-from .question_judge import SYSTEM_PROMPT as SYSTEM_PROMPT_JUDGE, PROMPT as PROMPT_JUDGE
-from .hallucination_filter import SYSTEM_PROMPT as SYSTEM_PROMPT_HALLUCINATION_FILTER, PROMPT as PROMPT_HALLUCINATION_FILTER
-from .easiness_filter import SYSTEM_PROMPT as SYSTEM_PROMPT_EASINESS_FILTER, PROMPT as PROMPT_EASINESS_FILTER
-from .distractor_expansion import SYSTEM_PROMPT as SYSTEM_PROMPT_DISTRACTOR_EXPANSION, PROMPT as PROMPT_DISTRACTOR_EXPANSION
-from .distractor_validity import SYSTEM_PROMPT as SYSTEM_PROMPT_DISTRACTOR_VALIDITY, PROMPT as PROMPT_DISTRACTOR_VALIDITY
+from nemotron.data_prep.stages.byob.mcq.prompts.qa_generation import SYSTEM_PROMPT as SYSTEM_PROMPT_QA, PROMPT as PROMPT_QA
+from nemotron.data_prep.stages.byob.mcq.prompts.question_judge import SYSTEM_PROMPT as SYSTEM_PROMPT_JUDGE, PROMPT as PROMPT_JUDGE
+from nemotron.data_prep.stages.byob.mcq.prompts.hallucination_filter import SYSTEM_PROMPT as SYSTEM_PROMPT_HALLUCINATION_FILTER, PROMPT as PROMPT_HALLUCINATION_FILTER
+from nemotron.data_prep.stages.byob.mcq.prompts.easiness_filter import SYSTEM_PROMPT as SYSTEM_PROMPT_EASINESS_FILTER, PROMPT as PROMPT_EASINESS_FILTER
+from nemotron.data_prep.stages.byob.mcq.prompts.distractor_expansion import SYSTEM_PROMPT as SYSTEM_PROMPT_DISTRACTOR_EXPANSION, PROMPT as PROMPT_DISTRACTOR_EXPANSION
+from nemotron.data_prep.stages.byob.mcq.prompts.distractor_validity import SYSTEM_PROMPT as SYSTEM_PROMPT_DISTRACTOR_VALIDITY, PROMPT as PROMPT_DISTRACTOR_VALIDITY
 
 def get_prompts():
     """Get all default prompt templates for MCQ generation pipeline.

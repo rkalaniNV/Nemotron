@@ -51,15 +51,15 @@ HF_DATASET_TO_SUBSET = {
 }
 
 HF_DATASET_TO_MODULE = {
-    'cais/mmlu': 'speaker.core.byob.mcq',
-    'TIGER-Lab/MMLU-Pro': 'speaker.core.byob.mcq',
-    'ai4bharat/MILU': 'speaker.core.byob.mcq',
-    'CohereLabs/Global-MMLU': 'speaker.core.byob.mcq',
-    'CohereLabs/Global-MMLU-Lite': 'speaker.core.byob.mcq',
-    'LinguaLift/IndicMMLU-Pro': 'speaker.core.byob.mcq',
-    'openai/MMMLU': 'speaker.core.byob.mcq',
-    'sarvamai/mmlu-indic': 'speaker.core.byob.mcq',
-    'Idavidrein/gpqa': 'speaker.core.byob.mcq',
+    'cais/mmlu': 'nemotron.data_prep.stages.byob.mcq',
+    'TIGER-Lab/MMLU-Pro': 'nemotron.data_prep.stages.byob.mcq',
+    'ai4bharat/MILU': 'nemotron.data_prep.stages.byob.mcq',
+    'CohereLabs/Global-MMLU': 'nemotron.data_prep.stages.byob.mcq',
+    'CohereLabs/Global-MMLU-Lite': 'nemotron.data_prep.stages.byob.mcq',
+    'LinguaLift/IndicMMLU-Pro': 'nemotron.data_prep.stages.byob.mcq',
+    'openai/MMMLU': 'nemotron.data_prep.stages.byob.mcq',
+    'sarvamai/mmlu-indic': 'nemotron.data_prep.stages.byob.mcq',
+    'Idavidrein/gpqa': 'nemotron.data_prep.stages.byob.mcq',
 }
 
 AVAILABLE_QUALITY_METRICS = [

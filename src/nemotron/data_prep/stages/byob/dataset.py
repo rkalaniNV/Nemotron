@@ -19,8 +19,8 @@ import importlib
 import numpy as np
 
 from abc import ABC, abstractmethod
-from speaker.core.byob.config import ByobConfig
-from speaker.core.byob.constants import HF_DATASET_TO_MODULE
+from nemotron.data_prep.stages.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.constants import HF_DATASET_TO_MODULE
 
 logger = logging.getLogger(__name__)
 

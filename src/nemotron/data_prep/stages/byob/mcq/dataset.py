@@ -23,9 +23,9 @@ import random
 
 from collections import Counter
 
-from speaker.core.byob.dataset import ByobDataset
-from speaker.core.byob.config import ByobConfig
-from speaker.core.byob.hf_utils import load_dataset
+from nemotron.data_prep.stages.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.dataset import ByobDataset
+from nemotron.data_prep.stages.byob.hf_utils import load_dataset
 
 logger = logging.getLogger(__name__)
 

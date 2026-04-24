@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 
-from speaker.core.byob.translation.quality_metrics import AVAILABLE_QUALITY_METRICS
+from nemotron.data_prep.stages.byob.constants import AVAILABLE_QUALITY_METRICS
 
 def get_statistics(df: pd.DataFrame) -> dict:
     for column in ['distractor_quality_score', 'chance_accuracy_score', 'consistency_score', 'rag_score', 'difficulty_score']:

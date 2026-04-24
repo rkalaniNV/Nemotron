@@ -4,9 +4,15 @@ import pandas as pd
 import data_designer.config as dd
 from data_designer.interface import DataDesigner
 
-from speaker.core.byob.data_designer_utils import setup_model_config
-from speaker.core.byob.config import ByobConfig
-from speaker.core.byob.mcq.response_model import QuestionAnswerList, DistractorExpansion, DistractorValidityFourChoices, DistractorValidityTenChoices, JudgeResult
+from nemotron.data_prep.stages.byob.config import ByobConfig
+from nemotron.data_prep.stages.byob.data_designer_utils import setup_model_config
+from nemotron.data_prep.stages.byob.mcq.response_model import (
+    DistractorExpansion,
+    DistractorValidityFourChoices,
+    DistractorValidityTenChoices,
+    JudgeResult,
+    QuestionAnswerList,
+)
 
 def generate_questions(config: ByobConfig, seed_df: pd.DataFrame):
     """Generate multiple-choice questions using LLM.
