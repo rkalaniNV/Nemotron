@@ -1,0 +1,27 @@
+BYOB MCQ (nemotron.data_prep.stages.byob) — context pack for agents
+====================================================================
+
+Core modules
+------------
+- config.py          : ByobConfig, YAML loading, thresholds, model block names.
+- dataset.py         : HuggingFace / local text → rows for the seed builder.
+- data_designer_utils.py, hf_utils : Integration helpers for NDD / HF.
+- mcq/stages.py     : DataDesigner-wrapped stage functions (generate, judge, expand, etc.).
+- mcq/utils.py      : prepare_*_seed_dataset and postprocess_* for each step.
+- mcq/deduplication.py, text_coverage.py, semantic_outlier.py : Non-LLM or mixed stages.
+
+Layout contract
+---------------
+- Corpora: per-subject directories of .txt (see your YAML `input_dir`).
+- Outputs: under `output_dir` / `expt_name` — `stage_cache/*.parquet` then `benchmark(.parquet)`.
+
+Six-block map (this package)
+------------------------------
+- STEP.md      : step names and failure notes.
+- types.toml   : which parquet feeds which.
+- patterns/*.md: when to toggle optional work.
+- context/     : this file + any domain-specific .txt you add.
+- SKILL.md     : the workflow loop.
+- eval/        : golden I/O for regression of expectations.
+
+End users often start from use-case-examples/build-your-own-benchmark/ notebooks, not this tree alone.

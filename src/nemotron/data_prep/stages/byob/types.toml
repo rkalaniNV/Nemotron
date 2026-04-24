@@ -1,0 +1,61 @@
+# BYOB MCQ: artifact compatibility (linker)
+# "What connects to what" for stage outputs. Names align with `mcq` stage_cache files.
+
+[artifact.config]
+kind = "yaml"
+accepts = []
+emits = ["ByobConfig"]
+
+[artifact.corpus]
+kind = "directory"
+accepts = ["Subject layout of *.txt (see default.yaml / input_dir)"]
+emits = ["hf|local rows via dataset module"]
+
+[artifact.generation_seed]
+kind = "parquet"
+emits = ["prepared generation seed for DataDesigner"]
+requires = ["artifact.config", "artifact.corpus"]
+
+[artifact.generated_questions]
+kind = "parquet"
+accepts = ["artifact.generation_seed"]
+emits = ["stage_cache/generated_questions.parquet"]
+
+[artifact.judged_questions]
+kind = "parquet"
+accepts = ["artifact.generated_questions"]
+emits = ["stage_cache/judged_questions.parquet"]
+
+[artifact.deduplicated]
+kind = "parquet"
+accepts = ["artifact.judged_questions"]
+emits = ["stage_cache/semantic_deduplicated_questions.parquet"]
+
+[artifact.expanded_distractors]
+kind = "parquet"
+accepts = ["artifact.deduplicated"]
+emits = ["stage_cache/expanded_distractors.parquet"]
+optional = "do_distractor_expansion"
+
+[artifact.coverage]
+kind = "parquet"
+accepts = ["artifact.deduplicated", "artifact.expanded_distractors"]
+emits = ["stage_cache/coverage_check.parquet"]
+optional = "do_coverage_check"
+
+[artifact.validity]
+kind = "parquet"
+emits = ["stage_cache/valid_distractors.parquet"]
+
+[artifact.outliers]
+kind = "parquet"
+emits = ["stage_cache/semantic_outlier_detection.parquet"]
+
+[artifact.filtered]
+kind = "parquet"
+emits = ["stage_cache/filtered_questions.parquet"]
+
+[artifact.benchmark]
+kind = "parquet"
+accepts = ["artifact.filtered"]
+emits = ["benchmark.parquet", "benchmark_raw.parquet"]

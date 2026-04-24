@@ -1,0 +1,175 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+expt_name: mmlu_base # Identifier for the experiment
+random_seed: 42 # Random seed for reproducibility
+ndd_batch_size: 32 # Batch size for NeMo Data Designer jobs
+
+# STAGE 1: Prepare data
+split: test # Dataset split to use
+subset: all # Optional: Dataset subset to use. Leave empty or set to `null` to use the default.
+# Paths below are workspace defaults. The build_mcq_benchmark notebook rewrites
+# input_dir, output_dir, metadata_file, and prompt_config to absolute paths under
+# your current working directory and local assets/ layout.
+input_dir: /workspace/speaker/egs/byob/mcq/datasets
+output_dir: /workspace/speaker/egs/byob/mcq/outputs
+hf_dataset: cais/mmlu # Hugging Face dataset
+language: en-IN # Language of the questions to generate
+metadata_file: /workspace/speaker/egs/byob/mcq/datasets/metadata.csv
+source_subjects: [] # The subsets to be used for few-shot prompts. Leave empty or set to `null` to use all subsets.
+
+# The mapping of target subjects to source subjects.
+# Each key must match a subdirectory of input_dir containing *.txt documents
+# (for example assets/wikipedia_finance_india/ when input_dir is assets/).
+# The key `subjects` is mandatory. Use [] to sample uniformly from all MMLU subjects.
+# Omit `tags` unless metadata_file is set and you use tag-based weighting.
+target_source_mapping:
+  wikipedia_finance_india:
+    subjects: []
+few_shot_samples_per_query: 1 # Number of samples to use for few-shot prompting
+queries_per_target_subject_document: 1 # Number of queries to be used for each target subject document to generate questions
+num_questions_per_query: 2 # Number of questions to generate for each query
+# The total number of questions to generate is queries_per_target_subject_document * num_questions_per_query * number of documents
+chunking_config:
+  window_size: 4096 # The window size to use for random chunking of the input text. Set to `null` to disable chunking.
+prompt_config: /workspace/speaker/egs/byob/mcq/prompts/generation.yaml # Overridden by the notebook to local Speaker paths when present
+
+# STAGE 2: Generate questions
+generation_model_config: # Config for question generation model
+  alias: gpt-oss-120b
+  model: openai/gpt-oss-120b
+  provider: nvidia
+  inference_parameters:
+    max_tokens: 16000
+    max_parallel_requests: 8
+    temperature:
+      distribution_type: uniform
+      params:
+        low: 0.9
+        high: 1.0
+    top_p: 1.0
+
+# STAGE 2.1: Judge questions
+judge_model_config: # Config for question judgement model
+  alias: gpt-oss-120b
+  model: openai/gpt-oss-120b
+  provider: nvidia
+  inference_parameters:
+    max_tokens: 16000
+    max_parallel_requests: 8
+    temperature:
+      distribution_type: uniform
+      params:
+        low: 0.9
+        high: 1.0
+    top_p: 1.0
+
+# STAGE 2.2: Semantic deduplication of questions
+semantic_deduplication_config:
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_clusters: 1
+  eps: 0.07
+  remove_duplicates: false
+
+# STAGE 3: Expand distractors
+do_distractor_expansion: true # Whether to expand distractors
+distractor_expansion_model_config: # Config for distractor expansion model
+  alias: gpt-oss-120b
+  model: openai/gpt-oss-120b
+  provider: nvidia
+  inference_parameters:
+    max_tokens: 16000
+    max_parallel_requests: 8
+    temperature:
+      distribution_type: uniform
+      params:
+        low: 0.9
+        high: 1.0
+    top_p: 1.0
+
+
+# STAGE 4: Test coverage of questions
+do_coverage_check: true # Whether to test coverage of questions generated
+coverage_check_config:
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  window_size: 1024 # The window size to use for creating subdocuments
+
+# STAGE 5: Check distractor validity
+distractor_validity_model_config: # Config for distractor validity model
+  alias: gpt-oss-120b
+  model: openai/gpt-oss-120b
+  provider: nvidia
+  inference_parameters:
+    max_tokens: 16000
+    max_parallel_requests: 8
+    temperature:
+      distribution_type: uniform
+      params:
+        low: 0.9
+        high: 1.0
+
+# STAGE 6: Semantic outlier detection in choices
+semantic_outlier_detection_config:
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_neighbours_min: 1 # Minimum number of neighbours the answer should have to be considered not an outlier
+  remove_outliers: true # Whether to remove outliers from the dataset
+
+# STAGE 7: Filter questions
+easiness_threshold: 0.8 # Fraction of models that can answer the question to consider the question easy
+hallucination_threshold: 0.5 # Fraction of models that need to agree on the answer to consider the question as not hallucinated
+remove_hallucinated: true # Whether to drop hallucinated questions from the dataset
+remove_easy: false # Whether to drop easy questions from the dataset
+filtering_model_configs: # The config for the swarm of LLMs to filter questions
+  hallucination:
+    - alias: hal_1
+      model: openai/gpt-oss-120b
+      provider: nvidia
+      inference_parameters:
+        max_tokens: 16000
+        max_parallel_requests: 8
+        temperature:
+          distribution_type: uniform
+          params:
+            low: 0.9
+            high: 1.0
+        top_p: 1.0
+  # Add more models here if needed
+  easiness:
+    - alias: eas_1
+      model: openai/gpt-oss-120b
+      provider: nvidia
+      inference_parameters:
+        max_tokens: 16000
+        max_parallel_requests: 8
+        temperature:
+          distribution_type: uniform
+          params:
+            low: 0.9
+            high: 1.0
+        top_p: 1.0
+    - alias: eas_2
+      model: nvidia/nemotron-3-nano-30b-a3b
+      provider: nvidia
+      inference_parameters:
+        max_tokens: 16000
+        max_parallel_requests: 8
+        temperature:
+          distribution_type: uniform
+          params:
+            low: 0.9
+            high: 1.0
+        top_p: 1.0
+  # Add more models here if needed
