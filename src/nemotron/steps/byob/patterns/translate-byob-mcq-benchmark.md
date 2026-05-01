@@ -9,4 +9,5 @@ steps: [byob]
 confidence: high
 ---
 
-Use the MCQ family `translate` stage with `config/translate.yaml` as the template.
+Use the MCQ family `translate` stage with `config/translate.yaml` as the template. Curator owns text
+translation and round-trip metrics; BYOB owns MCQ flattening, reassembly, and final parquet schema.

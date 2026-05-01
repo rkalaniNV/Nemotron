@@ -473,8 +473,7 @@ class ByobTranslationConfig:
         output_dir: Directory for output files.
         source_language: Source language code (e.g., 'en').
         target_language: Target language code (e.g., 'hi').
-        translation_model_config: Configuration for translation model.
-        ndd_batch_size: Batch size for DataDesigner operations.
+        translation_model_config: Configuration for Curator translation.
         backtranslation_quality_metrics: List of quality metrics for evaluation.
     """
 
@@ -484,7 +483,6 @@ class ByobTranslationConfig:
     source_language: str
     target_language: str
     translation_model_config: dict
-    ndd_batch_size: int = 32
     backtranslation_quality_metrics: list[dict] = field(default_factory=lambda: [])
     remove_low_quality: bool = True
 
@@ -504,10 +502,17 @@ class ByobTranslationConfig:
         with open(path) as f:
             config = yaml.safe_load(f)
 
-        config["ndd_batch_size"] = config.get("ndd_batch_size", ByobTranslationConfig.ndd_batch_size)
-
         assert "translation_model_config" in config, (
             "Field `translation_model_config` is required in the configuration file"
+        )
+        config["translation_model_config"]["mode"] = config["translation_model_config"].get("mode", "curator")
+        config["translation_model_config"]["params"] = config["translation_model_config"].get("params", {})
+        assert config["translation_model_config"]["mode"] == "curator", (
+            "BYOB translation supports only `translation_model_config.mode: curator`"
+        )
+        translation_stage_config = config["translation_model_config"].get("stage", {})
+        assert not translation_stage_config.get("enable_faith_eval", False), (
+            "BYOB translation uses backtranslation quality metrics; FAITH evaluation is not part of this flow"
         )
         assert "backtranslation_quality_metrics" in config, (
             "Field `backtranslation_quality_metrics` is required in the configuration file"
@@ -533,6 +538,5 @@ class ByobTranslationConfig:
             target_language=config["target_language"],
             translation_model_config=config["translation_model_config"],
             backtranslation_quality_metrics=config["backtranslation_quality_metrics"],
-            ndd_batch_size=config["ndd_batch_size"],
             remove_low_quality=config.get("remove_low_quality", ByobTranslationConfig.remove_low_quality),
         )

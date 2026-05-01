@@ -6,15 +6,6 @@ import copy
 import json
 from typing import Any
 
-FAITH_COLUMN_TO_KEY = {
-    "faith_fluency": "Fluency",
-    "faith_accuracy": "Accuracy",
-    "faith_idiomaticity": "Idiomaticity",
-    "faith_terminology": "Terminology",
-    "faith_handling_of_format": "Handling_of_Format",
-    "faith_avg": "average",
-}
-
 
 def flatten_mcq_records(
     records: list[dict[str, Any]],
@@ -62,7 +53,6 @@ def restore_mcq_records(
 
     out = [copy.deepcopy(record) for record in original_records]
     record_metadata = [_init_translation_metadata(record, target_lang) for record in original_records]
-    record_score_values = [{column: [] for column in FAITH_COLUMN_TO_KEY} for _ in original_records]
     record_time_totals = [0.0 for _ in original_records]
     record_error_lists = [[] for _ in original_records]
 
@@ -90,10 +80,10 @@ def restore_mcq_records(
                 [[] for _ in original_records[rec_idx].get("options", [])],
             )[key] = segment_pairs
 
-        _collect_row_quality(rec_idx, translated_row, record_score_values, record_time_totals, record_error_lists)
+        _collect_row_run_info(rec_idx, translated_row, record_time_totals, record_error_lists)
 
     for rec_idx, metadata in enumerate(record_metadata):
-        _attach_record_quality(out[rec_idx], metadata, record_score_values[rec_idx])
+        out[rec_idx]["translation_metadata"] = metadata
         if record_time_totals[rec_idx]:
             out[rec_idx]["translation_time"] = record_time_totals[rec_idx]
         if record_error_lists[rec_idx]:
@@ -190,19 +180,12 @@ def _restore_list_option_metadata(
     )
 
 
-def _collect_row_quality(
+def _collect_row_run_info(
     rec_idx: int,
     translated_row: dict[str, Any],
-    record_score_values: list[dict[str, list[float]]],
     record_time_totals: list[float],
     record_error_lists: list[list[str]],
 ) -> None:
-    for column in FAITH_COLUMN_TO_KEY:
-        value = translated_row.get(column)
-        if value is None or value != value:
-            continue
-        record_score_values[rec_idx].setdefault(column, []).append(float(value))
-
     time_value = translated_row.get("translation_time")
     if time_value is not None and time_value == time_value:
         record_time_totals[rec_idx] += float(time_value)
@@ -210,27 +193,6 @@ def _collect_row_quality(
     error_value = str(translated_row.get("translation_errors", "")).strip()
     if error_value:
         record_error_lists[rec_idx].append(error_value)
-
-
-def _attach_record_quality(
-    record: dict[str, Any],
-    metadata: dict[str, Any],
-    score_values: dict[str, list[float]],
-) -> None:
-    faith_scores = {
-        score_key: sum(values) / len(values)
-        for column, score_key in FAITH_COLUMN_TO_KEY.items()
-        for values in [score_values.get(column, [])]
-        if values
-    }
-    if faith_scores:
-        metadata["faith_scores"] = faith_scores
-    record["translation_metadata"] = metadata
-
-    for column in FAITH_COLUMN_TO_KEY:
-        values = score_values.get(column, [])
-        if values:
-            record[column] = sum(values) / len(values)
 
 
 def _options_to_list(options: Any) -> list[str]:

@@ -15,7 +15,7 @@ The notebook is intentionally aligned with the agentic step structure:
 | --- | --- |
 | `build_mcq_benchmark.ipynb` | End-to-end notebook for preparing finance text, writing a working config, running BYOB, and previewing the final parquet. |
 | `assets/` | Example corpus location. The notebook creates `assets/wiki_finance/*.txt`. |
-| `config/` | Example working config location. The notebook writes `config/finance_wiki.yaml` from the packaged step config. |
+| `config/` | Example working config location. The notebook writes generation and Curator translation configs from the packaged step configs. |
 | `outputs/` | Example output location for `seed.parquet`, `stage_cache/`, `benchmark_raw.parquet`, and `benchmark.parquet`. |
 
 ## Run
@@ -26,7 +26,7 @@ From the repository root:
 uv run jupyter lab use-case-examples/build-your-own-benchmark/build_mcq_benchmark.ipynb
 ```
 
-The notebook defaults to a dry command preview so it does not accidentally spend model quota. Set `RUN_BYOB = True` in the run cell after reviewing the generated config and credentials.
+The notebook defaults to a dry command preview so it does not accidentally spend model quota. Set `RUN_BYOB = True` in the run cell after reviewing the generated config and credentials. NVIDIA-hosted endpoints use `NGC_API_KEY` or `NVIDIA_API_KEY`.
 
 The equivalent CLI is:
 

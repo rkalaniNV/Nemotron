@@ -8,6 +8,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 try:
@@ -85,8 +86,10 @@ def test_byob_step_manifest_references_byob_files() -> None:
     assert data["step"]["category"] == "byob"
 
     reference = data["reference"]
-    for raw_path in reference.values():
-        assert (REPO_ROOT / raw_path).exists(), f"Missing BYOB reference path: {raw_path}"
+    for raw_reference in reference.values():
+        raw_paths = raw_reference if isinstance(raw_reference, list) else [raw_reference]
+        for raw_path in raw_paths:
+            assert (REPO_ROOT / raw_path).exists(), f"Missing BYOB reference path: {raw_path}"
 
 
 def test_byob_imports_are_lightweight() -> None:
@@ -153,10 +156,10 @@ def test_byob_adapter_round_trip() -> None:
     ]
 
     translated_rows = [
-        {"translated_text": "समूहित-क्वेरी अटेंशन क्या है?", "faith_avg": 4.0},
-        {"translated_text": "एक डिकोडर अटेंशन वैरिएंट", "faith_avg": 4.5},
-        {"translated_text": "एक टोकनाइज़र", "faith_avg": 5.0},
-        {"translated_text": "एक डेटासेट", "faith_avg": 4.5},
+        {"translated_text": "समूहित-क्वेरी अटेंशन क्या है?", "translation_time": 0.1},
+        {"translated_text": "एक डिकोडर अटेंशन वैरिएंट", "translation_time": 0.1},
+        {"translated_text": "एक टोकनाइज़र", "translation_time": 0.1},
+        {"translated_text": "एक डेटासेट", "translation_time": 0.1},
     ]
     restored = restore_mcq_records(source_records, index, translated_rows, target_lang="hi-IN")
 
@@ -164,4 +167,184 @@ def test_byob_adapter_round_trip() -> None:
     assert restored[0]["question"] == "समूहित-क्वेरी अटेंशन क्या है?"
     assert restored[0]["options"]["A"] == "एक डिकोडर अटेंशन वैरिएंट"
     assert restored[0]["translation_metadata"]["target_lang"] == "hi-IN"
-    assert restored[0]["faith_avg"] == 4.5
+    assert restored[0]["translation_time"] == pytest.approx(0.4)
+
+
+def test_byob_translate_config_defaults_to_curator() -> None:
+    from nemotron.steps.byob.runtime.config import ByobTranslationConfig
+
+    config = ByobTranslationConfig.from_yaml(str(BYOB_ROOT / "config" / "translate.yaml"))
+
+    assert config.translation_model_config["mode"] == "curator"
+    assert config.translation_model_config["backend_type"] == "llm"
+    assert "enable_faith_eval" not in config.translation_model_config.get("stage", {})
+
+
+def test_byob_translate_config_rejects_faith_eval(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.config import ByobTranslationConfig
+
+    config_path = tmp_path / "translate.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "expt_name": "unit",
+                "dataset_path": "benchmark.parquet",
+                "output_dir": "outputs",
+                "source_language": "en-US",
+                "target_language": "hi-IN",
+                "translation_model_config": {
+                    "mode": "curator",
+                    "params": {},
+                    "stage": {"enable_faith_eval": True},
+                },
+                "backtranslation_quality_metrics": [{"type": "chrf", "threshold": 50}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AssertionError, match="FAITH"):
+        ByobTranslationConfig.from_yaml(str(config_path))
+
+
+def test_byob_translation_has_no_data_designer_fallback() -> None:
+    translation_root = BYOB_ROOT / "runtime" / "translation"
+
+    assert not (translation_root / "llm.py").exists()
+    assert "data_designer" not in (translation_root / "translation.py").read_text(encoding="utf-8")
+    assert "data_designer" not in (translation_root / "translate.py").read_text(encoding="utf-8")
+
+
+def test_byob_translation_pipeline_uses_curator_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pandas as pd
+
+    from nemotron.steps.byob.runtime.config import ByobTranslationConfig
+    from nemotron.steps.byob.runtime.translation import translate
+    from nemotron.steps.byob.runtime.translation.translation import TranslationPipeline
+
+    stage_calls = []
+    client_calls = []
+
+    class FakeBatch:
+        def __init__(self, task_id: str, dataset_name: str, data: pd.DataFrame):
+            self.task_id = task_id
+            self.dataset_name = dataset_name
+            self.data = data
+
+        def to_pandas(self) -> pd.DataFrame:
+            return self.data
+
+    class FakeGenerationConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeOpenAIClient:
+        def __init__(self, **kwargs):
+            client_calls.append(kwargs)
+
+    class FakeStage:
+        name = "SegmentTranslationStage"
+
+        def setup(self) -> None:
+            pass
+
+        def teardown(self) -> None:
+            pass
+
+        def process(self, batch: FakeBatch) -> FakeBatch:
+            df = batch.to_pandas().copy()
+            df["translation"] = df["text"].map(lambda text: f"{text} [translated]")
+            return FakeBatch(batch.task_id, batch.dataset_name, df)
+
+    class FakeTranslationStage:
+        def __init__(self, **kwargs):
+            stage_calls.append(kwargs)
+
+        def decompose(self):
+            return [FakeStage()]
+
+    monkeypatch.setenv("NGC_API_KEY", "test-key")
+    monkeypatch.setattr(
+        translate,
+        "_load_curator_symbols",
+        lambda: translate._CuratorSymbols(
+            async_openai_client=FakeOpenAIClient,
+            document_batch=FakeBatch,
+            generation_config=FakeGenerationConfig,
+            translation_stage=FakeTranslationStage,
+        ),
+    )
+
+    config = ByobTranslationConfig(
+        expt_name="unit",
+        dataset_path="unused.parquet",
+        output_dir="unused",
+        source_language="en-US",
+        target_language="hi-IN",
+        translation_model_config={
+            "mode": "curator",
+            "backend_type": "llm",
+            "params": {
+                "model": "openai/gpt-oss-120b",
+                "provider": "nvidia",
+                "inference_parameters": {"max_tokens": 128, "max_parallel_requests": 2, "temperature": 0.0},
+            },
+            "stage": {"output_mode": "both"},
+            "segment_stage": {"health_check": False, "max_concurrent_requests": 2},
+        },
+        backtranslation_quality_metrics=[],
+    )
+    dataframe = pd.DataFrame(
+        [
+            {
+                "translation_id": "tq#1",
+                "question_id": "1",
+                "text": "What is inflation?",
+                "type": "question",
+                "source_language_code": "en-US",
+                "target_language_code": "hi-IN",
+            },
+            {
+                "translation_id": "tc#1#0",
+                "question_id": "1",
+                "text": "A price-level increase",
+                "type": "choice",
+                "source_language_code": "en-US",
+                "target_language_code": "hi-IN",
+            },
+        ]
+    )
+
+    translated = TranslationPipeline(
+        mode="curator",
+        model_params=config.translation_model_config["params"],
+        config=config,
+    ).translate(dataframe)
+
+    assert translated["translation"].tolist() == [
+        "What is inflation? [translated]",
+        "A price-level increase [translated]",
+    ]
+    assert len(stage_calls) == 1
+    assert stage_calls[0]["source_lang"] == "en"
+    assert stage_calls[0]["target_lang"] == "hi"
+    assert client_calls[0]["base_url"] == "https://integrate.api.nvidia.com/v1"
+    assert client_calls[0]["max_concurrent_requests"] == 2
+
+
+def test_byob_translation_pipeline_rejects_legacy_modes() -> None:
+    from nemotron.steps.byob.runtime.config import ByobTranslationConfig
+    from nemotron.steps.byob.runtime.translation.translation import TranslationPipeline
+
+    config = ByobTranslationConfig(
+        expt_name="unit",
+        dataset_path="unused.parquet",
+        output_dir="unused",
+        source_language="en-US",
+        target_language="hi-IN",
+        translation_model_config={"mode": "curator", "params": {}},
+        backtranslation_quality_metrics=[],
+    )
+
+    with pytest.raises(ValueError, match="only curator"):
+        TranslationPipeline(mode="llm", model_params={}, config=config)

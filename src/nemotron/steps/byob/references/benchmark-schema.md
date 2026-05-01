@@ -24,4 +24,4 @@ For MCQ generation, `input_dir/<target_subject>/` may contain `.txt` documents. 
 ## Translation
 
 Translated MCQ outputs keep the same final schema. Translation cache files may contain additional
-`question_translated`, `options_translated`, backtranslation, and quality metric columns.
+`question_translated`, `options_translated`, backtranslation, Curator metadata, and quality metric columns.

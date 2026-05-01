@@ -15,42 +15,9 @@
 
 
 import pandas as pd
-import sacrebleu
 
 from nemotron.steps.byob.runtime.benchmark_families.mcq.utils import format_qa
 from nemotron.steps.byob.runtime.config import ByobTranslationConfig
-
-
-def compute_metric(hypothesis: str, references: str, metric: str, threshold: float):
-    """Compute translation quality metric and check if it passes threshold.
-
-    Supports BLEU, chrF, and TER metrics for evaluating translation quality.
-
-    Args:
-        hypothesis: Translated text to evaluate.
-        references: Reference translation(s) for comparison.
-        metric: Metric type ('sacrebleu', 'chrf', or 'ter').
-        threshold: Threshold value for pass/fail determination.
-                   Higher values needed to pass for BLEU/chrF, lower for TER.
-
-    Returns:
-        pd.Series: Series with 'score' (float) and 'passed' (bool) fields.
-
-    Raises:
-        ValueError: If metric type is not supported.
-    """
-    if metric == "sacrebleu":
-        score = sacrebleu.sentence_bleu(hypothesis, references).score
-        passed = score >= threshold
-    elif metric == "chrf":
-        score = sacrebleu.sentence_chrf(hypothesis, references).score
-        passed = score >= threshold
-    elif metric == "ter":
-        score = sacrebleu.sentence_ter(hypothesis, references).score
-        passed = score <= threshold
-    else:
-        raise ValueError(f"Invalid metric: {metric}")
-    return pd.Series({"score": score, "passed": passed})
 
 
 def evaluate_quality_metrics(dataset: pd.DataFrame, config: ByobTranslationConfig):
@@ -68,21 +35,27 @@ def evaluate_quality_metrics(dataset: pd.DataFrame, config: ByobTranslationConfi
         pd.DataFrame: Original dataset augmented with score columns for each metric
                      (score_{metric}, score_{metric}_passed).
     """
+    from nemo_curator.stages.text.translation import TextQualityMetricStage
+    from nemo_curator.tasks import DocumentBatch
+
     dataset_out = dataset.copy()
-    for quality_metric in config.backtranslation_quality_metrics:
-        metric = quality_metric["type"]
-        threshold = quality_metric["threshold"]
-        dataset_out[[f"score_{metric}", f"score_{metric}_passed"]] = dataset_out[
-            ["question", "options", "question_translated_backtranslated", "options_translated_backtranslated"]
-        ].apply(
-            lambda x: compute_metric(
-                format_qa(x["question_translated_backtranslated"], x["options_translated_backtranslated"]),
-                [format_qa(x["question"], x["options"])],
-                metric,
-                threshold,
-            ),
-            axis=1,
-        )
-    passed_columns = [f"score_{metric['type']}_passed" for metric in config.backtranslation_quality_metrics]
-    dataset_out["is_quality_metric_passed"] = dataset_out[passed_columns].all(axis=1)
-    return dataset_out
+    dataset_out["_byob_reference_text"] = dataset_out[["question", "options"]].apply(
+        lambda x: format_qa(x["question"], x["options"]),
+        axis=1,
+    )
+    dataset_out["_byob_backtranslated_text"] = dataset_out[
+        ["question_translated_backtranslated", "options_translated_backtranslated"]
+    ].apply(
+        lambda x: format_qa(x["question_translated_backtranslated"], x["options_translated_backtranslated"]),
+        axis=1,
+    )
+
+    stage = TextQualityMetricStage(
+        reference_text_field="_byob_reference_text",
+        hypothesis_text_field="_byob_backtranslated_text",
+        metrics=config.backtranslation_quality_metrics,
+        filter_enabled=False,
+    )
+    batch = DocumentBatch(task_id=f"{config.expt_name}-quality", dataset_name=config.expt_name, data=dataset_out)
+    dataset_out = stage.process(batch).to_pandas()
+    return dataset_out.drop(columns=["_byob_reference_text", "_byob_backtranslated_text"])

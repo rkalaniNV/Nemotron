@@ -50,6 +50,10 @@ Also read in Orient (small files, always cheap):
 - `src/nemotron/steps/hardware.md` — if the user mentions GPU setup, or you need to ask about it.
 - `skills/nemotron-customize/context/index.toml` — **authoritative map** of step → context pack. Note them for Act. (Individual step.toml files cross-link the same pack paths under `[reference].skills`; treat those as convenience aliases, not a separate source.)
 
+Step-specific caution: for BYOB benchmark translation, use the `byob` context pack.
+Do not substitute the general `translate/nemo-skills` pack; BYOB translation is
+Curator-backed, uses backtranslation metrics, and preserves benchmark schema.
+
 **Ask the user if any of these are unclear:**
 
 1. What model to fine-tune (or if pretraining from scratch)

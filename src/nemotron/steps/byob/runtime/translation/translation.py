@@ -17,16 +17,11 @@
 import pandas as pd
 
 from nemotron.steps.byob.runtime.config import ByobTranslationConfig
-from nemotron.steps.byob.runtime.translation.llm import LLMTranslationModule
-from nemotron.steps.byob.runtime.translation.prompts.translation_prompts import PROMPT, SYSTEM_PROMPT
+from nemotron.steps.byob.runtime.translation.translate import CuratorTranslationModule
 
 
 class TranslationPipeline:
-    """Unified translation pipeline supporting multiple backend translation engines.
-
-    Provides a consistent interface for translating text using different backends
-    Currently supports LLM-based translation.
-    """
+    """Curator-backed translation pipeline for BYOB text rows."""
 
     def __init__(
         self,
@@ -42,7 +37,7 @@ class TranslationPipeline:
         """Initialize the translation pipeline.
 
         Args:
-            mode: Translation mode ('llm' or 'indictrans2').
+            mode: Translation mode. BYOB translation supports only 'curator'.
             model_params: Dictionary containing model configuration parameters.
             config: Translation configuration object.
             text_field: Name of the column containing source text.
@@ -63,8 +58,8 @@ class TranslationPipeline:
         self.tgt_lang_field = tgt_lang_field
         self.config = config
 
-        if mode == "llm":
-            self.module = LLMTranslationModule(
+        if mode == "curator":
+            self.module = CuratorTranslationModule(
                 model_params=model_params,
                 config=config,
                 text_field=text_field,
@@ -72,13 +67,9 @@ class TranslationPipeline:
                 id_field=id_field,
                 src_lang_field=src_lang_field,
                 tgt_lang_field=tgt_lang_field,
-                system_prompt=SYSTEM_PROMPT,
-                prompt=PROMPT,
             )
-        elif mode == "indictrans2":
-            raise NotImplementedError("IndicTrans2TranslationModule is not implemented yet")
         else:
-            raise ValueError(f"Invalid mode: {mode}. Choose one of the following: llm, indictrans2")
+            raise ValueError(f"Invalid mode: {mode}. BYOB translation supports only curator mode.")
 
     def translate(self, dataframe: pd.DataFrame):
         """Translate text in the dataframe using the configured backend.

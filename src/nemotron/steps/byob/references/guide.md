@@ -24,11 +24,12 @@ nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/con
 
 ## Translation
 
-The translation run expects an MCQ benchmark parquet with stable question IDs and option lists. It translates
-questions and choices, backtranslates the result, computes configured quality metrics, and exports the final
-translated benchmark.
+The translation run expects an MCQ benchmark parquet with stable question IDs and option lists. BYOB flattens
+questions and choices into text rows, Curator translates those rows, BYOB reassembles the MCQ schema, Curator
+computes configured backtranslation quality metrics, and BYOB exports the final translated benchmark.
 
-Run translation through the same CLI with `--stage translate` and a translation config.
+Run translation through the same CLI with `--stage translate` and a translation config. Keep
+`translation_model_config.mode: curator`; BYOB does not maintain a separate translation engine.
 
 ## Extending To Another Family
 
