@@ -5,7 +5,7 @@ when_to_use: Use for requests like "create a custom benchmark from these documen
 compatibility: Runtime requires BYOB dependencies for Data Designer, pandas, parquet IO, embedding models, and optional translation metrics.
 metadata:
   owner: nemotron
-  workflow-step: benchmark/byob
+  workflow-step: byob
 ---
 
 # BYOB

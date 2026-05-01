@@ -11,6 +11,7 @@ import yaml
 
 REQUIRED_FILES = (
     "SKILL.md",
+    "step.toml",
     "adapter.py",
     "scripts/run.py",
     "scripts/runtime.py",

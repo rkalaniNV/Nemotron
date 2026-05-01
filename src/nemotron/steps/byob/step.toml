@@ -1,7 +1,7 @@
 [step]
-id = "benchmark/byob"
+id = "byob"
 name = "Bring Your Own Benchmark"
-category = "benchmark"
+category = "byob"
 description = "Generate and translate BYOB MCQ benchmark parquet artifacts from domain documents with an extensible benchmark-family runtime."
 tags = ["benchmark", "byob", "mcq", "data-designer", "translation"]
 

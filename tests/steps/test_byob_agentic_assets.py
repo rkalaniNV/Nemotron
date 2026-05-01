@@ -32,6 +32,7 @@ def _load_frontmatter(path: Path) -> dict:
 def test_byob_skill_assets_exist() -> None:
     expected = [
         "SKILL.md",
+        "step.toml",
         "adapter.py",
         "scripts/run.py",
         "scripts/runtime.py",
@@ -74,12 +75,12 @@ def test_byob_pattern_index_points_to_real_files() -> None:
 
 
 def test_byob_step_manifest_references_byob_files() -> None:
-    manifest_path = STEPS_ROOT / "benchmark" / "byob" / "step.toml"
+    manifest_path = BYOB_ROOT / "step.toml"
     with manifest_path.open("rb") as handle:
         data = tomllib.load(handle)
 
-    assert data["step"]["id"] == "benchmark/byob"
-    assert data["step"]["category"] == "benchmark"
+    assert data["step"]["id"] == "byob"
+    assert data["step"]["category"] == "byob"
 
     reference = data["reference"]
     for raw_path in reference.values():

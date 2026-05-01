@@ -5,7 +5,7 @@ tags: [byob, benchmark, translation]
 triggers:
   - Translate a generated MCQ benchmark while keeping the benchmark schema.
   - Add backtranslation metrics to a BYOB benchmark.
-steps: [benchmark/byob]
+steps: [byob]
 confidence: high
 ---
 

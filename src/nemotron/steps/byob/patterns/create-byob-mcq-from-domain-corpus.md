@@ -5,7 +5,7 @@ tags: [byob, benchmark, mcq]
 triggers:
   - Generate an MCQ benchmark from custom domain text.
   - Build a benchmark from documents grouped by subject.
-steps: [benchmark/byob]
+steps: [byob]
 confidence: high
 ---
 

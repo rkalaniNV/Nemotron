@@ -6,8 +6,8 @@ triggers:
   - You need to create a benchmark from private or domain-specific documents.
   - The benchmark should use generated multiple-choice questions.
   - You need to translate a generated benchmark while preserving answer indexes.
-steps: [benchmark/byob]
+steps: [byob]
 confidence: high
 ---
 
-Use `benchmark/byob` when the request is to generate or translate benchmark artifacts, not training data.
+Use `byob` when the request is to generate or translate benchmark artifacts, not training data.
