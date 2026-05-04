@@ -11,7 +11,7 @@ import typer
 
 from nemotron.steps.byob.scripts.runtime import list_family_names, run_byob
 
-VALID_STAGES = ("prepare", "generate", "translate")
+VALID_STAGES = ("prepare", "generate", "translate", "assess")
 
 
 def byob(
@@ -34,7 +34,7 @@ def byob(
         str | None,
         typer.Option(
             "--stage",
-            help="Pipeline stage to run: prepare, generate, or translate.",
+            help="Pipeline stage: prepare, generate, translate, or assess (translation quality metrics + benchmark assessment artifacts).",
         ),
     ] = None,
     skip_until: Annotated[
@@ -52,7 +52,7 @@ def byob(
         ),
     ] = False,
 ) -> None:
-    """Run BYOB benchmark generation or translation."""
+    """Run BYOB benchmark generation, translation, or post-translation assessment."""
 
     if list_families:
         for registered_family in list_family_names():

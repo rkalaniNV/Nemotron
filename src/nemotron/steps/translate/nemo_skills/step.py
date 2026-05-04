@@ -16,7 +16,7 @@
 # nodes = 1
 # gpus_per_node = 0
 # ///
-"""Thin Speaker translation wrapper; full drivers: `speaker/src/speaker/driver/translate/`."""
+"""Nemotron translate step: runs faith-aware translation and evaluation via subprocess."""
 from __future__ import annotations
 import argparse, subprocess, sys, tempfile; from pathlib import Path; import yaml
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"

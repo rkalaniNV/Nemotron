@@ -31,9 +31,9 @@ choices = ["mcq"]
 
 [[parameters]]
 name = "stage"
-description = "BYOB pipeline stage to run."
+description = "BYOB pipeline stage: prepare, generate, translate, or assess (translation quality metrics and benchmark summary / nemo-skills export)."
 default = "generate"
-choices = ["prepare", "generate", "translate"]
+choices = ["prepare", "generate", "translate", "assess"]
 
 [[parameters]]
 name = "config"
@@ -68,7 +68,7 @@ recovery = "Choose a dataset from runtime/constants.py or add a dataset parser f
 
 [[errors]]
 name = "mcq_schema_mismatch"
-recovery = "Keep final MCQ benchmark.parquet columns aligned with references/benchmark-schema.md and the speaker MMLU-Pro format."
+recovery = "Keep final MCQ benchmark.parquet columns aligned with references/benchmark-schema.md and the MMLU-Pro column layout."
 
 [[errors]]
 name = "new_family_keeps_mcq_assumptions"

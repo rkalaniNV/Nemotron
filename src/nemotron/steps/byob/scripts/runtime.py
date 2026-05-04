@@ -11,7 +11,7 @@ from typing import Literal
 
 from nemotron.steps.byob.runtime.benchmark_families.registry import get_family, list_families
 
-StageName = Literal["prepare", "generate", "translate"]
+StageName = Literal["prepare", "generate", "translate", "assess"]
 
 
 def list_family_names() -> tuple[str, ...]:
@@ -38,5 +38,18 @@ def run_byob(
         if spec.translate is None:
             raise ValueError(f"Benchmark family {family!r} does not define translation")
         return spec.translate(config_path, skip_until=skip_until)
+    if stage == "assess":
+        # Default ``skip_until=QUALITY_METRICS``: skip re-running forward translation and
+        # back-translation (expects ``stage_cache`` parquet from a prior run), then run quality
+        # metrics and ``FINAL_OUTPUT``, then write assessment artifacts under ``assessment/``.
+        if spec.translate is None:
+            raise ValueError(f"Benchmark family {family!r} does not define translation")
+        effective_skip = skip_until if skip_until is not None else "QUALITY_METRICS"
+        bench_path = spec.translate(config_path, skip_until=effective_skip)
+        if bench_path is not None:
+            from nemotron.steps.byob.runtime.assessment_utils import write_assessment_artifacts
+
+            write_assessment_artifacts(bench_path, Path(bench_path).parent / "assessment")
+        return bench_path
 
     raise ValueError(f"Unknown BYOB stage {stage!r}")

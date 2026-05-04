@@ -14,7 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--family", default="mcq", help="Benchmark family to run")
     parser.add_argument(
         "--stage",
-        choices=("prepare", "generate", "translate"),
+        choices=("prepare", "generate", "translate", "assess"),
         help="Pipeline stage to run",
     )
     parser.add_argument(

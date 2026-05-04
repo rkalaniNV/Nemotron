@@ -285,6 +285,8 @@ def translate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None
         )
         dataset_out.to_parquet(output_path_backtranslation)
         logger.info("Back-translated questions saved to %s", output_path_backtranslation)
+    # Quality metrics always read the back-translation parquet; if this stage was skipped
+    # (e.g. ``skip_until=QUALITY_METRICS``), ``backtranslated_questions.parquet`` must exist.
     last_output_path = output_path_backtranslation
 
     if _should_run(skip_until, McqTranslationStage.QUALITY_METRICS):
