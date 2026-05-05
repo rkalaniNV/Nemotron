@@ -36,27 +36,67 @@ description = "Benchmark metrics, artifacts, and evaluation summaries produced b
 [[parameters]]
 name = "benchmarks"
 description = "Benchmark task names to run, using NeMo Evaluator or launcher task identifiers."
-default = ["lm-evaluation-harness.ifeval", "simple_evals.gpqa_diamond"]
+default = ["mmlu_pro", "ifeval", "gpqa_diamond"]
+
+[[parameters]]
+name = "runner"
+description = "Execution path for the step. Use direct for core NeMo Evaluator API smoke tests, or launcher for container-backed tasks."
+default = "direct"
+
+[[parameters]]
+name = "sovereign_container"
+description = "Optional sovereign evaluation container image used for sovereign.<task> benchmarks."
+default = ""
+
+[[parameters]]
+name = "api_key_name"
+description = "Environment variable name that stores the endpoint key. Never put the raw key in config."
+default = "NVIDIA_API_KEY"
+
+[[parameters]]
+name = "model_id"
+description = "Exact hosted endpoint model id. Prefer ids returned by the endpoint's /v1/models API."
+default = ""
 
 [[strategies]]
 when = "The input artifact is checkpoint_hf"
 then = "Deploy with a Hugging Face-friendly backend such as vLLM or Ray Serve, then point NeMo Evaluator at the resulting chat or completions endpoint."
+skill = "skills/nemotron-customize/context/eval-deploy-formats.txt"
 
 [[strategies]]
 when = "The input artifact is checkpoint_megatron"
 then = "Deploy the iter_* Megatron Bridge checkpoint with the Megatron-serving path and use the checkpoint tokenizer for log-probability benchmarks."
+skill = "skills/nemotron-customize/context/eval-deploy-formats.txt"
 
 [[strategies]]
 when = "The benchmark suite is chat or instruction-following oriented"
 then = "Use a chat endpoint and start from deterministic generation settings unless the model card recommends reasoning-specific settings."
+skill = "skills/nemotron-customize/context/eval-standard-nlu.txt"
+
+[[strategies]]
+when = "The user wants a quick standard English hosted endpoint validation"
+then = "Use config/hosted_mmlu_pro.yaml with runner=direct, benchmark mmlu_pro, and a small limit_samples value."
+skill = "src/nemotron/steps/eval/model_eval/SKILL.md"
 
 [[strategies]]
 when = "The benchmark suite is log-probability based, such as arc_challenge, hellaswag, or piqa"
 then = "Use a completions endpoint with logprobs support and provide a matching tokenizer path or model handle."
+skill = "skills/nemotron-customize/context/eval-standard-nlu.txt"
 
 [[strategies]]
 when = "You are evaluating a reasoning model"
 then = "Increase max_new_tokens, enable reasoning-trace processing, and use the model-card temperature and top-p defaults for reasoning tasks."
+skill = "skills/nemotron-customize/context/eval-standard-nlu.txt"
+
+[[strategies]]
+when = "The benchmark suite is sovereign, multilingual, Indic, Indonesian, or MILU"
+then = "Use deployment=none for hosted endpoints, select sovereign task names by language and endpoint capability, and provide the sovereign task container."
+skill = "skills/nemotron-customize/context/eval-sovereign-benchmarks.txt"
+
+[[strategies]]
+when = "The model is hosted behind an OpenAI-compatible service"
+then = "Probe the service's model list when available and use the exact returned model id; provider-prefixed ids may differ from short model names."
+skill = "src/nemotron/steps/eval/model_eval/SKILL.md"
 
 [[errors]]
 name = "missing_tokenizer_for_logprobs"
@@ -70,6 +110,20 @@ recovery = "Use chat endpoints for instruction/chat benchmarks and completions e
 name = "bad_megatron_checkpoint_path"
 recovery = "Point evaluation deployment at the specific iter_* checkpoint directory rather than only the parent output folder."
 
+[[errors]]
+name = "hosted_model_access_denied"
+recovery = "Check that the API key can access the requested model id. Query /v1/models or ask for a key with access to the target model."
+
+[[errors]]
+name = "framework_cli_not_found"
+recovery = "Install the benchmark framework package, such as nvidia-simple-evals for mmlu_pro, and run with the environment whose bin directory contains the framework CLI."
+
 [reference]
-script = "https://github.com/NVIDIA-NeMo/Evaluator/blob/main/packages/nemo-evaluator-launcher/examples/local_basic.yaml"
-docs = "https://docs.nvidia.com/nemo/evaluator/latest/get-started/quickstart/launcher.html"
+script = "Evaluator/packages/nemo-evaluator-launcher/examples/local_basic.yaml"
+docs = "Evaluator/docs/evaluation/index.md"
+skills = [
+  "src/nemotron/steps/eval/model_eval/SKILL.md",
+  "skills/nemotron-customize/context/eval-standard-nlu.txt",
+  "skills/nemotron-customize/context/eval-deploy-formats.txt",
+  "skills/nemotron-customize/context/eval-sovereign-benchmarks.txt",
+]

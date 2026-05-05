@@ -1,0 +1,58 @@
+# Sovereign benchmark smoke test through NeMo Evaluator Launcher.
+#
+# Set SOVEREIGN_EVAL_CONTAINER to the image built from nvidia-core-evals
+# frameworks/llm/sovereign or override sovereign.container on the CLI.
+
+runner: launcher
+output_dir: ./results-sovereign
+
+sovereign:
+  container: ${oc.env:SOVEREIGN_EVAL_CONTAINER,sovereign:local}
+
+execution:
+  type: local
+  mode: sequential
+  output_dir: ${output_dir}
+
+deployment:
+  type: none
+
+target:
+  api_endpoint:
+    model_id: ${oc.env:NEMO_EVALUATOR_MODEL_ID,meta/llama-3.2-3b-instruct}
+    url: ${oc.env:NEMO_EVALUATOR_MODEL_URL,https://integrate.api.nvidia.com/v1/chat/completions}
+    api_key_name: ${oc.env:NEMO_EVALUATOR_API_KEY_NAME,NVIDIA_API_KEY}
+
+evaluation:
+  nemo_evaluator_config:
+    config:
+      params:
+        temperature: 0.0
+        top_p: 1.0e-05
+        max_new_tokens: 1024
+        max_retries: 5
+        parallelism: 1
+        request_timeout: 3600
+        limit_samples: 1
+    target:
+      api_endpoint:
+        stream: false
+        adapter_config:
+          output_dir: /results
+          use_progress_tracking: false
+          use_caching: true
+          caching_dir: /results/cache
+          use_response_logging: true
+          max_logged_responses: 10
+          use_request_logging: true
+          max_logged_requests: 10
+  tasks:
+    - name: sovereign.gsm8k_indic_hi
+      container: ${sovereign.container}
+      endpoint_type: chat
+    - name: sovereign.mmlu_indic_hi
+      container: ${sovereign.container}
+      endpoint_type: chat
+    - name: sovereign.indicgenbench_flores_in_hi
+      container: ${sovereign.container}
+      endpoint_type: chat

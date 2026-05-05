@@ -1,0 +1,58 @@
+# Evaluation Context: Sovereign Benchmarks
+
+Use this pack when generating an `eval/model_eval` stage or advising an agent
+to run sovereign or multilingual Indic benchmarks through NeMo Evaluator.
+
+## Launcher Contract
+
+Evaluator PR 953 supports task-level:
+
+- `name`: task id, preferably `sovereign.<task>`
+- `container`: sovereign evaluation image
+- `endpoint_type`: `chat`, `completions`, or logprob-compatible completions
+
+The Launcher loads `framework.yml` from the task container and merges the task
+defaults into the evaluator config. Nemotron should not duplicate every
+sovereign task definition in code.
+
+## Model And Endpoint Selection
+
+Ask for:
+
+1. model id
+2. endpoint URL
+3. API key environment variable name
+4. endpoint capability: chat, completions, logprobs
+5. target language(s)
+6. smoke or full run
+7. sovereign container image
+
+Use `deployment: none` for hosted endpoints. Put the env var name in
+`target.api_endpoint.api_key_name`; do not put the secret value in YAML.
+
+## Benchmark Selection
+
+Indic language codes: `hi`, `bn`, `gu`, `kn`, `mr`, `ml`, `or`, `pa`, `ta`,
+`te`.
+
+Recommended Hindi chat smoke:
+
+- `sovereign.gsm8k_indic_hi`
+- `sovereign.mmlu_indic_hi`
+- `sovereign.indicgenbench_flores_in_hi`
+
+For another Indic language, replace the suffix. For completions-only endpoints,
+use `_completions`. For logprob evaluation, use `_logprob` only after verifying
+the endpoint supports completions logprobs.
+
+MILU tasks are `milu_<Language>` and require the external MILU harness in the
+sovereign image plus `HF_TOKEN` when the dataset is gated.
+
+## Metrics
+
+- GSM8K and chat MCQ BYOB tasks: `pass@1.correct`
+- MMLU Indic logprob: `acc`
+- ARC/BoolQ logprob: `acc_norm`
+- FLORES translation: `chrf`
+- CrossSum summarization: `rouge_l`
+- MILU: `lm_eval acc,none`

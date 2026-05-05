@@ -1,0 +1,48 @@
+# Hosted OpenAI-compatible endpoint smoke test through NeMo Evaluator Launcher.
+
+runner: launcher
+output_dir: ./results-hosted-mmlu
+
+execution:
+  type: local
+  mode: sequential
+  output_dir: ${output_dir}
+
+deployment:
+  type: none
+
+target:
+  api_endpoint:
+    model_id: ${oc.env:NEMO_EVALUATOR_MODEL_ID,meta/llama-3.2-3b-instruct}
+    url: ${oc.env:NEMO_EVALUATOR_MODEL_URL,https://integrate.api.nvidia.com/v1/chat/completions}
+    api_key_name: ${oc.env:NEMO_EVALUATOR_API_KEY_NAME,NVIDIA_API_KEY}
+
+evaluation:
+  nemo_evaluator_config:
+    config:
+      params:
+        temperature: 0.0
+        top_p: 1.0
+        max_new_tokens: 1024
+        max_retries: 5
+        parallelism: 1
+        request_timeout: 3600
+        limit_samples: 1
+    target:
+      api_endpoint:
+        adapter_config:
+          output_dir: /results
+          use_progress_tracking: false
+          use_caching: true
+          caching_dir: /results/cache
+          use_response_logging: true
+          max_logged_responses: 10
+          use_request_logging: true
+          max_logged_requests: 10
+  tasks:
+    - name: mmlu_instruct
+      endpoint_type: chat
+      nemo_evaluator_config:
+        config:
+          params:
+            task: mmlu_str_abstract_algebra

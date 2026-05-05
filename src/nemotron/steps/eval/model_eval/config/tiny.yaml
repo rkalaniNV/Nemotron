@@ -1,6 +1,13 @@
 # Tiny smoke-test config for NeMo Evaluator
 
+runner: direct
 output_dir: ./results-tiny
+
+endpoint_check:
+  enabled: true
+  max_retries: 3
+  retry_interval: 2
+  request_timeout: 60
 
 deployment:
   model_id: megatron_model

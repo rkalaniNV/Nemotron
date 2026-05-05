@@ -46,6 +46,13 @@ file = "eval-deploy-formats.txt"
 description = "Configure evaluator deployment targets and model formats — NIM, vLLM, Hugging Face, and Megatron-Bridge inputs."
 
 [[packs]]
+id = "eval-model-eval-sovereign"
+step = "eval/model_eval"
+intent = "sovereign"
+file = "eval-sovereign-benchmarks.txt"
+description = "Configure sovereign and multilingual Indic evaluation through NeMo Evaluator task containers."
+
+[[packs]]
 id = "optimize-modelopt-distill-generate"
 step = "optimize/modelopt/distill"
 intent = "generate"
