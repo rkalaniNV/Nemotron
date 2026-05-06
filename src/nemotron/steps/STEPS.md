@@ -65,11 +65,11 @@
 | [sft/automodel](sft/automodel/) | Supervised fine-tuning with the AutoModel stack for HF-format models and JSONL datasets that already use OpenAI chat-format messages. Supports full SFT and LoRA-style adapter tuning from the same step. | training_jsonl | checkpoint_hf |
 | [sft/megatron_bridge](sft/megatron_bridge/) | Supervised fine-tuning using NVIDIA Megatron-Bridge. Best for large-scale distributed training with tensor/pipeline/context parallelism. Requires packed Parquet data from prep/sft_packing. | packed_parquet, checkpoint_megatron (optional) | checkpoint_megatron |
 
-## synth — Synthetic Data Generation
+## sdg — Synthetic Data Generation
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [synth/data_designer](synth/data_designer/) | Build a NeMo Data Designer pipeline declaratively and generate synthetic data. Two recipes ship in config/: 'default' produces SFT chat data, 'rl_pref' produces preference pairs (chosen / rejected) for DPO.  Customisation lives in YAML — step.py just translates declarative column specs into the upstream DataDesignerConfigBuilder API. | training_jsonl (optional) | synthetic_jsonl |
+| [sdg/data_designer](sdg/data_designer/) | Build a NeMo Data Designer pipeline declaratively and generate synthetic data. Two recipes ship in config/: 'default' produces SFT chat data, 'rl_pref' produces preference pairs (chosen / rejected) for DPO.  Customisation lives in YAML — step.py just translates declarative column specs into the upstream DataDesignerConfigBuilder API. | training_jsonl (optional) | synthetic_jsonl |
 
 ## translate — Translation
 

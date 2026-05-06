@@ -1,11 +1,11 @@
 ---
-name: nemotron-synth-data-designer
-description: Configure Nemotron synth/data_designer for NeMo Data Designer synthetic data generation. Use for SFT SDG chat or tool-call data, RL preference SDG for DPO, seed datasets, column specs, preview runs, output projections, and generated JSONL validation.
+name: nemotron-sdg-data-designer
+description: Configure Nemotron sdg/data_designer for NeMo Data Designer synthetic data generation. Use for SFT SDG chat or tool-call data, RL preference SDG for DPO, seed datasets, column specs, preview runs, output projections, and generated JSONL validation.
 ---
 
 # Data Designer SDG
 
-Use `synth/data_designer` to generate synthetic JSONL from declarative YAML column specifications.
+Use `sdg/data_designer` to generate synthetic JSONL from declarative YAML column specifications.
 
 Before changing configs or code, read `step.toml` to understand the step flow, consumed and produced artifacts, important parameters, strategies, failure modes, and upstream references.
 
@@ -26,8 +26,8 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Local Files
 
-- Contract: `src/nemotron/steps/synth/data_designer/step.toml`
-- Runner: `src/nemotron/steps/synth/data_designer/step.py`
+- Contract: `src/nemotron/steps/sdg/data_designer/step.toml`
+- Runner: `src/nemotron/steps/sdg/data_designer/step.py`
 - Configs: `config/default.yaml`, `config/customer_support_tools.yaml`, `config/rl_pref.yaml`, `config/tiny.yaml`
 - Seeds: `data/sft_topic_seeds.jsonl`, `data/customer_support_tool_seeds.jsonl`, `data/rl_pref_prompt_seeds.jsonl`
 

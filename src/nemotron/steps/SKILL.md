@@ -16,7 +16,7 @@ Use this skill as the entry point for the Nemotron training and optimization ste
 | Supervised fine-tuning | `sft/SKILL.md` | `training_jsonl`, `packed_parquet`, checkpoints |
 | LoRA or adapter tuning | `peft/SKILL.md` | `checkpoint_lora` |
 | DPO, RLVR, or RLHF alignment | `rl/SKILL.md` | prompt or preference JSONL, Megatron checkpoints |
-| SFT SDG or RL preference SDG | `synth/SKILL.md` | `synthetic_jsonl` |
+| SFT SDG or RL preference SDG | `sdg/SKILL.md` | `synthetic_jsonl` |
 | Quantization, distillation, pruning | `optimize/SKILL.md` | optimized HF or Megatron checkpoints |
 | Execution profiles and Lepton/Ray env setup | `env/SKILL.md` | `env_toml` |
 

@@ -3,7 +3,7 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""Static checks for ``steps/synth/data_designer``.
+"""Static checks for ``steps/sdg/data_designer``.
 
 Also validates the declarative column-spec shape that step.py translates into
 the upstream ``DataDesignerConfigBuilder`` API. We don't import data_designer
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nemotron.steps.synth.data_designer.step import (
+from nemotron.steps.sdg.data_designer.step import (
     parse_json_object,
     project_records,
     records_from_designer_result,
@@ -28,7 +28,7 @@ from .._step_helpers import assert_step_static, step_dir
 VALID_COLUMN_TYPES = {"category", "seed", "llm_text", "llm_structured", "llm_judge"}
 LLM_COLUMN_TYPES = {"llm_text", "llm_structured", "llm_judge"}
 
-STEP = step_dir(__file__, "synth", "data_designer")
+STEP = step_dir(__file__, "sdg", "data_designer")
 REPO_ROOT = STEP.parents[4]
 
 
@@ -42,10 +42,10 @@ def _load_config(path: Path) -> dict:
     return data
 
 
-def test_synth_data_designer_static() -> None:
+def test_sdg_data_designer_static() -> None:
     assert_step_static(
         STEP,
-        expected_name="steps/synth/data_designer",
+        expected_name="steps/sdg/data_designer",
         expected_launch="python",
         expected_default_config="default",
     )
@@ -312,6 +312,47 @@ def test_structured_messages_projection() -> None:
             "issue": "late delivery",
         }
     ]
+
+
+def test_structured_messages_projection_serializes_tool_payload_objects() -> None:
+    records = [
+        {
+            "conversation": {
+                "messages": [
+                    {"role": "system", "content": "You are a support agent."},
+                    {"role": "user", "content": "Where is my order?"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_lookup_001",
+                                "type": "function",
+                                "function": {
+                                    "name": "lookup_order",
+                                    "arguments": {"order_id": "ORD-10492"},
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_lookup_001",
+                        "name": "lookup_order",
+                        "content": {"status": "delayed", "eta": "tomorrow"},
+                    },
+                ]
+            }
+        }
+    ]
+
+    projected = project_records(records, {"type": "structured_messages"})
+
+    assert projected[0]["messages"][2]["tool_calls"][0]["function"]["arguments"] == '{"order_id":"ORD-10492"}'
+    assert projected[0]["messages"][3]["content"] == '{"status":"delayed","eta":"tomorrow"}'
+    assert records[0]["conversation"]["messages"][2]["tool_calls"][0]["function"]["arguments"] == {
+        "order_id": "ORD-10492"
+    }
 
 
 def test_structured_messages_projection_parses_fenced_json() -> None:

@@ -20,12 +20,12 @@
 # Each generated conversation includes one assistant tool call, one matching
 # tool response, and a final assistant answer grounded in that tool result.
 
-output_dir: ${oc.env:SDG_OUTPUT_DIR,${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/synth}
+output_dir: ${oc.env:SDG_OUTPUT_DIR,${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/sdg}
 output_path: ${output_dir}/customer_support_tool_sft.jsonl
 num_records: 100
 
 seed_dataset:
-  path: ${oc.env:PWD}/src/nemotron/steps/synth/data_designer/data/customer_support_tool_seeds.jsonl
+  path: ${oc.env:PWD}/src/nemotron/steps/sdg/data_designer/data/customer_support_tool_seeds.jsonl
   strategy: shuffle
   fields: [customer_name, issue, order_id, product, policy_hint]
 
@@ -78,7 +78,8 @@ columns:
       - Include exactly one tool message that has the matching tool_call_id.
       - The assistant's final answer must use the tool result and the policy_hint.
       - Do not include markdown in message content.
-      - Function arguments must be a JSON string, not a JSON object.
+      - In the generated JSON object, function arguments must be JSON objects, not escaped JSON strings.
+      - In the generated JSON object, tool message content must be a JSON object, not an escaped JSON string.
 
       Available tool functions:
       - lookup_order(order_id: string)
@@ -97,7 +98,7 @@ columns:
             "type": "function",
             "function": {
               "name": "lookup_order",
-              "arguments": "{\"order_id\":\"ORD-10492\"}"
+              "arguments": {"order_id": "ORD-10492"}
             }
           }
         ]
@@ -108,7 +109,7 @@ columns:
         "role": "tool",
         "tool_call_id": "call_lookup_001",
         "name": "lookup_order",
-        "content": "{\"status\":\"delayed\",\"eta\":\"tomorrow\"}"
+        "content": {"status": "delayed", "eta": "tomorrow"}
       }
       Schema:
       {
@@ -138,7 +139,7 @@ columns:
                 "type": "function",
                 "function": {
                   "name": "lookup_order",
-                  "arguments": "{\"order_id\":\"ORD-10492\"}"
+                  "arguments": {"order_id": "ORD-10492"}
                 }
               }
             ]
@@ -147,7 +148,7 @@ columns:
             "role": "tool",
             "tool_call_id": "call_lookup_001",
             "name": "lookup_order",
-            "content": "{\"status\":\"delayed\",\"eta\":\"tomorrow\"}"
+            "content": {"status": "delayed", "eta": "tomorrow"}
           },
           {"role": "assistant", "content": "Final grounded answer"}
         ]

@@ -35,7 +35,7 @@ CATEGORY_TITLES = {
     "pretrain": "Pretraining",
     "rl": "Reinforcement Learning",
     "sft": "Supervised Fine-Tuning",
-    "synth": "Synthetic Data Generation",
+    "sdg": "Synthetic Data Generation",
     "translate": "Translation",
 }
 VALID_PATTERN_CONFIDENCE = {"high", "medium", "experimental"}

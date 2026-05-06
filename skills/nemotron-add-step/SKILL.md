@@ -30,7 +30,7 @@ Then I'll create the step directory, write step.toml + starter configs, add step
 
 Example — new artifact type:
 ```
-user: Add a synth step that produces preference-pair JSONL.
+user: Add an sdg step that produces preference-pair JSONL.
 assistant: `preference_jsonl` is not in `src/nemotron/steps/types.toml`.
 I'll first confirm no existing type fits. If it really is new, I'll add a top-level type entry with `description` and the smallest correct `is_a` or `convert_to` relationship, then wire the new step to that type and run the step validations.
 ```
@@ -52,7 +52,7 @@ Read these first:
 
 Then ask the contributor:
 1. What does this step do? (one sentence)
-2. Which category? (`curate`, `synth`, `translate`, `prep`, `pretrain`, `sft`, `peft`, `rl`, `optimize`, `eval`, `convert`, `benchmark`)
+2. Which category? (`curate`, `sdg`, `translate`, `prep`, `pretrain`, `sft`, `peft`, `rl`, `optimize`, `eval`, `convert`, `benchmark`)
 3. Which NVIDIA stack library? (Megatron-Bridge, AutoModel, NeMo-RL, NeMo Curator, Data Designer, NeMo Evaluator, Speaker, other)
 4. What does it consume? (artifact types from `src/nemotron/steps/types.toml`)
 5. What does it produce? (artifact types)

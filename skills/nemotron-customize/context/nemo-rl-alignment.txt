@@ -117,7 +117,7 @@ For RLHF:
 Typical chain:
 
 ```text
-synth/data_designer -> prep/rl_prep -> rl/nemo_rl/dpo
+sdg/data_designer -> prep/rl_prep -> rl/nemo_rl/dpo
 prep/rl_prep -> rl/nemo_rl/rlvr
 prep/rl_prep -> rl/nemo_rl/rlhf
 ```

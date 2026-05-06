@@ -1,6 +1,6 @@
 # NeMo Data Designer Synthetic Data Context
 
-Use this pack for `synth/data_designer`.
+Use this pack for `sdg/data_designer`.
 
 The step builds a Data Designer pipeline from YAML. Keep `step.py` generic:
 customization belongs in config files through model aliases, columns, seed data,
@@ -11,7 +11,7 @@ and output projections.
 Core fields:
 
 ```yaml
-output_path: ./output/synth/data.jsonl
+output_path: ./output/sdg/data.jsonl
 num_records: 1000
 seed_dataset:
   path: ./seed.jsonl
@@ -46,7 +46,7 @@ Use `structured_messages` for tool-calling SFT data.
 ## Customer-Support Tool Calls
 
 The config
-`src/nemotron/steps/synth/data_designer/config/customer_support_tools.yaml`
+`src/nemotron/steps/sdg/data_designer/config/customer_support_tools.yaml`
 generates multi-turn ecommerce support conversations with:
 
 - OpenAI-style `messages`
@@ -75,7 +75,7 @@ Use `config/rl_pref.yaml` when generating DPO-style data. It should emit:
 This can flow into:
 
 ```text
-synth/data_designer -> prep/rl_prep -> rl/nemo_rl/dpo
+sdg/data_designer -> prep/rl_prep -> rl/nemo_rl/dpo
 ```
 
 ## SFT Data
@@ -89,8 +89,8 @@ For SFT, emit:
 This can flow into:
 
 ```text
-synth/data_designer -> prep/sft_packing -> sft/megatron_bridge
-synth/data_designer -> sft/automodel
+sdg/data_designer -> prep/sft_packing -> sft/megatron_bridge
+sdg/data_designer -> sft/automodel
 ```
 
 Use `prep/sft_packing` only for Megatron-Bridge consumers that need packed

@@ -111,10 +111,10 @@ file = "nemotron-data-prep.txt"
 description = "Generate RL data prep stages — HF placeholder resolution, sharded JSONL, and DPO/RLVR/RLHF schemas."
 
 [[packs]]
-id = "synth-data-designer-generate"
-step = "synth/data_designer"
+id = "sdg-data-designer-generate"
+step = "sdg/data_designer"
 intent = "generate"
-file = "data-designer-synth.txt"
+file = "data-designer-sdg.txt"
 description = "Generate Data Designer synthetic-data stages — column specs, seed data, output projections, preference data, and tool-call SFT."
 
 [[packs]]

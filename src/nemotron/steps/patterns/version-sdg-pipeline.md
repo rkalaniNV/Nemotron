@@ -1,12 +1,12 @@
 ---
 id: version-sdg-pipeline
 title: "Version synthetic data generation as a pipeline"
-tags: [synth, data-quality, reproducibility]
+tags: [sdg, data-quality, reproducibility]
 triggers:
   - "Synthetic SFT, tool-use, prompt, or preference data is being generated."
   - "A Data Designer config is moving from preview mode to a larger generation job."
   - "Generated data will feed SFT, DPO, RLVR, RLHF, or downstream data prep."
-steps: [synth/data_designer, prep/sft_packing, prep/rl_prep, sft/automodel, rl/nemo_rl/dpo]
+steps: [sdg/data_designer, prep/sft_packing, prep/rl_prep, sft/automodel, rl/nemo_rl/dpo]
 confidence: high
 ---
 

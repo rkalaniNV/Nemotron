@@ -2,7 +2,7 @@
 # /// script
 # [tool.runspec]
 # schema = "1"
-# name = "steps/synth/data_designer"
+# name = "steps/sdg/data_designer"
 #
 # [tool.runspec.run]
 # launch = "python"
@@ -51,6 +51,7 @@ entirely in YAML.
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -139,9 +140,10 @@ def project_records(records: list[dict[str, Any]], projection: dict[str, Any] | 
                 if messages_field not in source:
                     raise ValueError(f"{source_field!r} is missing required {messages_field!r}")
 
-                item = {"messages": source[messages_field]}
+                item = {"messages": copy.deepcopy(source[messages_field])}
                 if tools_field in source:
-                    item["tools"] = source[tools_field]
+                    item["tools"] = copy.deepcopy(source[tools_field])
+                normalize_tool_payloads(item["messages"])
                 for field in metadata_fields:
                     if field in record:
                         item[field] = record[field]
@@ -208,6 +210,37 @@ def project_records(records: list[dict[str, Any]], projection: dict[str, Any] | 
         return projected
 
     raise ValueError(f"Unknown output_projection type: {kind!r}")
+
+
+def normalize_tool_payloads(messages: Any) -> None:
+    """Serialize nested tool payload objects to OpenAI chat string fields."""
+    if not isinstance(messages, list):
+        raise ValueError("'messages' must be a list")
+
+    for message in messages:
+        if not isinstance(message, dict):
+            raise ValueError("each message must be a mapping")
+
+        tool_calls = message.get("tool_calls")
+        if tool_calls is not None:
+            if not isinstance(tool_calls, list):
+                raise ValueError("'tool_calls' must be a list")
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    raise ValueError("each tool call must be a mapping")
+                function = tool_call.get("function")
+                if isinstance(function, dict) and "arguments" in function:
+                    function["arguments"] = stringify_jsonish(function["arguments"])
+
+        if message.get("role") == "tool" and "content" in message:
+            message["content"] = stringify_jsonish(message["content"])
+
+
+def stringify_jsonish(value: Any) -> str:
+    """Return strings unchanged and compact-encode structured JSON values."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, separators=(",", ":"))
 
 
 def parse_json_object(value: str, field_name: str) -> dict[str, Any]:

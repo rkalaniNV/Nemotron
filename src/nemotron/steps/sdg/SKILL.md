@@ -1,9 +1,9 @@
 ---
-name: nemotron-synth
+name: nemotron-sdg
 description: Configure Nemotron synthetic data generation with NeMo Data Designer for SFT SDG and RL preference SDG. Use when generating chat, tool-use, prompt, or chosen and rejected preference data for downstream prep, SFT, DPO, RLVR, or RLHF stages.
 ---
 
-# Nemotron Synth
+# Nemotron SDG
 
 Use this skill when synthetic data should be generated declaratively before prep, SFT, DPO, or RL stages.
 
@@ -11,14 +11,14 @@ Use this skill when synthetic data should be generated declaratively before prep
 
 | Need | Config | Output |
 | --- | --- | --- |
-| SFT synthetic chat data | `synth/data_designer/config/default.yaml` | chat-style `synthetic_jsonl` |
-| SFT tool-use synthetic data | `synth/data_designer/config/customer_support_tools.yaml` | tool-call `synthetic_jsonl` |
-| RL preference data for DPO | `synth/data_designer/config/rl_pref.yaml` | prompt/chosen/rejected `synthetic_jsonl` |
+| SFT synthetic chat data | `sdg/data_designer/config/default.yaml` | chat-style `synthetic_jsonl` |
+| SFT tool-use synthetic data | `sdg/data_designer/config/customer_support_tools.yaml` | tool-call `synthetic_jsonl` |
+| RL preference data for DPO | `sdg/data_designer/config/rl_pref.yaml` | prompt/chosen/rejected `synthetic_jsonl` |
 
 ## Workflow
 
 1. For Lepton, Slurm, Ray, or batch execution, verify the env profile file first. Default lookup uses repository-root `env.toml`; generated backend files such as `env.lepton.toml` or `env.slurm.toml` require `NEMOTRON_ENV_FILE`.
-2. Use `synth/data_designer` for both SFT SDG and RL preference SDG.
+2. Use `sdg/data_designer` for both SFT SDG and RL preference SDG.
 3. Start with preview mode or `config/tiny.yaml` while editing columns.
 4. Project SFT output into OpenAI-style `messages` before `prep/sft_packing` or AutoModel SFT.
 5. Project preference output into prompt, chosen, and rejected fields before DPO.
