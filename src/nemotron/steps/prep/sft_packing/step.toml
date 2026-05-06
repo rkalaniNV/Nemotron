@@ -91,5 +91,4 @@ megatron_bridge_docs = "https://docs.nvidia.com/nemo/megatron-bridge/latest/"
 packed_sequences_docs = "https://docs.nvidia.com/nemo/megatron-bridge/latest/training/packed-sequences.html"
 skills = [
   "skills/nemotron-customize/context/nemotron-data-prep.txt",
-  "skills/nemotron-customize/context/mbridge-sft-full.txt",
 ]

@@ -1,96 +1,116 @@
 # AutoModel Pretraining Context
 
-Use this pack for `pretrain/automodel`.
+Use this pack when generating stage code for `pretrain/automodel` (continued
+pretraining or from-scratch causal-LM training with NeMo-AutoModel).
 
-This step uses the same shared AutoModel runner pattern as SFT and PEFT:
+## In-repo references (read these first)
 
-```text
-src/nemotron/steps/_runners/automodel.py
-```
+- Step manifest: `src/nemotron/steps/pretrain/automodel/step.toml`
+- Step entry:    `src/nemotron/steps/pretrain/automodel/step.py`
+- Shared runner: `src/nemotron/steps/_runners/automodel.py`
+- Default cfg:   `src/nemotron/steps/pretrain/automodel/config/default.yaml`
+- Smoke cfg:     `src/nemotron/steps/pretrain/automodel/config/tiny.yaml`
 
-The runner resolves `_step_recipe` from YAML when present; otherwise it uses the
-default recipe target from `step.py`.
+The step is wired through the shared AutoModel runner used by sft/peft/pretrain.
 
-## Default Recipe
+## Recipe selection (the non-obvious part)
 
-```text
-nemo_automodel.recipes.llm.train_pretrain:TrainPretrainRecipeForNextTokenPrediction
-```
+The runner picks the recipe class as follows:
 
-Keep generated stage code generic:
+1. If the YAML has top-level `_step_recipe: "module.path:ClassName"` use that.
+2. Else if the YAML has a top-level `recipe:` (e.g. `TrainPretrainRecipeForNextTokenPrediction`),
+   AutoModel's own config loader picks it up.
+3. Else fall back to the Python-side `DEFAULT_TARGET` in `step.py`, which is
+   `nemo_automodel.recipes.llm.train_ft:TrainFinetuneRecipeForNextTokenPrediction`.
 
-1. load AutoModel config
-2. resolve recipe class
-3. instantiate recipe
-4. run setup and train/validation loop
+Implication: the Python `DEFAULT_TARGET` is a finetune class, but the
+**default config** sets `recipe: TrainPretrainRecipeForNextTokenPrediction`,
+so a default-config run trains as pretraining. **Override with `_step_recipe`
+not `recipe._target_`** — the runner deliberately avoids the `_target_` slot
+because AutoModel's own config loader treats `_target_` values as
+`file/path.py:ClassName`, which collides.
 
-Do not put model-family-specific logic in the wrapper.
+Generated stage code should:
 
-## Data
+1. Load the YAML (let AutoModel's `parse_args_and_load_config` handle it via the runner).
+2. Resolve recipe class through `_step_recipe` if set; else from the YAML; else from `DEFAULT_TARGET`.
+3. Instantiate the recipe and call `setup()` then `run_train_validation_loop()`.
 
-The catalog step consumes `binidx`, normally produced by:
+Don't put model-family-specific logic in the wrapper.
 
-```text
-prep/pretrain_prep
-```
+## Data: bin/idx pretraining shards
 
-Default dataset config uses:
+The step consumes `binidx` produced by `prep/pretrain_prep` (Megatron-format
+shards plus `blend.json`). The default config wires it through the
+`MegatronPretraining` dataset:
 
 ```yaml
 dataset:
-  _target_: nemo_automodel.components.datasets.llm.megatron.indexed_dataset.IndexedDataset
-  blend_path: /path/to/blend.json
-  split: train
-  sequence_length: 4096
+  _target_: nemo_automodel.components.datasets.llm.megatron_dataset.MegatronPretraining
+  paths: ${oc.env:PRETRAIN_BLEND_PATH}    # blend.json path from prep/pretrain_prep
+  index_mapping_dir: ./index_mapping/train
+  tokenizer:
+    _target_: nemo_automodel._transformers.auto_tokenizer.NeMoAutoTokenizer.from_pretrained
+    pretrained_model_name_or_path: <tokenizer-id>
 ```
 
-Use the same tokenizer and sequence-length assumptions across prep and training.
+Validation uses a separate `validation_dataset:` block of the same shape.
 
-## CPT vs From Scratch
+The tokenizer must match what `prep/pretrain_prep` used — see
+`src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md`.
 
-Continued pretraining:
+## CPT vs from scratch
 
-```yaml
-model:
-  pretrained_model_name_or_path: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
-load_weights: true
-optimizer:
-  lr: 1.0e-5
+Step.toml strategies:
+
+- **CPT**: `load_weights=true`, lr 1e-5 to 5e-5.
+- **From scratch**: `load_weights=false`, warmup + cosine schedule sized to
+  the token budget.
+
+Default `model.pretrained_model_name_or_path` in this repo is
+`Qwen/Qwen3-30B-A3B` (MoE backbone example; minimum 8 GPUs per
+`[[models]]`). Override at CLI:
+
+```bash
+nemotron step run pretrain/automodel -c default \
+  model.pretrained_model_name_or_path=<your-hf-id>
 ```
 
-From scratch:
+## Distributed defaults
 
-```yaml
-load_weights: false
-```
-
-Use a warmup/cosine schedule sized to the token budget for from-scratch runs.
-
-## Distributed Defaults
-
-AutoModel is the smaller-cluster path compared with Megatron-Bridge. Start with:
+AutoModel pretraining's default config uses FSDP2 with explicit parallelism:
 
 ```yaml
 distributed:
-  strategy: fsdp2
+  _target_: nemo_automodel.components.distributed.config.FSDP2Config
+  dp_size: none
   tp_size: 1
   cp_size: 1
-  sequence_parallel: true
+  pp_size: 1
+  ep_size: 8                    # MoE expert parallelism for Qwen3-30B-A3B
+  sequence_parallel: false
+  activation_checkpointing: false
 ```
 
-Increase tensor/context parallelism only when model size or sequence length
-requires it.
+For dense (non-MoE) backbones drop `ep_size` (or set it to 1). Increase
+tensor/context parallelism only when model size or sequence length requires it.
+
+AutoModel is the **smaller-cluster** path compared with
+`pretrain/megatron_bridge`. If the user wants TP/PP/CP at scale, route them
+to Megatron-Bridge instead.
 
 ## Output
 
-The step produces a HuggingFace-format checkpoint. Add an explicit conversion
-stage if a downstream Megatron consumer is selected.
+Produces `checkpoint_hf` (HuggingFace safetensors). Add `convert/hf_to_megatron`
+if the next consumer expects Megatron format.
 
-## Staleness Checks
+## Staleness checks (when this pack drifts)
 
-When updating:
+When the upstream/repo defaults change:
 
-- keep `_step_recipe` separate from AutoModel's own `_target_` keys
-- keep data target compatible with bin/idx `blend.json`
-- keep config-only customization in YAML
-- verify the runner still matches AutoModel's config parser API
+- Update the dataset `_target_` if AutoModel renames `megatron_dataset`.
+- Update the recipe-class names if `train_ft.py` / `train_pretrain.py` rename.
+- Refresh the default model id and `min_gpus` from
+  `src/nemotron/steps/pretrain/automodel/step.toml [[models]]`.
+- Re-verify the FSDP2 field names and the env-var name `PRETRAIN_BLEND_PATH`.
+- Keep `_step_recipe` separate from `recipe._target_` (collision rule above).

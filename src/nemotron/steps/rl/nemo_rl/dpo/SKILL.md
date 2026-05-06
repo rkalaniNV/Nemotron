@@ -22,7 +22,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Lower learning rate before making structural changes to the runner.
 - Use `prep/rl_prep` when preference data starts as HF references or blended local files.
 - Keep the reference policy aligned with the SFT policy.
-- Check `src/nemotron/steps/patterns/validate-rl-rewards-before-scale.md` before trusting preference-pair training results.
+- Check `src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md` before trusting preference-pair training results.
 
 ## Config Nuances
 

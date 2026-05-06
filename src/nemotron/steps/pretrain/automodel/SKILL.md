@@ -22,7 +22,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Keep tokenizer and vocab settings aligned with the bin/idx artifact.
 - Use launcher and executor settings from the AutoModel runner for cluster moves.
 - Check `src/nemotron/steps/patterns/pretrain-token-budget-before-scale.md` before changing pretraining strategy.
-- Check `src/nemotron/steps/patterns/prepared-data-is-tokenizer-locked.md` before reusing bin/idx data.
+- Check `src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md` before reusing bin/idx data.
 
 ## Config Nuances
 

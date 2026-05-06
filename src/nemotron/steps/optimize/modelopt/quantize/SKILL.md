@@ -22,7 +22,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Set `args.export_quant_cfg` to a value accepted by the installed upstream script: `int8_sq`, `fp8`, `fp8_blockwise`, `int4_awq`, `w4a8_awq`, or `nvfp4`.
 - Set `args.calib_size` high enough for representative activation ranges.
 - Use `extra_args` for new upstream ModelOpt or Megatron-Bridge flags.
-- Check `src/nemotron/steps/patterns/representative-calibration-before-optimization.md` before changing quantization strategy.
 
 ## Config Nuances
 

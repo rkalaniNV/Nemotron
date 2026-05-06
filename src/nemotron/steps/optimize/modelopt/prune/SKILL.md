@@ -22,8 +22,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Set `args.prune_target_params=null` when using a fixed export config.
 - Use `args.hparams_to_skip` for dimensions that must remain unchanged.
 - Use `extra_args` for new upstream pruning flags.
-- Check `src/nemotron/steps/patterns/distill-after-structural-compression.md` before changing pruning strategy.
-- Check `src/nemotron/steps/patterns/representative-calibration-before-optimization.md` before judging pruned quality.
 
 ## Config Nuances
 

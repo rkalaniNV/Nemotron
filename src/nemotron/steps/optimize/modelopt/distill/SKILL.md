@@ -23,8 +23,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Use `args.use_mock_data=true` only for launch validation.
 - Set `args.hf_export_path` when a Hugging Face export is needed directly.
 - Use `extra_args` for newly exposed upstream flags.
-- Check `src/nemotron/steps/patterns/distill-after-structural-compression.md` before changing distillation strategy.
-- Check `src/nemotron/steps/patterns/representative-calibration-before-optimization.md` before judging distillation quality.
 
 ## Config Nuances
 

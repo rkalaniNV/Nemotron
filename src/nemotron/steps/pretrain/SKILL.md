@@ -1,39 +1,119 @@
 ---
 name: nemotron-pretrain
-description: Choose and configure Nemotron pretraining and continued-pretraining backends, including AutoModel and Megatron-Bridge. Use when planning pretraining from bin/idx data, choosing checkpoint format, selecting HF-native versus distributed Megatron execution, or validating pretrain configs.
+description: Choose and configure Nemotron pretraining and continued-pretraining (CPT) backends — AutoModel and Megatron-Bridge. Use when planning pretraining from bin/idx data, choosing checkpoint format, selecting HF-native vs distributed Megatron execution, sizing the token budget, or scoping the data blend for sovereign CPT.
 ---
 
 # Nemotron Pretrain
 
-Use this skill to choose between AutoModel and Megatron-Bridge pretraining.
+Pick a pretraining backend and lock the token budget + data blend before
+requesting cluster time. Pretraining is the highest-cost stage in the
+catalog — the budget contract decides everything downstream.
 
-## Route
+## Backends
 
-| Backend | Best For | Default Model | Input | Output |
-| --- | --- | --- | --- | --- |
-| `pretrain/automodel` | HF-native CPT, smaller GPU counts, fast iteration | `Qwen/Qwen3-30B-A3B` | `binidx` | `checkpoint_hf` |
-| `pretrain/megatron_bridge` | Large distributed training, TP/PP/CP/EP scaling | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16` | `binidx`, optional `checkpoint_megatron` | `checkpoint_megatron` |
+| Backend | Best for | Default model / recipe | Input | Output |
+|---|---|---|---|---|
+| [`pretrain/automodel`](automodel/SKILL.md) | HF-native CPT, single-node, fast iteration | Qwen3-30B-A3B (MoE example) | `binidx` | `checkpoint_hf` |
+| [`pretrain/megatron_bridge`](megatron_bridge/SKILL.md) | Large distributed pretraining/CPT, TP/PP/CP/EP scaling, Nemotron recipe parity | `nemotron_3_nano_pretrain_config` recipe (Nano3) | `binidx` (+ optional `checkpoint_megatron`) | `checkpoint_megatron` |
+
+The "default model" column shows what the shipped `config/default.yaml`
+selects. Override at CLI:
+
+```bash
+nemotron step run pretrain/automodel -c default \
+  model.pretrained_model_name_or_path=<your-hf-id>
+```
+
+## Decision tree
+
+- HF-format output, ≤1 node, fast iteration → **AutoModel**.
+- Multi-node, TP/PP/CP/EP parallelism, or Nano3/Super3 recipe parity → **Megatron-Bridge**.
+- Switching backends mid-run is a conversion problem in itself. Pick once,
+  stay there. See [../patterns/convert-checkpoint-safety.md](../patterns/convert-checkpoint-safety.md).
+
+## Pretrain vs continued pretraining (CPT)
+
+Both backends support both. The differences are in **budget, learning rate,
+and data blend** — not in the runner.
+
+- **From scratch** (`load_weights=false`): warmup + cosine schedule sized to
+  the full token budget, conventional pretrain learning rate.
+- **CPT** (`load_weights=true`): learning rate **5–10× lower** than
+  from-scratch (1e-5 to 5e-5 — see step.toml CPT strategy), and **the data
+  blend matters more than the budget**.
+
+For sovereign CPT — adapting a base model to a target language, jurisdiction,
+or domain corpus — the blend ratios are the customization decision. See
+[../patterns/cpt-data-blend-scoping.md](../patterns/cpt-data-blend-scoping.md)
+for token-budget tiers (1–5B / 5–20B / 20–50B), forgetting checks, and
+mandatory blend-with-general-data discipline.
+
+## Pre-conditions
+
+1. **Compatible bin/idx data** from [`prep/pretrain_prep`](../prep/pretrain_prep/SKILL.md).
+   `blend.json` is the trainer's entry — its tokenizer must match the model's.
+2. **A documented token budget** (target_tokens, seq_length, gbs, train_iters,
+   lr schedule, ckpt cadence). See [../patterns/pretrain-token-budget-before-scale.md](../patterns/pretrain-token-budget-before-scale.md).
+3. **A held-out validation corpus** that never appears in training. For CPT,
+   this includes both target-domain prompts (to measure shift) and general
+   benchmarks the base model already passes (to detect forgetting).
+
+## Pipeline placement
+
+```
+curate/nemo_curator → prep/pretrain_prep → pretrain/automodel        → checkpoint_hf
+                                          → pretrain/megatron_bridge → checkpoint_megatron
+                                                                       (then convert/megatron_to_hf if HF needed downstream)
+```
 
 ## Workflow
 
-1. For Lepton, Slurm, Ray, or batch execution, verify the env profile file first. Default lookup uses repository-root `env.toml`; generated backend files such as `env.lepton.toml` or `env.slurm.toml` require `NEMOTRON_ENV_FILE`.
-2. Produce compatible bin/idx data with `prep/pretrain_prep`.
-3. Choose AutoModel when staying HF-native matters more than Megatron parallelism.
-4. Choose Megatron-Bridge when model size, sequence length, or throughput requires distributed parallelism.
-5. Start from `config/tiny.yaml` to validate data access, launch, and checkpoint writes.
-6. Check `src/nemotron/steps/patterns/pretrain-token-budget-before-scale.md` before moving beyond smoke tests.
-7. Check `src/nemotron/steps/patterns/prepared-data-is-tokenizer-locked.md` before reusing bin/idx data.
-8. Treat backend choice as a checkpoint-family choice unless you explicitly align the model and tokenizer overrides across backends.
+1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray runs
+   (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
+2. Run [`prep/pretrain_prep`](../prep/pretrain_prep/SKILL.md) on a tokenizer
+   that matches the trainer.
+3. Write the budget down (target_tokens / seq_length / gbs / train_iters /
+   lr schedule / ckpt cadence) **before code changes**.
+4. Pick backend per the decision tree.
+5. Smoke with `config/tiny.yaml` to verify launch + data access + checkpoint
+   write/restore.
+6. Run a short *representative* job at production sequence length and
+   parallelism to validate throughput and val-loss movement.
+7. For CPT, evaluate at every checkpoint to catch forgetting early.
+8. Bookend with eval — see
+   [../patterns/eval-before-and-after-training.md](../patterns/eval-before-and-after-training.md).
+9. For sovereign deployments, judge against a Build-Your-Own-Benchmark — see
+   [../patterns/byob-benchmark-design.md](../patterns/byob-benchmark-design.md).
 
-## Local Files
+## Smoke commands
 
-- `pretrain/automodel/step.toml`, `pretrain/automodel/step.py`, `pretrain/automodel/config/default.yaml`, `pretrain/automodel/config/tiny.yaml`
-- `pretrain/megatron_bridge/step.toml`, `pretrain/megatron_bridge/step.py`, `pretrain/megatron_bridge/config/default.yaml`, `pretrain/megatron_bridge/config/tiny.yaml`
-- `src/nemotron/steps/_runners/automodel.py`
-- `src/nemotron/steps/_runners/megatron_bridge.py`
+```bash
+nemotron step run pretrain/automodel       -c tiny
+nemotron step run pretrain/megatron_bridge -c tiny
+```
+
+## Patterns to cite
+
+- [../patterns/pretrain-token-budget-before-scale.md](../patterns/pretrain-token-budget-before-scale.md) — budget contract before scaling.
+- [../patterns/cpt-data-blend-scoping.md](../patterns/cpt-data-blend-scoping.md) — CPT-specific blend ratios + forgetting discipline.
+- [../patterns/prep-data-is-tokenizer-locked.md](../patterns/prep-data-is-tokenizer-locked.md) — bin/idx is tokenizer-locked.
+- [../patterns/multilingual-tokenizer-check.md](../patterns/multilingual-tokenizer-check.md) — target-language tokenization affects token budget.
+- [../patterns/eval-before-and-after-training.md](../patterns/eval-before-and-after-training.md) — measure pretrain/CPT effects.
+- [../patterns/byob-benchmark-design.md](../patterns/byob-benchmark-design.md) — sovereign deployment evaluation.
+
+## Local files
+
+- `pretrain/automodel/`: `step.toml`, `step.py`, `config/{default,tiny}.yaml`
+- `pretrain/megatron_bridge/`: `step.toml`, `step.py`, `config/{default,tiny}.yaml`
+- Shared runners: [../_runners/automodel.py](../_runners/automodel.py), [../_runners/megatron_bridge.py](../_runners/megatron_bridge.py)
 
 ## Guardrails
 
-- Do not reuse bin/idx data across tokenizer changes.
-- Set the token budget, LR schedule, checkpoint cadence, and validation corpus before scaling.
-- Keep output checkpoint format aligned with the next pipeline stage.
+- Don't reuse bin/idx data across tokenizer changes — rebuild prep.
+- For CPT, never train without a forgetting baseline (general-capability
+  validation slice).
+- Don't switch backends mid-run; the checkpoints aren't interchangeable
+  without explicit conversion.
+- Plan the restart policy before launching a multi-day cluster job.
+- Don't ship a sovereign deployment without a held-out target-language /
+  target-domain benchmark.

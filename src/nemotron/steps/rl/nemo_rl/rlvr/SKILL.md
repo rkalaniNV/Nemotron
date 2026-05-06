@@ -22,7 +22,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Keep `grpo.normalize_rewards=true` unless debugging raw reward scale.
 - Use `config/nemo_gym.yaml` for resource-server rewards.
 - Set `data.train.data_path`, `data.validation.data_path`, and `env.nemo_gym.config_paths` explicitly for NeMo-Gym.
-- Check `src/nemotron/steps/patterns/validate-rl-rewards-before-scale.md` before changing GRPO or reward strategy.
+- Check `src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md` before changing GRPO or reward strategy.
 
 ## Config Nuances
 

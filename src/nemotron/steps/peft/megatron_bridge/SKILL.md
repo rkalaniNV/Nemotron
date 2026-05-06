@@ -22,8 +22,8 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Start with the default `peft.dim`, then reduce it if memory is tight.
 - Keep packed-data tokenizer and sequence length aligned with the base model.
 - Merge or convert adapters when downstream consumers need HF model layout.
-- Check `src/nemotron/steps/patterns/prepared-data-is-tokenizer-locked.md` before reusing packed data.
-- Check `src/nemotron/steps/patterns/adapter-artifact-before-merge.md` before merging or converting adapters.
+- Check `src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md` before reusing packed data.
+- Check `src/nemotron/steps/patterns/peft-adapter-merge-discipline.md` before merging or converting adapters.
 
 ## Config Nuances
 

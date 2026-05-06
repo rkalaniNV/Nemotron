@@ -1,4 +1,4 @@
-suggest ---
+---
 name: nemotron-peft-automodel
 description: Configure Nemotron peft/automodel for AutoModel LoRA adapter training on chat-format JSONL. Use for memory-efficient HF model adaptation, single-node experiments, adapter checkpoints, LoRA rank or alpha tuning, and later HuggingFace checkpoint merging.
 ---
@@ -21,8 +21,8 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Keep `peft.alpha` near `2 * peft.dim` unless there is a reason to tune it.
 - Use smaller base models for single-GPU experiments.
 - Merge with `convert/merge_lora` when deployment requires a standalone HF checkpoint.
-- Check `src/nemotron/steps/patterns/small-dataset-lora.md` before choosing LoRA for small datasets.
-- Check `src/nemotron/steps/patterns/adapter-artifact-before-merge.md` before merging adapters.
+- Check `src/nemotron/steps/patterns/sft-small-dataset-prefer-lora.md` before choosing LoRA for small datasets.
+- Check `src/nemotron/steps/patterns/peft-adapter-merge-discipline.md` before merging adapters.
 
 ## Config Nuances
 

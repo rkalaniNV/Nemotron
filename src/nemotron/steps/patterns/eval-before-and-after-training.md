@@ -1,12 +1,12 @@
 ---
-id: eval-bookends
+id: eval-before-and-after-training
 title: "Evaluate before and after training"
 tags: [eval, pipeline-structure]
 triggers:
   - "You are about to train or adapt a model and need to prove improvement."
   - "A pipeline includes SFT, RL, conversion, or any quality-changing stage."
   - "You need to compare multiple training runs fairly."
-steps: []
+steps: [eval/model_eval, sft/automodel, sft/megatron_bridge, peft/automodel, peft/megatron_bridge, pretrain/automodel, pretrain/megatron_bridge, rl/nemo_rl/dpo, rl/nemo_rl/rlvr, rl/nemo_rl/rlhf, optimize/modelopt/quantize, optimize/modelopt/prune, optimize/modelopt/distill, convert/megatron_to_hf, convert/hf_to_megatron, convert/merge_lora]
 confidence: high
 ---
 
@@ -44,6 +44,10 @@ For very expensive evaluations, reduce scope rather than skipping the baseline e
 
 ## References
 
-- This is a cross-cutting pipeline rule, not a single-step recommendation.
-- Pair naturally with `eval/model_eval`, but the principle applies even when using custom or internal eval harnesses.
+- This is a cross-cutting pipeline rule. It applies to every quality-changing step in the catalog (SFT, PEFT, pretrain, RL, optimize, convert).
+- Pair with `byob-benchmark-design` whenever the deployment audience isn't covered by public benchmarks.
+- Pair with `rl-validate-rewards-before-scale` so RL training is scored on a held-out task eval, not just reward.
+- Pair with `data-quality-before-quantity` so eval improvements reflect data work, not just curation noise.
+- Pair with `cpt-data-blend-scoping` to detect general-capability forgetting after continued pretraining.
+- Pair with `peft-adapter-merge-discipline` to compare base, adapter-loaded, and merged checkpoints fairly.
 - Preserve eval comparability before adding exploratory benchmarks or qualitative demos.

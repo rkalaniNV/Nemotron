@@ -41,22 +41,18 @@ default = 100000
 [[strategies]]
 when = "You are starting from remote public sources such as Common Crawl, Wikipedia, or custom URL lists"
 then = "Use Curator's download/extract composite stages first, then write JSONL for downstream filtering and export."
-skill = "skills/nemotron-customize/context/curator-data-acquisition.txt"
 
 [[strategies]]
 when = "You already have local JSONL or Parquet data"
 then = "Skip remote acquisition and start with JsonlReader or ParquetReader, then apply language, quality, and domain filters."
-skill = "skills/nemotron-customize/context/curator-processing-language-quality.txt"
 
 [[strategies]]
 when = "You need multilingual or domain-specific gating before training"
 then = "Apply FastText language ID plus DomainClassifier or MultilingualDomainClassifier before final export."
-skill = "skills/nemotron-customize/context/curator-processing-language-quality.txt"
 
 [[strategies]]
 when = "Raw web data quality is noisy"
 then = "Start with heuristic ScoreFilter stages, then add QualityClassifier and deduplication for production-scale corpora."
-skill = "skills/nemotron-customize/context/curator-processing-language-quality.txt"
 
 [[errors]]
 name = "empty_or_tiny_output"
@@ -73,7 +69,3 @@ recovery = "Download the FastText lid.176 model and wire its path into FastTextL
 [reference]
 script = "https://github.com/NVIDIA-NeMo/Curator/blob/main/nemo_curator/stages/text/download/common_crawl/stage.py"
 docs = "https://docs.nvidia.com/nemo/curator/latest/"
-skills = [
-  "skills/nemotron-customize/context/curator-data-acquisition.txt",
-  "skills/nemotron-customize/context/curator-processing-language-quality.txt",
-]

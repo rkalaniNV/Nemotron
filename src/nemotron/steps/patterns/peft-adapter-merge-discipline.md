@@ -1,5 +1,5 @@
 ---
-id: adapter-artifact-before-merge
+id: peft-adapter-merge-discipline
 title: "Keep adapter artifacts separate until merge is validated"
 tags: [peft, lora, convert, deployment]
 triggers:
@@ -38,6 +38,8 @@ If the adapter is a disposable local experiment, minimal tracking may be enough,
 
 ## References
 
-- Pair with `small-dataset-lora` when deciding whether adapter tuning is the right training mode.
-- Pair with `checkpoint-before-convert` when merge is followed by format conversion.
-- Pair with `eval-bookends` to compare base, adapter-loaded, and merged checkpoints fairly.
+- Pair with `sft-small-dataset-prefer-lora` when deciding whether adapter tuning is the right training mode.
+- Pair with `convert-checkpoint-safety` when merge feeds a `convert/*` step (the merged HF checkpoint is itself a source that conversion must respect).
+- Pair with `eval-before-and-after-training` to compare base, adapter-loaded, and merged checkpoints fairly — never compare adapter-loaded scores against merged scores assuming they're identical.
+- Pair with `sft-data-blending` — domain adapters trained off different blends of the same base must be tracked by blend, not just by base.
+- Pair with `byob-benchmark-design` for sovereign deployments where the merged checkpoint is what serves traffic.

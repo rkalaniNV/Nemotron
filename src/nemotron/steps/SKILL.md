@@ -31,12 +31,12 @@ Use this skill as the entry point for the Nemotron training and optimization ste
 
 ## Decision Patterns
 
-- Use `patterns/prepared-data-is-tokenizer-locked.md` for packed Parquet, bin/idx, tokenizer, chat-template, and sequence-length compatibility.
+- Use `patterns/prep-data-is-tokenizer-locked.md` for packed Parquet, bin/idx, tokenizer, chat-template, and sequence-length compatibility.
 - Use `patterns/pretrain-token-budget-before-scale.md` before scaling pretraining or continued pretraining.
-- Use `patterns/small-dataset-lora.md` and `patterns/adapter-artifact-before-merge.md` for PEFT and LoRA decisions.
-- Use `patterns/validate-rl-rewards-before-scale.md` before scaling DPO, RLVR, or RLHF jobs.
-- Use `patterns/version-sdg-pipeline.md` for SFT SDG and RL preference SDG.
-- Use `patterns/representative-calibration-before-optimization.md` and `patterns/distill-after-structural-compression.md` for ModelOpt decisions.
+- Use `patterns/sft-small-dataset-prefer-lora.md` and `patterns/peft-adapter-merge-discipline.md` for PEFT and LoRA decisions.
+- Use `patterns/rl-validate-rewards-before-scale.md` before scaling DPO, RLVR, or RLHF jobs.
+- Use `patterns/sdg-pipeline-versioning.md` for SFT SDG and RL preference SDG.
+- Use `patterns/eval-before-and-after-training.md` and `patterns/byob-benchmark-design.md` for ModelOpt quality decisions.
 - Use each step's `step.toml [reference]` section for upstream repos and documentation.
 
 ## Guardrails

@@ -41,27 +41,22 @@ default = ["lm-evaluation-harness.ifeval", "simple_evals.gpqa_diamond"]
 [[strategies]]
 when = "The input artifact is checkpoint_hf"
 then = "Deploy with a Hugging Face-friendly backend such as vLLM or Ray Serve, then point NeMo Evaluator at the resulting chat or completions endpoint."
-skill = "skills/nemotron-customize/context/eval-deploy-formats.txt"
 
 [[strategies]]
 when = "The input artifact is checkpoint_megatron"
 then = "Deploy the iter_* Megatron Bridge checkpoint with the Megatron-serving path and use the checkpoint tokenizer for log-probability benchmarks."
-skill = "skills/nemotron-customize/context/eval-deploy-formats.txt"
 
 [[strategies]]
 when = "The benchmark suite is chat or instruction-following oriented"
 then = "Use a chat endpoint and start from deterministic generation settings unless the model card recommends reasoning-specific settings."
-skill = "skills/nemotron-customize/context/eval-standard-nlu.txt"
 
 [[strategies]]
 when = "The benchmark suite is log-probability based, such as arc_challenge, hellaswag, or piqa"
 then = "Use a completions endpoint with logprobs support and provide a matching tokenizer path or model handle."
-skill = "skills/nemotron-customize/context/eval-standard-nlu.txt"
 
 [[strategies]]
 when = "You are evaluating a reasoning model"
 then = "Increase max_new_tokens, enable reasoning-trace processing, and use the model-card temperature and top-p defaults for reasoning tasks."
-skill = "skills/nemotron-customize/context/eval-standard-nlu.txt"
 
 [[errors]]
 name = "missing_tokenizer_for_logprobs"
@@ -78,7 +73,3 @@ recovery = "Point evaluation deployment at the specific iter_* checkpoint direct
 [reference]
 script = "https://github.com/NVIDIA-NeMo/Evaluator/blob/main/packages/nemo-evaluator-launcher/examples/local_basic.yaml"
 docs = "https://docs.nvidia.com/nemo/evaluator/latest/get-started/quickstart/launcher.html"
-skills = [
-  "skills/nemotron-customize/context/eval-standard-nlu.txt",
-  "skills/nemotron-customize/context/eval-deploy-formats.txt",
-]

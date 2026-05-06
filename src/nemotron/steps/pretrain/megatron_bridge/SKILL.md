@@ -23,7 +23,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Start from the closest Megatron-Bridge recipe and override only required knobs.
 - Tune tensor, pipeline, context, and expert parallelism before scaling global batch.
 - Check `src/nemotron/steps/patterns/pretrain-token-budget-before-scale.md` before changing distributed strategy.
-- Check `src/nemotron/steps/patterns/prepared-data-is-tokenizer-locked.md` before reusing bin/idx data.
+- Check `src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md` before reusing bin/idx data.
 
 ## Config Nuances
 

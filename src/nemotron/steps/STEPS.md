@@ -14,6 +14,12 @@
 | --- | --- | --- | --- |
 | [curate/nemo_curator](curate/nemo_curator/) | Acquire public or custom text corpora with NeMo Curator, then annotate and filter them by language, domain, and quality to produce downstream-ready JSONL. | - | filtered_jsonl |
 
+## env
+
+| Step | Description | Consumes | Produces |
+| --- | --- | --- | --- |
+| [env/env_toml](env/env_toml/) | Generate and validate step-linked env profile examples from compact YAML templates for Lepton or Slurm, including inheritance, image overrides, mounts, env-var placeholders, and Ray/RL guardrails. | - | env_toml |
+
 ## eval — Evaluation
 
 | Step | Description | Consumes | Produces |
@@ -26,7 +32,7 @@
 | --- | --- | --- | --- |
 | [optimize/modelopt/distill](optimize/modelopt/distill/) | Distill a student model from a teacher model with NVIDIA Model Optimizer and Megatron-Bridge. Can run standalone or recover quality after pruning or quantization; real-data runs consume Megatron bin/idx data. | checkpoint_hf, binidx (optional) | checkpoint_megatron |
 | [optimize/modelopt/prune](optimize/modelopt/prune/) | Prune HuggingFace GPT/Mamba-family checkpoints with NVIDIA Model Optimizer and Megatron-Bridge. Supports target-parameter search or manual architecture pruning via config-controlled upstream arguments. | checkpoint_hf | checkpoint_hf |
-| [optimize/modelopt/quantize](optimize/modelopt/quantize/) | Post-training quantization with NVIDIA Model Optimizer through Megatron-Bridge. Supports generic PTQ recipes such as FP8/NVFP4 plus model-specific recipes when the upstream Megatron-Bridge script supports them, producing Megatron distributed checkpoints ready for export/evaluation. | checkpoint_hf | checkpoint_megatron |
+| [optimize/modelopt/quantize](optimize/modelopt/quantize/) | Post-training quantization with NVIDIA Model Optimizer through Megatron-Bridge. Supports PTQ recipes accepted by the installed Megatron-Bridge script, producing Megatron distributed checkpoints ready for export/evaluation. | checkpoint_hf | checkpoint_megatron |
 
 ## peft — Parameter-Efficient Fine-Tuning
 
@@ -58,18 +64,18 @@
 | [rl/nemo_rl/rlhf](rl/nemo_rl/rlhf/) | RLHF with a learned judge / generative reward model on top of NeMo-RL's GRPO loop. Uses NeMo-Gym for GenRM-style comparison rewards by default. | training_jsonl, checkpoint_megatron, checkpoint_hf | checkpoint_megatron |
 | [rl/nemo_rl/rlvr](rl/nemo_rl/rlvr/) | RL with Verifiable Rewards via GRPO (NeMo-RL). Designed for tasks with programmatic reward signals such as math problem solving or unit-tested code. Use config/nemo_gym.yaml for NeMo-Gym resource-server rewards. | training_jsonl, checkpoint_megatron | checkpoint_megatron |
 
+## sdg — Synthetic Data Generation
+
+| Step | Description | Consumes | Produces |
+| --- | --- | --- | --- |
+| [sdg/data_designer](sdg/data_designer/) | Build a NeMo Data Designer pipeline declaratively and generate synthetic data. Two recipes ship in config/: 'default' produces SFT chat data, 'rl_pref' produces preference pairs (chosen / rejected) for DPO.  Customisation lives in YAML — step.py just translates declarative column specs into the upstream DataDesignerConfigBuilder API. | training_jsonl (optional) | synthetic_jsonl |
+
 ## sft — Supervised Fine-Tuning
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
 | [sft/automodel](sft/automodel/) | Supervised fine-tuning with the AutoModel stack for HF-format models and JSONL datasets that already use OpenAI chat-format messages. Supports full SFT and LoRA-style adapter tuning from the same step. | training_jsonl | checkpoint_hf |
 | [sft/megatron_bridge](sft/megatron_bridge/) | Supervised fine-tuning using NVIDIA Megatron-Bridge. Best for large-scale distributed training with tensor/pipeline/context parallelism. Requires packed Parquet data from prep/sft_packing. | packed_parquet, checkpoint_megatron (optional) | checkpoint_megatron |
-
-## sdg — Synthetic Data Generation
-
-| Step | Description | Consumes | Produces |
-| --- | --- | --- | --- |
-| [sdg/data_designer](sdg/data_designer/) | Build a NeMo Data Designer pipeline declaratively and generate synthetic data. Two recipes ship in config/: 'default' produces SFT chat data, 'rl_pref' produces preference pairs (chosen / rejected) for DPO.  Customisation lives in YAML — step.py just translates declarative column specs into the upstream DataDesignerConfigBuilder API. | training_jsonl (optional) | synthetic_jsonl |
 
 ## translate — Translation
 

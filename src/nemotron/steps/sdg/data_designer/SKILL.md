@@ -22,7 +22,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Add post-processing or projection columns so downstream steps receive the expected schema.
 - Use SFT output with AutoModel directly only after it is projected to chat `messages`.
 - Use preference output with `rl/nemo_rl/dpo` only after prompt, chosen, and rejected fields are present.
-- Check `src/nemotron/steps/patterns/version-sdg-pipeline.md` before changing SDG design or scaling generation.
+- Check `src/nemotron/steps/patterns/sdg-pipeline-versioning.md` before changing SDG design or scaling generation.
 
 ## Local Files
 

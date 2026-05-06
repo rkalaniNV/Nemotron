@@ -1,31 +1,75 @@
 ---
 name: nemotron-peft
-description: Choose and configure Nemotron PEFT or LoRA backends for AutoModel and Megatron-Bridge. Use when adapter tuning is preferred over full fine-tuning because of memory, speed, checkpoint size, multi-domain adapters, or deployment constraints.
+description: Choose and configure Nemotron PEFT/LoRA backends for AutoModel and Megatron-Bridge. Use when adapter tuning is preferred over full fine-tuning because of memory, speed, checkpoint size, multi-domain adapters, or sovereign deployment constraints requiring small swappable artifacts.
 ---
 
 # Nemotron PEFT
 
-Use this skill to choose a LoRA path and wire adapter outputs correctly.
+Pick a LoRA path and wire adapter outputs correctly. PEFT is the default for
+sovereign customizations where the base model is strong enough and the goal is
+a narrow capability delta (target-language style, domain terminology,
+instruction-format adherence).
 
-## Route
+## Backends
 
-| Backend | Best For | Input | Output |
-| --- | --- | --- | --- |
-| `peft/automodel` | HF models, smaller GPU counts, direct chat JSONL | `training_jsonl` | `checkpoint_lora` |
-| `peft/megatron_bridge` | Distributed adapter tuning with Megatron checkpoints | `packed_parquet`, `checkpoint_megatron` | `checkpoint_lora` |
+| Backend | Best for | Min GPUs | Input | Output |
+|---|---|---|---|---|
+| [`peft/automodel`](automodel/SKILL.md) | HF-native, single-node, direct chat JSONL, fast iteration | 1–4 | `training_jsonl` | `checkpoint_lora` (HF adapter) |
+| [`peft/megatron_bridge`](megatron_bridge/SKILL.md) | Distributed adapter tuning over a Megatron base, packed-Parquet throughput | 8+ | `packed_parquet` + `checkpoint_megatron` | `checkpoint_lora` (Megatron-format adapter) |
+
+## Decision tree
+
+- 1–4 GPUs, HF base, JSONL data → **AutoModel**.
+- 8+ GPUs, Megatron base or packed Parquet → **Megatron-Bridge**.
+- Need a deployable HF checkpoint after training → either path; chain
+  [`convert/merge_lora`](../convert/merge_lora/step.toml) (Megatron-format
+  adapters need merging into the same base they were trained against).
+- Adapter output format must be HF for downstream tools → AutoModel directly,
+  or Megatron-Bridge then `convert/megatron_to_hf` then `convert/merge_lora`.
+
+## Pipeline impact
+
+**If AutoModel:**
+- No prep step. Reads `training_jsonl` directly.
+- LoRA defaults: `peft.dim=8` or `16`, `peft.alpha ≈ 2 * peft.dim`.
+- Output is an HF-format adapter merged via `convert/merge_lora`.
+
+**If Megatron-Bridge:**
+- Add [`prep/sft_packing`](../prep/sft_packing/SKILL.md) upstream.
+- Requires a base `checkpoint_megatron` at `checkpoint.pretrained_checkpoint`.
+- Output is a Megatron-format adapter.
 
 ## Workflow
 
-1. For Lepton, Slurm, Ray, or batch execution, verify the env profile file first. Default lookup uses repository-root `env.toml`; generated backend files such as `env.lepton.toml` or `env.slurm.toml` require `NEMOTRON_ENV_FILE`.
-2. Prefer AutoModel PEFT for the simplest JSONL-to-adapter path.
-3. Prefer Megatron-Bridge PEFT when TP/PP scaling or a Megatron base checkpoint is required.
-4. Add `prep/sft_packing` before Megatron-Bridge PEFT.
-5. Add `convert/merge_lora` when a standalone HF checkpoint is needed.
-6. Check `src/nemotron/steps/patterns/small-dataset-lora.md` when deciding whether LoRA is appropriate.
-7. Check `src/nemotron/steps/patterns/adapter-artifact-before-merge.md` before merging adapters for deployment.
+1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray runs
+   (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
+2. Pick backend per the decision tree above.
+3. Read the chosen step's `step.toml` for parameters/strategies/errors.
+4. Smoke-test with `config/tiny.yaml` before scaling.
+5. Keep base model + tokenizer + chat template identical to any later
+   `sft/*` or `eval/*` consumer — see
+   [../patterns/prep-data-is-tokenizer-locked.md](../patterns/prep-data-is-tokenizer-locked.md).
+6. Treat the adapter as a **separate artifact** until merge — see
+   [../patterns/peft-adapter-merge-discipline.md](../patterns/peft-adapter-merge-discipline.md).
+7. Decide whether LoRA is even the right tool — see
+   [../patterns/sft-small-dataset-prefer-lora.md](../patterns/sft-small-dataset-prefer-lora.md).
+8. For sovereign / domain SFT blends, also consult
+   [../patterns/sft-data-blending.md](../patterns/sft-data-blending.md).
+9. Bookend with eval — see
+   [../patterns/eval-before-and-after-training.md](../patterns/eval-before-and-after-training.md).
+
+## Smoke commands
+
+```bash
+nemotron step run peft/automodel -c tiny
+nemotron step run peft/megatron_bridge -c tiny   # requires compatible packed_parquet + base checkpoint
+```
 
 ## Guardrails
 
-- Keep LoRA rank low for tight memory, then raise it for harder tasks.
-- Treat adapters as separate artifacts until a merge step has been validated.
-- Re-evaluate after merging adapters into a full checkpoint.
+- Keep LoRA rank low for tight memory; raise it only for harder tasks.
+- Never compare adapter-loaded scores against merged scores assuming
+  identity — they can drift.
+- For multi-domain adapters trained off the same base, version each adapter
+  with the (base, blend, rank, alpha, target_modules) tuple.
+- Re-eval after merge; don't trust adapter eval as a proxy for merged quality.

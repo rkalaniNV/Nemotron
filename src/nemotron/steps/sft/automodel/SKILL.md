@@ -21,8 +21,8 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Keep `peft=lora` for memory-constrained runs or fast adapter experiments.
 - Choose a tokenizer with chat-template support or preprocess prompts explicitly.
 - Use the AutoModel launcher and executor settings when moving from local to cluster execution.
-- Check `src/nemotron/steps/patterns/eval-bookends.md` before comparing SFT results.
-- Check `src/nemotron/steps/patterns/small-dataset-lora.md` when deciding between LoRA and full SFT.
+- Check `src/nemotron/steps/patterns/eval-before-and-after-training.md` before comparing SFT results.
+- Check `src/nemotron/steps/patterns/sft-small-dataset-prefer-lora.md` when deciding between LoRA and full SFT.
 
 ## Config Nuances
 

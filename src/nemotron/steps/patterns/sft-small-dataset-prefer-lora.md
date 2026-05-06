@@ -1,5 +1,5 @@
 ---
-id: small-dataset-lora
+id: sft-small-dataset-prefer-lora
 title: "Prefer LoRA for small SFT datasets"
 tags: [sft, data-size, efficiency]
 triggers:
@@ -44,6 +44,10 @@ If you know you must ship a standalone fused checkpoint immediately, LoRA is sti
 
 ## References
 
-- LoRA and QLoRA are best viewed as parameter-efficient adaptation tools for narrow deltas.
+- Pair with `peft-adapter-merge-discipline` whenever the adapter will eventually need to be merged for serving.
+- Pair with `eval-before-and-after-training` — LoRA quality vs full SFT must be measured, not assumed.
+- Pair with `sft-data-blending` — even small SFT datasets benefit from deliberate capability blending.
+- Pair with `data-quality-before-quantity` — small + clean is the regime where LoRA shines; small + noisy still fails.
 - Cross-check with `sft/automodel` when GPU count is small or rapid iteration matters most.
 - Cross-check with `sft/megatron_bridge` when scale, distributed training, or checkpoint format requirements still point to Megatron.
+- LoRA and QLoRA are parameter-efficient adaptation tools for narrow deltas — not substitutes for missing coverage.

@@ -65,7 +65,3 @@ readme = "https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/README.md"
 docs = "https://docs.nvidia.com/nemo/megatron-bridge/latest/"
 training_entry_points = "https://docs.nvidia.com/nemo/megatron-bridge/latest/training/entry-points.html"
 recipe = "https://github.com/NVIDIA-NeMo/Megatron-Bridge/tree/main/megatron/bridge/recipes/nemotronh"
-skills = [
-  "skills/nemotron-customize/context/mbridge-pretrain.txt",
-  "skills/nemotron-customize/context/mbridge-parallelism-performance.txt",
-]

@@ -21,7 +21,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Tune `num_shards` for target filesystem and trainer throughput.
 - Leave `max_doc_tokens` unset unless the data policy requires truncation.
 - Point pretrain configs at the emitted `blend.json`.
-- Check `src/nemotron/steps/patterns/prepared-data-is-tokenizer-locked.md` before changing tokenization, split, or sharding behavior.
+- Check `src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md` before changing tokenization, split, or sharding behavior.
 - Check `src/nemotron/steps/patterns/pretrain-token-budget-before-scale.md` before creating production pretraining data.
 
 ## Config Nuances

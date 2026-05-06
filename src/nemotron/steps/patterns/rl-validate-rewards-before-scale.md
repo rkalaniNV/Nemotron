@@ -1,5 +1,5 @@
 ---
-id: validate-rl-rewards-before-scale
+id: rl-validate-rewards-before-scale
 title: "Validate RL rewards before scaling rollouts"
 tags: [rl, rewards, validation]
 triggers:
@@ -40,6 +40,9 @@ Some exploratory reward models are intentionally noisy. In that case, document t
 
 ## References
 
-- Pair with `eval-bookends` for pre/post alignment comparisons.
-- Pair with `prepared-data-is-tokenizer-locked` when RL data is sharded or materialized through `prep/rl_prep`.
+- Pair with `eval-before-and-after-training` for pre/post alignment comparisons against task evals (not just reward).
+- Pair with `prep-data-is-tokenizer-locked` when RL data is sharded or materialized through `prep/rl_prep`.
+- Pair with `byob-benchmark-design` — RL alignment must be scored against a held-out benchmark the reward function never saw.
+- Pair with `sdg-pipeline-versioning` when synthetic preferences (Data Designer `rl_pref.yaml`) feed DPO.
+- Pair with `data-quality-before-quantity` — bad reward sources scale failure faster than good rewards scale success.
 - This pattern applies to DPO data quality as much as online RL reward design.

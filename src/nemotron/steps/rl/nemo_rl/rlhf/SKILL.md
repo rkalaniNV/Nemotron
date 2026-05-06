@@ -23,7 +23,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Tune `grpo.num_generations_per_prompt` based on reward variance and serving cost.
 - Increase KL penalty, lower learning rate, or clip rewards when reward hacking appears.
 - Keep `env.should_use_nemo_gym=true` for GenRM-style comparison rewards.
-- Check `src/nemotron/steps/patterns/validate-rl-rewards-before-scale.md` before changing RLHF reward or rollout behavior.
+- Check `src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md` before changing RLHF reward or rollout behavior.
 
 ## Config Nuances
 

@@ -1,5 +1,5 @@
 ---
-id: pack-variable-length
+id: sft-sequence-packing
 title: "Pack variable-length SFT data"
 tags: [prep, sft, efficiency]
 triggers:
@@ -44,6 +44,8 @@ If the downstream trainer or evaluation path cannot respect boundaries or masks 
 
 ## References
 
-- Most directly relevant to `prep/sft_packing` and downstream Megatron-Bridge SFT.
-- Sequence packing is often the highest-leverage efficiency improvement for heterogeneous chat corpora.
-- Revisit this pattern whenever the data mix changes substantially across customers or domains.
+- Pair with `prep-data-is-tokenizer-locked` — `pack_size` mismatch is the most common downstream training failure and lives here.
+- Pair with `multilingual-tokenizer-check` before choosing pack_size for non-English corpora (tokens-per-character changes the histogram).
+- Pair with `sft-data-blending` — blend ratios change the tokenized length distribution, which changes packing efficiency.
+- Pair with `eval-before-and-after-training` to confirm packing doesn't move quality, only throughput.
+- Sequence packing is often the highest-leverage efficiency improvement for heterogeneous chat corpora — but it should never be a substitute for fixing data formatting.

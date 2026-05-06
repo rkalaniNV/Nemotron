@@ -22,8 +22,8 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - For DPO, ensure records include prompt, chosen, and rejected responses.
 - For RLVR, ensure each prompt carries verifier fields such as ground-truth answers.
 - For RLHF, ensure prompt data and reward-model references are handled separately.
-- Check `src/nemotron/steps/patterns/prepared-data-is-tokenizer-locked.md` before changing RL data layout.
-- Check `src/nemotron/steps/patterns/validate-rl-rewards-before-scale.md` before scaling RL jobs from prepared data.
+- Check `src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md` before changing RL data layout.
+- Check `src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md` before scaling RL jobs from prepared data.
 
 ## Local Files
 

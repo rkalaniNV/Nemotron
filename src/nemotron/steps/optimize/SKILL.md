@@ -5,28 +5,83 @@ description: "Choose and configure Nemotron optimization steps using NVIDIA Mode
 
 # Nemotron Optimizer
 
-Use this skill to choose a ModelOpt optimization path.
+Pick a ModelOpt path and chain converters where checkpoint formats cross.
+Optimization is a **post-customization** stage — apply it after SFT/RL is
+proven, not before.
 
-## Route
+## Steps
 
-| Need | Step | Output |
-| --- | --- | --- |
-| FP8 or NVFP4 post-training quantization | `optimize/modelopt/quantize` | `checkpoint_megatron` |
-| Teacher-student quality transfer | `optimize/modelopt/distill` | `checkpoint_megatron` |
-| Structured architecture pruning | `optimize/modelopt/prune` | `checkpoint_hf` |
+| Need | Step | Input | Output |
+|---|---|---|---|
+| FP8 (Hopper/H100) or NVFP4 (Blackwell/B200) post-training quantization | [`optimize/modelopt/quantize`](modelopt/quantize/SKILL.md) | `checkpoint_hf` | `checkpoint_megatron` |
+| Structured architecture pruning (Minitron-style search or fixed export) | [`optimize/modelopt/prune`](modelopt/prune/SKILL.md) | `checkpoint_hf` | `checkpoint_hf` |
+| Teacher-student quality transfer (often after pruning or quantization) | [`optimize/modelopt/distill`](modelopt/distill/SKILL.md) | `checkpoint_hf` (teacher + student) + optional `binidx` | `checkpoint_megatron` |
+
+The umbrella subcategory [`optimize/modelopt/`](modelopt/SKILL.md) ties the
+three together.
+
+## Decision tree
+
+- Want a smaller numeric format only (no architecture change) → **quantize**.
+- Want a smaller architecture (fewer layers / heads / FFN width) → **prune**.
+- Quality dropped after compression and you want to recover it → **distill**
+  (teacher = original BF16, student = compressed checkpoint).
+- Hardware target is Hopper/H100 → quantize FP8.
+- Hardware target is Blackwell/B200 → quantize NVFP4.
+- Hardware target unknown → quantize FP8 first; NVFP4 has narrower
+  serving-stack support.
+
+## Pipeline placement
+
+```
+sft/automodel  → optimize/modelopt/quantize → eval/model_eval        # smaller serving footprint
+sft/automodel  → optimize/modelopt/prune    → optimize/modelopt/distill → eval/model_eval   # smaller architecture + quality recovery
+prep/pretrain_prep → optimize/modelopt/distill → eval/model_eval     # standalone distillation
+```
+
+## Pre-conditions
+
+1. **A clean source checkpoint.** Optimization on a half-trained or untested
+   checkpoint just propagates the problem — see
+   [../patterns/convert-checkpoint-safety.md](../patterns/convert-checkpoint-safety.md).
+2. **A held-out benchmark.** Quantization and pruning both move quality;
+   without a baseline you can't measure the move — see
+   [../patterns/eval-before-and-after-training.md](../patterns/eval-before-and-after-training.md)
+   and (for sovereign deployments) [../patterns/byob-benchmark-design.md](../patterns/byob-benchmark-design.md).
+3. **A merged base** if the input is a LoRA — quantize/prune/distill don't
+   accept adapters directly. See
+   [../patterns/peft-adapter-merge-discipline.md](../patterns/peft-adapter-merge-discipline.md).
 
 ## Workflow
 
-1. For Lepton, Slurm, Ray, or batch execution, verify the env profile file first. Default lookup uses repository-root `env.toml`; generated backend files such as `env.lepton.toml` or `env.slurm.toml` require `NEMOTRON_ENV_FILE`.
-2. Decide target hardware, serving stack, checkpoint format, and quality budget first.
+1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray runs
+   (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
+2. Decide deployment hardware, serving stack, checkpoint format, and quality
+   budget **before** picking the step.
 3. Read the target step's `step.toml` and `config/default.yaml`.
-4. Smoke with `config/tiny.yaml` when present, or use mock-data and short-iteration overrides for distillation.
-5. Convert or export checkpoints when the downstream consumer requires a different format.
-6. Check `src/nemotron/steps/patterns/representative-calibration-before-optimization.md` before judging optimized quality.
-7. Check `src/nemotron/steps/patterns/distill-after-structural-compression.md` when pruning or quantization creates a quality gap.
+4. Smoke with `config/tiny.yaml` (quantize/prune) or
+   `args.use_mock_data=true` (distill) — these prove the wrapper, not quality.
+5. Run the full job on representative calibration / distillation data.
+6. Convert the output if the next stage expects a different checkpoint format
+   (`convert/megatron_to_hf` after quantize/distill if HF is needed).
+7. Re-eval against the same benchmark used pre-optimization.
+
+## Smoke commands
+
+```bash
+nemotron step run optimize/modelopt/quantize -c tiny
+nemotron step run optimize/modelopt/prune -c tiny
+nemotron step run optimize/modelopt/distill -c tiny    # uses use_mock_data=true
+```
 
 ## Guardrails
 
-- Distill after pruning or quantization when quality recovery matters.
-- Use representative calibration or distillation data for meaningful quality conclusions.
-- Preserve the full-precision baseline and evaluation record.
+- Don't judge optimization quality from tiny / mock-data runs. They're
+  plumbing, not evidence.
+- Preserve the full-precision (BF16) source checkpoint and its eval results.
+  You'll need them as the teacher if recovery is required.
+- For Mamba/MoE models, check tensor-parallel divisibility before launching
+  (per-step SKILL covers the specific knobs).
+- Distill after pruning, not the other way around — pruning before
+  distillation lets the student inherit the smaller architecture; distillation
+  before pruning wastes the teacher signal on a soon-to-shrink student.

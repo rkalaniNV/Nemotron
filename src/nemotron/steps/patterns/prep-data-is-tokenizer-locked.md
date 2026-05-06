@@ -1,5 +1,5 @@
 ---
-id: prepared-data-is-tokenizer-locked
+id: prep-data-is-tokenizer-locked
 title: "Treat prepared data as tokenizer-locked"
 tags: [prep, tokenizer, data-artifacts]
 triggers:
@@ -38,6 +38,10 @@ If the downstream trainer reads raw JSONL directly, as AutoModel SFT and PEFT do
 
 ## References
 
-- Pair with `pack-variable-length` when the question is whether packing is useful.
-- Pair with `multilingual-tokenizer-check` when the corpus includes non-English or mixed-language data.
-- This pattern explains many late failures that appear during training but originate in prep.
+- Pair with `sft-sequence-packing` when deciding whether packing is useful for the corpus.
+- Pair with `multilingual-tokenizer-check` for non-English / mixed-language data — tokenizer choice affects pack_size and seq_length feasibility.
+- Pair with `sft-data-blending` — the prepared artifact captures the blend ratios; reshuffling means repacking.
+- Pair with `cpt-data-blend-scoping` — bin/idx blends must come from the same Nemotron release as the trainer.
+- Pair with `sdg-pipeline-versioning` when synthetic data feeds the prep step.
+- Pair with `convert-checkpoint-safety` when a converter (e.g. `convert/megatron_to_hf`) sits between prep and the consumer.
+- This pattern explains many late training failures that originate in prep, not the trainer.

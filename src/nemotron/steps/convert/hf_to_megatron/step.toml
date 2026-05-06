@@ -29,4 +29,3 @@ description = "Megatron distributed checkpoint"
 
 [reference]
 script = "https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/examples/conversion/convert_checkpoints.py"
-skills = ["skills/nemotron-customize/context/mbridge-sft-full.txt"]
