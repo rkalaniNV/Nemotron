@@ -205,9 +205,11 @@ def plan_for(
         patch_cloud_data_mover_skip_configs,
         patch_dgxcloud_accept_legacy_kwargs,
         patch_dgxcloud_strip_source_chunks_from_exports,
+        patch_lepton_launcher_configurable_init,
     )
 
     patch_cloud_data_mover_skip_configs()
+    patch_lepton_launcher_configurable_init()
     # DGXCloud needs chunks delivered via ``environmentVariables`` only, not
     # re-baked into ``torchrun_job.sh`` — otherwise the file balloons and
     # ``move_data`` spends ~12 min chunking it into ~46 workloads.

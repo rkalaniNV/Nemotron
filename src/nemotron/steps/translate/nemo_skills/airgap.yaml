@@ -1,0 +1,22 @@
+version: 1
+config_fields:
+  - path: input_file
+    kind: local_path
+    note: Translation input should live on executor-visible persistent storage.
+  - path: data_directory
+    kind: local_path
+    note: Translation working/output directory should be on executor-visible persistent storage.
+  - path: server.address
+    kind: service
+    note: Translation and FAITH endpoint must be reachable inside the airgapped network.
+  - path: translation.prompt_config
+    kind: local_path
+    note: Prompt config path must exist in the task image or a mounted repo.
+  - path: faith_eval.prompt_config
+    kind: local_path
+    note: Prompt config path must exist in the task image or a mounted repo.
+task_container:
+  family: nemo-skills
+  required_imports:
+    - speaker
+    - yaml

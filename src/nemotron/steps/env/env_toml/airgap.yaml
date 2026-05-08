@@ -1,0 +1,9 @@
+version: 1
+config_fields:
+  - path: output_path
+    kind: local_path
+    note: Generated env.toml should be written to a customer-controlled handoff path.
+task_container:
+  family: submitter-helper
+  required_imports:
+    - omegaconf

@@ -1,0 +1,17 @@
+version: 1
+config_fields:
+  - path: env_file
+    kind: local_path
+    note: Executor env.toml is customer/site-specific and must be supplied at lock time.
+  - path: output_path
+    kind: local_path
+    note: Airgap lock output should be written under deploy/nemotron-customizer/airgap.
+  - path: bundle_dir
+    kind: local_path
+    note: Optional bundle verification path should point at the airgap bundle directory.
+task_container:
+  family: submitter-helper
+  note: Submitter-side helper step; probe output is advisory and does not require a training task image.
+  required_imports:
+    - yaml
+    - omegaconf

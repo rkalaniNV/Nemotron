@@ -1,0 +1,10 @@
+name: workflow
+targets: []
+profiles: []
+env_file: null
+repo_root: null
+output_path: deploy/nemotron-customizer/airgap/airgap.lock.yaml
+show_plan: true
+verify: true
+strict: false
+bundle_dir: null

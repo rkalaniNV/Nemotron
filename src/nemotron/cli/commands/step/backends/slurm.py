@@ -22,9 +22,12 @@ import time
 import typer
 
 from nemo_runspec.execution import (
+    build_remote_pip_setup,
     create_executor,
     create_slurm_executor,
+    get_env_value,
     prepend_startup_to_cmd,
+    to_plain,
 )
 from nemo_runspec.packaging import (
     REMOTE_CONFIG,
@@ -132,16 +135,23 @@ class SlurmBackend:
         Honors author-supplied ``cmd`` verbatim. When it's None, picks an
         invocation based on ``launch``: torchrun for distributed training
         (so WORLD_SIZE matches the slurm allocation), bare ``python``
-        otherwise.
+        otherwise. Remote pip setup is explicit and shared with Lepton/DGX:
+        profiles can request preinstalled import checks or offline wheelhouse
+        installs instead of ad hoc online startup commands.
         """
+        runtime_setup = build_remote_pip_setup(
+            ctx.env,
+            to_plain(get_env_value(ctx.env, "pip_extras") or []),
+            context="slurm job",
+        )
         if ctx.spec.run.cmd is not None:
-            return ctx.spec.run.cmd.format(script=REMOTE_SCRIPT, config=REMOTE_CONFIG)
-        if ctx.spec.run.launch == "torchrun":
+            cmd = ctx.spec.run.cmd.format(script=REMOTE_SCRIPT, config=REMOTE_CONFIG)
+        else:
             # nemo-run's torchrun launcher is set on the executor and handles
             # the actual srun-side wrap; on this code path we just feed the
             # plain script + args through ``bash -lc``.
-            return f"python {REMOTE_SCRIPT} --config {REMOTE_CONFIG}"
-        return f"python {REMOTE_SCRIPT} --config {REMOTE_CONFIG}"
+            cmd = f"python {REMOTE_SCRIPT} --config {REMOTE_CONFIG}"
+        return prepend_startup_to_cmd(runtime_setup, cmd)
 
     @staticmethod
     def _uses_code_packager(ctx: JobContext) -> bool:

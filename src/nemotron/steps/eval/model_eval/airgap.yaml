@@ -1,0 +1,18 @@
+version: 1
+config_fields:
+  - path: deployment.url
+    kind: service
+    note: Evaluation endpoint must be reachable inside the airgapped network.
+  - path: params.extra.tokenizer
+    kind: local_path
+    note: Tokenizer path must be staged on executor-visible persistent storage.
+  - path: output_dir
+    kind: local_path
+    note: Evaluation output must be written to executor-visible persistent storage.
+task_container:
+  family: evaluator
+  required_imports:
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf

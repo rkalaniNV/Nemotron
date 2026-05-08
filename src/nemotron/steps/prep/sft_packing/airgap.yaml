@@ -1,0 +1,27 @@
+version: 1
+config_fields:
+  - path: blend_path
+    kind: local_path
+    note: For customer airgap, use a blend JSON on executor-visible persistent storage.
+  - path: tokenizer.model
+    kind: hf_model
+    note: Tokenizer/model assets must be staged in the mounted HF cache or replaced with a local path.
+  - path: output_dir
+    kind: local_path
+    note: Output directory must be writable on executor-visible persistent storage.
+task_container:
+  family: nemo-data-prep
+  required_imports:
+    - cosmos_xenna
+    - cattrs
+    - obstore
+    - portpicker
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf
+  required_packages:
+    - cosmos-xenna==0.4.0
+    - cattrs==26.1.0
+    - obstore==0.8.2
+    - portpicker==1.6.0

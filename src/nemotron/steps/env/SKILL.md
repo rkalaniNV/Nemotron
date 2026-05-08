@@ -10,6 +10,7 @@ Use this category for execution-profile setup under `src/nemotron/steps/env/`.
 ## Route
 
 - `env/env_toml`: generate and validate starter env profile examples for Lepton or Slurm.
+- `env/airgap`: compile a workflow airgap lock for Nemotron Customizer steps.
 
 ## Guardrails
 

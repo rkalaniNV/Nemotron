@@ -1,0 +1,113 @@
+[step]
+id = "env/airgap"
+name = "Airgap Readiness"
+category = "env"
+description = """Compile airgap locks for selected Nemotron Customizer steps, build the local submitter/runtime image, and produce the remote asset staging contract for disconnected customer environments."""
+tags = ["airgap", "offline", "deploy", "wheelhouse", "assets", "lepton", "slurm"]
+
+[[consumes]]
+type = "step_workflow"
+description = "One or more selected src/nemotron/steps targets, usually expressed as step_id:config pairs."
+
+[[consumes]]
+type = "env_toml"
+description = "Optional executor profile file used to lock remote images, mounts, pip policy, and control-plane dependencies."
+required = false
+
+[[produces]]
+type = "airgap_lock"
+description = "YAML lock describing runtime files, task images, assets, services, manual inputs, and unresolved environment variables."
+
+[[produces]]
+type = "airgap_runtime_image"
+description = "Local submitter/runtime Docker image containing repo source, uv, offline wheelhouse, and offline env."
+
+[[produces]]
+type = "airgap_asset_bundle"
+description = "Staging layout for models, datasets, git repos, URL payloads, and metadata; remote runs should place these contents on executor-visible persistent storage."
+
+[[produces]]
+type = "airgap_delivery_plan"
+description = "Five-stage customer journey plus asset, image, mount, service, and environment closure tables."
+
+[[parameters]]
+name = "targets"
+description = "Workflow targets to lock, e.g. prep/sft_packing:tiny and sft/megatron_bridge:tiny."
+
+[[parameters]]
+name = "profiles"
+description = "Executor profiles to include from env.toml so remote images, mounts, services, and pip policy are checked."
+
+[[parameters]]
+name = "bundle_dir"
+description = "Connected-side staging directory. Only bundle_dir/runtime is baked into the local runtime image."
+default = "deploy/nemotron-customizer/airgap/airgap-bundle"
+
+[[parameters]]
+name = "remote_asset_root"
+description = "Customer persistent storage root that contains assets/hf-cache, assets/repos, and any offline wheelhouse used by remote task containers."
+
+[[strategies]]
+when = "The customer knows all steps in the workflow"
+then = "Use `nemotron step airgap lock-workflow` once with all step_id:config targets instead of locking one step at a time."
+
+[[strategies]]
+when = "Explaining or debugging an airgap run"
+then = "Name the current stage: select and lock, fetch runtime, stage assets, build submitter image, or smoke and verify. Fold any fix back into the relevant stage."
+
+[[strategies]]
+when = "Execution is Lepton, DGX Cloud, Slurm, or another remote executor"
+then = "Keep models, datasets, repos, and wheelhouses on executor-visible persistent storage; do not bake large assets into the submitter image or rely on per-job source sync."
+
+[[strategies]]
+when = "Validating true remote airgap behavior"
+then = "Submit from the local runtime image, but keep the remote task image as the mirrored Nano3/Super3/RL image selected by the executor profile."
+
+[[strategies]]
+when = "Remote task images need extra Python packages"
+then = "Prefer `pip_install_mode=preinstalled`. Lepton, DGX Cloud/run:ai, and Slurm understand the same policy. Use `offline_wheelhouse` only with a mounted wheelhouse, `pip_no_deps=true`, and explicit `pip_required_imports` unless a fully pinned requirements/constraints pair is supplied."
+
+[[strategies]]
+when = "Lepton is the remote executor"
+then = "Avoid the connected nemo-run default that fetches lepton_env_to_pytorch.sh from GitHub by mounting it at /opt/nemotron-airgap/assets/lepton/lepton_env_to_pytorch.sh, setting NEMOTRON_LEPTON_INIT_SCRIPT, or setting NEMOTRON_LEPTON_INIT_MODE=skip when the profile already provides the needed env."
+
+[[strategies]]
+when = "A step loads a Hugging Face model or tokenizer offline"
+then = "Either stage the HF cache under assets/hf-cache/hub with models--org--repo snapshots/blobs/refs layout, or override the step config to a normal local model directory."
+
+[[strategies]]
+when = "A Megatron Bridge smoke uses a very small train.train_iters value"
+then = "Keep scheduler.lr_warmup_iters strictly lower than train.train_iters. For train.train_iters=1, set scheduler.lr_warmup_iters=0."
+
+[[errors]]
+name = "lepton_init_script_unset"
+recovery = "Mount lepton_env_to_pytorch.sh under assets/lepton, set NEMOTRON_LEPTON_INIT_SCRIPT to that mounted path, or set NEMOTRON_LEPTON_INIT_MODE=skip if safe for the task image."
+
+[[errors]]
+name = "hf_cache_missing"
+recovery = "Stage the required model/dataset into the mounted HF cache before running offline, and set HF_HOME plus HF_HUB_CACHE to that cache."
+
+[[errors]]
+name = "remote_startup_online_command"
+recovery = "Move pip installs, wget/curl downloads, or git clones from startup_commands into the task image, mounted assets, or offline wheelhouse."
+
+[[errors]]
+name = "remote_pip_wheelhouse_deps_mutable"
+recovery = "Use pip_no_deps=true with explicit required import checks, or provide pinned requirements and constraints so pip cannot upgrade the base task image unexpectedly."
+
+[[errors]]
+name = "submitter_image_not_used"
+recovery = "For true smoke testing, run `uv run nemotron step run ...` inside the built local runtime image rather than from the host shell."
+
+[[errors]]
+name = "megatron_warmup_not_less_than_decay"
+recovery = "Set scheduler.lr_warmup_iters=0 for a one-iteration smoke, or increase train.train_iters so warmup is strictly less than train/decay steps."
+
+[reference]
+runner = "src/nemotron/steps/env/airgap/step.py"
+config = "src/nemotron/steps/env/airgap/config/default.yaml"
+cli = "src/nemotron/cli/commands/step/airgap_cmd.py"
+compiler = "src/nemotron/steps/airgap.py"
+deploy = "deploy/nemotron-customizer/airgap/README.md"
+dockerfile = "deploy/nemotron-customizer/airgap/Dockerfile"
+launcher = "src/nemo_runspec/execution.py"

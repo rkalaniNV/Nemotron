@@ -1,0 +1,18 @@
+version: 1
+config_fields:
+  - path: policy.model_name
+    kind: hf_model
+    note: Policy model must be staged in the mounted HF cache or replaced with a local path.
+  - path: checkpointing.checkpoint_dir
+    kind: local_path
+    note: Checkpoints should be written to executor-visible persistent storage.
+  - path: logger.log_dir
+    kind: local_path
+    note: Logs should be written to executor-visible persistent storage.
+task_container:
+  family: nemo-rl
+  required_imports:
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf

@@ -1,0 +1,46 @@
+# OOTB derivative task-image Dockerfile for Nemotron Customizer airgap jobs.
+# Scope: remote images that execute src/nemotron/steps/ workloads.
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG AIRGAP_BUNDLE=deploy/nemotron-customizer/airgap/airgap-bundle
+ARG TASK_REQUIREMENTS=deploy/nemotron-customizer/airgap/task-requirements.txt
+ARG TASK_REPO_MOUNTS=deploy/nemotron-customizer/airgap/task-repo-mounts.json
+ARG PYTHON_BIN=python
+
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_DATASETS_OFFLINE=1
+ENV PIP_NO_INDEX=1
+ENV PIP_FIND_LINKS=/opt/nemotron-airgap/wheels
+ENV UV_FIND_LINKS=/opt/nemotron-airgap/wheels
+ENV UV_NO_INDEX=1
+ENV UV_OFFLINE=1
+ENV UV_LINK_MODE=copy
+ENV UV_NO_SYNC=1
+ENV UV_PYTHON_DOWNLOADS=never
+ENV WANDB_MODE=offline
+ENV HF_HOME=/opt/nemotron-airgap/assets/hf-cache
+ENV HF_HUB_CACHE=/opt/nemotron-airgap/assets/hf-cache/hub
+ENV NEMOTRON_AIRGAP_ASSETS=/opt/nemotron-airgap/assets
+ENV NEMOTRON_AIRGAP_REPOS=/opt/nemotron-airgap/assets/repos
+
+# Runtime wheels are used only for tiny package gaps identified by
+# `nemotron step airgap probe-task-images`. Models and datasets must stay on
+# executor-visible persistent storage and be supplied through config paths.
+COPY ${AIRGAP_BUNDLE}/runtime/wheels/ /opt/nemotron-airgap/wheels/
+COPY ${AIRGAP_BUNDLE}/assets/repos/ /opt/nemotron-airgap/assets/repos/
+COPY ${AIRGAP_BUNDLE}/assets/lepton/ /opt/nemotron-airgap/assets/lepton/
+COPY ${TASK_REQUIREMENTS} /opt/nemotron-airgap/task-requirements.txt
+COPY ${TASK_REPO_MOUNTS} /opt/nemotron-airgap/task-repo-mounts.json
+
+RUN mkdir -p /opt/nemotron-airgap/assets/hf-cache/hub && \
+    if [ -s /opt/nemotron-airgap/task-requirements.txt ]; then \
+        ${PYTHON_BIN} -m pip install \
+            --no-index \
+            --find-links=/opt/nemotron-airgap/wheels \
+            --no-deps \
+            -r /opt/nemotron-airgap/task-requirements.txt; \
+    fi && \
+    ${PYTHON_BIN} -c "import json, pathlib, shutil; root=pathlib.Path('/opt/nemotron-airgap/assets/repos'); mounts=json.load(open('/opt/nemotron-airgap/task-repo-mounts.json')); [shutil.copytree(root / item['repo'], pathlib.Path(item['target']), dirs_exist_ok=True) for item in mounts if (root / item['repo']).exists() and item.get('target')]"

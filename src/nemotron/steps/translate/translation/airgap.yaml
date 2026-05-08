@@ -1,0 +1,19 @@
+version: 1
+config_fields:
+  - path: input_path
+    kind: local_path
+    note: Translation input should live on executor-visible persistent storage.
+  - path: output_dir
+    kind: local_path
+    note: Translation output should be written to executor-visible persistent storage.
+  - path: server.url
+    kind: service
+    note: LLM/FAITH endpoint must be reachable inside the airgapped network.
+  - path: nmt.server_url
+    kind: service
+    note: NMT endpoint must be reachable inside the airgapped network when backend=nmt.
+task_container:
+  family: nemo-curator-translation
+  required_imports:
+    - nemo_curator
+    - yaml

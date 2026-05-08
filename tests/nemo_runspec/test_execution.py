@@ -25,7 +25,11 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
+import shlex
+import sys
+import types
 from dataclasses import dataclass, field
 from unittest.mock import patch
 
@@ -33,12 +37,14 @@ import pytest
 from omegaconf import OmegaConf
 
 from nemo_runspec.execution import (
+    _cloud_script_path,
     _derive_cloud_workspace,
     _get_env,
     _git_mount_commands,
     _parse_netrc,
-    _cloud_script_path,
     _ray_node_source_sync_cmd,
+    _resolve_preseeded_repo_root,
+    _strip_uv_python_run_for_cloud,
     _to_plain,
     _transport_env_cleanup_cmd,
     _wait_for_ray_job,
@@ -116,6 +122,91 @@ class TestStartupCommands:
         assert prepend_startup_to_cmd([], "main_cmd") == "main_cmd"
 
 
+class TestRemotePipSetup:
+    def test_preinstalled_mode_checks_imports_without_installing(self):
+        from nemo_runspec import execution as exec_mod
+
+        commands = exec_mod.build_remote_pip_setup(
+            {
+                "pip_install_mode": "preinstalled",
+                "pip_required_imports": ["typer", "pydantic_settings"],
+            },
+            ["typer", "pydantic-settings"],
+            context="lepton job",
+        )
+
+        assert len(commands) == 1
+        assert "pip install" not in commands[0]
+        assert "lepton job missing Python imports" in commands[0]
+
+    def test_offline_wheelhouse_uses_no_index_and_no_deps(self):
+        from nemo_runspec import execution as exec_mod
+
+        commands = exec_mod.build_remote_pip_setup(
+            {
+                "pip_install_mode": "offline_wheelhouse",
+                "pip_wheelhouse": "/mnt/offline/wheels",
+                "pip_no_deps": "true ",
+                "pip_required_imports": ["cosmos_xenna"],
+            },
+            ["cosmos-xenna==0.4.0"],
+            context="slurm job",
+        )
+
+        assert commands[0].startswith("python -m pip install --no-index")
+        assert "--find-links /mnt/offline/wheels" in commands[0]
+        assert "--no-deps" in commands[0]
+        assert commands[-1].startswith("python -c")
+
+    def test_import_check_quotes_context_safely(self):
+        from nemo_runspec import execution as exec_mod
+
+        commands = exec_mod.build_remote_pip_setup(
+            {
+                "pip_install_mode": "preinstalled",
+                "pip_required_imports": ["definitely_missing_module"],
+            },
+            [],
+            context="lepton user's job\\path",
+        )
+        code = shlex.split(commands[0])[2]
+
+        compile(code, "<remote-import-check>", "exec")
+        assert "message_prefix =" in code
+
+
+class TestCloudCommandRewrite:
+    def test_strips_uv_run_wrapping_python_step_command(self):
+        cmd = "uv run --extra xenna python src/nemotron/steps/prep/sft_packing/step.py --config cfg.yaml"
+
+        assert (
+            _strip_uv_python_run_for_cloud(cmd)
+            == "python src/nemotron/steps/prep/sft_packing/step.py --config cfg.yaml"
+        )
+
+    def test_keeps_uv_run_for_non_python_cli_command(self):
+        cmd = "uv run my-cli --flag value"
+
+        assert _strip_uv_python_run_for_cloud(cmd) == cmd
+
+
+class TestPreseededRepoRoot:
+    def test_logs_profile_field_choice(self, caplog):
+        class FakeTunnel:
+            def run(self, *_args, **_kwargs):  # noqa: ANN002
+                raise AssertionError("profile field should win before remote lookup")
+
+        with caplog.at_level(logging.DEBUG, logger="nemo_runspec.execution"):
+            value = _resolve_preseeded_repo_root(
+                FakeTunnel(),
+                env={"repo_cache_root": "/mnt/repos"},
+                override=None,
+            )
+
+        assert value == "/mnt/repos"
+        assert "executor profile field repo_cache_root" in caplog.text
+
+
 class TestTransportEnvCleanup:
     def test_cleanup_unsets_source_chunks_and_config_payload(self):
         cmd = _transport_env_cleanup_cmd()
@@ -191,6 +282,91 @@ class TestRayJobStatusAndLogs:
         _write_ray_job_logs(FakeRayJob(), str(log_path))
 
         assert log_path.read_text(encoding="utf-8") == "hello from ray\n"
+
+
+class TestExecuteCloudRaySetup:
+    def test_ray_head_keeps_native_symlinks_and_legacy_cli_deps(self, monkeypatch, tmp_path):
+        from nemo_runspec import data_mover
+        from nemo_runspec import execution as exec_mod
+
+        seen: dict[str, object] = {}
+
+        class FakeCluster:
+            def __init__(self, *, name, executor):  # noqa: ANN001
+                self.name = name
+                self.executor = executor
+
+            def start(self, *, pre_ray_start_commands, timeout):  # noqa: ANN001
+                seen["pre_ray_start_commands"] = pre_ray_start_commands
+                seen["timeout"] = timeout
+
+        class FakeRayJob:
+            submission_id = "sub-test"
+
+            def __init__(self, *, name, executor, cluster_name=None, pre_ray_start_commands=None):  # noqa: ANN001
+                self.name = name
+                self.executor = executor
+                self.cluster_name = cluster_name
+                self.pre_ray_start_commands = pre_ray_start_commands
+
+            def start(self, *, command, workdir):  # noqa: ANN001
+                seen["command"] = command
+                seen["workdir"] = workdir
+
+        def fake_plan_for(**_kwargs):
+            return data_mover.Plan(
+                packager=object(),
+                pod_src_root="/nemo_run/code/src",
+                pre_script_cmds=["extract source"],
+                needs_pwd_symlinks=True,
+            )
+
+        class FakeExecutor:
+            launcher = "launcher"
+
+        ray_pkg = types.ModuleType("nemo_run.run.ray")
+        cluster_mod = types.ModuleType("nemo_run.run.ray.cluster")
+        job_mod = types.ModuleType("nemo_run.run.ray.job")
+        cluster_mod.RayCluster = FakeCluster
+        job_mod.RayJob = FakeRayJob
+        monkeypatch.setitem(sys.modules, "nemo_run.run.ray", ray_pkg)
+        monkeypatch.setitem(sys.modules, "nemo_run.run.ray.cluster", cluster_mod)
+        monkeypatch.setitem(sys.modules, "nemo_run.run.ray.job", job_mod)
+        monkeypatch.setattr(exec_mod.data_mover, "plan_for", fake_plan_for)
+        monkeypatch.setattr(exec_mod, "_create_lepton_executor", lambda *args, **kwargs: FakeExecutor())
+        monkeypatch.setattr(exec_mod, "_git_mount_commands", lambda: [])
+
+        config = tmp_path / "config.yaml"
+        config.write_text("value: 1\n", encoding="utf-8")
+        env = {
+            "executor": "lepton",
+            "workspace": "/mnt/work",
+            "pip_install_mode": "online_best_effort",
+            "pip_extras": ["cosmos-xenna"],
+        }
+
+        exec_mod.execute_cloud_ray(
+            "src/nemotron/steps/prep/sft_packing/step.py",
+            config,
+            env,
+            {},
+            [],
+            attached=False,
+            startup_commands=["module load python"],
+            setup_commands=["module load worker-python"],
+        )
+
+        command = str(seen["command"])
+        assert "ln -sfn /nemo_run/code/src/nemotron /mnt/work/_nemotron/src/nemotron" in command
+        assert "python -m pip install -q typer rich pydantic-settings shellingham cosmos-xenna" in command
+        assert command.index("module load python") < command.index("python -m pip install -q typer")
+
+        pre_ray_start_commands = seen["pre_ray_start_commands"]
+        assert isinstance(pre_ray_start_commands, list)
+        worker_install = next(cmd for cmd in pre_ray_start_commands if cmd.startswith("python -m pip install -q"))
+        assert pre_ray_start_commands.index("module load worker-python") < pre_ray_start_commands.index(
+            worker_install
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -767,7 +943,7 @@ class TestGitMountCommands:
             commands = _git_mount_commands()
         assert len(commands) == 1
         assert "git clone --depth 1 -b main" in commands[0]
-        assert commands[0].startswith("rm -rf /opt/megatron-lm")
+        assert "rm -rf /opt/megatron-lm" in commands[0]
         assert "/opt/megatron-lm" in commands[0]
 
     def test_commit_sha_uses_fetch_fallback(self):
@@ -818,6 +994,24 @@ class TestGitMountCommands:
         assert len(commands) == 2
         assert any("/opt/a" in c and "-b main" in c for c in commands)
         assert any("/opt/b" in c and "-b develop" in c for c in commands)
+
+    def test_cloud_git_mounts_prefer_preseeded_repos(self):
+        mounts = {
+            "Megatron-Bridge": {
+                "url": "https://example.invalid/Megatron-Bridge.git",
+                "ref": "main",
+                "target": "/opt/Megatron-Bridge",
+            }
+        }
+        with patch("nemo_runspec.config.resolvers.get_git_mounts", return_value=mounts):
+            commands = _git_mount_commands()
+
+        assert (
+            "${NEMO_RUNSPEC_REPO_CACHE:-${NEMOTRON_AIRGAP_REPOS:-/opt/nemotron-airgap/assets/repos}}"
+            "/Megatron-Bridge"
+        ) in commands[0]
+        assert "cp -a" in commands[0]
+        assert "git clone --depth 1 -b main" in commands[0]
 
 
 # ---------------------------------------------------------------------------

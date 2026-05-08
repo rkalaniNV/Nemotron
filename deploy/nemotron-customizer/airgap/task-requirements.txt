@@ -1,0 +1,2 @@
+# Filled from `nemotron step airgap probe-task-images --execute --requirements-dir ...`.
+# Keep this file empty when the selected task image already has the required imports.

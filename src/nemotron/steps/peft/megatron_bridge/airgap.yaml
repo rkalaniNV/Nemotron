@@ -1,0 +1,23 @@
+version: 1
+config_fields:
+  - path: hf_model_path
+    kind: hf_model
+    note: Base model must be staged in the mounted HF cache or replaced with a local persistent path.
+  - path: dataset.packed_sequence_specs.packed_train_data_path
+    kind: local_path
+    note: Packed training shards should live on executor-visible persistent storage.
+  - path: checkpoint.save
+    kind: local_path
+    note: Checkpoints should be written to executor-visible persistent storage.
+task_container:
+  family: megatron-bridge
+  required_imports:
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf
+  repo_mounts:
+    - repo: Megatron-LM
+      target: /opt/megatron-lm
+    - repo: Megatron-Bridge
+      target: /opt/Megatron-Bridge

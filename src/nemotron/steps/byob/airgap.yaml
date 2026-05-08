@@ -1,0 +1,37 @@
+version: 1
+config_fields:
+  - path: input_dir
+    kind: local_path
+    note: Source documents should live on executor-visible persistent storage.
+  - path: dataset_path
+    kind: local_path
+    note: Translation-only parquet input should live on executor-visible persistent storage.
+  - path: output_dir
+    kind: local_path
+    note: Benchmark outputs should be written to executor-visible persistent storage.
+  - path: hf_dataset
+    kind: hf_dataset
+    repo_type: dataset
+    note: Public benchmark datasets must be pre-staged or replaced with a local path.
+  - path: semantic_deduplication_config.model_identifier
+    kind: hf_model
+    note: Embedding models should be available in the mounted HF cache or replaced with a local path.
+  - path: coverage_check_config.model_identifier
+    kind: hf_model
+    note: Embedding models should be available in the mounted HF cache or replaced with a local path.
+  - path: semantic_outlier_detection_config.model_identifier
+    kind: hf_model
+    note: Embedding models should be available in the mounted HF cache or replaced with a local path.
+  - path: generation_model_config.provider
+    kind: service
+    note: Generation provider must resolve to an in-network endpoint in airgap.
+  - path: translation_model_config.params.base_url
+    kind: service
+    note: Translation endpoint must be reachable inside the airgapped network.
+task_container:
+  family: byob
+  required_imports:
+    - data_designer
+    - nemo_curator
+    - pandas
+    - yaml

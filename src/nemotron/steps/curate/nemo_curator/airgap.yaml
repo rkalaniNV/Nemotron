@@ -1,0 +1,27 @@
+version: 1
+config_fields:
+  - path: dataset.repo_id
+    kind: hf_dataset
+    repo_type: dataset
+    note: Dataset snapshots should be staged on persistent storage or replaced with local input_glob.
+  - path: dataset.local_dir
+    kind: local_path
+    note: Curator dataset local_dir must be on executor-visible storage.
+  - path: input_glob
+    kind: local_path
+    note: Input files should be staged on executor-visible storage.
+  - path: output_dir
+    kind: local_path
+    note: Curated output should be written to executor-visible storage.
+  - path: models.fasttext_langid
+    kind: local_path
+    note: FastText language model must be staged before the run.
+  - path: models.hf_cache_dir
+    kind: local_path
+    note: Curator model cache should point at persistent storage.
+task_container:
+  family: nemo-curator
+  required_imports:
+    - huggingface_hub
+    - nemo_curator
+    - yaml

@@ -1,0 +1,34 @@
+version: 1
+assets:
+  - kind: git_repo
+    id: Megatron-LM
+    revision: main
+    target: /opt/megatron-lm
+    note: https://github.com/NVIDIA/Megatron-LM.git
+  - kind: git_repo
+    id: Megatron-Bridge
+    revision: main
+    target: /opt/Megatron-Bridge
+    note: https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
+config_fields:
+  - path: args.hf_model_id
+    kind: hf_model
+    note: Source model must be staged in the mounted HF cache or replaced with a local path.
+  - path: args.megatron_save_path
+    kind: local_path
+    note: Quantized Megatron output should be written to executor-visible persistent storage.
+  - path: args.prompts
+    kind: local_path
+    note: Optional calibration prompts should be staged on persistent storage.
+task_container:
+  family: modelopt-megatron-bridge
+  required_imports:
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf
+  repo_mounts:
+    - repo: Megatron-LM
+      target: /opt/megatron-lm
+    - repo: Megatron-Bridge
+      target: /opt/Megatron-Bridge

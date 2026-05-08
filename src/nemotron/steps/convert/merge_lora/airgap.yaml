@@ -1,0 +1,26 @@
+version: 1
+assets:
+  - kind: hf_model
+    id: nvidia/Nemotron-3-Nano-30B-A3B
+    repo_type: model
+    required: false
+    note: Replace the pattern default with the customer-staged base model path for production.
+  - kind: git_repo
+    id: Megatron-LM
+    revision: main
+    target: /opt/megatron-lm
+    note: https://github.com/NVIDIA/Megatron-LM.git
+  - kind: git_repo
+    id: Megatron-Bridge
+    revision: main
+    target: /opt/Megatron-Bridge
+    note: https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
+task_container:
+  family: megatron-bridge
+  required_imports:
+    - megatron
+  repo_mounts:
+    - repo: Megatron-LM
+      target: /opt/megatron-lm
+    - repo: Megatron-Bridge
+      target: /opt/Megatron-Bridge

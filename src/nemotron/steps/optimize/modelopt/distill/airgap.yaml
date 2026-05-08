@@ -1,0 +1,50 @@
+version: 1
+assets:
+  - kind: git_repo
+    id: Model-Optimizer
+    revision: main
+    target: /opt/Model-Optimizer
+    note: https://github.com/NVIDIA/Model-Optimizer.git
+  - kind: git_repo
+    id: Megatron-LM
+    revision: main
+    target: /opt/megatron-lm
+    note: https://github.com/NVIDIA/Megatron-LM.git
+  - kind: git_repo
+    id: Megatron-Bridge
+    revision: main
+    target: /opt/Megatron-Bridge
+    note: https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
+config_fields:
+  - path: args.teacher_hf_path
+    kind: hf_model
+    note: Teacher model must be staged in the mounted HF cache or replaced with a local path.
+  - path: args.student_hf_path
+    kind: hf_model
+    note: Student model must be staged in the mounted HF cache or replaced with a local path.
+  - path: args.student_hf_model
+    kind: hf_model
+    note: Optional export model config must be staged when set.
+  - path: args.data_paths
+    kind: local_path
+    note: Distillation data prefixes should live on executor-visible persistent storage.
+  - path: args.output_dir
+    kind: local_path
+    note: Distillation output should be written to executor-visible persistent storage.
+  - path: args.hf_export_path
+    kind: local_path
+    note: Optional HF export path should be on persistent storage.
+task_container:
+  family: modelopt-megatron-bridge
+  required_imports:
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf
+  repo_mounts:
+    - repo: Model-Optimizer
+      target: /opt/Model-Optimizer
+    - repo: Megatron-LM
+      target: /opt/megatron-lm
+    - repo: Megatron-Bridge
+      target: /opt/Megatron-Bridge

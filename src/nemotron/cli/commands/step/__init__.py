@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import typer
 
+from nemotron.cli.commands.step.airgap_cmd import airgap_app
 from nemotron.cli.commands.step.list_cmd import list_steps
 from nemotron.cli.commands.step.run_cmd import run_step
 from nemotron.cli.commands.step.show_cmd import show_step
@@ -36,6 +37,7 @@ step_app = typer.Typer(
 
 step_app.command("list", help="List discovered steps. Use --json for machine-readable output.")(list_steps)
 step_app.command("show", help="Show a step's manifest, runspec, and parameters.")(show_step)
+step_app.add_typer(airgap_app)
 step_app.command(
     "run",
     help="Run a step on the chosen executor profile.",

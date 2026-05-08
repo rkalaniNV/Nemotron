@@ -1,0 +1,20 @@
+version: 1
+config_fields:
+  - path: dataset.data_paths
+    kind: local_path
+    note: Pretrain blend/binidx paths should live on executor-visible persistent storage.
+  - path: checkpoint.save
+    kind: local_path
+    note: Checkpoints should be written to executor-visible persistent storage.
+task_container:
+  family: megatron-bridge
+  required_imports:
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf
+  repo_mounts:
+    - repo: Megatron-LM
+      target: /opt/megatron-lm
+    - repo: Megatron-Bridge
+      target: /opt/Megatron-Bridge

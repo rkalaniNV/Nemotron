@@ -1,0 +1,16 @@
+version: 1
+config_fields:
+  - path: output_path
+    kind: local_path
+    note: Generated data should be written to executor-visible persistent storage.
+  - path: seed_dataset.path
+    kind: local_path
+    note: Seed data should be staged on executor-visible persistent storage.
+  - path: models.provider
+    kind: service
+    note: Data Designer provider must resolve to an in-network endpoint.
+task_container:
+  family: data-designer
+  required_imports:
+    - data_designer
+    - omegaconf

@@ -386,3 +386,101 @@ def patch_cloud_data_mover_skip_configs() -> None:
         dgx_mod.DGXCloudExecutor._nemotron_data_mover_patched = True
 
 
+def patch_lepton_launcher_configurable_init() -> None:
+    """Make Lepton's env-init script source configurable for offline runs.
+
+    nemo-run's stock Lepton launcher downloads
+    ``https://raw.githubusercontent.com/leptonai/scripts/main/lepton_env_to_pytorch.sh``
+    inside every worker pod. That is convenient for connected development but
+    fails offline or restricted-network contracts. Keep the connected fallback,
+    but first honor generic nemo_runspec env vars:
+
+    * ``NEMO_RUNSPEC_LEPTON_INIT_SCRIPT``: source this pre-mounted script.
+    * ``NEMO_RUNSPEC_LEPTON_INIT_DEFAULT_SCRIPT``: default mounted asset path.
+    * ``NEMO_RUNSPEC_LEPTON_INIT_MODE=skip``: skip the init when the
+      image/profile already provides the required distributed env.
+
+    Legacy ``NEMOTRON_*`` aliases remain supported for existing profiles.
+    """
+    try:
+        from nemo_run.core.execution import lepton as lep_mod
+    except Exception:
+        return
+
+    cls = lep_mod.LeptonExecutor
+    if getattr(cls, "_nemo_runspec_configurable_init_patched", False):
+        return
+
+    def launch(self, name: str, cmd: list[str]) -> tuple[str, str]:
+        self._validate_mounts()
+        name = name.replace("_", "-").replace(".", "-").lower()
+        if len(name) > 35:
+            lep_mod.logger.warning("length of name exceeds 35 characters. Shortening...")
+            name = name[:34]
+
+        pre_launch_section = ""
+        if self.pre_launch_commands:
+            pre_launch_section = "\n".join(self.pre_launch_commands) + "\n"
+
+        init_section = """
+_NEMO_RUNSPEC_LEPTON_INIT_MODE="${NEMO_RUNSPEC_LEPTON_INIT_MODE:-${NEMOTRON_LEPTON_INIT_MODE:-}}"
+_NEMO_RUNSPEC_LEPTON_INIT_SCRIPT="${NEMO_RUNSPEC_LEPTON_INIT_SCRIPT:-${NEMOTRON_LEPTON_INIT_SCRIPT:-}}"
+_NEMO_RUNSPEC_LEPTON_DEFAULT_SCRIPT="${NEMO_RUNSPEC_LEPTON_INIT_DEFAULT_SCRIPT:-/opt/nemotron-airgap/assets/lepton/lepton_env_to_pytorch.sh}"
+if [ "${_NEMO_RUNSPEC_LEPTON_INIT_MODE}" = "skip" ]; then
+  echo "[lepton] skipping env init because NEMO_RUNSPEC_LEPTON_INIT_MODE=skip"
+elif [ -n "${_NEMO_RUNSPEC_LEPTON_INIT_SCRIPT}" ]; then
+  if [ ! -f "${_NEMO_RUNSPEC_LEPTON_INIT_SCRIPT}" ]; then
+    echo "[lepton] init script ${_NEMO_RUNSPEC_LEPTON_INIT_SCRIPT} does not exist on the worker." >&2
+    echo "[lepton] Mount the script into the pod or unset the variable to fall back to the default/online init." >&2
+    exit 1
+  fi
+  cp "${_NEMO_RUNSPEC_LEPTON_INIT_SCRIPT}" init.sh
+  chmod +x init.sh
+  source init.sh
+elif [ -f "${_NEMO_RUNSPEC_LEPTON_DEFAULT_SCRIPT}" ]; then
+  cp "${_NEMO_RUNSPEC_LEPTON_DEFAULT_SCRIPT}" init.sh
+  chmod +x init.sh
+  source init.sh
+elif [ "${_NEMO_RUNSPEC_LEPTON_INIT_MODE}" = "offline" ] \
+  || [ "${NEMO_RUNSPEC_OFFLINE:-}" = "1" ] \
+  || [ "${NEMOTRON_AIRGAP:-}" = "1" ]; then
+  echo "[lepton] offline mode requested but no init script is available." >&2
+  echo "[lepton] Set NEMO_RUNSPEC_LEPTON_INIT_SCRIPT," >&2
+  echo "[lepton] mount ${_NEMO_RUNSPEC_LEPTON_DEFAULT_SCRIPT}," >&2
+  echo "[lepton] or set NEMO_RUNSPEC_LEPTON_INIT_MODE=skip if the task image" >&2
+  echo "[lepton] already provides the distributed env." >&2
+  exit 1
+else
+  wget -O init.sh https://raw.githubusercontent.com/leptonai/scripts/main/lepton_env_to_pytorch.sh
+  chmod +x init.sh
+  source init.sh
+fi
+"""
+        launch_script = f"""
+{pre_launch_section}{init_section}
+ln -s {self.lepton_job_dir}/ /nemo_run
+cd /nemo_run/code
+{" ".join(cmd)}
+"""
+
+        with open(os.path.join(self.job_dir, "launch_script.sh"), "w+") as f:
+            f.write(launch_script)
+
+        lep_mod.logger.info("Copying experiment directory to remote filesystem")
+        self.move_data()
+
+        lep_mod.logger.info("Creating distributed workload")
+        job = self.create_lepton_job(name)
+        if not job:
+            raise RuntimeError("Failed to create Lepton job")
+
+        job_id = job.metadata.id_
+        if not job_id:
+            raise RuntimeError("Failed to retrieve job information")
+        status = self.status(job_id)
+        if not status:
+            raise RuntimeError("Failed to retrieve job status")
+        return job_id, status
+
+    cls.launch = launch
+    cls._nemo_runspec_configurable_init_patched = True

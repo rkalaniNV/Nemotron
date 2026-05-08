@@ -24,6 +24,7 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
+| [env/airgap](env/airgap/) | Compile a workflow airgap lock for selected Nemotron Customizer steps. | - | airgap_lock |
 | [env/env_toml](env/env_toml/) | Generate and validate step-linked env profile examples from compact YAML templates for Lepton or Slurm, including inheritance, image overrides, mounts, env-var placeholders, and Ray/RL guardrails. | - | env_toml |
 
 ## eval — Evaluation

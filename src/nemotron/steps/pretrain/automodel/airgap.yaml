@@ -1,0 +1,16 @@
+version: 1
+config_fields:
+  - path: dataset.path_or_dataset_id
+    kind: hf_dataset
+    repo_type: dataset
+    note: Use a mounted dataset path or a pre-staged HF datasets cache.
+  - path: checkpoint.checkpoint_dir
+    kind: local_path
+    note: Checkpoints should be written to executor-visible persistent storage.
+task_container:
+  family: automodel
+  required_imports:
+    - typer
+    - rich
+    - pydantic_settings
+    - omegaconf
