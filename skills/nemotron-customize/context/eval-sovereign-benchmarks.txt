@@ -1,19 +1,21 @@
-# Evaluation Context: Sovereign Benchmarks
+# Evaluation Context: Container-Backed Benchmarks
 
 Use this pack when generating an `eval/model_eval` stage or advising an agent
-to run sovereign or multilingual Indic benchmarks through NeMo Evaluator.
+to run container-backed benchmarks through NeMo Evaluator, including custom
+language, sovereign, multilingual Indic, standard English, tool, or agent
+tasks.
 
 ## Launcher Contract
 
-Evaluator PR 953 supports task-level:
+Evaluator Launcher supports task-level:
 
-- `name`: task id, preferably `sovereign.<task>`
-- `container`: sovereign evaluation image
+- `name`: task id, preferably fully qualified as `<harness>.<task>` when available
+- `container`: evaluation image that owns the task metadata
 - `endpoint_type`: `chat`, `completions`, or logprob-compatible completions
 
-The Launcher loads `framework.yml` from the task container and merges the task
-defaults into the evaluator config. Nemotron should not duplicate every
-sovereign task definition in code.
+The Launcher loads benchmark metadata from the task container and merges the
+task defaults into the evaluator config. Nemotron should not duplicate every
+task definition in code.
 
 ## Model And Endpoint Selection
 
@@ -25,17 +27,32 @@ Ask for:
 4. endpoint capability: chat, completions, logprobs
 5. target language(s)
 6. smoke or full run
-7. sovereign container image
+7. benchmark/evaluation container image, if the selected task requires one
 
 Use `deployment: none` for hosted endpoints. Put the env var name in
 `target.api_endpoint.api_key_name`; do not put the secret value in YAML.
 
 ## Benchmark Selection
 
-Indic language codes: `hi`, `bn`, `gu`, `kn`, `mr`, `ml`, `or`, `pa`, `ta`,
-`te`.
+Pick tasks by target language and capability, not by model origin. A sovereign
+or region-specific model can still be evaluated on standard English benchmarks
+when the user wants English knowledge, instruction following, or reasoning
+coverage.
 
-Recommended Hindi chat smoke:
+For a user-developed container in another language or domain, use the task
+names, language codes, endpoint support, and metrics published by that
+container. Do not assume the sovereign/Indic task layout applies.
+
+Recommended English chat smoke:
+
+- `lm-evaluation-harness.mmlu_instruct`
+- `lm-evaluation-harness.ifeval`
+- `simple_evals.gpqa_diamond`
+
+Sovereign/Indic example language codes: `hi`, `bn`, `gu`, `kn`, `mr`, `ml`,
+`or`, `pa`, `ta`, `te`.
+
+Example Hindi chat smoke:
 
 - `sovereign.gsm8k_indic_hi`
 - `sovereign.mmlu_indic_hi`
