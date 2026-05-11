@@ -43,6 +43,14 @@ default = 1000
 name = "seed_dataset.path"
 description = "Path to seed JSONL referenced by 'seed'-typed columns."
 
+[[parameters]]
+name = "providers"
+description = "Optional custom Data Designer model providers for OpenAI-compatible or Anthropic endpoints. Provider api_key values should be environment variable names, not resolved secret values."
+
+[[parameters]]
+name = "models.provider"
+description = "Provider name for each model alias. Use a built-in provider such as 'nvidia', or a name declared under providers."
+
 [[strategies]]
 when = "Iterating on column specs"
 then = "Run with --preview to emit a small batch via client.preview() before scaling to client.create()."
