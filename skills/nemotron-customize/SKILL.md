@@ -40,6 +40,7 @@ Concise. Technical. No fluff.
 | Cross-step constraint (tokenizer lock, eval bookends, ...) | `src/nemotron/steps/patterns/<id>.md` |
 | Artifact compatibility / `is_a` / `convert_to` | [src/nemotron/steps/types.toml](../../src/nemotron/steps/types.toml) |
 | GPU memory / parallelism heuristics | [src/nemotron/steps/hardware.md](../../src/nemotron/steps/hardware.md) |
+| Explicit airgap/offline bundle request only | [deploy/nemotron-customizer/airgap/SKILL.md](../../deploy/nemotron-customizer/airgap/SKILL.md) |
 | Library API extracts for code generation | [context/index.toml](context/index.toml) → `context/<pack>.txt` |
 | Project scaffold rules (CLI, pyproject, README, deploy) | [act/PROJECT.md](act/PROJECT.md) |
 | Per-stage code rules (R1–R5, dry-run, W&B) | [act/STAGE.md](act/STAGE.md) |
@@ -144,7 +145,6 @@ Goal: produce a markdown plan the user reviews before any code is written.
 | 6 | RL warm-starts from SFT; rewards validated before scale. | [patterns/rl-validate-rewards-before-scale.md](../../src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md) |
 | 7 | GPU count ≥ chosen model's `min_gpus` (from `[[models]]` block in each `step.toml`). | step.toml + [hardware.md](../../src/nemotron/steps/hardware.md) |
 | 8 | Sovereign / customization patterns checked: `cpt-data-blend-scoping`, `sft-data-blending`, `multilingual-tokenizer-check`, `data-quality-before-quantity`, `sdg-pipeline-versioning`, `byob-benchmark-design`, `pretrain-token-budget-before-scale`, `sft-small-dataset-prefer-lora`, `convert-checkpoint-safety`. | [patterns/](../../src/nemotron/steps/patterns/) |
-
 When a check fails: surface it as a `⚠` warning in the plan and propose a
 fix. When the user can't satisfy it (e.g. hardware), propose alternatives in
 descending preference: smaller model → AutoModel instead of Megatron-Bridge →
@@ -187,6 +187,7 @@ graph LR
 | Resource | Required by | Notes |
 |---|---|---|
 | <resource> | <stage> | <status / question> |
+
 ````
 
 **Step 2.5 — Present the plan and wait.** Don't proceed to Act until the
@@ -356,6 +357,17 @@ catalog-based stage."
 If the same Explorer build keeps appearing across projects, suggest the user
 run `/nemotron-add-step` to land it in the catalog.
 
+### Explicit airgap handoff
+
+Do this only when the user explicitly asks for airgap, offline/no-internet
+execution, image tarballs, or Nemotron Customizer airgap bundle work. Do not
+include it in normal local, Slurm, Lepton, Airflow, or Kubeflow planning.
+
+When triggered, stop the generic project-generation path and load
+[deploy/nemotron-customizer/airgap/SKILL.md](../../deploy/nemotron-customizer/airgap/SKILL.md).
+Use the approved catalog step IDs as airgap runner `--target <step_id>:<config>`
+values, then follow that skill's validate/build/run workflow.
+
 ### Choosing a mode
 
 | User says | Mode |
@@ -367,6 +379,7 @@ run `/nemotron-add-step` to land it in the catalog.
 | "Translate EN → \<lang\>" | Catalog ([translate/nemo_skills](../../src/nemotron/steps/translate/nemo_skills/)) |
 | "Curate web text" | Catalog ([curate/nemo_curator](../../src/nemotron/steps/curate/nemo_curator/)) |
 | "Deploy to TensorRT-LLM" | Explorer (no step yet — derive from upstream library docs and add a `convert/*` step if the path stabilizes) |
+| "Build an airgap bundle", "offline cluster", "no internet", "image tarballs for these steps" | Explicit airgap handoff |
 | "Train with X exotic backend" | Explorer or **ask** |
 | Ambiguous | **Ask** |
 
@@ -437,6 +450,8 @@ configs.
 - Tune parallelism beyond what `hardware.md` and `[[strategies]]` advise.
 - Assume GPU count, type, or interconnect.
 - Generate Slurm/Airflow/Kubeflow wrappers unless requested.
+- Route to airgap for generic deployment requests; require an explicit airgap,
+  offline, no-internet, or image-tar bundle ask.
 - Modify [src/nemotron/steps/](../../src/nemotron/steps/). To extend the catalog, route the user to `/nemotron-add-step`.
 - Restate per-step rules in this skill — link to the step's `SKILL.md` instead.
 
