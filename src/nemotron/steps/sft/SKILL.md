@@ -12,7 +12,7 @@ Pick an SFT backend and keep data and checkpoint formats compatible.
 | Backend | Best for | Min GPUs | Input | Output |
 |---|---|---|---|---|
 | [`sft/automodel`](automodel/SKILL.md) | HF-native outputs, direct JSONL, smaller GPU counts, quick LoRA experiments | 4 | `training_jsonl` (no packing) | `checkpoint_hf` |
-| [`sft/megatron_bridge`](megatron_bridge/SKILL.md) | Large distributed runs with TP/PP/CP, packed-sequence throughput, Nano3/Super3 recipe parity | 8 (Nano3), 32 (Super3) | `packed_parquet` (needs `prep/sft_packing`) | `checkpoint_megatron` |
+| [`sft/megatron_bridge`](megatron_bridge/SKILL.md) | Large distributed runs with TP/PP/CP, packed-sequence throughput, Nano3/Super3 recipe parity | 8 (Nano3), 32 (Super3) | `packed_parquet` (needs `data_prep/sft_packing`) | `checkpoint_megatron` |
 
 ## Decision tree
 
@@ -25,7 +25,7 @@ Pick an SFT backend and keep data and checkpoint formats compatible.
 ## Pipeline impact
 
 **If Megatron-Bridge:**
-- Add [`prep/sft_packing`](../prep/sft_packing/SKILL.md) upstream.
+- Add [`data_prep/sft_packing`](../data_prep/sft_packing/SKILL.md) upstream.
 - Output is `checkpoint_megatron`. For HF-format consumers downstream, add
   [`convert/megatron_to_hf`](../convert/megatron_to_hf/step.toml).
 
@@ -70,7 +70,7 @@ nemotron steps run sft/megatron_bridge -c tiny   # requires compatible packed_pa
   problem (`convert/megatron_to_hf` / `convert/hf_to_megatron`).
 - For Megatron-Bridge, `pack_size` (in prep) must equal `seq_length` (in
   training). Mismatch surfaces as shape errors mid-train.
-- For AutoModel, never add `prep/sft_packing` — the trainer reads JSONL
+- For AutoModel, never add `data_prep/sft_packing` — the trainer reads JSONL
   directly.
 - Inspect formatted prompts and loss masks before trusting loss curves —
   template bugs look like quality bugs.

@@ -24,11 +24,12 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Data acquisition and curation via NeMo Curator — reference implementation."""
+"""Lightweight JSONL curation via NeMo Curator."""
 
 from __future__ import annotations
 
 import argparse
+import os
 from ast import literal_eval
 from pathlib import Path
 
@@ -37,11 +38,12 @@ from huggingface_hub import snapshot_download
 from nemo_curator.core.client import RayClient
 from nemo_curator.pipeline import Pipeline
 from nemo_curator.stages.text.classifiers import MultilingualDomainClassifier
-from nemo_curator.stages.text.filters import Filter, ScoreFilter
-from nemo_curator.stages.text.filters.fasttext import FastTextLangId
-from nemo_curator.stages.text.filters.heuristic.string import WordCountFilter
 from nemo_curator.stages.text.io.reader import JsonlReader
 from nemo_curator.stages.text.io.writer import JsonlWriter
+
+from nemo_curator.stages.text.filters import FastTextLangId, WordCountFilter
+
+from nemo_curator.stages.text.modules import Filter, ScoreFilter
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 
@@ -51,52 +53,69 @@ def keep_language(value: str, allowed: set[str]) -> bool:
     return lang_code in allowed and score >= 0.0
 
 
+def ray_client_kwargs(cfg: dict) -> dict:
+    kwargs = dict(cfg.get("ray") or {})
+    if "num_cpus" not in kwargs and os.environ.get("NEMOTRON_CURATOR_RAY_NUM_CPUS"):
+        kwargs["num_cpus"] = int(os.environ["NEMOTRON_CURATOR_RAY_NUM_CPUS"])
+    return kwargs
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Acquire and curate text with NeMo Curator")
+    parser = argparse.ArgumentParser(description="Curate JSONL text with NeMo Curator")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     args = parser.parse_args()
     cfg = yaml.safe_load(args.config.read_text())
 
-    snapshot_download(**cfg["dataset"])
-    allowed_languages = {code.upper() for code in cfg["language_codes"]}
+    if cfg.get("dataset"):
+        snapshot_download(**cfg["dataset"])
+    allowed_languages = {code.upper() for code in cfg.get("language_codes") or []}
+    models = cfg.get("models") or {}
+    quality_filters = cfg.get("quality_filters") or {}
 
     pipeline = Pipeline(name="curate_nemo_curator")
     pipeline.add_stage(JsonlReader(file_paths=cfg["input_glob"], fields=[cfg["text_field"]]))
-    pipeline.add_stage(
-        ScoreFilter(
-            FastTextLangId(
-                model_path=cfg["models"]["fasttext_langid"],
-                min_langid_score=cfg["quality_filters"]["min_langid_score"],
-            ),
-            text_field=cfg["text_field"],
-            score_field="language",
+    if allowed_languages:
+        pipeline.add_stage(
+            ScoreFilter(
+                FastTextLangId(
+                    model_path=models["fasttext_langid"],
+                    min_langid_score=quality_filters.get("min_langid_score", 0.0),
+                ),
+                text_field=cfg["text_field"],
+                score_field="language",
+            )
         )
-    )
-    pipeline.add_stage(
-        Filter(
-            filter_fn=lambda value: keep_language(value, allowed_languages),
-            filter_field="language",
+        pipeline.add_stage(
+            Filter(
+                filter_fn=lambda value: keep_language(value, allowed_languages),
+                filter_field="language",
+            )
         )
-    )
-    pipeline.add_stage(
-        ScoreFilter(
-            WordCountFilter(
-                min_words=cfg["quality_filters"]["min_words"],
-                max_words=cfg["quality_filters"]["max_words"],
-            ),
-            text_field=cfg["text_field"],
+
+    has_word_filter = any(key in quality_filters for key in ("min_words", "max_words"))
+    if has_word_filter:
+        if not all(key in quality_filters for key in ("min_words", "max_words")):
+            raise ValueError("quality_filters must set both min_words and max_words to enable WordCountFilter")
+        pipeline.add_stage(
+            ScoreFilter(
+                WordCountFilter(
+                    min_words=quality_filters["min_words"],
+                    max_words=quality_filters["max_words"],
+                ),
+                text_field=cfg["text_field"],
+            )
         )
-    )
-    pipeline.add_stage(
-        MultilingualDomainClassifier(
-            text_field=cfg["text_field"],
-            filter_by=cfg.get("domains") or None,
-            cache_dir=cfg["models"].get("hf_cache_dir"),
+    if cfg.get("domains"):
+        pipeline.add_stage(
+            MultilingualDomainClassifier(
+                text_field=cfg["text_field"],
+                filter_by=cfg["domains"],
+                cache_dir=models.get("hf_cache_dir"),
+            )
         )
-    )
     pipeline.add_stage(JsonlWriter(path=cfg["output_dir"]))
 
-    ray_client = RayClient()
+    ray_client = RayClient(**ray_client_kwargs(cfg))
     ray_client.start()
     try:
         pipeline.run()

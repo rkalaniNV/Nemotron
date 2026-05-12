@@ -38,6 +38,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Guardrails
 
-- Do not run `prep/sft_packing`; this step consumes JSONL directly.
+- Do not run `data_prep/sft_packing`; this step consumes JSONL directly.
 - Reduce rank and sequence length before changing the training wrapper for OOMs.
 - Treat the adapter as a separate artifact until merge and eval have passed.

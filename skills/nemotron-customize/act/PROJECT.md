@@ -99,7 +99,7 @@ produces = "translated_jsonl"
 
 [[stages]]
 id = "02_prep"
-step = "prep/sft_packing"
+step = "data_prep/sft_packing"
 consumes = "translated_jsonl"
 produces = "packed_parquet"
 ```

@@ -7,7 +7,7 @@ triggers:
   - "A Data Designer config is moving from preview mode to a production-scale generation job."
   - "Generated data will feed SFT, DPO, RLVR, RLHF, or downstream data prep."
   - "A second SDG run needs to reproduce or extend an earlier corpus."
-steps: [sdg/data_designer, prep/sft_packing, prep/rl_prep, sft/automodel, sft/megatron_bridge, rl/nemo_rl/dpo]
+steps: [sdg/data_designer, data_prep/sft_packing, data_prep/rl_prep, sft/automodel, sft/megatron_bridge, rl/nemo_rl/dpo]
 confidence: high
 ---
 
@@ -33,7 +33,7 @@ A single git commit or single tagged directory is the cheapest way; a manifest f
 
 **Always preview before scaling.** Run with `--preview` (or `tiny.yaml`) until the projection schema is right. The quality bugs that show up in 10 records become expensive at 10,000 records.
 
-**Pin the output schema explicitly.** SFT data should project to OpenAI `messages` if downstream is `prep/sft_packing` or `sft/automodel`. DPO data must project to `{prompt, chosen, rejected}` for `prep/rl_prep` → `rl/nemo_rl/dpo`. Tool-use data uses `structured_messages` with `messages` + `tools`. Don't generate ambiguous schemas hoping a downstream consumer will untangle them.
+**Pin the output schema explicitly.** SFT data should project to OpenAI `messages` if downstream is `data_prep/sft_packing` or `sft/automodel`. DPO data must project to `{prompt, chosen, rejected}` for `data_prep/rl_prep` → `rl/nemo_rl/dpo`. Tool-use data uses `structured_messages` with `messages` + `tools`. Don't generate ambiguous schemas hoping a downstream consumer will untangle them.
 
 **Curate seed data deliberately.** Seeds are the single biggest lever on output diversity:
 - Representative of the target deployment audience.

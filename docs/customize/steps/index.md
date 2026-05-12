@@ -10,7 +10,7 @@ types
 hardware
 curate/index
 translate/index
-prep/index
+data_prep/index
 sft/index
 eval/index
 convert/index

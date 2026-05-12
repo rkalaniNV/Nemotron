@@ -2,7 +2,7 @@
 
 | Backend | Best for | Min GPUs | Data format | Checkpoint format |
 |---------|----------|----------|-------------|-------------------|
-| **Megatron-Bridge** | Large-scale distributed training with TP / PP / CP control | 8 | packed_parquet (needs `prep/sft_packing`) | checkpoint_megatron |
+| **Megatron-Bridge** | Large-scale distributed training with TP / PP / CP control | 8 | packed_parquet (needs `data_prep/sft_packing`) | checkpoint_megatron |
 | **AutoModel** | Simpler setup, fewer GPUs, LoRA / PEFT, quick iteration | 4 | training_jsonl (no packing) | checkpoint_hf |
 
 ## Quick decision tree
@@ -16,7 +16,7 @@
 ## Impact on the pipeline
 
 ### If you choose Megatron-Bridge
-- Add `prep/sft_packing` upstream.
+- Add `data_prep/sft_packing` upstream.
 - Input artifact becomes `packed_parquet`.
 - Output artifact is `checkpoint_megatron`.
 - If you later need HuggingFace format, add a conversion step.

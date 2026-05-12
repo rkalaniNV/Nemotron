@@ -18,13 +18,21 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [curate/nemo_curator](curate/nemo_curator/) | Acquire public or custom text corpora with NeMo Curator, then annotate and filter them by language, domain, and quality to produce downstream-ready JSONL. | - | filtered_jsonl |
+| [curate/nemo_curator](curate/nemo_curator/) | Read JSONL text with NeMo Curator, optionally hydrate a Hugging Face snapshot, apply light language, word-count, and domain filters, and write downstream-ready JSONL. | - | filtered_jsonl |
+
+## data_prep — Data Preparation
+
+| Step | Description | Consumes | Produces |
+| --- | --- | --- | --- |
+| [data_prep/pretrain_prep](data_prep/pretrain_prep/) | Tokenise raw text (HF datasets or local parquet/jsonl) into Megatron bin/idx shards and emit a blend.json that pretrain/megatron_bridge and pretrain/automodel can ingest directly. | filtered_jsonl | binidx |
+| [data_prep/rl_prep](data_prep/rl_prep/) | Resolve HuggingFace dataset references in an RL data blend and shard the output JSONL into the prompt / preference layout expected by rl/nemo_rl/*. | training_jsonl | training_jsonl |
+| [data_prep/sft_packing](data_prep/sft_packing/) | Apply the chat template, tokenize training JSONL, and pack examples into Megatron-Bridge-compatible Parquet shards for SFT. | training_jsonl | packed_parquet |
 
 ## env
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [env/env_toml](env/env_toml/) | Generate and validate step-linked env profile examples from compact YAML templates for Lepton or Slurm, including inheritance, image overrides, mounts, env-var placeholders, and Ray/RL guardrails. | - | env_toml |
+| [env/env_toml](env/env_toml/) | Generate and validate step-linked env profile examples from compact YAML templates for Lepton or Slurm, including inheritance, image overrides, mounts, env-var placeholders, Curator/Data Designer profiles, and Ray/RL guardrails. | - | env_toml |
 
 ## eval — Evaluation
 
@@ -45,15 +53,7 @@
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
 | [peft/automodel](peft/automodel/) | Parameter-efficient fine-tuning (LoRA) with the AutoModel stack. Same training loop as sft/automodel but with a LoRA adapter wired in by default, making larger HF backbones practical for adapter-based tuning. | training_jsonl | checkpoint_lora |
-| [peft/megatron_bridge](peft/megatron_bridge/) | Parameter-efficient fine-tuning (LoRA) on top of Megatron-Bridge. Useful when a full SFT exceeds memory but you still want TP/PP/CP scaling. Consumes packed Parquet from prep/sft_packing. | packed_parquet, checkpoint_megatron | checkpoint_lora |
-
-## prep — Data Preparation
-
-| Step | Description | Consumes | Produces |
-| --- | --- | --- | --- |
-| [prep/pretrain_prep](prep/pretrain_prep/) | Tokenise raw text (HF datasets or local parquet/jsonl) into Megatron bin/idx shards and emit a blend.json that pretrain/megatron_bridge and pretrain/automodel can ingest directly. | filtered_jsonl | binidx |
-| [prep/rl_prep](prep/rl_prep/) | Resolve HuggingFace dataset references in an RL data blend and shard the output JSONL into the prompt / preference layout expected by rl/nemo_rl/*. | training_jsonl | training_jsonl |
-| [prep/sft_packing](prep/sft_packing/) | Apply the chat template, tokenize training JSONL, and pack examples into Megatron-Bridge-compatible Parquet shards for SFT. | training_jsonl | packed_parquet |
+| [peft/megatron_bridge](peft/megatron_bridge/) | Parameter-efficient fine-tuning (LoRA) on top of Megatron-Bridge. Useful when a full SFT exceeds memory but you still want TP/PP/CP scaling. Consumes packed Parquet from data_prep/sft_packing. | packed_parquet, checkpoint_megatron | checkpoint_lora |
 
 ## pretrain — Pretraining
 
@@ -81,7 +81,7 @@
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
 | [sft/automodel](sft/automodel/) | Supervised fine-tuning with the AutoModel stack for HF-format models and JSONL datasets that already use OpenAI chat-format messages. Supports full SFT and LoRA-style adapter tuning from the same step. | training_jsonl | checkpoint_hf |
-| [sft/megatron_bridge](sft/megatron_bridge/) | Supervised fine-tuning using NVIDIA Megatron-Bridge. Best for large-scale distributed training with tensor/pipeline/context parallelism. Requires packed Parquet data from prep/sft_packing. | packed_parquet, checkpoint_megatron (optional) | checkpoint_megatron |
+| [sft/megatron_bridge](sft/megatron_bridge/) | Supervised fine-tuning using NVIDIA Megatron-Bridge. Best for large-scale distributed training with tensor/pipeline/context parallelism. Requires packed Parquet data from data_prep/sft_packing. | packed_parquet, checkpoint_megatron (optional) | checkpoint_megatron |
 
 ## translate — Translation
 

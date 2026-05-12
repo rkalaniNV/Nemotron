@@ -1,6 +1,8 @@
-# Starter config for data acquisition + curation with NeMo Curator.
-# Downloads a dataset snapshot from Hugging Face, keeps selected languages,
-# applies lightweight quality filters, then annotates/filter by domain.
+# Starter config for lightweight JSONL curation with NeMo Curator.
+# If dataset is non-null, snapshot_download runs first and input_glob should
+# point into dataset.local_dir. Set dataset: null for local JSONL-only runs.
+# Optional filters are controlled by language_codes, domains, and
+# quality_filters. Empty values disable those stages.
 
 language_codes:
   - EN

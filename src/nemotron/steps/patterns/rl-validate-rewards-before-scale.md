@@ -6,7 +6,7 @@ triggers:
   - "An RLVR reward function, NeMo-Gym resource server, or learned reward model is being added."
   - "Reward is improving but held-out examples or human review look worse."
   - "A DPO, RLVR, or RLHF run is moving from tiny validation to production rollout counts."
-steps: [prep/rl_prep, rl/nemo_rl/dpo, rl/nemo_rl/rlvr, rl/nemo_rl/rlhf]
+steps: [data_prep/rl_prep, rl/nemo_rl/dpo, rl/nemo_rl/rlvr, rl/nemo_rl/rlhf]
 confidence: high
 ---
 
@@ -41,7 +41,7 @@ Some exploratory reward models are intentionally noisy. In that case, document t
 ## References
 
 - Pair with `eval-before-and-after-training` for pre/post alignment comparisons against task evals (not just reward).
-- Pair with `prep-data-is-tokenizer-locked` when RL data is sharded or materialized through `prep/rl_prep`.
+- Pair with `prep-data-is-tokenizer-locked` when RL data is sharded or materialized through `data_prep/rl_prep`.
 - Pair with `byob-benchmark-design` — RL alignment must be scored against a held-out benchmark the reward function never saw.
 - Pair with `sdg-pipeline-versioning` when synthetic preferences (Data Designer `rl_pref.yaml`) feed DPO.
 - Pair with `data-quality-before-quantity` — bad reward sources scale failure faster than good rewards scale success.

@@ -95,7 +95,7 @@ Validation checks for tool-call data (run before SFT):
 Emits `{"prompt", "chosen", "rejected"}`. Flows into:
 
 ```
-sdg/data_designer → prep/rl_prep → rl/nemo_rl/dpo
+sdg/data_designer → data_prep/rl_prep → rl/nemo_rl/dpo
 ```
 
 ## SFT data (`default.yaml`)
@@ -103,11 +103,11 @@ sdg/data_designer → prep/rl_prep → rl/nemo_rl/dpo
 Emits `{"messages": [...]}`. Flows into:
 
 ```
-sdg/data_designer → prep/sft_packing → sft/megatron_bridge   (Megatron-Bridge SFT)
+sdg/data_designer → data_prep/sft_packing → sft/megatron_bridge   (Megatron-Bridge SFT)
 sdg/data_designer →                    sft/automodel          (AutoModel SFT, no packing)
 ```
 
-Use `prep/sft_packing` only for Megatron-Bridge SFT. AutoModel reads JSONL
+Use `data_prep/sft_packing` only for Megatron-Bridge SFT. AutoModel reads JSONL
 directly.
 
 ## Patterns to cite

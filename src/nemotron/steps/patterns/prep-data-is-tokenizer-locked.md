@@ -1,12 +1,12 @@
 ---
 id: prep-data-is-tokenizer-locked
 title: "Treat prepared data as tokenizer-locked"
-tags: [prep, tokenizer, data-artifacts]
+tags: [data_prep, tokenizer, data-artifacts]
 triggers:
   - "You are reusing packed Parquet or bin/idx data after changing the tokenizer, chat template, or sequence length."
   - "A downstream trainer reports shape, vocabulary, EOS, loss-mask, or data-prefix mismatches."
   - "You need to decide whether an existing prepared dataset is still compatible with a new training config."
-steps: [prep/sft_packing, prep/pretrain_prep, sft/megatron_bridge, peft/megatron_bridge, pretrain/automodel, pretrain/megatron_bridge]
+steps: [data_prep/sft_packing, data_prep/pretrain_prep, sft/megatron_bridge, peft/megatron_bridge, pretrain/automodel, pretrain/megatron_bridge]
 confidence: high
 ---
 
@@ -14,7 +14,7 @@ confidence: high
 
 Apply this whenever a training pipeline consumes materialized data artifacts rather than raw JSONL or text. Packed Parquet and bin/idx outputs are not generic datasets; they encode tokenizer, template, length, split, and sometimes loss-mask assumptions.
 
-This matters most at handoff points: `prep/sft_packing` into Megatron-Bridge SFT or PEFT, and `prep/pretrain_prep` into AutoModel or Megatron-Bridge pretraining.
+This matters most at handoff points: `data_prep/sft_packing` into Megatron-Bridge SFT or PEFT, and `data_prep/pretrain_prep` into AutoModel or Megatron-Bridge pretraining.
 
 Use it when a run changes model family, tokenizer path, chat template, sequence length, EOS handling, or role formatting. Any of those changes can invalidate data that otherwise still looks readable on disk.
 
@@ -42,6 +42,6 @@ If the downstream trainer reads raw JSONL directly, as AutoModel SFT and PEFT do
 - Pair with `multilingual-tokenizer-check` for non-English / mixed-language data — tokenizer choice affects pack_size and seq_length feasibility.
 - Pair with `sft-data-blending` — the prepared artifact captures the blend ratios; reshuffling means repacking.
 - Pair with `cpt-data-blend-scoping` — bin/idx blends must come from the same Nemotron release as the trainer.
-- Pair with `sdg-pipeline-versioning` when synthetic data feeds the prep step.
+- Pair with `sdg-pipeline-versioning` when synthetic data feeds the data_prep step.
 - Pair with `convert-checkpoint-safety` when a converter (e.g. `convert/megatron_to_hf`) sits between prep and the consumer.
 - This pattern explains many late training failures that originate in prep, not the trainer.

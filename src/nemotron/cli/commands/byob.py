@@ -9,9 +9,13 @@ from typing import Annotated
 
 import typer
 
-from nemotron.steps.byob.scripts.runtime import list_family_names, run_byob
-
-VALID_STAGES = ("prepare", "generate", "translate")
+from nemotron.steps.byob.scripts.runtime import (
+    STAGE_CHOICES,
+    list_family_names,
+    load_dispatch_config,
+    resolve_dispatch_value,
+    run_byob,
+)
 
 
 def byob(
@@ -24,17 +28,17 @@ def byob(
         ),
     ] = None,
     family: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--family",
             help="Benchmark family to run.",
         ),
-    ] = "mcq",
+    ] = None,
     stage: Annotated[
         str | None,
         typer.Option(
             "--stage",
-            help="Pipeline stage to run: prepare, generate, or translate.",
+            help="Pipeline stage to run: prepare, generate, translate, or all.",
         ),
     ] = None,
     skip_until: Annotated[
@@ -63,12 +67,17 @@ def byob(
         typer.echo("Error: --config is required unless --list-families is set", err=True)
         raise typer.Exit(1)
 
+    yaml_dict = load_dispatch_config(config)
+    stage = resolve_dispatch_value(stage, yaml_dict, "stage")
+    family = resolve_dispatch_value(family, yaml_dict, "family", default="mcq")
+    skip_until = resolve_dispatch_value(skip_until, yaml_dict, "skip_until")
+
     if stage is None:
-        typer.echo("Error: --stage is required unless --list-families is set", err=True)
+        typer.echo("Error: --stage is required unless config contains `stage`", err=True)
         raise typer.Exit(1)
 
-    if stage not in VALID_STAGES:
-        valid = ", ".join(VALID_STAGES)
+    if stage not in STAGE_CHOICES:
+        valid = ", ".join(STAGE_CHOICES)
         typer.echo(f"Error: --stage must be one of: {valid}", err=True)
         raise typer.Exit(1)
 

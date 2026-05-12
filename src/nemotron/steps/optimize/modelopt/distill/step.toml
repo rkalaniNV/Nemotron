@@ -29,7 +29,7 @@ required = true
 
 [[consumes]]
 type = "binidx"
-description = "Optional real distillation data from prep/pretrain_prep. Not needed when use_mock_data=true."
+description = "Optional real distillation data from data_prep/pretrain_prep. Not needed when use_mock_data=true."
 required = false
 
 [[produces]]

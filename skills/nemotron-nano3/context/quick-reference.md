@@ -236,7 +236,7 @@ So if asked “can I match the paper numbers?” the safe answer is:
 | Need | Step / mode |
 |---|---|
 | curate or filter new corpus | `curate/nemo_curator` |
-| pack Nano3 SFT JSONL | `prep/sft_packing` |
+| pack Nano3 SFT JSONL | `data_prep/sft_packing` |
 | SFT with Megatron-Bridge | `sft/megatron_bridge` |
 | SFT with smaller GPU counts / LoRA | `sft/automodel` |
 | RL with GRPO | `rl/nemo_rl/rlvr` |

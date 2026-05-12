@@ -19,7 +19,7 @@ category = "peft"
 description = """\
 Parameter-efficient fine-tuning (LoRA) on top of Megatron-Bridge. Useful when a
 full SFT exceeds memory but you still want TP/PP/CP scaling. Consumes packed
-Parquet from prep/sft_packing."""
+Parquet from data_prep/sft_packing."""
 tags = ["peft", "lora", "fine-tuning", "megatron", "distributed-training"]
 
 [[consumes]]
@@ -54,7 +54,7 @@ skill = "Megatron-Bridge/skills/perf-techniques/parallelism-strategies/SKILL.md"
 
 [[errors]]
 name = "missing_packed_data"
-recovery = "Run prep/sft_packing first."
+recovery = "Run data_prep/sft_packing first."
 
 [reference]
 recipe = "src/nemotron/recipes/nano3/stage1_sft/"

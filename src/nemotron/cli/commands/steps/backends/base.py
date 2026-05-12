@@ -28,7 +28,7 @@ class JobContext:
     config. Backends never poke at globals; they read from this.
     """
 
-    step_id: str                       # e.g. "prep/sft_packing"
+    step_id: str                       # e.g. "data_prep/sft_packing"
     script_path: Path                  # absolute path to the local step.py
     train_path: Path                   # absolute path to the rendered train.yaml
     spec: Any                          # nemo_runspec.Runspec

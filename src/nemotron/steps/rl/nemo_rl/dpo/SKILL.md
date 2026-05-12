@@ -20,7 +20,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 - Tune `dpo.reference_policy_kl_penalty` when KL collapses or loss diverges.
 - Lower learning rate before making structural changes to the runner.
-- Use `prep/rl_prep` when preference data starts as HF references or blended local files.
+- Use `data_prep/rl_prep` when preference data starts as HF references or blended local files.
 - Keep the reference policy aligned with the SFT policy.
 - Check `src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md` before trusting preference-pair training results.
 

@@ -11,7 +11,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Inputs And Outputs
 
-- Consume `binidx` data and `blend.json` from `prep/pretrain_prep`.
+- Consume `binidx` data and `blend.json` from `data_prep/pretrain_prep`.
 - Optionally initialize from a base checkpoint or HF weights for continued pretraining.
 - Produce `checkpoint_megatron`.
 - Validate data loading, parallelism, and checkpoint output with a short run before scaling token budget.
@@ -28,7 +28,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 ## Config Nuances
 
 - Keep `recipe.seq_length`, `model.seq_length`, and `dataset.seq_length` identical; Bridge validates the model and dataset values before setup.
-- Set `dataset.data_paths` to the bin/idx `blend.json` from `prep/pretrain_prep`, not SFT packed Parquet.
+- Set `dataset.data_paths` to the bin/idx `blend.json` from `data_prep/pretrain_prep`, not SFT packed Parquet.
 - For Qwen/Nemotron MoE runs, keep `model.sequence_parallel: true` with tensor parallelism.
 - If Transformer Engine userbuffers are enabled on a system without CUDA multicast support, set `run.env.env_vars.UB_SKIPMC: "1"` or default it in `step.py` before Bridge initialization.
 - Use `train.global_batch_size` as a multiple of data-parallel size; start with `train.micro_batch_size: 1` when validating a new parallelism shape.
@@ -42,6 +42,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Guardrails
 
-- Run `prep/pretrain_prep` first unless compatible bin/idx data already exists.
+- Run `data_prep/pretrain_prep` first unless compatible bin/idx data already exists.
 - Verify data paths and checkpoint writes on the target executor before long jobs.
 - Convert Megatron checkpoints only when the downstream consumer requires HF layout.

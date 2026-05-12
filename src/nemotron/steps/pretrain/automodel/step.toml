@@ -23,7 +23,7 @@ tags = ["pretrain", "cpt", "automodel", "huggingface"]
 
 [[consumes]]
 type = "binidx"
-description = "Megatron bin/idx tokenized text shards (from prep/pretrain_prep)."
+description = "Megatron bin/idx tokenized text shards (from data_prep/pretrain_prep)."
 required = true
 
 [[produces]]

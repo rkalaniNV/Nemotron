@@ -7,7 +7,7 @@ triggers:
   - "You are mixing translated/synthetic data with curated human-written data."
   - "Sovereign / regional SFT data is being blended with broader open-source instruction sets."
   - "After SFT the model loses one capability while gaining another."
-steps: [prep/sft_packing, sft/automodel, sft/megatron_bridge, peft/automodel, peft/megatron_bridge]
+steps: [data_prep/sft_packing, sft/automodel, sft/megatron_bridge, peft/automodel, peft/megatron_bridge]
 confidence: high
 ---
 
@@ -17,7 +17,7 @@ Apply this whenever SFT data comes from more than one source. Sovereign customiz
 
 This pattern matters most when capabilities trade against each other: a mostly-English instruction set will pull a target-language model back toward English; a tool-call-heavy blend can degrade chat fluency; a reasoning-heavy blend can hurt brevity on conversational tasks.
 
-Apply it before `prep/sft_packing`. The blend ratios decide what goes into the packed Parquet; reshuffling after packing means repacking.
+Apply it before `data_prep/sft_packing`. The blend ratios decide what goes into the packed Parquet; reshuffling after packing means repacking.
 
 ## What to do
 

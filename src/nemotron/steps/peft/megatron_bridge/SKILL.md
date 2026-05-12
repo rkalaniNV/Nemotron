@@ -11,7 +11,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Inputs And Outputs
 
-- Consume `packed_parquet` from `prep/sft_packing`.
+- Consume `packed_parquet` from `data_prep/sft_packing`.
 - Consume a base `checkpoint_megatron`.
 - Produce `checkpoint_lora`.
 - Validate with a short adapter run before scaling data, rank, or sequence length.
@@ -31,7 +31,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 - Use `load_hf_weights: false` when PEFT starts from `checkpoint.pretrained_checkpoint`; use HF loading only when deliberately bootstrapping from HF weights.
 - Keep `model.sequence_parallel: true` when `model.tensor_model_parallel_size > 1` and MoE is enabled.
 - When checkpoint save reliability matters more than async throughput, prefer `checkpoint.async_save: false`, `checkpoint.fully_parallel_save: false`, `checkpoint.save_optim: false`, and `checkpoint.save_rng: false`.
-- `dataset.packed_sequence_specs.packed_train_data_path` should point at `splits/train/*.parquet` produced by `prep/sft_packing`.
+- `dataset.packed_sequence_specs.packed_train_data_path` should point at `splits/train/*.parquet` produced by `data_prep/sft_packing`.
 
 ## Local Files
 
@@ -41,6 +41,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Guardrails
 
-- Run `prep/sft_packing` first unless a compatible packed dataset already exists.
+- Run `data_prep/sft_packing` first unless a compatible packed dataset already exists.
 - Use `sft/megatron_bridge` instead when the user explicitly needs full fine-tuning.
 - Keep the base Megatron checkpoint path separate from adapter output paths.

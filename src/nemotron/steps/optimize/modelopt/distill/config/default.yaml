@@ -18,7 +18,7 @@
 # - distill.py teaches a student model from a larger/stronger teacher.
 # - It can run standalone or recover accuracy after pruning / quantization.
 # - Real-data runs expect pre-tokenized Megatron bin/idx data. Use
-#   prep/pretrain_prep first and pass the produced data prefixes via data_paths.
+#   data_prep/pretrain_prep first and pass the produced data prefixes via data_paths.
 #
 # Usage:
 #   nemotron steps run optimize/modelopt/distill -c default

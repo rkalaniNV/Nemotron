@@ -7,7 +7,7 @@ triggers:
   - "A pretrain config is being scaled from tiny/local execution to multi-GPU or multi-node execution."
   - "You need to choose between pretrain/automodel and pretrain/megatron_bridge."
   - "Cluster cost or wall-clock budget is being requested for a pretrain run."
-steps: [prep/pretrain_prep, pretrain/automodel, pretrain/megatron_bridge]
+steps: [data_prep/pretrain_prep, pretrain/automodel, pretrain/megatron_bridge]
 confidence: high
 ---
 

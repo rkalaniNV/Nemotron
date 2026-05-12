@@ -30,12 +30,12 @@ instruction-format adherence).
 ## Pipeline impact
 
 **If AutoModel:**
-- No prep step. Reads `training_jsonl` directly.
+- No data_prep step. Reads `training_jsonl` directly.
 - LoRA defaults: `peft.dim=8` or `16`, `peft.alpha ≈ 2 * peft.dim`.
 - Output is an HF-format adapter merged via `convert/merge_lora`.
 
 **If Megatron-Bridge:**
-- Add [`prep/sft_packing`](../prep/sft_packing/SKILL.md) upstream.
+- Add [`data_prep/sft_packing`](../data_prep/sft_packing/SKILL.md) upstream.
 - Requires a base `checkpoint_megatron` at `checkpoint.pretrained_checkpoint`.
 - Output is a Megatron-format adapter.
 

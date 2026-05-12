@@ -64,7 +64,7 @@ skill = "Automodel/docs/guides/llm/finetune.md"
 
 [[strategies]]
 when = "dataset already uses OpenAI chat-format JSONL"
-then = "skip prep/sft_packing and train directly from training_jsonl"
+then = "skip data_prep/sft_packing and train directly from training_jsonl"
 skill = "Automodel/docs/guides/dataset-overview.md"
 
 [[strategies]]

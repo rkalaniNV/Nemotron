@@ -80,11 +80,11 @@ def test_auto_includes_scopes_to_active_step_subtree(tmp_path):
     (steps / "sft" / "automodel").mkdir(parents=True)
     (steps / "sft" / "__init__.py").write_text("")
     (steps / "sft" / "automodel" / "step.py").write_text("")
-    (steps / "prep").mkdir()
-    (steps / "prep" / "__init__.py").write_text("")
-    (steps / "prep" / "_common.py").write_text("")
-    (steps / "prep" / "sft_packing").mkdir()
-    (steps / "prep" / "sft_packing" / "step.py").write_text("")
+    (steps / "data_prep").mkdir()
+    (steps / "data_prep" / "__init__.py").write_text("")
+    (steps / "data_prep" / "_common.py").write_text("")
+    (steps / "data_prep" / "sft_packing").mkdir()
+    (steps / "data_prep" / "sft_packing" / "step.py").write_text("")
     (steps / "rl" / "nemo_rl").mkdir(parents=True)
     (steps / "rl" / "nemo_rl" / "step.py").write_text("")
 
@@ -101,19 +101,19 @@ def test_auto_includes_scopes_to_active_step_subtree(tmp_path):
 def test_auto_includes_ships_active_step_ancestor_helpers(tmp_path):
     _write_fake_repo(tmp_path)
     steps = tmp_path / "src" / "nemotron" / "steps"
-    (steps / "prep").mkdir(parents=True)
-    (steps / "prep" / "__init__.py").write_text("")
-    (steps / "prep" / "_common.py").write_text("")
-    (steps / "prep" / "sft_packing").mkdir()
-    (steps / "prep" / "sft_packing" / "step.py").write_text("")
+    (steps / "data_prep").mkdir(parents=True)
+    (steps / "data_prep" / "__init__.py").write_text("")
+    (steps / "data_prep" / "_common.py").write_text("")
+    (steps / "data_prep" / "sft_packing").mkdir()
+    (steps / "data_prep" / "sft_packing" / "step.py").write_text("")
     (steps / "sft" / "automodel").mkdir(parents=True)
     (steps / "sft" / "automodel" / "step.py").write_text("")
 
-    includes = _auto_includes(tmp_path, script_path="src/nemotron/steps/prep/sft_packing/step.py")
+    includes = _auto_includes(tmp_path, script_path="src/nemotron/steps/data_prep/sft_packing/step.py")
 
-    assert "src/nemotron/steps/prep/__init__.py" in includes
-    assert "src/nemotron/steps/prep/_common.py" in includes
-    assert "src/nemotron/steps/prep/sft_packing" in includes
+    assert "src/nemotron/steps/data_prep/__init__.py" in includes
+    assert "src/nemotron/steps/data_prep/_common.py" in includes
+    assert "src/nemotron/steps/data_prep/sft_packing" in includes
     assert "src/nemotron/steps/sft" not in includes
 
 

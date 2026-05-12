@@ -24,7 +24,7 @@ field:
   distributed workload; ``execute_cloud`` handles its own torchrun wrap
   for ``launch = "torchrun"`` and a bare python invocation otherwise.
 
-Preparation steps are the exception: Xenna owns its own Ray initialization
+Data preparation steps are the exception: Xenna owns its own Ray initialization
 inside the worker pod, so cloud prep runs as a plain inline workload even when
 the local/Slurm runspec uses ``launch = "ray"``.
 
@@ -62,7 +62,7 @@ class CloudBackend:
             )
             return
 
-        # Plain distributed-workload path. Prep steps intentionally arrive here
+        # Plain distributed-workload path. Data prep steps intentionally arrive here
         # even with launch="ray": Xenna starts Ray inside the single cloud pod,
         # avoiding a Lepton RayCluster whose workers may not share Python deps.
         execute_cloud(
@@ -82,15 +82,15 @@ class CloudBackend:
     @staticmethod
     def _uses_inline_cloud(ctx: JobContext) -> bool:
         """Return True for steps that should not create cloud RayClusters."""
-        return ctx.step_id.startswith("prep/")
+        return ctx.step_id.startswith("data_prep/")
 
     @staticmethod
     def _pod_relative_script(script_path: str) -> str:
         """Strip the local repo root so the cloud pod's cwd resolves the script.
 
-        Drivers see e.g. ``/home/.../src/nemotron/steps/prep/sft_packing/step.py``
+        Drivers see e.g. ``/home/.../src/nemotron/steps/data_prep/sft_packing/step.py``
         but the pod's workspace is the repo root, so we want
-        ``src/nemotron/steps/prep/sft_packing/step.py`` instead.
+        ``src/nemotron/steps/data_prep/sft_packing/step.py`` instead.
         """
         path = Path(script_path)
         parts = path.parts

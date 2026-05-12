@@ -53,12 +53,12 @@ def test_prep_ray_step_uses_inline_cloud_submit(monkeypatch: pytest.MonkeyPatch)
         calls.append(("inline", kwargs))
 
     def fail_execute_cloud_ray(*_args, **_kwargs):
-        raise AssertionError("prep steps must not use cloud RayCluster submission")
+        raise AssertionError("data_prep steps must not use cloud RayCluster submission")
 
     monkeypatch.setattr(cloud_mod, "execute_cloud", fake_execute_cloud)
     monkeypatch.setattr(cloud_mod, "execute_cloud_ray", fail_execute_cloud_ray)
 
-    CloudBackend().submit(_ctx("prep/sft_packing"))
+    CloudBackend().submit(_ctx("data_prep/sft_packing"))
 
     assert len(calls) == 1
     assert calls[0][0] == "inline"

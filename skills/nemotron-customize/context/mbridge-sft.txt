@@ -33,7 +33,7 @@ pretrain side.
   - `src/nemotron/steps/sft/megatron_bridge/config/{default,tiny}.yaml`
   - `src/nemotron/steps/peft/megatron_bridge/config/{default,tiny}.yaml`
 - Live reference recipe: `src/nemotron/recipes/nano3/stage1_sft/`
-- Companion data prep:   `src/nemotron/steps/prep/sft_packing/` (consume `packed_parquet`)
+- Companion data prep:   `src/nemotron/steps/data_prep/sft_packing/` (consume `packed_parquet`)
 
 ## Shared runner (the non-obvious part)
 
@@ -75,7 +75,7 @@ recipe family (e.g. `megatron.bridge.recipes.llama.*`,
 
 ### `sft/megatron_bridge`
 
-- Consumes: `packed_parquet` (required, from `prep/sft_packing`) + optional
+- Consumes: `packed_parquet` (required, from `data_prep/sft_packing`) + optional
   base `checkpoint_megatron`.
 - Produces: `checkpoint_megatron`.
 - Models declared in step.toml `[[models]]`:
@@ -184,14 +184,14 @@ checkpoint:
 
 ## Hard rules (from step.toml [[strategies]] + [[errors]])
 
-- **`prep/sft_packing.pack_size` MUST equal `recipe.seq_length`,
+- **`data_prep/sft_packing.pack_size` MUST equal `recipe.seq_length`,
   `dataset.seq_length`, `dataset.packed_sequence_specs.packed_sequence_size`,
   and `model.seq_length`** — all five. Mismatch is the most common
   silent-quality-bug. See `src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md`.
-- **Tokenizer + chat template** must match what `prep/sft_packing` used
+- **Tokenizer + chat template** must match what `data_prep/sft_packing` used
   (recovery for `tokenizer_mismatch`).
 - **`dataset.packed_sequence_specs.packed_train_data_path`** points at the
-  `splits/train/*.parquet` directory produced by `prep/sft_packing`, not
+  `splits/train/*.parquet` directory produced by `data_prep/sft_packing`, not
   the run/runs/.../shards path.
 - **For PEFT**, `checkpoint.pretrained_checkpoint` must point at a real
   Megatron checkpoint dir (not the parent run dir). Don't use
@@ -226,12 +226,12 @@ live in the upstream repo, not this one. If you can't read them, use the
 ## Pipeline placement
 
 ```
-prep/sft_packing → sft/megatron_bridge → checkpoint_megatron → eval / RL / convert
-prep/sft_packing → peft/megatron_bridge → checkpoint_lora → convert/merge_lora → eval
+data_prep/sft_packing → sft/megatron_bridge → checkpoint_megatron → eval / RL / convert
+data_prep/sft_packing → peft/megatron_bridge → checkpoint_lora → convert/merge_lora → eval
 ```
 
 For sovereign customizations:
-- `sdg/data_designer (default.yaml)` → `prep/sft_packing` → `sft/megatron_bridge`
+- `sdg/data_designer (default.yaml)` → `data_prep/sft_packing` → `sft/megatron_bridge`
 - For target-language SFT, see `src/nemotron/steps/patterns/multilingual-tokenizer-check.md`
   before choosing tokenizer / pack_size.
 

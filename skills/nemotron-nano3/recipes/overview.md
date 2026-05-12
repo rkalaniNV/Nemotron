@@ -99,7 +99,7 @@ Use this map when the user shifts from “what is Nano3?” to “help me build 
 | Goal | `nemotron-customize` path |
 |---|---|
 | curate text corpora | `curate/nemo_curator` |
-| pack SFT JSONL for Megatron | `prep/sft_packing` |
+| pack SFT JSONL for Megatron | `data_prep/sft_packing` |
 | run Nano3-style Megatron SFT | `sft/megatron_bridge` |
 | run smaller-GPU SFT | `sft/automodel` |
 | run GRPO alignment | `rl/nemo_rl/rlvr` |

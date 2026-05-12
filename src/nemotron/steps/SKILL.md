@@ -1,6 +1,6 @@
 ---
 name: nemotron-steps
-description: Navigate the Nemotron step library across prep, pretrain, SFT, PEFT, RL, synthetic data generation, and optimization. Use when planning end-to-end pipelines, choosing a backend, checking artifact compatibility, or finding the correct step SKILL.md, step.toml, runner, config, and upstream reference repo.
+description: Navigate the Nemotron step library across data_prep, pretrain, SFT, PEFT, RL, synthetic data generation, and optimization. Use when planning end-to-end pipelines, choosing a backend, checking artifact compatibility, or finding the correct step SKILL.md, step.toml, runner, config, and upstream reference repo.
 ---
 
 # Nemotron Steps
@@ -11,7 +11,7 @@ Use this skill as the entry point for the Nemotron training and optimization ste
 
 | Need | Start With | Primary Artifacts |
 | --- | --- | --- |
-| SFT packing, pretrain bin/idx, RL sharding | `prep/SKILL.md` | `training_jsonl`, `packed_parquet`, `binidx` |
+| SFT packing, pretrain bin/idx, RL sharding | `data_prep/SKILL.md` | `training_jsonl`, `packed_parquet`, `binidx` |
 | Pretraining or continued pretraining | `pretrain/SKILL.md` | `binidx`, `checkpoint_hf`, `checkpoint_megatron` |
 | Supervised fine-tuning | `sft/SKILL.md` | `training_jsonl`, `packed_parquet`, checkpoints |
 | LoRA or adapter tuning | `peft/SKILL.md` | `checkpoint_lora` |

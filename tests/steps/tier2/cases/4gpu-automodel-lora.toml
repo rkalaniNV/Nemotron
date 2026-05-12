@@ -9,7 +9,7 @@ request = "Fine-tune an instruction model on my chat JSONL. We only have 4 GPUs,
 [expected.steps]
 must_include = ["sft/automodel", "eval/model_eval"]
 may_include = []
-must_exclude = ["prep/sft_packing", "sft/megatron_bridge", "curate/nemo_curator"]
+must_exclude = ["data_prep/sft_packing", "sft/megatron_bridge", "curate/nemo_curator"]
 
 [expected.plan]
 has_mermaid_diagram = true
@@ -27,4 +27,4 @@ no_relative_data_paths = true
 
 [expected.disclosure]
 must_read = ["STEPS.md", "sft/guide.md"]
-must_not_read = ["prep/guide.md"]
+must_not_read = ["data_prep/guide.md"]

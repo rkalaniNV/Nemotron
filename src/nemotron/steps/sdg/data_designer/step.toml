@@ -64,7 +64,7 @@ when = "Generating preference data for DPO"
 then = "Use config/rl_pref.yaml — it emits chosen / rejected fields ready for rl/nemo_rl/dpo."
 
 [[strategies]]
-when = "Output needs to feed prep/sft_packing"
+when = "Output needs to feed data_prep/sft_packing"
 then = "Add a final post-processing column or transform that projects the generated columns into OpenAI 'messages' chat format."
 
 [reference]

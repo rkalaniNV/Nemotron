@@ -9,7 +9,7 @@ request = "Translate a large English news corpus to Hindi with a local NMT serve
 [expected.steps]
 must_include = ["translate/translation"]
 may_include = []
-must_exclude = ["curate/nemo_curator", "prep/sft_packing", "sft/megatron_bridge", "sft/automodel", "eval/model_eval"]
+must_exclude = ["curate/nemo_curator", "data_prep/sft_packing", "sft/megatron_bridge", "sft/automodel", "eval/model_eval"]
 
 [expected.plan]
 has_mermaid_diagram = true

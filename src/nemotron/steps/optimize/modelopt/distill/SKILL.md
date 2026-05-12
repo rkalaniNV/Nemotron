@@ -12,7 +12,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 ## Inputs And Outputs
 
 - Consume teacher and student `checkpoint_hf` paths.
-- Optionally consume `binidx` data from `prep/pretrain_prep`.
+- Optionally consume `binidx` data from `data_prep/pretrain_prep`.
 - Produce `checkpoint_megatron`.
 - Validate launch and checkpoint writing before using real distillation data for quality evaluation.
 

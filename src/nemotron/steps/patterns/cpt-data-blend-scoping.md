@@ -7,7 +7,7 @@ triggers:
   - "A CPT blend mixes domain text (legal, medical, government, finance) with general web/Wikipedia data."
   - "The training token budget is being chosen for a continued-pretraining run."
   - "Catastrophic forgetting on general benchmarks is a concern after CPT."
-steps: [prep/pretrain_prep, pretrain/automodel, pretrain/megatron_bridge]
+steps: [data_prep/pretrain_prep, pretrain/automodel, pretrain/megatron_bridge]
 confidence: high
 ---
 

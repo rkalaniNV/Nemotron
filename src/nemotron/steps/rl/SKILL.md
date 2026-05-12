@@ -37,15 +37,15 @@ resource-server / GenRM rewards (`env.should_use_nemo_gym=true`).
    not launch fails. See
    [../patterns/rl-validate-rewards-before-scale.md](../patterns/rl-validate-rewards-before-scale.md).
 3. **Materialized data**. If data starts as HF references, run
-   [`prep/rl_prep`](../prep/rl_prep/SKILL.md) first to resolve placeholders
+   [`data_prep/rl_prep`](../data_prep/rl_prep/SKILL.md) first to resolve placeholders
    into local JSONL.
 
 ## Pipeline placement
 
 ```
-... → sft/megatron_bridge → prep/rl_prep → rl/nemo_rl/dpo   → checkpoint_megatron
-                                          → rl/nemo_rl/rlvr  → checkpoint_megatron
-                                          → rl/nemo_rl/rlhf  → checkpoint_megatron
+... → sft/megatron_bridge → data_prep/rl_prep → rl/nemo_rl/dpo   → checkpoint_megatron
+                                              → rl/nemo_rl/rlvr  → checkpoint_megatron
+                                              → rl/nemo_rl/rlhf  → checkpoint_megatron
 ```
 
 Output is Megatron-format. Add [`convert/megatron_to_hf`](../convert/megatron_to_hf/step.toml)
@@ -57,7 +57,7 @@ when the next consumer (eval, deployment) expects HF.
    (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
 2. Confirm the SFT warm-start checkpoint exists and was trained on a
    compatible tokenizer and chat template.
-3. Run [`prep/rl_prep`](../prep/rl_prep/SKILL.md) when data needs HF
+3. Run [`data_prep/rl_prep`](../data_prep/rl_prep/SKILL.md) when data needs HF
    resolution or sharding.
 4. Pick the step per the decision tree.
 5. Validate the reward path on a tiny set **before scaling rollout count** —
