@@ -36,7 +36,7 @@ three together.
 ```
 sft/automodel  → optimize/modelopt/quantize → eval/model_eval        # smaller serving footprint
 sft/automodel  → optimize/modelopt/prune    → optimize/modelopt/distill → eval/model_eval   # smaller architecture + quality recovery
-prep/pretrain_prep → optimize/modelopt/distill → eval/model_eval     # standalone distillation
+data_prep/pretrain_prep → optimize/modelopt/distill → eval/model_eval     # standalone distillation
 ```
 
 ## Pre-conditions

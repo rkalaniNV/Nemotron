@@ -145,8 +145,8 @@ class SlurmBackend:
 
     @staticmethod
     def _uses_code_packager(ctx: JobContext) -> bool:
-        """Prep steps start Ray internally, so workers need importable modules."""
-        return ctx.step_id.startswith("prep/")
+        """Data prep steps start Ray internally, so workers need importable modules."""
+        return ctx.step_id.startswith("data_prep/")
 
     @staticmethod
     def _wait_for_ray_job(ray_job: object, *, poll_seconds: int = 30) -> str:

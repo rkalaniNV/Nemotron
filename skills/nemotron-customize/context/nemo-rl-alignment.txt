@@ -107,7 +107,7 @@ Strategies:
 
 In-repo entry path: `src/nemotron/recipes/super3/stage2_rl/stage3_rlhf`.
 
-## Data prep (use `prep/rl_prep` upstream)
+## Data prep (use `data_prep/rl_prep` upstream)
 
 For DPO, preserve `prompt`, `chosen`, `rejected`; validate non-empty
 chosen/rejected; keep train/validation splits deterministic.
@@ -120,9 +120,9 @@ For RLHF, preserve prompt metadata required by the reward model.
 ## Pipeline placement
 
 ```
-sdg/data_designer  → prep/rl_prep → rl/nemo_rl/dpo
-prep/rl_prep                       → rl/nemo_rl/rlvr
-prep/rl_prep                       → rl/nemo_rl/rlhf
+sdg/data_designer  → data_prep/rl_prep → rl/nemo_rl/dpo
+data_prep/rl_prep                       → rl/nemo_rl/rlvr
+data_prep/rl_prep                       → rl/nemo_rl/rlhf
 ```
 
 ## Artifact rules

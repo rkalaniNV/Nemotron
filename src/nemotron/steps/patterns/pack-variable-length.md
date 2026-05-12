@@ -1,12 +1,12 @@
 ---
 id: pack-variable-length
 title: "Pack variable-length SFT data"
-tags: [prep, sft, efficiency]
+tags: [data_prep, sft, efficiency]
 triggers:
   - "Training examples range from very short to very long sequences."
   - "GPU utilization is poor because padding dominates batches."
   - "You are preparing data for Megatron-Bridge SFT with packed inputs available."
-steps: [prep/sft_packing]
+steps: [data_prep/sft_packing]
 confidence: high
 ---
 
@@ -44,6 +44,6 @@ If the downstream trainer or evaluation path cannot respect boundaries or masks 
 
 ## References
 
-- Most directly relevant to `prep/sft_packing` and downstream Megatron-Bridge SFT.
+- Most directly relevant to `data_prep/sft_packing` and downstream Megatron-Bridge SFT.
 - Sequence packing is often the highest-leverage efficiency improvement for heterogeneous chat corpora.
 - Revisit this pattern whenever the data mix changes substantially across customers or domains.

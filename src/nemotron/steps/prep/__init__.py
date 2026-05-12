@@ -1,1 +1,0 @@
-"""Preparation step category."""

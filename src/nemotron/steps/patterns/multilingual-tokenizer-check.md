@@ -6,7 +6,7 @@ triggers:
   - "Training data includes non-English text or mixed-language prompts."
   - "You are adapting a mostly English base model to another language."
   - "The target language uses scripts, spacing rules, or morphology unlike English."
-steps: [prep/sft_packing, sft/megatron_bridge, sft/automodel]
+steps: [data_prep/sft_packing, sft/megatron_bridge, sft/automodel]
 confidence: high
 ---
 

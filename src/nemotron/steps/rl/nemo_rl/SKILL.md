@@ -37,7 +37,7 @@ The local `defaults: <yaml>` form in YAML is a small layering convenience
 ## Workflow
 
 1. Read the algorithm's `step.toml` for consumed artifacts and main knobs.
-2. Run [`../prep/rl_prep`](../../prep/rl_prep/SKILL.md) when data starts as
+2. Run [`../data_prep/rl_prep`](../../data_prep/rl_prep/SKILL.md) when data starts as
    HF references or unsharded blends.
 3. Use `config/tiny.yaml` for runner validation. Use `config/nemo_gym.yaml`
    (RLVR/RLHF) when resource-server or GenRM rewards are required.
@@ -72,7 +72,7 @@ The local `defaults: <yaml>` form in YAML is a small layering convenience
 - [../../patterns/rl-validate-rewards-before-scale.md](../../patterns/rl-validate-rewards-before-scale.md) — validate every reward path before scaling.
 - [../../patterns/eval-before-and-after-training.md](../../patterns/eval-before-and-after-training.md) — RL must be scored on task evals, not just reward.
 - [../../patterns/byob-benchmark-design.md](../../patterns/byob-benchmark-design.md) — for sovereign deployments, the eval is the BYOB.
-- [../../patterns/prep-data-is-tokenizer-locked.md](../../patterns/prep-data-is-tokenizer-locked.md) — RL data sharded through `prep/rl_prep` inherits the tokenizer-lock invariant.
+- [../../patterns/prep-data-is-tokenizer-locked.md](../../patterns/prep-data-is-tokenizer-locked.md) — RL data sharded through `data_prep/rl_prep` inherits the tokenizer-lock invariant.
 
 ## Guardrails
 

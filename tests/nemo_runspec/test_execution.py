@@ -132,19 +132,19 @@ class TestCloudScriptPath:
     def test_rewrites_src_relative_script_to_pod_local_source(self):
         assert (
             _cloud_script_path(
-                "src/nemotron/steps/prep/pretrain_prep/step.py",
+                "src/nemotron/steps/data_prep/pretrain_prep/step.py",
                 "/mnt/work/_nemotron/src-deadbeef-12345678",
             )
-            == "/nemo_run/code/src/nemotron/steps/prep/pretrain_prep/step.py"
+            == "/nemo_run/code/src/nemotron/steps/data_prep/pretrain_prep/step.py"
         )
 
     def test_keeps_script_path_for_native_source_layout(self):
         assert (
             _cloud_script_path(
-                "src/nemotron/steps/prep/pretrain_prep/step.py",
+                "src/nemotron/steps/data_prep/pretrain_prep/step.py",
                 "/nemo_run/code/src",
             )
-            == "src/nemotron/steps/prep/pretrain_prep/step.py"
+            == "src/nemotron/steps/data_prep/pretrain_prep/step.py"
         )
 
 

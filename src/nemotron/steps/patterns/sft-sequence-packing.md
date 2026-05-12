@@ -1,12 +1,12 @@
 ---
 id: sft-sequence-packing
 title: "Pack variable-length SFT data"
-tags: [prep, sft, efficiency]
+tags: [data_prep, sft, efficiency]
 triggers:
   - "Training examples range from very short to very long sequences."
   - "GPU utilization is poor because padding dominates batches."
   - "You are preparing data for Megatron-Bridge SFT with packed inputs available."
-steps: [prep/sft_packing]
+steps: [data_prep/sft_packing]
 confidence: high
 ---
 

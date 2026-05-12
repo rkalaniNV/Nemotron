@@ -13,7 +13,7 @@ key_facts:
   - "The SFT run trains for 13,000 steps with batch size 64 and sequence packing to 256k."
   - "The SFT domains include competition math/code, tool use, long context, formal proofs, multilingual, terminal use, safety, software engineering, and science."
 related_steps:
-  - "prep/sft_packing"
+  - "data_prep/sft_packing"
   - "sft/megatron_bridge"
   - "sft/automodel"
   - "convert/hf_to_megatron"

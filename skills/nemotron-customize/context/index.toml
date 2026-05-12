@@ -74,22 +74,22 @@ file = "mbridge-sft.txt"
 description = "Megatron-Bridge PEFT/LoRA — adapter dim/alpha, packed Parquet input, base checkpoint binding, adapter-only checkpoint discipline."
 
 [[packs]]
-id = "prep-generate"
-step = "prep/sft_packing"
+id = "data-prep-generate"
+step = "data_prep/sft_packing"
 intent = "generate"
 file = "nemotron-data-prep.txt"
 description = "SFT packing stage — chat templates, sequence packing, shard sizing, packed Parquet."
 
 [[packs]]
-id = "prep-pretrain-generate"
-step = "prep/pretrain_prep"
+id = "data-prep-pretrain-generate"
+step = "data_prep/pretrain_prep"
 intent = "generate"
 file = "nemotron-data-prep.txt"
 description = "Pretraining data prep — HF/local blends, bin/idx tokenization, split blends, tokenizer lock-in."
 
 [[packs]]
-id = "prep-rl-generate"
-step = "prep/rl_prep"
+id = "data-prep-rl-generate"
+step = "data_prep/rl_prep"
 intent = "generate"
 file = "nemotron-data-prep.txt"
 description = "RL data prep — HF placeholder resolution, sharded JSONL, DPO/RLVR/RLHF schemas."

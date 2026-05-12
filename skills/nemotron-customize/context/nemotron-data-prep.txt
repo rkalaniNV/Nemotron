@@ -1,10 +1,10 @@
 # Nemotron Data Prep Context
 
-Use this pack when generating stage code for any of the prep steps:
+Use this pack when generating stage code for any of the data_prep steps:
 
-- `prep/sft_packing`     → produces `packed_parquet`
-- `prep/pretrain_prep`   → produces `binidx` + `blend.json`
-- `prep/rl_prep`         → produces `training_jsonl` (sharded)
+- `data_prep/sft_packing`     → produces `packed_parquet`
+- `data_prep/pretrain_prep`   → produces `binidx` + `blend.json`
+- `data_prep/rl_prep`         → produces `training_jsonl` (sharded)
 
 The step family wraps `src/nemotron/data_prep` recipes. Generated stage code
 should be a thin wrapper around the recipe entry point — no schema knowledge
@@ -12,14 +12,14 @@ in Python.
 
 ## In-repo references (read these first)
 
-- Manifests: `src/nemotron/steps/prep/<step>/step.toml`
-- Per-step SKILL: `src/nemotron/steps/prep/<step>/SKILL.md`
-- Category SKILL: `src/nemotron/steps/prep/SKILL.md` (which step + when-to-pack table)
-- Shared helpers: `src/nemotron/steps/prep/_common.py`
+- Manifests: `src/nemotron/steps/data_prep/<step>/step.toml`
+- Per-step SKILL: `src/nemotron/steps/data_prep/<step>/SKILL.md`
+- Category SKILL: `src/nemotron/steps/data_prep/SKILL.md` (which step + when-to-pack table)
+- Shared helpers: `src/nemotron/steps/data_prep/_common.py`
 
-## Shared helpers (`prep/_common.py`)
+## Shared helpers (`data_prep/_common.py`)
 
-Use these in every prep stage wrapper:
+Use these in every data_prep stage wrapper:
 
 - `resolve_blend_path(cfg, *, step_dir, default_name="blend_tiny.json")` —
   resolve blend path from config, falling back to a step-bundled default.
@@ -36,7 +36,7 @@ Order in your `run.py`:
 3. `chdir_to_scratch(...)` only after all paths are resolved.
 4. Call the recipe.
 
-## Shared principles across prep steps
+## Shared principles across data_prep steps
 
 - **Tokenizer-locked outputs.** Repack on tokenizer / template / seq_length
   change. See `src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md`.
@@ -48,7 +48,7 @@ Order in your `run.py`:
 - **Receipts near the output.** Manifests / blend.json / split metadata land
   next to the produced shards so downstream stages can validate.
 
-## SFT packing (`prep/sft_packing`)
+## SFT packing (`data_prep/sft_packing`)
 
 Consumes OpenAI chat-format JSONL, emits packed Parquet for
 Megatron-Bridge SFT/PEFT.
@@ -75,7 +75,7 @@ Use this **before**:
 Skip this **before**:
 - `sft/automodel`, `peft/automodel` (read `training_jsonl` directly).
 
-## Pretraining prep (`prep/pretrain_prep`)
+## Pretraining prep (`data_prep/pretrain_prep`)
 
 Consumes curated text (HF datasets or local parquet/jsonl), emits Megatron
 bin/idx shards plus `blend.json`.
@@ -98,7 +98,7 @@ Use this **before**:
 - `pretrain/automodel` (the env var `PRETRAIN_BLEND_PATH` points at the produced `blend.json`)
 - `optimize/modelopt/distill` (real-data runs, not `use_mock_data`)
 
-## RL prep (`prep/rl_prep`)
+## RL prep (`data_prep/rl_prep`)
 
 Consumes a blend referencing HF or local prompt/preference datasets, emits
 sharded JSONL ready for `rl/nemo_rl/{dpo,rlvr,rlhf}`.
@@ -124,25 +124,25 @@ Schema preserved per algorithm:
 ## Pipeline placement
 
 ```
-curate/nemo_curator → prep/pretrain_prep → pretrain/{megatron_bridge,automodel}
-curate/nemo_curator → translate/nemo_skills → prep/sft_packing → sft/megatron_bridge
+curate/nemo_curator → data_prep/pretrain_prep → pretrain/{megatron_bridge,automodel}
+curate/nemo_curator → translate/translation → data_prep/sft_packing → sft/megatron_bridge
                                               ↓
                                           (skip packing) → sft/automodel
-sdg/data_designer  → prep/sft_packing → sft/megatron_bridge
-sdg/data_designer  → prep/rl_prep     → rl/nemo_rl/dpo
-prep/pretrain_prep → optimize/modelopt/distill
+sdg/data_designer       → data_prep/sft_packing → sft/megatron_bridge
+sdg/data_designer       → data_prep/rl_prep     → rl/nemo_rl/dpo
+data_prep/pretrain_prep → optimize/modelopt/distill
 ```
 
 ## Verification
 
 ```bash
-uv run pytest tests/steps/prep -q     # focused
+uv run pytest tests/steps/data_prep -q     # focused
 uv run pytest tests/steps -q          # full step-family suite
 ```
 
 ## Staleness checks
 
-When updating prep steps:
+When updating data_prep steps:
 
 - Verify downstream artifact type still matches (`packed_parquet`, `binidx`, `training_jsonl`).
 - Verify output path is resolved **before** the scratch chdir.

@@ -193,7 +193,7 @@ args:
     - /data/tokenized/domain_text_document
 ```
 
-Use `prep/pretrain_prep` first when data starts as HF/local text.
+Use `data_prep/pretrain_prep` first when data starts as HF/local text.
 `use_mock_data: true` is **plumbing only**, not a quality signal.
 
 Distillation patterns:
@@ -211,7 +211,7 @@ Common chains:
 ```
 sft/automodel        → optimize/modelopt/quantize → eval/model_eval
 sft/automodel        → optimize/modelopt/prune    → optimize/modelopt/distill → eval/model_eval
-prep/pretrain_prep   → optimize/modelopt/distill  → eval/model_eval
+data_prep/pretrain_prep   → optimize/modelopt/distill  → eval/model_eval
 ```
 
 Artifact rules:

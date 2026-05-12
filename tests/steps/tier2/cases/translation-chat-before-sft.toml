@@ -7,7 +7,7 @@ tags = ["translation", "chat", "multilingual", "sft"]
 request = "Translate a multi-turn chat corpus from English to Thai before SFT on Nemotron Nano3."
 
 [expected.steps]
-must_include = ["translate/translation", "prep/sft_packing", "sft/megatron_bridge", "eval/model_eval"]
+must_include = ["translate/translation", "data_prep/sft_packing", "sft/megatron_bridge", "eval/model_eval"]
 may_include = []
 must_exclude = ["curate/nemo_curator", "sft/automodel"]
 

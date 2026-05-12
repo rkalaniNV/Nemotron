@@ -50,7 +50,7 @@ mandatory blend-with-general-data discipline.
 
 ## Pre-conditions
 
-1. **Compatible bin/idx data** from [`prep/pretrain_prep`](../prep/pretrain_prep/SKILL.md).
+1. **Compatible bin/idx data** from [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/SKILL.md).
    `blend.json` is the trainer's entry — its tokenizer must match the model's.
 2. **A documented token budget** (target_tokens, seq_length, gbs, train_iters,
    lr schedule, ckpt cadence). See [../patterns/pretrain-token-budget-before-scale.md](../patterns/pretrain-token-budget-before-scale.md).
@@ -61,8 +61,8 @@ mandatory blend-with-general-data discipline.
 ## Pipeline placement
 
 ```
-curate/nemo_curator → prep/pretrain_prep → pretrain/automodel        → checkpoint_hf
-                                          → pretrain/megatron_bridge → checkpoint_megatron
+curate/nemo_curator → data_prep/pretrain_prep → pretrain/automodel        → checkpoint_hf
+                                              → pretrain/megatron_bridge → checkpoint_megatron
                                                                        (then convert/megatron_to_hf if HF needed downstream)
 ```
 
@@ -70,7 +70,7 @@ curate/nemo_curator → prep/pretrain_prep → pretrain/automodel        → che
 
 1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray runs
    (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
-2. Run [`prep/pretrain_prep`](../prep/pretrain_prep/SKILL.md) on a tokenizer
+2. Run [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/SKILL.md) on a tokenizer
    that matches the trainer.
 3. Write the budget down (target_tokens / seq_length / gbs / train_iters /
    lr schedule / ckpt cadence) **before code changes**.

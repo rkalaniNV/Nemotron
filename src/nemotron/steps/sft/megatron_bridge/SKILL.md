@@ -11,14 +11,14 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Inputs And Outputs
 
-- Consume `packed_parquet` from `prep/sft_packing`.
+- Consume `packed_parquet` from `data_prep/sft_packing`.
 - Optionally consume a `checkpoint_megatron` base or prior checkpoint.
 - Produce `checkpoint_megatron`.
 - Validate packed data, parallelism, and checkpoint output with a short run before scaling.
 
 ## Configure
 
-- Keep `seq_length` equal to the prep step's `pack_size`.
+- Keep `seq_length` equal to the data_prep step's `pack_size`.
 - Start Nano3 plans around the existing recipe defaults; scale Super3-like plans only after short validation runs pass.
 - Tune tensor, pipeline, and context parallelism before scaling global batch.
 - The shipped 30B default uses `peft=lora` to fit the starter topology; set `recipe.peft=null` and remove the top-level `peft:` block only when full SFT fits.
@@ -41,6 +41,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Guardrails
 
-- Run `prep/sft_packing` first unless a compatible packed dataset already exists.
+- Run `data_prep/sft_packing` first unless a compatible packed dataset already exists.
 - Repack data after tokenizer, template, or sequence length changes.
 - Convert Megatron checkpoints to HF format before HF-native evaluation or deployment.

@@ -35,10 +35,10 @@ The catalog ships one step under this category:
 ## Pipeline placement
 
 ```
-sdg/data_designer (default.yaml)              → prep/sft_packing → sft/megatron_bridge
-sdg/data_designer (default.yaml)              →                    sft/automodel
-sdg/data_designer (customer_support_tools.yaml) → prep/sft_packing → sft/* (tool-call SFT)
-sdg/data_designer (rl_pref.yaml)              → prep/rl_prep      → rl/nemo_rl/dpo
+sdg/data_designer (default.yaml)              → data_prep/sft_packing → sft/megatron_bridge
+sdg/data_designer (default.yaml)              →                         sft/automodel
+sdg/data_designer (customer_support_tools.yaml) → data_prep/sft_packing → sft/* (tool-call SFT)
+sdg/data_designer (rl_pref.yaml)              → data_prep/rl_prep       → rl/nemo_rl/dpo
 ```
 
 ## Workflow
@@ -50,9 +50,9 @@ sdg/data_designer (rl_pref.yaml)              → prep/rl_prep      → rl/nemo_
    produce the right shape.
 4. Set `num_records` only after preview is right.
 5. Project the output explicitly to the schema the next stage expects:
-   - SFT (Megatron-Bridge): `openai_messages` → `prep/sft_packing`.
+   - SFT (Megatron-Bridge): `openai_messages` → `data_prep/sft_packing`.
    - SFT (AutoModel): `openai_messages` directly (no packing).
-   - DPO: `dpo_preference` → `prep/rl_prep`.
+   - DPO: `dpo_preference` → `data_prep/rl_prep`.
 6. Validate generated records before training — see
    [../patterns/sdg-pipeline-versioning.md](../patterns/sdg-pipeline-versioning.md).
 7. For sovereign deployments, mix synthetic with non-synthetic data and

@@ -38,6 +38,6 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Guardrails
 
-- Do not add `prep/sft_packing`; AutoModel reads JSONL directly.
+- Do not add `data_prep/sft_packing`; AutoModel reads JSONL directly.
 - Reduce batch size or switch to LoRA before changing unrelated training logic for OOMs.
 - Inspect formatted conversations before trusting loss curves.

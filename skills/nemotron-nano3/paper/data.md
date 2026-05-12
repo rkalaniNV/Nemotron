@@ -14,8 +14,8 @@ key_facts:
   - "The SFT mixture spans competition math/code, tool use, long-context data, Lean proofs, multilingual data, terminal use, general chat, instruction following, safety, SWE, science, GenSelect, and CUDA pairs."
 related_steps:
   - "curate/nemo_curator"
-  - "prep/sft_packing"
-  - "translate/nemo_skills"
+  - "data_prep/sft_packing"
+  - "translate/translation"
   - "sft/megatron_bridge"
 currency: "frozen"
 ---

@@ -35,19 +35,19 @@ launcher_image:
 # that naturally require a previous Nemotron Customizer step output.
 dependencies:
   sft/megatron_bridge:
-    - prep/sft_packing:tiny
+    - data_prep/sft_packing:tiny
   peft/megatron_bridge:
-    - prep/sft_packing:tiny
+    - data_prep/sft_packing:tiny
   pretrain/megatron_bridge:
-    - prep/pretrain_prep:tiny
+    - data_prep/pretrain_prep:tiny
   pretrain/automodel:
-    - prep/pretrain_prep:tiny
+    - data_prep/pretrain_prep:tiny
   rl/nemo_rl/dpo:
-    - prep/rl_prep:tiny
+    - data_prep/rl_prep:tiny
   rl/nemo_rl/rlhf:
-    - prep/rl_prep:tiny
+    - data_prep/rl_prep:tiny
   rl/nemo_rl/rlvr:
-    - prep/rl_prep:tiny
+    - data_prep/rl_prep:tiny
   # SDG can feed SFT or RL prep, but it is not forced as a dependency because
   # many customers bring their own JSONL on persistent storage.
 
@@ -66,9 +66,9 @@ step_execution_images:
   optimize/modelopt/quantize: nemo-modelopt
   peft/automodel: nemo-automodel
   peft/megatron_bridge: nemo-megatron
-  prep/pretrain_prep: nemo-megatron
-  prep/rl_prep: nemo-rl
-  prep/sft_packing: nemo-megatron
+  data_prep/pretrain_prep: nemo-megatron
+  data_prep/rl_prep: nemo-rl
+  data_prep/sft_packing: nemo-megatron
   pretrain/automodel: nemo-automodel
   pretrain/megatron_bridge: nemo-megatron
   rl/nemo_rl/dpo: nemo-rl
@@ -77,7 +77,6 @@ step_execution_images:
   sdg/data_designer: nemo-data-designer
   sft/automodel: nemo-automodel
   sft/megatron_bridge: nemo-megatron
-  translate/nemo_skills: nemo-curator
   translate/translation: nemo-curator
 
 execution_images:

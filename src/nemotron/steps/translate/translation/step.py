@@ -146,7 +146,7 @@ def _text_field(value: Any) -> str | list[str]:
 
 
 def _build_translation_stage(config: dict[str, Any]) -> Any:
-    from nemo_curator.stages.text.translation import TranslationStage
+    from nemo_curator.stages.text.experimental.translation import TranslationStage
 
     faith_cfg = config.get("faith_eval", {}) or {}
     enable_faith = bool(faith_cfg.get("enabled", False))
@@ -166,7 +166,6 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
         enable_faith_eval=enable_faith,
         faith_threshold=float(faith_cfg.get("threshold", 2.5)),
         faith_model_name=str(faith_cfg.get("model_name") or server.get("model") or ""),
-        segment_level=bool(faith_cfg.get("segment_level", False)),
         filter_enabled=bool(faith_cfg.get("filter_enabled", True)),
         output_mode=str(config.get("output_mode", "both")),
         merge_scores=bool(config.get("merge_scores", True)),

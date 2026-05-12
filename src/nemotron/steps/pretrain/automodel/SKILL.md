@@ -11,7 +11,7 @@ Before changing configs or code, read `step.toml` to understand the step flow, c
 
 ## Inputs And Outputs
 
-- Consume `binidx` data from `prep/pretrain_prep`.
+- Consume `binidx` data from `data_prep/pretrain_prep`.
 - Produce `checkpoint_hf`.
 - Validate data loading and checkpoint output with a short run before scaling token budget.
 

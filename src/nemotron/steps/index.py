@@ -29,15 +29,14 @@ CATEGORY_TITLES = {
     "byob": "Bring Your Own Benchmark",
     "convert": "Conversion",
     "curate": "Data Curation",
+    "data_prep": "Data Preparation",
     "eval": "Evaluation",
     "optimize": "Model Optimization",
     "peft": "Parameter-Efficient Fine-Tuning",
-    "prep": "Data Preparation",
     "pretrain": "Pretraining",
     "rl": "Reinforcement Learning",
     "sft": "Supervised Fine-Tuning",
     "sdg": "Synthetic Data Generation",
-    "synth": "Synthetic Data Generation",
     "translate": "Translation",
 }
 VALID_PATTERN_CONFIDENCE = {"high", "medium", "experimental"}

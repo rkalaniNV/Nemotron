@@ -50,7 +50,7 @@ uv run python deploy/nemotron-customizer/airgap/runner.py \
 
 To override the workflow without editing YAML, pass one or more selected
 Nemotron step targets. Dependencies are still expanded from `dependencies`.
-For example, SDG plus SFT also adds `prep/sft_packing` because SFT needs packed
+For example, SDG plus SFT also adds `data_prep/sft_packing` because SFT needs packed
 data:
 
 ```bash

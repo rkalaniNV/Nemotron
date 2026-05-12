@@ -66,7 +66,7 @@ data-sdg = ["data-designer==0.5.5; python_version>='3.11' and python_version<'3.
 byob = [
     # BYOB uses Curator's current translation and semantic dedup stack, which is Python 3.11+.
     "data-designer==0.5.5; python_version>='3.11' and python_version<'3.14'",
-    "nemo-curator @ git+https://github.com/NVIDIA-NeMo/Curator.git@main ; python_version>='3.11' and python_version<'3.14'",
+    "nemo-curator[translation_all] @ git+https://github.com/NVIDIA-NeMo/Curator.git@main ; python_version>='3.11' and python_version<'3.14'",
     "pandas>=2.1.0; python_version>='3.11'",
     "sentence-transformers>=5.0.0,<6.0.0; python_version>='3.11'",
     "scikit-learn>=1.7.0,<1.8.0; python_version>='3.11'",
@@ -81,6 +81,9 @@ byob = [
     "pylibraft-cu12==25.10.*; python_version>='3.11' and platform_system=='Linux' and platform_machine=='x86_64'",
     "raft-dask-cu12==25.10.*; python_version>='3.11' and platform_system=='Linux' and platform_machine=='x86_64'",
     "rapidsmpf-cu12==25.10.*; python_version>='3.11' and platform_system=='Linux' and platform_machine=='x86_64'",
+]
+translation = [
+    "nemo-curator[translation_all] @ git+https://github.com/NVIDIA-NeMo/Curator.git@main ; python_version>='3.11' and python_version<'3.14'",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -97,7 +100,7 @@ all = [
     "webdataset>=0.2.86",
     "imageio-ffmpeg>=0.5.1",
     "data-designer==0.5.5; python_version>='3.11' and python_version<'3.14'",
-    "nemo-curator @ git+https://github.com/NVIDIA-NeMo/Curator.git@main ; python_version>='3.11' and python_version<'3.14'",
+    "nemo-curator[translation_all] @ git+https://github.com/NVIDIA-NeMo/Curator.git@main ; python_version>='3.11' and python_version<'3.14'",
     "pandas>=2.1.0; python_version>='3.11'",
     "sentence-transformers>=5.0.0,<6.0.0; python_version>='3.11'",
     "scikit-learn>=1.7.0,<1.8.0; python_version>='3.11'",

@@ -22,10 +22,16 @@ stage.
 
 ## CLI
 
+Install the Curator-backed translation dependencies before running the step:
+
+```bash
+uv sync --extra translation
+```
+
 Run the step directly:
 
 ```bash
-nemotron steps translation \
+uv run --extra translation nemotron steps translation \
   input_path=/path/to/source.jsonl \
   output_dir=/path/to/translated \
   source_language=en \
@@ -33,7 +39,20 @@ nemotron steps translation \
 ```
 
 Use `-c` or `--config` to pass a config file or config name from the step's
-`config/` directory. The CLI currently supports local execution only.
+`config/` directory. The direct `nemotron steps translation` shortcut supports
+local execution only.
+
+For batch executors such as Lepton or Slurm, use the generic step runner:
+
+```bash
+uv run nemotron steps run translate/translation \
+  -c default \
+  --batch lepton_translate \
+  input_path=/mnt/lustre-shared/data/source.jsonl \
+  output_dir=/mnt/lustre-shared/output/translated \
+  source_language=en \
+  target_language=hi
+```
 
 ## Reference Implementation
 

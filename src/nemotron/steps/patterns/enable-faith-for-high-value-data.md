@@ -16,7 +16,7 @@ Use this when translated data quality needs evidence, not just output files. FAI
 
 ## What to do
 
-Enable `faith_eval.enabled=true`. Prefer `faith_eval.segment_level=true` for long corpora because scoring follows the same segment boundaries used by translation.
+Enable `faith_eval.enabled=true`. FAITH scoring follows the translated segments produced by the translation stage, then merges scores back onto the output records.
 
 Ask whether low-scoring rows should be filtered or only annotated. Set `faith_eval.filter_enabled` accordingly.
 

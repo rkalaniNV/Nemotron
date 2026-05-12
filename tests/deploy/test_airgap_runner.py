@@ -25,15 +25,15 @@ def test_airgap_runner_expands_and_validates_sft_dependency():
     runner = _runner_module()
     cfg = {
         "workflow": {"stages": ["sft/megatron_bridge:tiny"]},
-        "dependencies": {"sft/megatron_bridge": ["prep/sft_packing:tiny"]},
+        "dependencies": {"sft/megatron_bridge": ["data_prep/sft_packing:tiny"]},
     }
 
     targets = runner.expand_targets(cfg)
     infos = runner.validate_targets(targets)
 
-    assert [target.spec for target in targets] == ["prep/sft_packing:tiny", "sft/megatron_bridge:tiny"]
+    assert [target.spec for target in targets] == ["data_prep/sft_packing:tiny", "sft/megatron_bridge:tiny"]
     assert infos["sft/megatron_bridge"].module == "nemotron.steps.sft.megatron_bridge.step"
-    assert infos["prep/sft_packing"].config_path.name == "tiny.yaml"
+    assert infos["data_prep/sft_packing"].config_path.name == "tiny.yaml"
     assert [item.target for item in infos["sft/megatron_bridge"].repo_overlays] == [
         "/opt/megatron-lm",
         "/opt/Megatron-Bridge",
@@ -50,7 +50,7 @@ def test_airgap_runner_groups_execution_images_by_base_image_and_repo_overlays(t
     )
     cfg = {
         "step_execution_images": {
-            "prep/sft_packing": "a",
+            "data_prep/sft_packing": "a",
             "sft/megatron_bridge": "b",
         },
         "execution_images": {
@@ -73,8 +73,8 @@ def test_airgap_runner_groups_execution_images_by_base_image_and_repo_overlays(t
         cfg,
         output_dir=tmp_path,
         step_infos={
-            "prep/sft_packing": runner.StepInfo(
-                target=runner.Target("prep/sft_packing"),
+            "data_prep/sft_packing": runner.StepInfo(
+                target=runner.Target("data_prep/sft_packing"),
                 step_dir=tmp_path,
                 step_py=tmp_path / "step.py",
                 step_toml=tmp_path / "step.toml",
@@ -95,9 +95,9 @@ def test_airgap_runner_groups_execution_images_by_base_image_and_repo_overlays(t
 
     assert len(groups) == 2
     by_step = {group.steps[0]: group for group in groups}
-    assert by_step["prep/sft_packing"].base_image == "image:base"
-    assert by_step["prep/sft_packing"].required_imports == {"omegaconf"}
-    assert by_step["prep/sft_packing"].repo_overlays == []
+    assert by_step["data_prep/sft_packing"].base_image == "image:base"
+    assert by_step["data_prep/sft_packing"].required_imports == {"omegaconf"}
+    assert by_step["data_prep/sft_packing"].repo_overlays == []
     assert by_step["sft/megatron_bridge"].base_image == "image:base"
     assert by_step["sft/megatron_bridge"].required_imports == {"yaml"}
     assert by_step["sft/megatron_bridge"].repo_overlays == [overlay]
@@ -108,7 +108,7 @@ def test_airgap_runner_only_builds_images_for_selected_steps(tmp_path):
     runner = _runner_module()
     cfg = {
         "step_execution_images": {
-            "prep/sft_packing": "nemo-megatron",
+            "data_prep/sft_packing": "nemo-megatron",
             "sft/automodel": "nemo-automodel",
         },
         "execution_images": {
@@ -117,11 +117,11 @@ def test_airgap_runner_only_builds_images_for_selected_steps(tmp_path):
         },
     }
 
-    groups = runner.execution_groups(cfg, output_dir=tmp_path, step_infos={"prep/sft_packing": object()})
+    groups = runner.execution_groups(cfg, output_dir=tmp_path, step_infos={"data_prep/sft_packing": object()})
 
     assert len(groups) == 1
     assert groups[0].name.startswith("nemo-megatron-")
-    assert groups[0].steps == ["prep/sft_packing"]
+    assert groups[0].steps == ["data_prep/sft_packing"]
 
 
 def test_airgap_runner_maps_sdg_to_light_sdk_image(tmp_path):
@@ -169,11 +169,11 @@ def test_airgap_runner_target_override_selects_sdg_and_sft():
 
     assert [target.spec for target in targets] == [
         "sdg/data_designer:tiny",
-        "prep/sft_packing:tiny",
+        "data_prep/sft_packing:tiny",
         "sft/megatron_bridge:tiny",
     ]
     by_steps = {tuple(group.steps): group for group in groups}
-    merged = by_steps[("sdg/data_designer", "prep/sft_packing")]
+    merged = by_steps[("sdg/data_designer", "data_prep/sft_packing")]
     assert merged.image_names == {"nemo-data-designer", "nemo-megatron"}
     assert merged.tag.startswith("nemotron-customizer-nemo-data-designer-nemo-megatron-airgap-")
 
@@ -188,7 +188,7 @@ def test_airgap_runner_splits_same_base_image_when_repo_overlays_differ(tmp_path
     )
     cfg = {
         "step_execution_images": {
-            "prep/sft_packing": "nemo-megatron",
+            "data_prep/sft_packing": "nemo-megatron",
             "sft/megatron_bridge": "nemo-megatron",
         },
         "execution_images": {
@@ -203,8 +203,8 @@ def test_airgap_runner_splits_same_base_image_when_repo_overlays_differ(tmp_path
         cfg,
         output_dir=tmp_path,
         step_infos={
-            "prep/sft_packing": runner.StepInfo(
-                target=runner.Target("prep/sft_packing"),
+            "data_prep/sft_packing": runner.StepInfo(
+                target=runner.Target("data_prep/sft_packing"),
                 step_dir=tmp_path,
                 step_py=tmp_path / "step.py",
                 step_toml=tmp_path / "step.toml",
@@ -224,7 +224,7 @@ def test_airgap_runner_splits_same_base_image_when_repo_overlays_differ(tmp_path
     )
 
     assert len(groups) == 2
-    assert sorted([group.steps for group in groups]) == [["prep/sft_packing"], ["sft/megatron_bridge"]]
+    assert sorted([group.steps for group in groups]) == [["data_prep/sft_packing"], ["sft/megatron_bridge"]]
     assert len({group.tag for group in groups}) == 2
 
 
@@ -358,7 +358,7 @@ def test_airgap_runner_progress_state_resumes_and_completes(tmp_path):
 
 def test_airgap_runner_static_import_scan_stays_direct():
     runner = _runner_module()
-    step_py = runner.STEP_ROOT / "prep/sft_packing/step.py"
+    step_py = runner.STEP_ROOT / "data_prep/sft_packing/step.py"
 
     imports = runner.discover_external_imports(step_py)
 

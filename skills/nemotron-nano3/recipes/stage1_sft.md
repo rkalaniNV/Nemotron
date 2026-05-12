@@ -117,7 +117,7 @@ Even with that scale gap, stage1 is the best public explanation of how Nano3 SFT
 
 This stage maps cleanly to catalog steps:
 
-1. `prep/sft_packing`
+1. `data_prep/sft_packing`
 2. `sft/megatron_bridge`
 
 Optional surrounding steps:
@@ -127,4 +127,4 @@ Optional surrounding steps:
 
 ## Good Handoff Pattern
 
-> “For a public Nano3-style SFT build, use `prep/sft_packing` to produce packed Parquet and `sft/megatron_bridge` to run Megatron-Bridge fine-tuning. That reproduces the stage shape, but not the paper’s full 18M-sample, 256k packed run.”
+> “For a public Nano3-style SFT build, use `data_prep/sft_packing` to produce packed Parquet and `sft/megatron_bridge` to run Megatron-Bridge fine-tuning. That reproduces the stage shape, but not the paper’s full 18M-sample, 256k packed run.”

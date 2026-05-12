@@ -16,7 +16,7 @@ Use this context when generating a `translate/translation` stage.
 - Step wrapper: `src/nemotron/steps/translate/translation/step.py`
 - Step config: `src/nemotron/steps/translate/translation/config/default.yaml`
 - CLI command: `nemotron steps translation`
-- Curator stage: `nemo_curator.stages.text.translation.TranslationStage`
+- Curator stage: `nemo_curator.stages.text.experimental.translation.TranslationStage`
 - Curator I/O: `JsonlReader`, `ParquetReader`, `JsonlWriter`, `ParquetWriter`
 
 ## Configuration Guidance
@@ -28,7 +28,7 @@ Use this context when generating a `translate/translation` stage.
 - `backend=aws` uses Amazon Translate; require AWS credentials in the environment or role and choose `aws.region`.
 - `backend=google` uses Google Cloud Translation; require Google credentials, `google.api_version`, and `google.project_id` for v3.
 - `output_mode=both` is the safest default for generated projects because it keeps translated fields and metadata.
-- `faith_eval.segment_level=true` is preferred for long corpora because scoring follows the same segmentation boundary as translation.
+- FAITH scoring follows the same translated segments produced by the translation stage, then merges scores back onto output records.
 
 ## Questions To Ask Before Generation
 

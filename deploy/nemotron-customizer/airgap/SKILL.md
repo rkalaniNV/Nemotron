@@ -108,7 +108,7 @@ For CLI-facing examples, also smoke the command shape:
 
 ```bash
 uv run nemotron steps --help
-uv run nemotron steps show prep/sft_packing --json
+uv run nemotron steps show data_prep/sft_packing --json
 ```
 
 Do not run Docker build/save stages during validation unless the user explicitly

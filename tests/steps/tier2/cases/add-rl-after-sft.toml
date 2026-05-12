@@ -7,7 +7,7 @@ tags = ["iteration", "add-stage", "rl", "grpo", "multi-turn"]
 request = "Build a Nano3 SFT pipeline for my instruction JSONL on 2 nodes of 8x H100."
 
 [expected.steps]
-must_include = ["prep/sft_packing", "sft/megatron_bridge", "eval/model_eval"]
+must_include = ["data_prep/sft_packing", "sft/megatron_bridge", "eval/model_eval"]
 may_include = []
 must_exclude = ["sft/automodel"]
 
@@ -25,5 +25,5 @@ no_relative_data_paths = true
 [expected.iteration]
 followup = "Add RL with GRPO after SFT."
 must_add_stage = "03_rl"
-must_have_step = "rl/nemo_rl_grpo"
+must_have_step = "rl/nemo_rl/rlvr"
 must_mention = ["GRPO", "checkpoint_megatron"]

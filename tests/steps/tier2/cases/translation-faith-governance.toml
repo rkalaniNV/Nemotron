@@ -9,7 +9,7 @@ request = "Translate this tool-calling chat dataset to German and include FAITH 
 [expected.steps]
 must_include = ["translate/translation"]
 may_include = []
-must_exclude = ["curate/nemo_curator", "prep/sft_packing", "sft/megatron_bridge", "sft/automodel"]
+must_exclude = ["curate/nemo_curator", "data_prep/sft_packing", "sft/megatron_bridge", "sft/automodel"]
 
 [expected.plan]
 has_mermaid_diagram = true

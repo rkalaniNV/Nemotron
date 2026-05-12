@@ -7,7 +7,7 @@ triggers:
   - "You are mixing translated/synthetic data with curated human-written data."
   - "Sovereign / regional SFT data is being blended with broader open-source instruction sets."
   - "After SFT the model loses one capability while gaining another."
-steps: [prep/sft_packing, sft/automodel, sft/megatron_bridge, peft/automodel, peft/megatron_bridge]
+steps: [data_prep/sft_packing, sft/automodel, sft/megatron_bridge, peft/automodel, peft/megatron_bridge]
 confidence: high
 ---
 
@@ -17,7 +17,7 @@ Apply this whenever SFT data comes from more than one source. Sovereign customiz
 
 This pattern matters most when capabilities trade against each other: a mostly-English instruction set will pull a target-language model back toward English; a tool-call-heavy blend can degrade chat fluency; a reasoning-heavy blend can hurt brevity on conversational tasks.
 
-Apply it before `prep/sft_packing`. The blend ratios decide what goes into the packed Parquet; reshuffling after packing means repacking.
+Apply it before `data_prep/sft_packing`. The blend ratios decide what goes into the packed Parquet; reshuffling after packing means repacking.
 
 ## What to do
 
@@ -31,7 +31,7 @@ Apply it before `prep/sft_packing`. The blend ratios decide what goes into the p
 
 **Keep capability slices balanced.** If reasoning, tool use, and chat each need to work, each capability should have enough rows to register against the blend. A 5K-row reasoning slice in a 500K-row corpus is a rounding error.
 
-**Translate, don't paraphrase, when localizing.** When mixing translated open-source data with target-language native data, run `translate/nemo_skills` with FAITH scoring (see the step's strategies) and keep faith ≥ 0.7. Low-faith translations dilute the language signal.
+**Translate, don't paraphrase, when localizing.** When mixing translated open-source data with target-language native data, run `translate/translation` with FAITH scoring (see the step's strategies) and keep faith ≥ 0.7. Low-faith translations dilute the language signal.
 
 **Validate the blend before packing.** Sample 100 rows proportional to the planned blend and inspect. If the sample doesn't look like what you want the model to do, the full blend won't either.
 

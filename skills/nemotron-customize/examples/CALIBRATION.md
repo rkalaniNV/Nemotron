@@ -16,7 +16,7 @@ A: Two options for Nano3 SFT:
 | | Megatron-Bridge | AutoModel |
 |---|---|---|
 | Min GPUs | 8 H100 | 4 |
-| Data format | Packed Parquet (needs prep step) | JSONL directly |
+| Data format | Packed Parquet (needs data_prep step) | JSONL directly |
 | LoRA support | Config flag | Built-in |
 
 Which fits your setup? And how many GPUs do you have?
@@ -24,7 +24,7 @@ Which fits your setup? And how many GPUs do you have?
 user: I have 8 H100s, let's use Megatron-Bridge
 
 A: Got it. I'll build a 3-stage pipeline:
-1. prep/sft_packing → pack your JSONL to Parquet
+1. data_prep/sft_packing → pack your JSONL to Parquet
 2. sft/megatron_bridge → Nano3 SFT (tp=4, pp=1, cp=2)
 3. eval/model_eval → benchmark the result
 
@@ -50,14 +50,14 @@ Here's the plan:
 ## Stages
 1. curate/nemo_curator   → filtered_jsonl
 2. translate/translation → translated_jsonl
-3. prep/sft_packing      → packed_parquet
+3. data_prep/sft_packing → packed_parquet
 4. sft/megatron_bridge   → checkpoint_megatron
-5. rl/nemo_rl_grpo       → checkpoint_megatron (RL-tuned)
+5. rl/nemo_rl/rlvr       → checkpoint_megatron (RL-tuned)
 6. eval/model_eval       → eval_results
 
 ## Validation
 ✓ All artifact types chain
-✓ Tokenizer consistent (Nano3 across prep + SFT + RL)
+✓ Tokenizer consistent (Nano3 across data_prep + SFT + RL)
 ⚠ RL needs 16+ GPUs (2 nodes) — do you have that?
 ⚠ translate needs an LLM endpoint (NIM or vLLM) — do you have one?
 

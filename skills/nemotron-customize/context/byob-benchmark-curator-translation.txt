@@ -60,8 +60,7 @@ Final MCQ parquet columns must remain:
 ## Translation Flow
 
 BYOB translation uses Curator experimental translation as the only text translation engine. Import
-translation stages from `nemo_curator.stages.text.experimental.translation`; do not use the old
-`nemo_curator.stages.text.translation` namespace.
+translation stages from `nemo_curator.stages.text.experimental.translation`.
 
 Preserve this division of responsibility:
 

@@ -1,13 +1,13 @@
 [case]
 name = "type-mismatch-no-prep"
-description = "The agent should catch direct JSONL -> Megatron-Bridge incompatibility and insert prep/sft_packing."
-tags = ["verify", "type-mismatch", "prep", "megatron-bridge"]
+description = "The agent should catch direct JSONL -> Megatron-Bridge incompatibility and insert data_prep/sft_packing."
+tags = ["verify", "type-mismatch", "data_prep", "megatron-bridge"]
 
 [input]
 request = "Take my chat-format JSONL and feed it directly into Megatron-Bridge SFT with no packing step."
 
 [expected.steps]
-must_include = ["prep/sft_packing", "sft/megatron_bridge"]
+must_include = ["data_prep/sft_packing", "sft/megatron_bridge"]
 may_include = ["eval/model_eval"]
 must_exclude = ["sft/automodel"]
 
@@ -23,5 +23,5 @@ must_have_tiny_config = true
 no_relative_data_paths = true
 
 [expected.disclosure]
-must_read = ["STEPS.md", "prep/guide.md", "sft/guide.md"]
+must_read = ["STEPS.md", "data_prep/guide.md", "sft/guide.md"]
 must_not_read = []

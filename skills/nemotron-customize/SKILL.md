@@ -296,10 +296,10 @@ or library APIs from memory. Mirror what the in-repo code does:
 - [steps/_runners/automodel.py](../../src/nemotron/steps/_runners/automodel.py) — used by AutoModel steps.
 - [steps/_runners/nemo_rl.py](../../src/nemotron/steps/_runners/nemo_rl.py) — used by all NeMo-RL alignment steps.
 
-For steps without a context pack (`sft/megatron_bridge`,
-`curate/nemo_curator`, `translate/nemo_skills`), combine:
-per-step `SKILL.md` + `step.toml [[strategies]]` + `step.py` + existing configs
-and URLs in `[reference]`. That's enough.
+For steps without a context pack (`sft/megatron_bridge`, `eval/model_eval`,
+`curate/nemo_curator`, `translate/translation`, `convert/*`), the agent
+combines: per-step `SKILL.md` + `step.toml [[strategies]]` + `step.py` + the
+URLs in `[reference]`. That's enough.
 
 ---
 

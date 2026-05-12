@@ -23,7 +23,7 @@ tags = ["pretrain", "cpt", "megatron", "distributed-training"]
 
 [[consumes]]
 type = "binidx"
-description = "Megatron bin/idx tokenized text shards with blend.json (from prep/pretrain_prep)."
+description = "Megatron bin/idx tokenized text shards with blend.json (from data_prep/pretrain_prep)."
 required = true
 
 [[consumes]]
@@ -57,7 +57,7 @@ then = "Lower LR (1e-5 - 5e-5) and shorter warmup; keep load_hf_weights=true."
 
 [[errors]]
 name = "missing_blend_json"
-recovery = "Run prep/pretrain_prep and point dataset.data_paths at the produced blend.json."
+recovery = "Run data_prep/pretrain_prep and point dataset.data_paths at the produced blend.json."
 
 [reference]
 repo = "https://github.com/NVIDIA-NeMo/Megatron-Bridge"
