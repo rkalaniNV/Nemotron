@@ -67,7 +67,9 @@ export HF_TOKEN="${HF_TOKEN:-}"
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 ```
 
-### Install And CLI Discovery
+### SETUP-001 Install Base Environment And Discover CLI
+
+Prerequisites: `uv` is available and commands are run from the repo root.
 
 ```bash
 uv sync
@@ -80,7 +82,17 @@ uv run nemotron data --help
 uv run nemotron byob --help
 ```
 
-Optional workflow dependency installs:
+Success criteria:
+
+- `uv sync` exits 0.
+- All listed help and discovery commands exit 0.
+- Help output is captured for `nemotron`, `nemotron steps`, `nemotron data`, and `nemotron byob`.
+
+Evidence to collect: command logs, CLI help snippets, and final exit status.
+
+### SETUP-002 Install Optional Workflow Extras
+
+Prerequisites: Network access to package indexes and Git dependencies.
 
 ```bash
 uv sync --extra translation
@@ -88,7 +100,16 @@ uv sync --extra byob
 uv sync --group run
 ```
 
-### Step Metadata Snapshot
+Success criteria:
+
+- Translation, BYOB, and run dependencies install successfully.
+- If package indexes or Git dependencies are unavailable, this test is marked `BLOCKED` with the exact failed dependency or network error.
+
+Evidence to collect: install logs and final exit status.
+
+### SETUP-003 Snapshot Step Metadata
+
+Prerequisites: Base environment from `SETUP-001`.
 
 ```bash
 for STEP in \
@@ -117,16 +138,18 @@ do
 done
 ```
 
-Expected result:
+Success criteria:
 
 - Every command exits successfully.
 - Metadata files are valid JSON.
 - Step IDs match the paths shown in the command.
 - No command requires a model credential just to show metadata.
 
+Evidence to collect: metadata JSON files under `$QA_ROOT/metadata` and command logs.
+
 ## Translation
 
-### Test Data
+### Test Data Setup
 
 ```bash
 export TR_ROOT="$QA_ROOT/translation"
@@ -165,7 +188,9 @@ cp "$TR_ROOT/news_en/shard_0001.jsonl" "$TR_ROOT/mixed_dir/shard_0001.jsonl"
 cp "$TR_ROOT/news_en.parquet" "$TR_ROOT/mixed_dir/shard_0002.parquet"
 ```
 
-### Discovery And Dry Run
+### TR-001 Discover Translation Step And Run Dry-Run
+
+Prerequisites: Translation extra installed with `uv sync --extra translation`; test data from `Test Data Setup`.
 
 ```bash
 uv run nemotron steps show translate/translation
@@ -187,13 +212,18 @@ uv run --extra translation nemotron steps translation \
   server.api_key_env=NVIDIA_API_KEY
 ```
 
-Expected result:
+Success criteria:
 
 - Dry run prints resolved YAML.
 - `source_language` and `target_language` are explicit.
 - No output directory is created by dry run.
+- `TranslationStage` imports from `nemo_curator.stages.text.experimental.translation`.
 
-### LLM Translation
+Evidence to collect: CLI logs, resolved config, import output, and absence of output files in `$TR_ROOT/dry`.
+
+### TR-002 Translate JSONL Text Records With Hosted LLM
+
+Prerequisites: `NVIDIA_API_KEY` or configured hosted LLM credential; live `TRANSLATION_MODEL`.
 
 ```bash
 : "${NVIDIA_API_KEY:?Set NVIDIA_API_KEY for hosted LLM translation}"
@@ -232,13 +262,19 @@ print({"files": len(files), "rows": len(rows), "sample": rows[0]})
 PY
 ```
 
-Expected result:
+Success criteria:
 
+- Command exits 0.
 - Output JSONL shards exist.
 - Row count matches input when FAITH filtering is disabled.
 - Translated text is present.
+- Logs do not print API keys.
 
-### Structured Chat Translation
+Evidence to collect: output JSONL files, row-count validation output, sampled row, and redacted logs.
+
+### TR-003 Translate Structured Chat Records
+
+Prerequisites: Hosted LLM backend available; chat test data from `Test Data Setup`.
 
 ```bash
 uv run --extra translation nemotron steps translation \
@@ -279,13 +315,19 @@ print({"rows": len(rows), "tool_json_ok": True})
 PY
 ```
 
-Expected result:
+Success criteria:
 
+- Command exits 0.
 - Tool-call JSON remains parseable.
 - Code fences are not corrupted.
 - Natural-language message content is translated or accompanied by translated output fields depending on `output_mode`.
+- Output rows exist and preserve the expected chat structure.
 
-### FAITH Annotation
+Evidence to collect: output JSONL, JSON parse validation output, sampled translated row, and redacted logs.
+
+### TR-004 Run FAITH Annotation Without Filtering Rows
+
+Prerequisites: Hosted LLM backend available for `FAITH_MODEL`.
 
 ```bash
 uv run --extra translation nemotron steps translation \
@@ -305,13 +347,18 @@ uv run --extra translation nemotron steps translation \
   server.api_key_env=NVIDIA_API_KEY
 ```
 
-Expected result:
+Success criteria:
 
+- Command exits 0.
 - Output rows are retained.
 - FAITH score metadata is present.
 - Logs do not print API keys.
 
-### NMT Translation
+Evidence to collect: output files, score-field inspection, row count, and redacted logs.
+
+### TR-005 Translate With NMT Backend
+
+Prerequisites: Reachable `NMT_SERVER_URL` implementing the expected translation endpoint.
 
 ```bash
 : "${NMT_SERVER_URL:?Set NMT_SERVER_URL to an NMT service endpoint}"
@@ -329,12 +376,17 @@ uv run --extra translation nemotron steps translation \
   faith_eval.enabled=false
 ```
 
-Expected result:
+Success criteria:
 
 - Translation succeeds without an LLM API key.
 - Backend traffic goes to the configured NMT server.
+- Output rows exist and are readable.
 
-### Parquet Translation
+Evidence to collect: command logs, output files, sampled rows, and service logs if available.
+
+### TR-006 Translate Parquet Input And Write Parquet Output
+
+Prerequisites: Hosted LLM backend available; `pandas` and `pyarrow` available.
 
 ```bash
 uv run --extra translation nemotron steps translation \
@@ -365,12 +417,17 @@ print(df.head().to_dict(orient="records"))
 PY
 ```
 
-Expected result:
+Success criteria:
 
+- Command exits 0.
 - Parquet output is readable.
 - Row count is preserved when filtering is disabled.
 
-### Resume And Negative Cases
+Evidence to collect: Parquet validation output, sampled rows, and redacted logs.
+
+### TR-007 Resume Or Skip Already Translated Records
+
+Prerequisites: Prior translated output from `TR-002` or equivalent.
 
 ```bash
 uv run --extra translation nemotron steps translation \
@@ -388,6 +445,18 @@ uv run --extra translation nemotron steps translation \
   server.model="$TRANSLATION_MODEL" \
   server.api_key_env=NVIDIA_API_KEY
 ```
+
+Success criteria:
+
+- Command exits 0.
+- Records already containing the configured translation column are not retranslated where supported by the schema.
+- Output remains readable.
+
+Evidence to collect: resume command logs and output sample.
+
+### TR-008 Reject Mixed JSONL And Parquet Input Directory
+
+Prerequisites: Mixed-format test directory from `Test Data Setup`.
 
 ```bash
 if uv run --extra translation nemotron steps translation \
@@ -408,12 +477,16 @@ else
 fi
 ```
 
-Expected result:
+Success criteria:
 
-- Resume run skips already translated rows where supported by the output schema.
 - Mixed JSONL/Parquet input fails with a clear format error.
+- The command does not report misleading partial success.
 
-### Translation Agent Prompt
+Evidence to collect: failure log, exit status, and error message.
+
+### TR-009 Agent-Driven Translation Workflow
+
+Prerequisites: Agent environment available; chat test data from `Test Data Setup`; hosted LLM credential if running for real.
 
 Ask the agent:
 
@@ -421,7 +494,7 @@ Ask the agent:
 Translate /tmp/nemotron-qa-<run-id>/translation/chat_code_en.jsonl from English to Hindi using the Nemotron translation step. Preserve tool-call JSON, do not filter rows, and show me the exact command before running it.
 ```
 
-Expected agent behavior:
+Success criteria:
 
 - Uses `nemotron steps translation` for local execution.
 - Uses `text_field='messages.*.content'`.
@@ -429,9 +502,11 @@ Expected agent behavior:
 - Keeps credentials in environment variables.
 - Validates output JSON and row count.
 
+Evidence to collect: agent transcript, generated command, validation output, and output artifact paths.
+
 ## BYOB
 
-### Test Data And Configs
+### Test Data And Config Setup
 
 ```bash
 export BYOB_ROOT="$QA_ROOT/byob"
@@ -541,7 +616,9 @@ print(cfg_path)
 PY
 ```
 
-### Discovery
+### BYOB-001 Discover BYOB CLI And Validator
+
+Prerequisites: BYOB extra installed with `uv sync --extra byob`.
 
 ```bash
 uv run --extra byob nemotron byob --help
@@ -549,12 +626,17 @@ uv run --extra byob nemotron byob --list-families
 uv run python src/nemotron/steps/byob/scripts/validate.py --help
 ```
 
-Expected result:
+Success criteria:
 
 - `mcq` is listed as a family.
 - Help output shows `prepare`, `generate`, `translate`, and `all`.
+- Validator help exits 0.
 
-### BYOB All-Stage Generate
+Evidence to collect: CLI logs and family list output.
+
+### BYOB-002 Generate MCQ Benchmark With `--stage all`
+
+Prerequisites: `NGC_API_KEY` or `NVIDIA_API_KEY`; live generation and judge model; copied BYOB config from setup.
 
 ```bash
 : "${NGC_API_KEY:?Set NGC_API_KEY or NVIDIA_API_KEY for BYOB generation}"
@@ -586,11 +668,15 @@ print({"path": str(benchmarks[-1]), "rows": len(df), "columns": list(df.columns)
 PY
 ```
 
-Expected result:
+Success criteria:
 
+- Command exits 0.
 - `all` runs prepare followed by generate.
 - Seed, raw benchmark, and final benchmark artifacts are written.
 - Final benchmark schema contains MCQ fields.
+- Final `benchmark.parquet` has at least one row.
+
+Evidence to collect: artifact listing, Parquet schema validation, row count, and sampled benchmark row.
 
 Optional stage-by-stage commands for isolating failures:
 
@@ -606,7 +692,9 @@ uv run --extra byob nemotron byob \
   --config "$BYOB_ROOT/config/byob_mcq.yaml"
 ```
 
-### BYOB Resume
+### BYOB-003 Resume BYOB Generation From A Named Stage
+
+Prerequisites: Outputs from `BYOB-002` or compatible stage cache.
 
 ```bash
 uv run --extra byob nemotron byob \
@@ -616,12 +704,17 @@ uv run --extra byob nemotron byob \
   --config "$BYOB_ROOT/config/byob_mcq.yaml"
 ```
 
-Expected result:
+Success criteria:
 
 - Earlier cached stages are reused.
 - Later stages regenerate or validate without corrupting final schema.
+- If resume is invalid for the current cache, failure clearly states why.
 
-### BYOB Translation
+Evidence to collect: resume logs and artifact timestamps or paths.
+
+### BYOB-004 Translate BYOB Benchmark
+
+Prerequisites: BYOB translation config; hosted translation credential; benchmark parquet exists.
 
 ```bash
 : "${NGC_API_KEY:?Set NGC_API_KEY or NVIDIA_API_KEY for BYOB translation}"
@@ -653,13 +746,18 @@ print({"path": str(benchmarks[-1]), "rows": len(df), "columns": list(df.columns)
 PY
 ```
 
-Expected result:
+Success criteria:
 
+- Command exits 0.
 - Translated benchmark exists.
 - `question_id`, options, answer, and answer index remain structurally valid.
 - If `remove_low_quality=false`, row count should match the translation input.
 
-### BYOB Agent Prompt
+Evidence to collect: output Parquet schema, row count, sampled translated question/options, and redacted logs.
+
+### BYOB-005 Agent-Driven BYOB Workflow
+
+Prerequisites: Agent environment available; BYOB test data and credentials if running real generation.
 
 Ask the agent:
 
@@ -667,16 +765,18 @@ Ask the agent:
 Use BYOB to create a tiny MCQ benchmark from /tmp/nemotron-qa-<run-id>/byob/input and then translate the generated benchmark to Hindi. Use copied configs under /tmp/nemotron-qa-<run-id>/byob/config and do not edit repo configs.
 ```
 
-Expected agent behavior:
+Success criteria:
 
 - Uses `nemotron byob --family mcq --stage all` for prepare+generate, or explicitly explains why it is running `prepare` and `generate` separately.
 - Uses `nemotron byob --family mcq --stage translate`.
 - Patches config copies only.
 - Validates final Parquet schema.
 
+Evidence to collect: agent transcript, generated configs, command logs, validation output, and artifact paths.
+
 ## Training
 
-### Test Data
+### Test Data Setup
 
 ```bash
 export TRN_ROOT="$QA_ROOT/training"
@@ -698,7 +798,9 @@ cat > "$TRN_ROOT/data/preferences.jsonl" <<'EOF'
 EOF
 ```
 
-### Discovery And Dry Runs
+### TRAIN-001 Discover Training And Data-Prep Step Metadata
+
+Prerequisites: Base environment from `SETUP-001`; training test data setup completed.
 
 ```bash
 uv run nemotron steps list --json > "$TRN_ROOT/steps.json"
@@ -717,7 +819,21 @@ uv run nemotron steps show rl/nemo_rl/rlhf --json > "$TRN_ROOT/rl_rlhf.json"
 uv run nemotron steps show optimize/modelopt/quantize --json > "$TRN_ROOT/modelopt_quantize.json"
 uv run nemotron steps show optimize/modelopt/prune --json > "$TRN_ROOT/modelopt_prune.json"
 uv run nemotron steps show optimize/modelopt/distill --json > "$TRN_ROOT/modelopt_distill.json"
+```
 
+Success criteria:
+
+- All listed steps are discoverable.
+- All metadata files are valid JSON.
+- Requested step IDs match the emitted metadata.
+
+Evidence to collect: metadata JSON files and command logs.
+
+### TRAIN-002 Dry-Run Scoped Training And Data-Prep Steps
+
+Prerequisites: Base environment from `SETUP-001`; step configs present.
+
+```bash
 uv run nemotron steps run data_prep/sft_packing -c tiny --dry-run
 uv run nemotron steps run data_prep/pretrain_prep -c tiny --dry-run
 uv run nemotron steps run data_prep/rl_prep -c tiny --dry-run
@@ -735,13 +851,17 @@ uv run nemotron steps run optimize/modelopt/prune -c tiny --dry-run
 uv run nemotron steps run optimize/modelopt/distill -c tiny --dry-run
 ```
 
-Expected result:
+Success criteria:
 
-- All listed steps are discoverable.
 - Dry runs compile configs and show resolved resources.
 - No remote job is submitted during dry run.
+- Missing optional dependencies are reported clearly if a dry-run cannot compile.
 
-### Local Prep Smoke
+Evidence to collect: dry-run logs and resolved configs.
+
+### TRAIN-003 Run Local Data-Prep Smoke Commands
+
+Prerequisites: Tiny training test data; tokenizer access or a recorded tokenizer-access blocker.
 
 ```bash
 SFT_OUTPUT_DIR="$TRN_ROOT/output/sft_packing" \
@@ -761,12 +881,17 @@ find "$TRN_ROOT/output" -maxdepth 5 -type f | sort | tee "$TRN_ROOT/output_files
 test -s "$TRN_ROOT/output_files.txt"
 ```
 
-Expected result:
+Success criteria:
 
 - Prep outputs are written under `TRN_ROOT/output`.
 - Missing tokenizer, dataset, or package failures are clear and actionable.
+- Generated output file listing is non-empty when the run succeeds.
 
-### W&B Offline Dry Run
+Evidence to collect: output directories, generated files, row or file counts, and command logs.
+
+### TRAIN-004 Validate W&B Offline Dry-Run Behavior
+
+Prerequisites: W&B package installed.
 
 ```bash
 WANDB_MODE=offline \
@@ -774,12 +899,17 @@ SFT_OUTPUT_DIR="$TRN_ROOT/output/sft_automodel" \
   uv run nemotron steps run sft/automodel -c tiny --dry-run
 ```
 
-Expected result:
+Success criteria:
 
 - Dry-run output includes W&B offline settings where supported.
 - No API key is printed.
+- No online W&B login is required.
 
-### Training Agent Prompt
+Evidence to collect: dry-run logs showing offline mode and no credential leakage.
+
+### TRAIN-005 Agent-Driven Training Workflow
+
+Prerequisites: Agent environment available; tiny training data.
 
 Ask the agent:
 
@@ -787,16 +917,20 @@ Ask the agent:
 Prepare a tiny SFT workflow for /tmp/nemotron-qa-<run-id>/training/data/sft_chat.jsonl. Show the prep step, the AutoModel SFT option, and the Megatron-Bridge option. Do not run full training unless I provide a GPU executor.
 ```
 
-Expected agent behavior:
+Success criteria:
 
 - Uses `data_prep/sft_packing` before Megatron-Bridge SFT/PEFT.
 - Does not add `data_prep/sft_packing` before AutoModel unless the chosen step requires packed data.
 - Uses tiny or dry-run first.
 - Explains what requires GPU or remote executor.
 
+Evidence to collect: agent transcript, generated command plan, and dry-run logs.
+
 ## SDG
 
-### Test Data And Config
+### SDG-001 Create SDG Test Data And Config Copy
+
+Prerequisites: Base environment from `SETUP-001`.
 
 ```bash
 export SDG_ROOT="$QA_ROOT/sdg"
@@ -838,7 +972,17 @@ print(cfg_path)
 PY
 ```
 
-### Discovery And Run
+Success criteria:
+
+- Test seed data is created under `$QA_ROOT`.
+- SDG config is copied under `$QA_ROOT` and patched there.
+- Checked-in configs are not modified.
+
+Evidence to collect: config path, test data path, and copied config contents.
+
+### SDG-002 Discover And Run SDG Workflow
+
+Prerequisites: `data-sdg` dependencies; hosted model credential if running real generation.
 
 ```bash
 uv run nemotron steps list --category sdg --json
@@ -870,13 +1014,17 @@ print({"rows": len(rows), "sample": rows[0]})
 PY
 ```
 
-Expected result:
+Success criteria:
 
 - Dry run compiles without model calls.
 - Real run writes OpenAI-style `messages`.
 - Invalid endpoint/key failures identify the missing credential or service.
 
-### SDG Agent Prompt
+Evidence to collect: CLI logs, generated JSONL path, row count, and sampled output row.
+
+### SDG-003 Agent-Driven SDG Workflow
+
+Prerequisites: Agent environment available; SDG task requirements.
 
 Ask the agent:
 
@@ -884,16 +1032,20 @@ Ask the agent:
 Generate five synthetic SFT chat examples about budgeting and diversification using sdg/data_designer. Use a copied config under /tmp/nemotron-qa-<run-id>/sdg/config and validate that the output is JSONL with messages.
 ```
 
-Expected agent behavior:
+Success criteria:
 
 - Uses `sdg/data_designer`.
 - Copies and patches config instead of editing repo files.
 - Runs dry-run before real generation.
 - Validates output JSONL schema.
 
+Evidence to collect: agent transcript, generated config, logs, and artifacts.
+
 ## Airgap
 
-### Plan Commands
+### AIR-001 Generate Airgap Plan
+
+Prerequisites: Airgap runner config available; Docker is not required for plan-only mode.
 
 Airgap plan mode is the default. Do not pass `--execute` unless QA is intentionally building and saving images.
 
@@ -903,6 +1055,21 @@ mkdir -p "$AIRGAP_ROOT"
 
 uv run python deploy/nemotron-customizer/airgap/runner.py \
   --config deploy/nemotron-customizer/airgap/airgap.yaml
+```
+
+Success criteria:
+
+- Plan command exits 0.
+- Generated plan includes scoped targets and required dependency categories.
+- No image build starts in plan-only mode.
+
+Evidence to collect: plan output and target list.
+
+### AIR-002 Validate Selected Airgap Targets
+
+Prerequisites: Required local tooling and images for validation, or a recorded blocker.
+
+```bash
 
 uv run python deploy/nemotron-customizer/airgap/runner.py \
   --config deploy/nemotron-customizer/airgap/airgap.yaml \
@@ -944,14 +1111,19 @@ uv run python deploy/nemotron-customizer/airgap/runner.py \
   --target sft/megatron_bridge:tiny
 ```
 
-Expected result:
+Success criteria:
 
 - Plan mode validates selected targets without building images.
 - Selected targets and dependencies are printed.
 - Models, datasets, checkpoints, and customer files remain external to images.
 - Execute mode writes outputs under `deploy/nemotron-customizer/airgap/out/` if Docker and registry access are available.
+- Missing image, Docker, registry, or site tooling is recorded as `BLOCKED` with the exact missing prerequisite.
 
-### Airgap Agent Prompt
+Evidence to collect: validation logs, dependency plan output, and generated bundle or metadata paths when execute mode is used.
+
+### AIR-003 Agent-Driven Airgap Workflow
+
+Prerequisites: Agent environment available; target list from user.
 
 Ask the agent:
 
@@ -959,16 +1131,20 @@ Ask the agent:
 Create an airgap plan for SDG plus Megatron-Bridge SFT. Validate the plan only; do not build images. Explain which assets remain outside the images.
 ```
 
-Expected agent behavior:
+Success criteria:
 
 - Uses `deploy/nemotron-customizer/airgap/runner.py`.
 - Omits `--execute` for plan-only validation.
 - Selects scoped targets.
 - States that models, datasets, checkpoints, and customer data remain on persistent storage.
 
+Evidence to collect: agent transcript, plan output, validation logs, and selected target list.
+
 ## Lepton Testing
 
-### Generate Lepton Env File
+### LEP-001 Generate Lepton Env File
+
+Prerequisites: Lepton env profile config available.
 
 ```bash
 export LEPTON_ROOT="$QA_ROOT/lepton"
@@ -982,12 +1158,18 @@ uv run nemotron steps run env/env_toml \
 export NEMOTRON_ENV_FILE="$LEPTON_ROOT/env.lepton.toml"
 ```
 
-Expected result:
+Success criteria:
 
 - `env.lepton.toml` is generated.
 - QA reviews and edits workspace, node group, mounts, shapes, and secret passthrough before submitting jobs.
+- Generated profiles include `lepton_translate`.
+- Secrets are not written in plain text unless explicitly intended by the profile.
 
-### Lepton Dry Runs
+Evidence to collect: generated env file path and redacted content sample.
+
+### LEP-002 Run Lepton Dry-Runs For Scoped Steps
+
+Prerequisites: Env file from `LEP-001`; no real Lepton submission required.
 
 ```bash
 uv run nemotron steps run translate/translation \
@@ -1029,7 +1211,17 @@ uv run nemotron steps run optimize/modelopt/quantize \
   --batch lepton_optimize_modelopt_quantize
 ```
 
-### Lepton Real Smoke Commands
+Success criteria:
+
+- Dry-runs compile against batch profiles.
+- Rendered commands reference shared storage paths where required.
+- No real Lepton job is submitted during dry-run.
+
+Evidence to collect: dry-run logs and rendered executor config.
+
+### LEP-003 Run Real Lepton Smoke Commands
+
+Prerequisites: Lepton workspace, quota, credentials, images, shared storage, and reviewed env file.
 
 Run only after the env file has valid site-specific values:
 
@@ -1053,13 +1245,17 @@ uv run nemotron steps run translate/translation \
   server.api_key_env=NVIDIA_API_KEY
 ```
 
-Expected result:
+Success criteria:
 
-- Dry runs compile against batch profiles.
 - Real runs return Lepton job IDs or complete locally depending on executor behavior.
 - Remote logs show mounted paths and do not print secrets.
+- If Lepton workspace, quota, credentials, images, or shared storage are unavailable, mark the specific run `BLOCKED`.
 
-### Lepton Agent Prompt
+Evidence to collect: Lepton job IDs, logs, output artifacts, and redacted secret evidence.
+
+### LEP-004 Agent-Driven Lepton Workflow
+
+Prerequisites: Agent environment available; generated and reviewed `env.lepton.toml`.
 
 Ask the agent:
 
@@ -1067,16 +1263,20 @@ Ask the agent:
 Convert this local translation validation into a Lepton run using the generated env.lepton.toml. Use the generic steps runner, not the local translation shortcut.
 ```
 
-Expected agent behavior:
+Success criteria:
 
 - Uses `nemotron steps run translate/translation`.
 - Uses `--batch lepton_translate`.
 - Keeps input/output under shared storage.
 - Does not use `nemotron steps translation` for Lepton.
 
+Evidence to collect: agent transcript, generated commands, dry-run logs or job logs.
+
 ## Evaluation
 
-### Test Data
+### EVAL-001 Create Evaluation Test Data
+
+Prerequisites: Base environment from `SETUP-001`.
 
 ```bash
 export EVAL_ROOT="$QA_ROOT/eval"
@@ -1088,7 +1288,16 @@ cat > "$EVAL_ROOT/results/synthetic_results.jsonl" <<'EOF'
 EOF
 ```
 
-### Discovery And Dry Run
+Success criteria:
+
+- Test data files are created under `$QA_ROOT`.
+- Checked-in files are not modified.
+
+Evidence to collect: test data paths and file samples.
+
+### EVAL-002 Discover And Dry-Run Model Evaluation
+
+Prerequisites: Eval step config present.
 
 ```bash
 uv run nemotron steps list --category eval --json
@@ -1105,13 +1314,17 @@ uv run nemotron steps run eval/model_eval \
   params.extra.tokenizer="$EVAL_TOKENIZER"
 ```
 
-Expected result:
+Success criteria:
 
 - Eval step is discoverable.
 - Dry run resolves endpoint/model/tokenizer parameters.
 - No endpoint call is made during dry run.
 
-### Hosted Eval Smoke
+Evidence to collect: dry-run logs and resolved config.
+
+### EVAL-003 Run Hosted Eval Smoke
+
+Prerequisites: Reachable evaluation endpoint and tokenizer/model identifiers.
 
 ```bash
 : "${NVIDIA_API_KEY:?Set NVIDIA_API_KEY for hosted eval}"
@@ -1135,13 +1348,17 @@ Validate output:
 find "$EVAL_ROOT/results-tiny" -maxdepth 5 -type f | sort
 ```
 
-Expected result:
+Success criteria:
 
 - One-sample eval runs or fails with a clear endpoint/tokenizer/credential error.
 - Result files are written under `EVAL_ROOT/results-tiny` when successful.
 - Secrets are not printed in logs.
 
-### Evaluation Agent Prompt
+Evidence to collect: result files, summary logs, endpoint metadata, and redacted logs.
+
+### EVAL-004 Agent-Driven Evaluation Workflow
+
+Prerequisites: Agent environment available; endpoint details from user.
 
 Ask the agent:
 
@@ -1149,12 +1366,14 @@ Ask the agent:
 Set up a one-sample hosted evaluation smoke run for my model endpoint. Ask me for any missing endpoint, model ID, tokenizer path, or API key environment variable before running.
 ```
 
-Expected agent behavior:
+Success criteria:
 
 - Uses `eval/model_eval`.
 - Runs dry-run first.
 - Asks for missing endpoint/model/tokenizer/key instead of inventing values.
 - Validates output artifact paths after the real run.
+
+Evidence to collect: agent transcript, generated command, and result summary.
 
 ## Reporting
 
