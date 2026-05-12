@@ -15,7 +15,7 @@
 # RL data prep — resolve HF references and shard. HF-dataset compatible via the blend.
 
 blend_path: /path/to/rl_blend.json
-output_dir: /nemo_run/rl-prep
+output_dir: /nemo_run/data_prep/rl_prep
 num_shards_per_split: 1
 compression: none
 resolve_hf_placeholders: true

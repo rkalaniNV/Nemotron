@@ -63,7 +63,7 @@ policy:
         num_nodes: 1
 
 data:
-  manifest_path: ${oc.env:RL_PREP_MANIFEST,/mnt/lustre-shared/output/functional/prep/rl/tiny/manifest.json}
+  manifest_path: ${oc.env:RL_PREP_MANIFEST,/mnt/lustre-shared/output/functional/data_prep/rl_prep/tiny/manifest.json}
   allow_train_as_validation: true
 
 env:

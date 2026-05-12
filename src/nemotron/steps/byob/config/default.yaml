@@ -48,6 +48,9 @@ generation_model_config: &generator
         low: 0.9
         high: 1.0
     top_p: 1.0
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
 
 judge_model_config: *generator
 

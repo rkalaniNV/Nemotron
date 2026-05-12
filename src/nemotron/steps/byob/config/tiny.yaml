@@ -6,6 +6,7 @@ run:
 expt_name: byob_mcq_tiny
 random_seed: 7
 ndd_batch_size: 2
+stage: all
 
 split: test
 subset: all
@@ -38,20 +39,23 @@ generation_model_config: &tiny_model
     max_parallel_requests: 1
     temperature: 0.0
     top_p: 1.0
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
 
 judge_model_config: *tiny_model
 
 semantic_deduplication_config:
-  enabled: false
+  enabled: true
   model_identifier: sentence-transformers/all-MiniLM-L6-v2
   n_clusters: 1
   eps: 0.07
   remove_duplicates: false
 
-do_distractor_expansion: false
+do_distractor_expansion: true
 distractor_expansion_model_config: *tiny_model
 
-do_coverage_check: false
+do_coverage_check: true
 coverage_check_config:
   model_identifier: null
   window_size: null
@@ -59,7 +63,7 @@ coverage_check_config:
 distractor_validity_model_config: *tiny_model
 
 semantic_outlier_detection_config:
-  enabled: false
+  enabled: true
   model_identifier: sentence-transformers/all-MiniLM-L6-v2
   n_neighbours_min: 1
   remove_outliers: false

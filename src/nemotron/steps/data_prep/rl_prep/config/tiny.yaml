@@ -15,7 +15,7 @@
 defaults: default.yaml
 
 blend_path: ${oc.env:PWD}/src/nemotron/steps/data_prep/rl_prep/data/blend_tiny.json
-output_dir: ${oc.env:RL_OUTPUT_DIR,./output/rl-prep-tiny}
+output_dir: ${oc.env:RL_OUTPUT_DIR,./output/data_prep/rl_prep/tiny}
 num_shards_per_split: 1
 sample: 64
 force: false

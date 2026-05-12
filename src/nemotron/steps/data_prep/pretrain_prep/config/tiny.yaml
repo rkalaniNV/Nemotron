@@ -18,11 +18,11 @@
 #
 # Usage:
 #   nemotron steps run data_prep/pretrain_prep -c tiny                          # local
-#   nemotron steps run data_prep/pretrain_prep -c tiny -r lepton_pretrain_dataprep
-#   nemotron steps run data_prep/pretrain_prep -c tiny -r slurm_pretrain_dataprep
+#   nemotron steps run data_prep/pretrain_prep -c tiny -r lepton_prep_pretrain_prep
+#   nemotron steps run data_prep/pretrain_prep -c tiny -r slurm_prep_pretrain_prep
 
 # blend_path is omitted on purpose — step.py defaults to data/blend_tiny.json.
-output_dir: ${oc.env:PRETRAIN_OUTPUT_DIR,./output/pretrain_dataprep_tiny}
+output_dir: ${oc.env:PRETRAIN_OUTPUT_DIR,./output/data_prep/pretrain_prep/tiny}
 
 num_shards: 4
 valid_shards: 1

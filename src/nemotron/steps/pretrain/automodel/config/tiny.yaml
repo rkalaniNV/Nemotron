@@ -31,14 +31,14 @@ checkpoint:
   checkpoint_dir: ${oc.env:PRETRAIN_OUTPUT_DIR,./output/pretrain-automodel-tiny}/checkpoints
 
 dataset:
-  paths: ${oc.env:PRETRAIN_BLEND_PATH,/mnt/lustre-shared/output/functional/prep/pretrain_idxbin/tiny/blend.json}
+  paths: ${oc.env:PRETRAIN_BLEND_PATH,/mnt/lustre-shared/output/functional/data_prep/pretrain_prep/tiny/blend.json}
   index_mapping_dir: ${oc.env:PRETRAIN_OUTPUT_DIR,./output/pretrain-automodel-tiny}/index_mapping/train
   seq_length: 1024
   num_train_samples: 128
   trainer_max_steps: 5
 
 validation_dataset:
-  paths: ${oc.env:PRETRAIN_BLEND_PATH,/mnt/lustre-shared/output/functional/prep/pretrain_idxbin/tiny/blend.json}
+  paths: ${oc.env:PRETRAIN_BLEND_PATH,/mnt/lustre-shared/output/functional/data_prep/pretrain_prep/tiny/blend.json}
   index_mapping_dir: ${oc.env:PRETRAIN_OUTPUT_DIR,./output/pretrain-automodel-tiny}/index_mapping/validation
   seq_length: 1024
   num_val_samples: 16

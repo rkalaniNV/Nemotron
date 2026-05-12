@@ -22,6 +22,9 @@ translation_model_config:
       max_parallel_requests: 8
       temperature: 0.0
       top_p: 0.95
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
   stage:
     segmentation_mode: coarse
     min_segment_chars: 0

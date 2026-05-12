@@ -18,13 +18,13 @@
 #
 # Usage:
 #   nemotron steps run data_prep/sft_packing -c tiny                          # local
-#   nemotron steps run data_prep/sft_packing -c tiny -r slurm_sft_dataprep_tiny
-#   nemotron steps run data_prep/sft_packing -c tiny -r test_lepton_sft_dataprep
+#   nemotron steps run data_prep/sft_packing -c tiny -r slurm_prep_sft_packing
+#   nemotron steps run data_prep/sft_packing -c tiny -r lepton_prep_sft_packing
 
 # blend_path is omitted on purpose — step.py defaults to the in-step
 # data/blend_tiny.json so the same config works under any source layout
 # (local, /nemo_run/code on slurm, /mnt/lustre-shared/_nemotron on lepton).
-output_dir: ${oc.env:SFT_OUTPUT_DIR,./output/stage1_sft_tiny}
+output_dir: ${oc.env:SFT_OUTPUT_DIR,./output/data_prep/sft_packing/tiny}
 
 tokenizer:
   model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
