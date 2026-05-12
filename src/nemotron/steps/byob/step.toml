@@ -33,7 +33,7 @@ choices = ["mcq"]
 name = "stage"
 description = "BYOB pipeline stage to run."
 default = "generate"
-choices = ["prepare", "generate", "translate"]
+choices = ["prepare", "generate", "translate", "all"]
 
 [[parameters]]
 name = "config"
@@ -45,7 +45,7 @@ description = "Optional resume stage enum name for cached generation or translat
 
 [[strategies]]
 when = "You need a domain-specific multiple-choice benchmark from user-provided documents"
-then = "Use family=mcq, run prepare before generate, and start from config/default.yaml or config/tiny.yaml for a smoke run. Curator semantic dedup uses RayDataExecutor, RayActorPoolExecutor, and package-level SemanticDeduplicationWorkflow."
+then = "Use family=mcq with stage=all, or run prepare before generate, and start from config/default.yaml or config/tiny.yaml for a smoke run. Curator semantic dedup uses RayDataExecutor, RayActorPoolExecutor, and package-level SemanticDeduplicationWorkflow."
 skill = "skills/nemotron-customize/context/byob-benchmark-curator-translation.txt"
 
 [[strategies]]

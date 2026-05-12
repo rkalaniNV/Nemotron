@@ -151,6 +151,8 @@ def _toml_value(value: Any) -> str:
     if isinstance(value, str):
         return json.dumps(value)
     if isinstance(value, list):
+        if not value:
+            return "[]"
         if all(isinstance(item, dict) for item in value):
             return "[\n" + ",\n".join(f"    {_inline_table(item)}" for item in value) + ",\n]"
         return "[" + ", ".join(_toml_value(item) for item in value) + "]"

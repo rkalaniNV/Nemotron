@@ -9,14 +9,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+import yaml
+
 from nemotron.steps.byob.runtime.benchmark_families.registry import get_family, list_families
 
-StageName = Literal["prepare", "generate", "translate"]
+STAGE_CHOICES = ("prepare", "generate", "translate", "all")
+StageName = Literal["prepare", "generate", "translate", "all"]
 
 
 def list_family_names() -> tuple[str, ...]:
     """Return the registered benchmark families."""
     return tuple(list_families())
+
+
+def load_dispatch_config(config_path: str | Path) -> dict:
+    """Parse the BYOB YAML config; returns ``{}`` for empty/non-mapping payloads."""
+    with Path(config_path).open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def resolve_dispatch_value(arg_value, yaml_dict: dict, yaml_key: str, default=None):
+    """Resolve CLI/YAML dispatch values without coupling to one CLI framework."""
+    return arg_value or yaml_dict.get(yaml_key, default)
 
 
 def run_byob(
@@ -30,6 +45,9 @@ def run_byob(
     spec = get_family(family)
     config_path = Path(config)
 
+    if stage == "all":
+        spec.prepare_data(config_path)
+        return spec.generate(config_path, skip_until=skip_until)
     if stage == "prepare":
         return spec.prepare_data(config_path)
     if stage == "generate":

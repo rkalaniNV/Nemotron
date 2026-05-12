@@ -1,6 +1,6 @@
 ---
 name: nemotron-env-toml
-description: Create, validate, and adjust Nemotron env.toml profiles for Lepton, Ray, NeMo-RL, NeMo-Gym, AutoModel, ModelOpt, and functional step runs. Use when a user needs an env.toml from scratch, profile inheritance fixes, executor/resource profile advice, or debugging Ray runtime-env and placement issues.
+description: Create, validate, and adjust Nemotron env.toml profiles for Lepton, Slurm, Ray, NeMo-RL, NeMo-Gym, AutoModel, ModelOpt, Curator, Data Designer SDG, and functional step runs. Use when a user needs an env.toml from scratch, profile inheritance fixes, executor/resource profile advice, or debugging Ray runtime-env and placement issues.
 ---
 
 # Env TOML
@@ -16,14 +16,14 @@ Before editing profiles, read `step.toml` for the contract, then choose `config/
 2. When no backend env file exists, generate one:
 
 ```bash
-uv run nemotron step run env/env_toml -c lepton
+uv run nemotron steps run env/env_toml -c lepton
 export NEMOTRON_ENV_FILE=env.lepton.toml
 ```
 
 For Slurm:
 
 ```bash
-uv run nemotron step run env/env_toml -c slurm
+uv run nemotron steps run env/env_toml -c slurm
 export NEMOTRON_ENV_FILE=env.slurm.toml
 ```
 
@@ -38,7 +38,7 @@ The loader in `src/nemo_runspec/env.py` searches for repository-root `env.toml` 
 
 ## Nuances
 
-- Prefer one backend base and concrete profiles named for individual steps, such as `lepton_prep_sft_packing`, `lepton_pretrain_megatron_bridge`, or `slurm_optimize_modelopt_quantize`.
+- Prefer one backend base and concrete profiles named for individual steps, such as `lepton_prep_sft_packing`, `lepton_pretrain_megatron_bridge`, `lepton_sdg_data_designer_tiny`, or `slurm_optimize_modelopt_quantize`.
 - Env profiles are inherited with `extends`; child profiles should override only what the step needs, such as image, node count, startup commands, or output path.
 - Data-prep profiles should be CPU-only by default. For Slurm prep profiles, override the GPU base with CPU partitions, `gpus_per_node = 0`, `build_include_gpus = false`, and enough `cpus_per_task` for Ray/Xenna. For Lepton prep profiles, use a CPU `resource_shape` and `gpus_per_node = 0`.
 - Keep secrets as `${oc.env:...}` placeholders. Do not write tokens directly into env files.
@@ -48,6 +48,7 @@ The loader in `src/nemo_runspec/env.py` searches for repository-root `env.toml` 
 - For Ray jobs, avoid job `runtime_env` workdirs when vLLM or NeMo-RL starts nested Ray actors. Use staged source plus `PYTHONPATH` and keep source-transport cleanup in the runner, not in env.toml profiles.
 - For RLHF with GenRM, budget physical Ray nodes for policy/generation, NeMo-Gym GPU servers, and extra placement headroom. For example, a small logical `cluster.num_nodes=2` plus `env.nemo_gym.num_gpu_nodes=1` should use a 4x8-GPU Lepton profile until proven stable.
 - Use separate image bases: NeMo for Megatron Bridge, NeMo-RL `nvcr.io/nvidia/nemo-rl:v0.6.0` for DPO/RLVR/RLHF, NeMo-AutoModel for AutoModel, and NeMo 26.02 for ModelOpt.
+- Use Curator image profiles for `byob`, `translate/translation`, and `curate/nemo_curator`; use the normal NeMo image with `data-designer==0.5.5` for `sdg/data_designer`.
 - For Lepton NeMo-RL profiles, keep `ray_version` on the latest workspace-supported Ray version. NeMo-RL v0.6.0 pins Ray 2.54 upstream, but some Lepton workspaces may only accept older Ray versions such as 2.48.0.
 - Keep functional runner `gpu_count` aligned with the env profile, not only the step config.
 

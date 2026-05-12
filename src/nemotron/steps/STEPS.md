@@ -18,13 +18,13 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [curate/nemo_curator](curate/nemo_curator/) | Acquire public or custom text corpora with NeMo Curator, then annotate and filter them by language, domain, and quality to produce downstream-ready JSONL. | - | filtered_jsonl |
+| [curate/nemo_curator](curate/nemo_curator/) | Read JSONL text with NeMo Curator, optionally hydrate a Hugging Face snapshot, apply light language, word-count, and domain filters, and write downstream-ready JSONL. | - | filtered_jsonl |
 
 ## env
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [env/env_toml](env/env_toml/) | Generate and validate step-linked env profile examples from compact YAML templates for Lepton or Slurm, including inheritance, image overrides, mounts, env-var placeholders, and Ray/RL guardrails. | - | env_toml |
+| [env/env_toml](env/env_toml/) | Generate and validate step-linked env profile examples from compact YAML templates for Lepton or Slurm, including inheritance, image overrides, mounts, env-var placeholders, Curator/Data Designer profiles, and Ray/RL guardrails. | - | env_toml |
 
 ## eval — Evaluation
 
