@@ -2,6 +2,26 @@
 
 Use this context pack when generating project code around the `byob` step.
 
+## Critical Plan Summary
+
+State these items in the visible plan before doing implementation work:
+
+- BYOB step: generate and translate MCQ benchmark parquet artifacts from
+  domain-grouped source documents.
+- Required compact MCQ fields: `question`, `options`, `answer_index`, `answer`,
+  `category`.
+- Required final parquet columns: `question_id`, `question`, `options`,
+  `answer_index`, `answer`, `cot_content`, `src`, `category`.
+- Semantic deduplication: Curator `RayDataExecutor`,
+  `RayActorPoolExecutor`, and package-level `SemanticDeduplicationWorkflow`.
+- Translation: forward translation, backtranslation, and round-trip
+  `sacrebleu`, `chrf`, `ter` metrics.
+- Privacy: default to local-only for internal legal, banking, insurance,
+  medical, government, or other regulated documents.
+- Dependencies: `datasets`, `huggingface_hub`, `transformers`,
+  `sentence-transformers`, `sentencepiece`, `sacrebleu`, `ray`, and
+  `nemo-curator` must be installed before running.
+
 ## Intent
 
 BYOB creates benchmark artifacts from user-provided domain documents. It is not a
