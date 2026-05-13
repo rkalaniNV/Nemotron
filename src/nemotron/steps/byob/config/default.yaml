@@ -1,8 +1,3 @@
-run:
-  env:
-    mounts:
-      - ${auto_mount:git+https://github.com/NVIDIA-NeMo/Curator.git@d10cd6ffe9f5ac4cbb176d7b3ada698f22633aea,/opt/Curator}
-
 expt_name: byob_mcq_default
 random_seed: 42
 ndd_batch_size: 32
@@ -48,9 +43,6 @@ generation_model_config: &generator
         low: 0.9
         high: 1.0
     top_p: 1.0
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: false
 
 judge_model_config: *generator
 

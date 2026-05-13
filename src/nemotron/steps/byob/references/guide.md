@@ -29,19 +29,6 @@ nemotron byob --family mcq --stage prepare --config src/nemotron/steps/byob/conf
 nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/config/default.yaml
 ```
 
-The BYOB configs declare Curator through the normal step config mount path:
-
-```yaml
-run:
-  env:
-    mounts:
-      - ${auto_mount:git+https://github.com/NVIDIA-NeMo/Curator.git@d10cd6ffe9f5ac4cbb176d7b3ada698f22633aea,/opt/Curator}
-```
-
-Remote profiles should make `/opt/Curator` visible through `PYTHONPATH` or an
-image-level install and install BYOB runtime dependencies in the profile. The
-step entrypoint intentionally stays a thin CLI wrapper.
-
 When editing semantic deduplication, keep the Curator imports aligned with the runtime:
 `nemo_curator.backends.ray_data.RayDataExecutor`,
 `nemo_curator.backends.ray_actor_pool.RayActorPoolExecutor`, and

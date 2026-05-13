@@ -92,16 +92,16 @@ Goal: enumerate candidate steps and gather the user's constraints in one pass.
 machine-readable:
 
 ```bash
-nemotron steps list --json                                 # all steps
-nemotron steps list --json --category sft                  # by category
-nemotron steps list --json --consumes training_jsonl       # by input type
-nemotron steps list --json --produces checkpoint_megatron  # by output type
-nemotron steps show <step_id>                              # full manifest
+nemotron step list --json                                  # all steps
+nemotron step list --json --category sft                   # by category
+nemotron step list --json --consumes training_jsonl        # by input type
+nemotron step list --json --produces checkpoint_megatron   # by output type
+nemotron step show <step_id>                               # full manifest
 ```
 
-Implementation: [list_cmd.py](../../src/nemotron/cli/commands/steps/list_cmd.py),
-[show_cmd.py](../../src/nemotron/cli/commands/steps/show_cmd.py),
-[run_cmd.py](../../src/nemotron/cli/commands/steps/run_cmd.py).
+Implementation: [list_cmd.py](../../src/nemotron/cli/commands/step/list_cmd.py),
+[show_cmd.py](../../src/nemotron/cli/commands/step/show_cmd.py),
+[run_cmd.py](../../src/nemotron/cli/commands/step/run_cmd.py).
 
 Per-step JSON schema: `{id, name, category, description, tags, path,
 consumes:[{type,required,description}], produces:[...], parameters:[...]}`.
@@ -164,10 +164,13 @@ Goal: produce a markdown plan the user reviews before any code is written.
 | # | Check | Source of truth |
 |---|---|---|
 | 1 | Every `consumes.type` matches an upstream `produces.type` (direct or via `is_a`). | [types.toml](../../src/nemotron/steps/types.toml) |
-| 2 | Tokenizer + chat template + seq_length consistent across prep ↔ train ↔ RL. | [patterns/prep-data-is-tokenizer-locked.md](../../src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md), [patterns/sft-sequence-packing.md](../../src/nemotron/steps/patterns/sft-sequence-packing.md) |
-| 3 | RL warm-starts from SFT; rewards validated before scale. | [patterns/rl-validate-rewards-before-scale.md](../../src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md) |
-| 4 | GPU count ≥ chosen model's `min_gpus` (from `[[models]]` block in each `step.toml`). | step.toml + [hardware.md](../../src/nemotron/steps/hardware.md) |
-| 5 | Sovereign / customization patterns checked: `cpt-data-blend-scoping`, `sft-data-blending`, `multilingual-tokenizer-check`, `data-quality-before-quantity`, `sdg-pipeline-versioning`, `pretrain-token-budget-before-scale`, `sft-small-dataset-prefer-lora`. | [patterns/](../../src/nemotron/steps/patterns/) |
+| 2 | If a chain breaks, insert the right converter step. | `convert_to` in [types.toml](../../src/nemotron/steps/types.toml) → [convert/megatron_to_hf](../../src/nemotron/steps/convert/megatron_to_hf/), [convert/hf_to_megatron](../../src/nemotron/steps/convert/hf_to_megatron/), [convert/merge_lora](../../src/nemotron/steps/convert/merge_lora/) |
+| 3 | Tokenizer + chat template + seq_length consistent across prep ↔ train ↔ RL ↔ eval. | [patterns/prep-data-is-tokenizer-locked.md](../../src/nemotron/steps/patterns/prep-data-is-tokenizer-locked.md), [patterns/sft-sequence-packing.md](../../src/nemotron/steps/patterns/sft-sequence-packing.md) |
+| 4 | LoRA outputs are merged before eval/RL. | [patterns/peft-adapter-merge-discipline.md](../../src/nemotron/steps/patterns/peft-adapter-merge-discipline.md) |
+| 5 | Eval bookends present (before + after training). | [patterns/eval-before-and-after-training.md](../../src/nemotron/steps/patterns/eval-before-and-after-training.md) |
+| 6 | RL warm-starts from SFT; rewards validated before scale. | [patterns/rl-validate-rewards-before-scale.md](../../src/nemotron/steps/patterns/rl-validate-rewards-before-scale.md) |
+| 7 | GPU count ≥ chosen model's `min_gpus` (from `[[models]]` block in each `step.toml`). | step.toml + [hardware.md](../../src/nemotron/steps/hardware.md) |
+| 8 | Sovereign / customization patterns checked: `cpt-data-blend-scoping`, `sft-data-blending`, `multilingual-tokenizer-check`, `data-quality-before-quantity`, `sdg-pipeline-versioning`, `byob-benchmark-design`, `pretrain-token-budget-before-scale`, `sft-small-dataset-prefer-lora`, `convert-checkpoint-safety`. | [patterns/](../../src/nemotron/steps/patterns/) |
 When a check fails: surface it as a `⚠` warning in the plan and propose a
 fix. When the user can't satisfy it (e.g. hardware), propose alternatives in
 descending preference: smaller model → AutoModel instead of Megatron-Bridge →
@@ -208,7 +211,6 @@ graph LR
 | Resource | Required by | Notes |
 |---|---|---|
 | <resource> | <stage> | <status / question> |
-
 ````
 
 **Step 2.5 — Present the plan and wait.** Don't proceed to Act until the
@@ -297,7 +299,7 @@ or library APIs from memory. Mirror what the in-repo code does:
 - [steps/_runners/nemo_rl.py](../../src/nemotron/steps/_runners/nemo_rl.py) — used by all NeMo-RL alignment steps.
 
 For steps without a context pack (`sft/megatron_bridge`, `eval/model_eval`,
-`curate/nemo_curator`, `translate/translation`, `convert/*`), the agent
+`curate/nemo_curator`, `translate/nemo_skills`, `convert/*`), the agent
 combines: per-step `SKILL.md` + `step.toml [[strategies]]` + `step.py` + the
 URLs in `[reference]`. That's enough.
 
@@ -399,6 +401,7 @@ run `/nemotron-add-step` to land it in the catalog.
 | "Synthesize preference / SFT data" | Catalog ([sdg/data_designer](../../src/nemotron/steps/sdg/data_designer/)) |
 | "Translate EN → \<lang\> for training data" | Catalog ([translate/nemo_skills](../../src/nemotron/steps/translate/nemo_skills/)) |
 | "Curate web text" | Catalog ([curate/nemo_curator](../../src/nemotron/steps/curate/nemo_curator/)) |
+| "Deploy to TensorRT-LLM" | Explorer (no step yet — derive from upstream library docs and add a `convert/*` step if the path stabilizes) |
 | "Train with X exotic backend" | Explorer or **ask** |
 | Post-training-only request | Out of scope for this skill; ask the user to use a more appropriate workflow. |
 | Ambiguous | **Ask** |
@@ -470,12 +473,15 @@ configs.
 
 ## Tool preferences
 
-- **Catalog discovery**: `nemotron steps list --json --consumes <type>` — don't grep `**/step.toml`.
-- **Manifest read**: `nemotron steps show <id>` — fastest single read.
+- **Catalog discovery**: `nemotron step list --json --consumes <type>` — don't grep `**/step.toml`.
+- **Manifest read**: `nemotron step show <id>` — fastest single read.
 - **Context packs**: load only for exceptional codegen; YAML-only requests should not need them.
 - **Step.py read**: full file — they're <100 lines.
 - **Type validation**: read [types.toml](../../src/nemotron/steps/types.toml) once during Orient; keep in context through Verify.
 - **Parallel reads**: batch step.toml + category SKILL.md reads.
+- **Efficiency**: for BYOB, use the fast path above. Do not read unrelated
+  benchmark docs, whole repository file maps, or broad package listings unless
+  a command fails and the missing detail is needed.
 
 ---
 
@@ -496,12 +502,19 @@ configs.
 
 - Invent steps. Use Explorer mode or ask.
 - Skip Plan for any pipeline ≥2 stages.
+- Run destructive cleanup such as `rm -rf`. Use a fresh output directory,
+  overwrite generated files intentionally, or ask before deleting anything.
+- Print environment variables, API keys, full source documents, or generated
+  regulated-data rows in chat or command output. Refer to file paths and
+  aggregate counts instead.
+- Create or rewrite the user's private source documents. Consume existing files;
+  if examples are required, use tiny synthetic non-sensitive samples.
 - Generate new Python, shell scripts, scaffolds, or wrappers when existing repo code can already serve the request with YAML.
 - Import from modules not present in the step's reference code.
 - Add monitoring / logging / W&B unless the user asks.
 - Tune parallelism beyond what `hardware.md` and `[[strategies]]` advise.
 - Assume GPU count, type, or interconnect.
-- Generate Slurm/Airflow/Kubeflow wrappers.
+- Generate Slurm/Airflow/Kubeflow wrappers unless requested.
 - Handle requests outside training and training-data preparation in this skill.
 - Modify [src/nemotron/steps/](../../src/nemotron/steps/). To extend the catalog, route the user to `/nemotron-add-step`.
 - Restate per-step rules in this skill — link to the step's `SKILL.md` instead.
