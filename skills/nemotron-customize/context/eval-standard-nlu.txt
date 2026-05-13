@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Evaluator
+Evaluator
 ├── docs
 │   └── evaluation
 │       ├── benchmarks
@@ -30,7 +30,7 @@
                                 └── default.yaml *
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/index.md
+File: Evaluator/docs/evaluation/index.md
 ```md
 (evaluation-overview)=
 
@@ -199,7 +199,7 @@ Configure request/response processing, logging, caching, and custom interceptors
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/benchmarks/about.md
+File: Evaluator/docs/evaluation/benchmarks/about.md
 ```md
 (eval-benchmarks)=
 
@@ -666,7 +666,7 @@ params = ConfigParams(
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/benchmarks/catalog/index.md
+File: Evaluator/docs/evaluation/benchmarks/catalog/index.md
 ```md
 (benchmarks-full-list)=
 # Available Benchmarks
@@ -678,7 +678,7 @@ File: /Users/mromeijn/src/Evaluator/docs/evaluation/benchmarks/catalog/index.md
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/run-evals/index.md
+File: Evaluator/docs/evaluation/run-evals/index.md
 ```md
 (eval-run)=
 
@@ -751,7 +751,7 @@ Reasoning <reasoning>
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/run-evals/text-gen.md
+File: Evaluator/docs/evaluation/run-evals/text-gen.md
 ```md
 (text-gen)=
 
@@ -878,7 +878,7 @@ results = evaluate(target_cfg=target, eval_cfg=config)
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/run-evals/logprobs.md
+File: Evaluator/docs/evaluation/run-evals/logprobs.md
 ```md
 (logprobs)=
 # Evaluate LLMs Using Log-Probabilities
@@ -1034,7 +1034,7 @@ For this purpose the input is tokenized, which allows to trace which log-probabi
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/run-evals/reasoning.md
+File: Evaluator/docs/evaluation/run-evals/reasoning.md
 ```md
 (run-eval-reasoning)=
 # Evaluation of Reasoning Models
@@ -1311,7 +1311,7 @@ For more information on available artifacts, see {ref}`evaluation-output`.
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/evaluation/parameters.md
+File: Evaluator/docs/evaluation/parameters.md
 ```md
 (eval-parameters)=
 
@@ -1721,7 +1721,7 @@ params = ConfigParams(
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/examples/local_basic.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/examples/local_basic.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -1784,7 +1784,7 @@ evaluation:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/examples/local_reasoning.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/examples/local_reasoning.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -1870,7 +1870,7 @@ evaluation:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/evaluation/base/default.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/evaluation/base/default.yaml
 ```yaml
 # Base model evaluation configuration (completions endpoint)
 # Uses log-probabilities for multiple-choice tasks
@@ -1890,7 +1890,7 @@ evaluation:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/evaluation/base/standard.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/evaluation/base/standard.yaml
 ```yaml
 # Standard LLM Benchmarks for base models (completions endpoint, log-probability based)
 # These tasks use log-probabilities to assess model confidence on answer choices
@@ -1904,7 +1904,7 @@ evaluation:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/evaluation/chat/default.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/evaluation/chat/default.yaml
 ```yaml
 # Chat model evaluation configuration (chat endpoint)
 evaluation:

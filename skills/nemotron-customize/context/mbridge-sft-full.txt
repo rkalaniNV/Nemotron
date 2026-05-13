@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Megatron-Bridge
+Megatron-Bridge
 ├── docs
 │   ├── training
 │   │   ├── images
@@ -321,7 +321,7 @@
 (+ denotes code-map available)
 Config: directory-only view; depth cap 3; selected files shown.
 
-File: /Users/mromeijn/src/Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/tokenizers/megatron_tokenizer.py
+File: Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/tokenizers/megatron_tokenizer.py
 Imports:
   - import importlib
   - import json
@@ -360,7 +360,7 @@ Global vars:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/callbacks.py
+File: Megatron-Bridge/src/megatron/bridge/training/callbacks.py
 Imports:
   - import logging
   - from collections.abc import Callable
@@ -423,7 +423,7 @@ Global vars:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/state.py
+File: Megatron-Bridge/src/megatron/bridge/training/state.py
 Imports:
   - import json
   - import os
@@ -529,7 +529,7 @@ Functions:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/data/builders/hf_dataset.py
+File: Megatron-Bridge/src/megatron/bridge/data/builders/hf_dataset.py
 Imports:
   - import glob
   - import json
@@ -627,7 +627,7 @@ Global vars:
 ---
 
 
-File: /Users/mromeijn/src/Nemotron/src/nemotron/kit/megatron_stub.py
+File: Nemotron/src/nemotron/kit/megatron_stub.py
 Imports:
   - from dataclasses import dataclass, field
   - from pathlib import Path
@@ -678,7 +678,7 @@ Classes:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/3rdparty/Megatron-LM/megatron/legacy/model/gpt_model.py
+File: Megatron-Bridge/3rdparty/Megatron-LM/megatron/legacy/model/gpt_model.py
 Imports:
   - import torch
   - from typing import Optional
@@ -713,7 +713,7 @@ Functions:
 
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/README.md
+File: Megatron-Bridge/docs/training/README.md
 ```md
 # Training and Customization
 
@@ -841,7 +841,7 @@ A typical training workflow involves:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/packed-sequences.md
+File: Megatron-Bridge/docs/training/packed-sequences.md
 ```md
 # Packed Sequences
 
@@ -942,7 +942,7 @@ The most stable caveats to remember are:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/parallelisms.md
+File: Megatron-Bridge/docs/parallelisms.md
 ```md
 # Parallelisms Guide
 
@@ -1465,7 +1465,7 @@ layouts, and memory estimation, see the
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/bridge-guide.md
+File: Megatron-Bridge/docs/bridge-guide.md
 ```md
 # Get Started with 🤗 Hugging Face Conversion
 
@@ -1782,7 +1782,7 @@ AutoBridge.get_conversion_tasks(megatron_model: MegatronModule | list[MegatronMo
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/recipe-usage.md
+File: Megatron-Bridge/docs/recipe-usage.md
 ```md
 # Using Recipes
 
@@ -2048,7 +2048,7 @@ module and then each spawn new processes. This results in an infinite loop of pr
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/skills/mlm-bridge-training/SKILL.md
+File: Megatron-Bridge/skills/mlm-bridge-training/SKILL.md
 ```md
 ---
 name: mlm-bridge-training
@@ -2214,7 +2214,7 @@ git submodule update --init 3rdparty/Megatron-LM
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/skills/perf-techniques/sequence-packing/SKILL.md
+File: Megatron-Bridge/skills/perf-techniques/sequence-packing/SKILL.md
 ```md
 ---
 name: sequence-packing
@@ -2356,7 +2356,7 @@ Success criteria:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/common.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/common.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2907,7 +2907,7 @@ def _peft_common_vlm() -> ConfigContainer:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/utils/finetune_utils.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/utils/finetune_utils.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -3093,7 +3093,7 @@ def default_gsm8k_config(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/utils/dataset_utils.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/utils/dataset_utils.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -3377,7 +3377,7 @@ def infer_mode_from_dataset(dataset_type: str) -> str:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/data/datasets/sft.py
+File: Megatron-Bridge/src/megatron/bridge/data/datasets/sft.py
 ```py
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -4649,7 +4649,7 @@ class GPTSFTChatDataset(GPTSFTDataset):
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/data/builders/finetuning_dataset.py
+File: Megatron-Bridge/src/megatron/bridge/data/builders/finetuning_dataset.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -5091,7 +5091,7 @@ class FinetuningDatasetBuilder:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/data/datasets/packed_sequence.py
+File: Megatron-Bridge/src/megatron/bridge/data/datasets/packed_sequence.py
 ```py
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -5453,7 +5453,7 @@ class PackedSequenceSpecs:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/data/datasets/packed_parquet.py
+File: Megatron-Bridge/src/megatron/bridge/data/datasets/packed_parquet.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -6106,7 +6106,7 @@ class GPTSFTPackedParquetDataset(GPTSFTPackedDataset):
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/finetune.py
+File: Megatron-Bridge/src/megatron/bridge/training/finetune.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -6164,7 +6164,7 @@ def finetune(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/gpt_step.py
+File: Megatron-Bridge/src/megatron/bridge/training/gpt_step.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -6540,7 +6540,7 @@ def _create_loss_function_modelopt(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/config.py
+File: Megatron-Bridge/src/megatron/bridge/training/config.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -8269,7 +8269,7 @@ def _validate_fine_grained_activation_offloading(config: ConfigContainer) -> Non
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/scripts/training/run_recipe.py
+File: Megatron-Bridge/scripts/training/run_recipe.py
 ```py
 #!/usr/bin/env python3
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.

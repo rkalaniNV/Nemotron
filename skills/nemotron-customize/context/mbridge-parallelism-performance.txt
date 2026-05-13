@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Megatron-Bridge
+Megatron-Bridge
 ├── docs
 │   ├── training
 │   │   ├── images
@@ -315,7 +315,7 @@
 (+ denotes code-map available)
 Config: directory-only view; depth cap 3; selected files shown.
 
-File: /Users/mromeijn/src/Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/process_groups_config.py
+File: Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/process_groups_config.py
 Imports:
   - from dataclasses import dataclass, field, fields
   - from functools import partial
@@ -367,7 +367,7 @@ Classes:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/3rdparty/Megatron-LM/megatron/training/resilience_config.py
+File: Megatron-Bridge/3rdparty/Megatron-LM/megatron/training/resilience_config.py
 Imports:
   - from dataclasses import dataclass
   - from typing import Literal
@@ -389,7 +389,7 @@ Classes:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/3rdparty/Megatron-LM/megatron/training/common_config.py
+File: Megatron-Bridge/3rdparty/Megatron-LM/megatron/training/common_config.py
 Imports:
   - from dataclasses import dataclass, field
   - from typing import Literal
@@ -436,7 +436,7 @@ Classes:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/distributed/distributed_data_parallel_config.py
+File: Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/distributed/distributed_data_parallel_config.py
 Imports:
   - from dataclasses import dataclass
   - from typing import Optional
@@ -479,7 +479,7 @@ Classes:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/models/transformer_config.py
+File: Megatron-Bridge/src/megatron/bridge/models/transformer_config.py
 Imports:
   - import copy
   - from dataclasses import dataclass, fields, is_dataclass
@@ -516,7 +516,7 @@ Functions:
 ---
 
 
-File: /Users/mromeijn/src/Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/optimizer/optimizer_config.py
+File: Megatron-Bridge/3rdparty/Megatron-LM/megatron/core/optimizer/optimizer_config.py
 Imports:
   - import fnmatch
   - from dataclasses import dataclass, field
@@ -615,7 +615,7 @@ Classes:
 ---
 
 
-File: /Users/mromeijn/src/Nemotron/src/nemotron/kit/megatron_stub.py
+File: Nemotron/src/nemotron/kit/megatron_stub.py
 Imports:
   - from dataclasses import dataclass, field
   - from pathlib import Path
@@ -667,7 +667,7 @@ Classes:
 
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Megatron-Bridge/docs/parallelisms.md
+File: Megatron-Bridge/docs/parallelisms.md
 ```md
 # Parallelisms Guide
 
@@ -1190,7 +1190,7 @@ layouts, and memory estimation, see the
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/performance-guide.md
+File: Megatron-Bridge/docs/performance-guide.md
 ```md
 # Performance Tuning Guide
 
@@ -1709,13 +1709,13 @@ FROM nvcr.io/nvidia/pytorch:25.11-py3 as base
 RUN ln -s /usr/lib/x86_64-linux-gnu/libmlx5.so.1 /usr/lib/x86_64-linux-gnu/libmlx5.so
 
 # Clone DeepEP customized version 
-WORKDIR /home/dpsk_a2a
+WORKDIR dpsk_a2a
 RUN git clone https://github.com/zhongbozhu/DeepEP.git ./deepep
-RUN cd ./deepep && git checkout nvshmem_deepep_gcp && cd /home/dpsk_a2a
+RUN cd ./deepep && git checkout nvshmem_deepep_gcp && cd dpsk_a2a
 
 # Clone NVSHMEM 3.5 https://github.com/NVIDIA/nvshmem
 RUN git clone --branch v3.5.19-1 https://github.com/NVIDIA/nvshmem.git ./deepep-nvshmem
-RUN cd ./deepep-nvshmem && git checkout v3.5.19-1 && cd /home/dpsk_a2a
+RUN cd ./deepep-nvshmem && git checkout v3.5.19-1 && cd dpsk_a2a
 
 # Build nvshmem from source
 # You can also download the pre-built binary, and skip the following 
@@ -1726,10 +1726,10 @@ RUN apt-get update && \
         libclang-dev && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /home/dpsk_a2a/deepep-nvshmem
+WORKDIR dpsk_a2a/deepep-nvshmem
 RUN mkdir -p build && mkdir -p install && \
     cmake -S . -B build \
-    -DCMAKE_INSTALL_PREFIX=/home/dpsk_a2a/deepep-nvshmem/install \
+    -DCMAKE_INSTALL_PREFIX=dpsk_a2a/deepep-nvshmem/install \
     -DCUDA_HOME=/usr/local/cuda \
     -DMPI_HOME=/opt/hpcx/ompi \
     -DMPI_C_COMPILER=/opt/hpcx/ompi/bin/mpicc \
@@ -1754,12 +1754,12 @@ RUN mkdir -p build && mkdir -p install && \
     cmake --build build -j && \
     cmake --install build
 
-ENV NVSHMEM_DIR=/home/dpsk_a2a/deepep-nvshmem/install
+ENV NVSHMEM_DIR=dpsk_a2a/deepep-nvshmem/install
 ENV LD_LIBRARY_PATH=${NVSHMEM_DIR}/lib:$LD_LIBRARY_PATH
 ENV PATH=${NVSHMEM_DIR}/bin:$PATH
 
 ## Build deepep
-WORKDIR /home/dpsk_a2a/deepep
+WORKDIR dpsk_a2a/deepep
 ENV TORCH_CUDA_ARCH_LIST="10.0"
 ENV PIP_NO_BUILD_ISOLATION=1
 ENV CPATH=${CUDA_HOME}/include/cccl:$CPATH
@@ -1831,7 +1831,7 @@ export WORLD_SIZE=${SLURM_NNODES:-2}   # number of nodes
 export RANK=${SLURM_NODEID:-0}         # 0..N-1 per node
 
 export OMP_NUM_THREADS=1
-python -u /home/dpsk_a2a/deepep/tests/test_internode.py
+python -u dpsk_a2a/deepep/tests/test_internode.py
 '
 
 ```
@@ -1910,7 +1910,7 @@ python -u /home/dpsk_a2a/deepep/tests/test_internode.py
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/communication-overlap.md
+File: Megatron-Bridge/docs/training/communication-overlap.md
 ```md
 # Communication Overlap
 
@@ -2066,7 +2066,7 @@ correct question is always "which communication path is exposed in this run?"
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/mixed-precision.md
+File: Megatron-Bridge/docs/training/mixed-precision.md
 ```md
 # Mixed Precision Training
 
@@ -2259,7 +2259,7 @@ The mixed precision configuration will set `bf16=True` on both the model and opt
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/activation-recomputation.md
+File: Megatron-Bridge/docs/training/activation-recomputation.md
 ```md
 # Activation Recomputation
 
@@ -2409,7 +2409,7 @@ model_config = GPTModelProvider(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/megatron-fsdp.md
+File: Megatron-Bridge/docs/training/megatron-fsdp.md
 ```md
 # Megatron FSDP
 
@@ -2530,7 +2530,7 @@ The stable recommendation today is:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/hybrid-context-parallel.md
+File: Megatron-Bridge/docs/training/hybrid-context-parallel.md
 ```md
 # Hybrid / Hierarchical Context Parallel
 
@@ -2648,7 +2648,7 @@ all Bridge initialization modes.
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/packed-sequences.md
+File: Megatron-Bridge/docs/training/packed-sequences.md
 ```md
 # Packed Sequences
 
@@ -2749,7 +2749,7 @@ The most stable caveats to remember are:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/skills/perf-techniques/parallelism-strategies/SKILL.md
+File: Megatron-Bridge/skills/perf-techniques/parallelism-strategies/SKILL.md
 ```md
 ---
 name: parallelism-strategies
@@ -2987,7 +2987,7 @@ Success criteria:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/skills/perf-techniques/sequence-packing/SKILL.md
+File: Megatron-Bridge/skills/perf-techniques/sequence-packing/SKILL.md
 ```md
 ---
 name: sequence-packing
@@ -3129,7 +3129,7 @@ Success criteria:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/skills/perf-techniques/tp-dp-comm-overlap/SKILL.md
+File: Megatron-Bridge/skills/perf-techniques/tp-dp-comm-overlap/SKILL.md
 ```md
 ---
 name: tp-dp-comm-overlap
@@ -3251,7 +3251,7 @@ Success criteria:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/skills/perf-techniques/cuda-graphs/SKILL.md
+File: Megatron-Bridge/skills/perf-techniques/cuda-graphs/SKILL.md
 ```md
 ---
 name: cuda-graphs
@@ -3528,7 +3528,7 @@ uv run python -m pytest \
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/config.py
+File: Megatron-Bridge/src/megatron/bridge/training/config.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -5257,7 +5257,7 @@ def _validate_fine_grained_activation_offloading(config: ConfigContainer) -> Non
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/comm_overlap.py
+File: Megatron-Bridge/src/megatron/bridge/training/comm_overlap.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -5940,7 +5940,7 @@ class CommOverlapConfig:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/initialize.py
+File: Megatron-Bridge/src/megatron/bridge/training/initialize.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #

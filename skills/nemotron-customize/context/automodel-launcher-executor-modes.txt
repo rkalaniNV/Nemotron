@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Automodel
+Automodel
 ├── docs
 │   ├── launcher
 │   │   ├── local-workstation.md *
@@ -382,7 +382,7 @@
 Config: directory-only view; selected files shown.
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/launcher/base.py
+File: Automodel/nemo_automodel/components/launcher/base.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -431,7 +431,7 @@ class Launcher(ABC):
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/launcher/interactive.py
+File: Automodel/nemo_automodel/components/launcher/interactive.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -577,7 +577,7 @@ class InteractiveLauncher(Launcher):
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/launcher/nemo_run/config.py
+File: Automodel/nemo_automodel/components/launcher/nemo_run/config.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -599,7 +599,7 @@ import os
 from dataclasses import dataclass, field
 
 # Default path to user-defined executor definitions.
-# Respects the NEMORUN_HOME env var used by nemo-run itself (defaults to ~/.nemo_run).
+# Respects the NEMORUN_HOME env var used by nemo-run itself (defaults to .nemo_run).
 _NEMORUN_HOME = os.environ.get("NEMORUN_HOME", os.path.join(os.path.expanduser("~"), ".nemo_run"))
 DEFAULT_EXECUTORS_FILE = os.path.join(_NEMORUN_HOME, "executors.py")
 
@@ -667,7 +667,7 @@ class NemoRunConfig:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/launcher/nemo_run/launcher.py
+File: Automodel/nemo_automodel/components/launcher/nemo_run/launcher.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -840,7 +840,7 @@ class NemoRunLauncher(Launcher):
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/launcher/skypilot/config.py
+File: Automodel/nemo_automodel/components/launcher/skypilot/config.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -888,7 +888,7 @@ class SkyPilotConfig:
     # Remote environment
     setup: str = field(default="", metadata=dict(help="Shell commands run on the remote VM before training starts"))
     hf_home: str = field(
-        default="~/.cache/huggingface",
+        default=".cache/huggingface",
         metadata=dict(help="HuggingFace cache directory on the remote VM"),
     )
 
@@ -919,7 +919,7 @@ class SkyPilotConfig:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/launcher/skypilot/launcher.py
+File: Automodel/nemo_automodel/components/launcher/skypilot/launcher.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -980,7 +980,7 @@ class SkyPilotLauncher(Launcher):
         num_nodes: int,
         extra_args: Optional[List[str]] = None,
     ) -> str:
-        repo_root = "~/sky_workdir"
+        repo_root = "sky_workdir"
         script_path = _recipe_module_path(recipe_target, repo_root)
 
         parts = [
@@ -1053,7 +1053,7 @@ class SkyPilotLauncher(Launcher):
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/launcher/overview.md
+File: Automodel/docs/launcher/overview.md
 ```md
 # Job Launchers
 
@@ -1114,7 +1114,7 @@ Every launcher shares the same YAML recipe format. The only difference is an opt
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/launcher/local-workstation.md
+File: Automodel/docs/launcher/local-workstation.md
 ```md
 # Run on Your Local Workstation
 
@@ -1269,7 +1269,7 @@ All approaches use the same configuration files and provide the same training ca
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/launcher/slurm.md
+File: Automodel/docs/launcher/slurm.md
 ```md
 # Run on a Cluster
 
@@ -1358,8 +1358,8 @@ CONFIG=examples/llm_finetune/llama3_2/llama3_2_1b_squad.yaml
 CONT=/lustre/fsw/images/automodel.sqsh
 CONT_NAME=automodel-training
 CONT_MOUNT="\
-/home/$USER/Automodel:/opt/Automodel,\
-/home/$USER/.cache/huggingface:/root/.cache/huggingface"
+Automodel:/opt/Automodel,\
+.cache/huggingface:/root/.cache/huggingface"
 
 export MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
 export MASTER_PORT=13742
@@ -1466,7 +1466,7 @@ For single-node workflows, see our [Run on Your Local Workstation](./local-works
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/launcher/nemo-run.md
+File: Automodel/docs/launcher/nemo-run.md
 ```md
 # Run with NeMo-Run
 
@@ -1482,7 +1482,7 @@ NeMo-Run is an open-source tool from NVIDIA that manages job submission across d
 pip install nemo-run
 ```
 
-2. **Create an executor definitions file** at `$NEMORUN_HOME/executors.py`. `NEMORUN_HOME` defaults to `~/.nemo_run`; set the environment variable to use a different location. This file tells NeMo-Run how to reach your compute target. Every executor you reference in a YAML config must be defined here. See [Executor Setup](#executor-setup) for a complete example.
+2. **Create an executor definitions file** at `$NEMORUN_HOME/executors.py`. `NEMORUN_HOME` defaults to `.nemo_run`; set the environment variable to use a different location. This file tells NeMo-Run how to reach your compute target. Every executor you reference in a YAML config must be defined here. See [Executor Setup](#executor-setup) for a complete example.
 
 3. **Verify connectivity** to the target in your executor (e.g. SSH for Slurm, kubeconfig for Kubernetes).
 
@@ -1708,7 +1708,7 @@ automodel config_with_nemo_run.yaml \
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/launcher/skypilot.md
+File: Automodel/docs/launcher/skypilot.md
 ```md
 # Run on Any Cloud with SkyPilot
 
@@ -1809,7 +1809,7 @@ model:
 | `instance_type` | *(auto)* | Specific instance type; auto-selected if omitted |
 | `job_name` | `<domain>_<command>` | Job and SkyPilot cluster name |
 | `setup` | *(auto)* | Extra setup commands run after `pip install -e .` |
-| `hf_home` | `~/.cache/huggingface` | Hugging Face cache directory on the remote VM |
+| `hf_home` | `.cache/huggingface` | Hugging Face cache directory on the remote VM |
 | `hf_token` | `$HF_TOKEN` env | Hugging Face token for gated model access |
 | `wandb_key` | `$WANDB_API_KEY` env | Weights & Biases API key |
 | `env_vars` | `{}` | Additional environment variables for the remote VM |
@@ -1873,7 +1873,7 @@ sky down <cluster_name>       # Terminate the cluster and stop billing
 1. The `automodel` CLI detects the `skypilot:` key in the YAML and calls `launch_with_skypilot()`.
 2. The training config (with `skypilot:` removed) is written to a local `skypilot_jobs/<timestamp>/job_config.yaml`.
 3. A `sky.Task` is created with:
-   - **workdir** — the current directory synced to `~/sky_workdir` on the remote VM.
+   - **workdir** — the current directory synced to `sky_workdir` on the remote VM.
    - **file_mounts** — the job config uploaded to `/tmp/automodel_job_config.yaml`.
    - **setup** — `pip install -e .` (plus any custom `setup:` commands).
    - **run** — a `torchrun` command pointing at the recipe script and config.
@@ -1899,7 +1899,7 @@ automodel finetune llm -c config_with_skypilot.yaml \
 
 ```
 
-File: /Users/mromeijn/src/Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad.yaml
+File: Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad.yaml
 ```yaml
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2025,7 +2025,7 @@ ci:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad_skypilot.yaml
+File: Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad_skypilot.yaml
 ```yaml
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #

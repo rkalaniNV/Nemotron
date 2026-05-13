@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Curator
+Curator
 ├── docs
 │   ├── about
 │   │   ├── concepts
@@ -416,7 +416,7 @@
 (+ denotes code-map available)
 Config: directory-only view; selected files shown.
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/base.py
+File: Curator/nemo_curator/stages/base.py
 Imports:
   - import contextlib
   - import copy
@@ -492,7 +492,7 @@ Global vars:
 ---
 
 
-File: /Users/mromeijn/src/Curator/nemo_curator/tasks/file_group.py
+File: Curator/nemo_curator/tasks/file_group.py
 Imports:
   - from dataclasses import dataclass, field
   - from typing import Any
@@ -511,7 +511,7 @@ Classes:
 
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Curator/docs/about/concepts/text/data-acquisition-concepts.md
+File: Curator/docs/about/concepts/text/data-acquisition-concepts.md
 ```md
 ---
 description: "Core concepts for acquiring text data from remote sources including DocumentDownloader, DocumentIterator, and DocumentExtractor components"
@@ -810,7 +810,7 @@ This enables you to:
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/about/concepts/text/data-loading-concepts.md
+File: Curator/docs/about/concepts/text/data-loading-concepts.md
 ```md
 ---
 description: "Core concepts for loading and managing text datasets using pipeline-based readers and DocumentBatch tasks"
@@ -1030,7 +1030,7 @@ The data acquisition process produces standardized output that integrates seamle
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/load-data/index.md
+File: Curator/docs/curate-text/load-data/index.md
 ```md
 ---
 description: "Load text data from Common Crawl, Wikipedia, and custom datasets using Curator."
@@ -1165,7 +1165,7 @@ Custom Data Sources <custom.md>
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/load-data/common-crawl.md
+File: Curator/docs/curate-text/load-data/common-crawl.md
 ```md
 ---
 description: "Download and extract text from Common Crawl web archives using Curator."
@@ -1472,7 +1472,7 @@ cc_stage = CommonCrawlDownloadExtractStage(
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/load-data/custom.md
+File: Curator/docs/curate-text/load-data/custom.md
 ```md
 ---
 description: "Create custom data loading pipelines using Curator."
@@ -1779,7 +1779,7 @@ Processed data flows through the pipeline as `DocumentBatch` tasks containing Pa
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/load-data/read-existing.md
+File: Curator/docs/curate-text/load-data/read-existing.md
 ```md
 ---
 description: "Read existing JSONL and Parquet datasets using Curator's reader stages."
@@ -2020,7 +2020,7 @@ Both readers produce `DocumentBatch` tasks that integrate seamlessly with:
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/download/base/download.py
+File: Curator/nemo_curator/stages/text/download/base/download.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2191,7 +2191,7 @@ class DocumentDownloadStage(ProcessingStage[FileGroupTask, FileGroupTask]):
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/download/base/extract.py
+File: Curator/nemo_curator/stages/text/download/base/extract.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2235,7 +2235,7 @@ class DocumentExtractor(ABC):
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/download/base/stage.py
+File: Curator/nemo_curator/stages/text/download/base/stage.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2324,7 +2324,7 @@ class DocumentDownloadExtractStage(CompositeStage[_EmptyTask, DocumentBatch]):
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/download/common_crawl/stage.py
+File: Curator/nemo_curator/stages/text/download/common_crawl/stage.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2432,7 +2432,7 @@ class CommonCrawlDownloadExtractStage(DocumentDownloadExtractStage):
 
 ```
 
-File: /Users/mromeijn/src/Curator/tutorials/text/download-and-extract/README.md
+File: Curator/tutorials/text/download-and-extract/README.md
 ```md
 # Download and Extract Common Crawl, Wikipedia, and ArXiv Data
 
@@ -2444,7 +2444,7 @@ Please note that the ArXiv section of the tutorial requires the [s5cmd](https://
 
 ```
 
-File: /Users/mromeijn/src/Curator/tutorials/text/llama-nemotron-data-curation/README.md
+File: Curator/tutorials/text/llama-nemotron-data-curation/README.md
 ```md
 # Curate the Llama Nemotron Reasoning Dataset with NVIDIA NeMo Curator
 
@@ -2605,7 +2605,7 @@ The NeMo tutorial expects the `/path/to/curated-data/training.jsonl` file genera
 
 ```
 
-File: /Users/mromeijn/src/Curator/tutorials/text/llama-nemotron-data-curation/main.py
+File: Curator/tutorials/text/llama-nemotron-data-curation/main.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #

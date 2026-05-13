@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Megatron-Bridge
+Megatron-Bridge
 ├── docs
 │   ├── models
 │   │   ├── llm
@@ -366,7 +366,7 @@
 Config: directory-only view; depth cap 3; selected files shown.
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/setup.py
+File: Megatron-Bridge/src/megatron/bridge/training/setup.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -945,7 +945,7 @@ def maybe_log_and_save_config(cfg: ConfigContainer) -> None:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/training-loop-settings.md
+File: Megatron-Bridge/docs/training/training-loop-settings.md
 ```md
 # Training Loop Configuration
 
@@ -1036,7 +1036,7 @@ Monitor training consistency and synchronization across distributed processes.
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/distillation.md
+File: Megatron-Bridge/docs/training/distillation.md
 ```md
 # Knowledge Distillation
 
@@ -1162,7 +1162,7 @@ For more information on the underlying implementation, see:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/README.md
+File: Megatron-Bridge/docs/training/README.md
 ```md
 # Training and Customization
 
@@ -1290,7 +1290,7 @@ A typical training workflow involves:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/communication-overlap.md
+File: Megatron-Bridge/docs/training/communication-overlap.md
 ```md
 # Communication Overlap
 
@@ -1446,7 +1446,7 @@ correct question is always "which communication path is exposed in this run?"
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/common.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/common.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -1997,7 +1997,7 @@ def _peft_common_vlm() -> ConfigContainer:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/hybrid-context-parallel.md
+File: Megatron-Bridge/docs/training/hybrid-context-parallel.md
 ```md
 # Hybrid / Hierarchical Context Parallel
 
@@ -2115,7 +2115,7 @@ all Bridge initialization modes.
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/profiling.md
+File: Megatron-Bridge/docs/training/profiling.md
 ```md
 # Profiling
 
@@ -2294,7 +2294,7 @@ Profiling adds overhead to your training job, so measured timings may be slightl
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/scripts/training/README.md
+File: Megatron-Bridge/scripts/training/README.md
 ```md
 # Training Scripts
 
@@ -2436,7 +2436,7 @@ python launch_with_nemo_run.py \
     --ssh-tunnel \
     --host my-cluster.example.com \
     --user myusername \
-    --remote-job-dir /home/myusername/nemo-runs
+    --remote-job-dir nemo-runs
 ```
 
 #### With Containers
@@ -2559,7 +2559,7 @@ If you need to pass arguments to the recipe constructor itself (e.g., custom par
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/scripts/training/launch_with_nemo_run.py
+File: Megatron-Bridge/scripts/training/launch_with_nemo_run.py
 ```py
 #!/usr/bin/env python3
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -2609,7 +2609,7 @@ Usage:
         --ssh-tunnel \
         --host my-cluster.example.com \
         --user myusername \
-        --remote-job-dir /home/myusername/nemo-runs
+        --remote-job-dir nemo-runs
 
     # With CLI overrides
     python launch_with_nemo_run.py \
@@ -3001,7 +3001,7 @@ if __name__ == "__main__":
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/README.md
+File: Megatron-Bridge/docs/README.md
 ```md
 # Megatron Bridge Documentation
 
@@ -3265,7 +3265,7 @@ graph TD
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/performance-summary.md
+File: Megatron-Bridge/docs/performance-summary.md
 ```md
 # Performance
 
@@ -3395,7 +3395,7 @@ The performance data includes:
 Performance summary for past releases can be found in the [archive](performance-summary-archive.md).
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/scripts/training/run_recipe.py
+File: Megatron-Bridge/scripts/training/run_recipe.py
 ```py
 #!/usr/bin/env python3
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -3756,7 +3756,7 @@ if __name__ == "__main__":
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/recipe-usage.md
+File: Megatron-Bridge/docs/recipe-usage.md
 ```md
 # Using Recipes
 
@@ -4022,7 +4022,7 @@ module and then each spawn new processes. This results in an infinite loop of pr
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/packed-sequences.md
+File: Megatron-Bridge/docs/training/packed-sequences.md
 ```md
 # Packed Sequences
 
@@ -4123,7 +4123,7 @@ The most stable caveats to remember are:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/models/llm/nemotron3-super.md
+File: Megatron-Bridge/docs/models/llm/nemotron3-super.md
 ```md
 # Nemotron 3 Super
 [Nemotron 3 Super](https://huggingface.co/collections/nvidia/nvidia-nemotron-v3)is a large language model (LLM) trained by NVIDIA, designed to deliver strong agentic, reasoning, and conversational capabilities. It is employs a hybrid **Latent Mixture-of-Experts (LatentMoE)** architecture, utilizing interleaved Mamba-2 and MoE layers, along with select Attention layers. Distinct from the Nano model, the Super model incorporates **Multi-Token Prediction (MTP)** layers for faster text generation and improved quality, and it is trained using **NVFP4** quantization to maximize compute efficiency. The model has **12B active parameters** and **120B parameters in total**.
@@ -4450,7 +4450,7 @@ model.sequence_parallel=True
 ```
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/scripts/training/launch_with_sbatch.sh
+File: Megatron-Bridge/scripts/training/launch_with_sbatch.sh
 ```sh
 #!/bin/bash
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -4616,12 +4616,12 @@ echo "======================================"
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/images/canonical_lora.png
+File: Megatron-Bridge/docs/training/images/canonical_lora.png
 ```png
 [Binary file]
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/optimizer-scheduler.md
+File: Megatron-Bridge/docs/training/optimizer-scheduler.md
 ```md
 # Optimizer and Scheduler Configuration
 
@@ -4741,7 +4741,7 @@ These scheduling options control how the weight decay coefficient changes over t
 | **Cosine**    | Cosine progression from start to end weight decay.                          |
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/examples/models/nemotron_3/nano/slurm_pretrain.sh
+File: Megatron-Bridge/examples/models/nemotron_3/nano/slurm_pretrain.sh
 ```sh
 #!/bin/bash
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -4913,12 +4913,12 @@ echo "======================================"
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/images/activation-recomputation-example-2.jpg
+File: Megatron-Bridge/docs/training/images/activation-recomputation-example-2.jpg
 ```jpg
 [Binary file]
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/examples/models/gpt_oss/README.md
+File: Megatron-Bridge/examples/models/gpt_oss/README.md
 ```md
 # GPT-OSS Examples
 
@@ -5079,7 +5079,7 @@ Coming soon.
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/utils/omegaconf_utils.py
+File: Megatron-Bridge/src/megatron/bridge/training/utils/omegaconf_utils.py
 ```py
 #!/usr/bin/env python3
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -5605,7 +5605,7 @@ def _apply_overrides(config_obj: DataclassInstance, overrides_dict: Dict[str, An
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/examples/models/nemotron_3/nano/pretrain_nemotron_3_nano.py
+File: Megatron-Bridge/examples/models/nemotron_3/nano/pretrain_nemotron_3_nano.py
 ```py
 #!/usr/bin/env python3
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -5713,7 +5713,7 @@ if __name__ == "__main__":
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/peft.md
+File: Megatron-Bridge/docs/training/peft.md
 ```md
 # Parameter-Efficient Fine-Tuning (PEFT)
 
@@ -6035,7 +6035,7 @@ PEFT offers several advantages for scalable and efficient model fine-tuning:
 - **Resume Support**: Training can be resumed seamlessly using adapter-only checkpoints, without reloading full model weights.
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/examples/models/gpt_oss/slurm_pretrain.sh
+File: Megatron-Bridge/examples/models/gpt_oss/slurm_pretrain.sh
 ```sh
 #!/bin/bash
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -6252,7 +6252,7 @@ echo "======================================"
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/logging.md
+File: Megatron-Bridge/docs/training/logging.md
 ```md
 # Logging and Monitoring
 
@@ -6696,7 +6696,7 @@ Increase to `1` or `2` only when more detailed timing metrics are required, as h
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/mixed-precision.md
+File: Megatron-Bridge/docs/training/mixed-precision.md
 ```md
 # Mixed Precision Training
 
@@ -6889,7 +6889,7 @@ The mixed precision configuration will set `bf16=True` on both the model and opt
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/performance-guide.md
+File: Megatron-Bridge/docs/performance-guide.md
 ```md
 # Performance Tuning Guide
 
@@ -7408,13 +7408,13 @@ FROM nvcr.io/nvidia/pytorch:25.11-py3 as base
 RUN ln -s /usr/lib/x86_64-linux-gnu/libmlx5.so.1 /usr/lib/x86_64-linux-gnu/libmlx5.so
 
 # Clone DeepEP customized version 
-WORKDIR /home/dpsk_a2a
+WORKDIR dpsk_a2a
 RUN git clone https://github.com/zhongbozhu/DeepEP.git ./deepep
-RUN cd ./deepep && git checkout nvshmem_deepep_gcp && cd /home/dpsk_a2a
+RUN cd ./deepep && git checkout nvshmem_deepep_gcp && cd dpsk_a2a
 
 # Clone NVSHMEM 3.5 https://github.com/NVIDIA/nvshmem
 RUN git clone --branch v3.5.19-1 https://github.com/NVIDIA/nvshmem.git ./deepep-nvshmem
-RUN cd ./deepep-nvshmem && git checkout v3.5.19-1 && cd /home/dpsk_a2a
+RUN cd ./deepep-nvshmem && git checkout v3.5.19-1 && cd dpsk_a2a
 
 # Build nvshmem from source
 # You can also download the pre-built binary, and skip the following 
@@ -7425,10 +7425,10 @@ RUN apt-get update && \
         libclang-dev && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /home/dpsk_a2a/deepep-nvshmem
+WORKDIR dpsk_a2a/deepep-nvshmem
 RUN mkdir -p build && mkdir -p install && \
     cmake -S . -B build \
-    -DCMAKE_INSTALL_PREFIX=/home/dpsk_a2a/deepep-nvshmem/install \
+    -DCMAKE_INSTALL_PREFIX=dpsk_a2a/deepep-nvshmem/install \
     -DCUDA_HOME=/usr/local/cuda \
     -DMPI_HOME=/opt/hpcx/ompi \
     -DMPI_C_COMPILER=/opt/hpcx/ompi/bin/mpicc \
@@ -7453,12 +7453,12 @@ RUN mkdir -p build && mkdir -p install && \
     cmake --build build -j && \
     cmake --install build
 
-ENV NVSHMEM_DIR=/home/dpsk_a2a/deepep-nvshmem/install
+ENV NVSHMEM_DIR=dpsk_a2a/deepep-nvshmem/install
 ENV LD_LIBRARY_PATH=${NVSHMEM_DIR}/lib:$LD_LIBRARY_PATH
 ENV PATH=${NVSHMEM_DIR}/bin:$PATH
 
 ## Build deepep
-WORKDIR /home/dpsk_a2a/deepep
+WORKDIR dpsk_a2a/deepep
 ENV TORCH_CUDA_ARCH_LIST="10.0"
 ENV PIP_NO_BUILD_ISOLATION=1
 ENV CPATH=${CUDA_HOME}/include/cccl:$CPATH
@@ -7530,7 +7530,7 @@ export WORLD_SIZE=${SLURM_NNODES:-2}   # number of nodes
 export RANK=${SLURM_NODEID:-0}         # 0..N-1 per node
 
 export OMP_NUM_THREADS=1
-python -u /home/dpsk_a2a/deepep/tests/test_internode.py
+python -u dpsk_a2a/deepep/tests/test_internode.py
 '
 
 ```
@@ -7609,7 +7609,7 @@ python -u /home/dpsk_a2a/deepep/tests/test_internode.py
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/cpu-offloading.md
+File: Megatron-Bridge/docs/training/cpu-offloading.md
 ```md
 # CPU Offloading
 
@@ -7690,7 +7690,7 @@ model_config = GPTModelProvider(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/models/README.md
+File: Megatron-Bridge/docs/models/README.md
 ```md
 # Supported Models
 
@@ -7934,7 +7934,7 @@ Or return to the [main documentation](../README.md).
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/examples/models/nemotron_3/super/slurm_pretrain.sh
+File: Megatron-Bridge/examples/models/nemotron_3/super/slurm_pretrain.sh
 ```sh
 #!/bin/bash
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -8109,7 +8109,7 @@ echo "======================================"
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/models/llm/README.md
+File: Megatron-Bridge/docs/models/llm/README.md
 ```md
 # Large Language Models
 
@@ -8180,7 +8180,7 @@ Each model documentation page typically includes:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/models/llm/nemotronh.md
+File: Megatron-Bridge/docs/models/llm/nemotronh.md
 ```md
 # Nemotron H and Nemotron Nano v2
 
@@ -8629,7 +8629,7 @@ Nemotron H models support several PP configurations with pre-defined layouts:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/megatron-fsdp.md
+File: Megatron-Bridge/docs/training/megatron-fsdp.md
 ```md
 # Megatron FSDP
 
@@ -8750,7 +8750,7 @@ The stable recommendation today is:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/attention-optimizations.md
+File: Megatron-Bridge/docs/training/attention-optimizations.md
 ```md
 # Attention Optimizations
 
@@ -8883,7 +8883,7 @@ model_config = GPTModelProvider(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/parallelisms.md
+File: Megatron-Bridge/docs/parallelisms.md
 ```md
 # Parallelisms Guide
 
@@ -9406,7 +9406,7 @@ layouts, and memory estimation, see the
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/examples/models/nemotron_3/README.md
+File: Megatron-Bridge/examples/models/nemotron_3/README.md
 ```md
 # Nemotron 3 Examples
 
@@ -9471,7 +9471,7 @@ Coming soon.
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/nemotronh/nemotron_3_super.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/nemotronh/nemotron_3_super.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -9822,7 +9822,7 @@ __all__ = [
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/cuda-graphs.md
+File: Megatron-Bridge/docs/training/cuda-graphs.md
 ```md
 # CUDA Graphs
 
@@ -10060,7 +10060,7 @@ be isolated:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/checkpointing.md
+File: Megatron-Bridge/docs/training/checkpointing.md
 ```md
 # Checkpointing
 
@@ -10490,7 +10490,7 @@ When `custom_manager_class` is not set, Megatron Bridge uses `DefaultCheckpointM
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/gpt_step.py
+File: Megatron-Bridge/src/megatron/bridge/training/gpt_step.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -10866,7 +10866,7 @@ def _create_loss_function_modelopt(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/training/pretrain.py
+File: Megatron-Bridge/src/megatron/bridge/training/pretrain.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -11074,12 +11074,12 @@ def _maybe_destroy_process_group(should_destroy: bool) -> None:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/images/pp_comm_overlap.png
+File: Megatron-Bridge/docs/training/images/pp_comm_overlap.png
 ```png
 [Binary file]
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/pruning.md
+File: Megatron-Bridge/docs/training/pruning.md
 ```md
 # Pruning
 
@@ -11162,7 +11162,7 @@ Knowledge Distillation is required to recover the performance of the pruned mode
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/resiliency.md
+File: Megatron-Bridge/docs/training/resiliency.md
 ```md
 # Resiliency
 
@@ -11359,7 +11359,7 @@ with job-level fault tolerance.
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/activation-recomputation.md
+File: Megatron-Bridge/docs/training/activation-recomputation.md
 ```md
 # Activation Recomputation
 
@@ -11509,7 +11509,7 @@ model_config = GPTModelProvider(
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/config-container-overview.md
+File: Megatron-Bridge/docs/training/config-container-overview.md
 ```md
 # Configuration Overview
 
@@ -11710,7 +11710,7 @@ config = ConfigContainer.from_yaml("config.yaml")
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/multi-token-prediction.md
+File: Megatron-Bridge/docs/training/multi-token-prediction.md
 ```md
 # Multi-Token Prediction (MTP)
 
@@ -11988,7 +11988,7 @@ When reporting issues, include:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/examples/models/nemotron_3/super/pretrain_nemotron_3_super.py
+File: Megatron-Bridge/examples/models/nemotron_3/super/pretrain_nemotron_3_super.py
 ```py
 #!/usr/bin/env python3
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
@@ -12093,7 +12093,7 @@ if __name__ == "__main__":
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/entry-points.md
+File: Megatron-Bridge/docs/training/entry-points.md
 ```md
 # Training Entry Points
 
@@ -12195,7 +12195,7 @@ You can customize the forward step function when you need:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/nemotronh/nemotron_3_nano.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/nemotronh/nemotron_3_nano.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -12792,17 +12792,17 @@ __all__ = [
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/images/performant_lora.png
+File: Megatron-Bridge/docs/training/images/performant_lora.png
 ```png
 [Binary file]
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/images/tp_comm_overlap.png
+File: Megatron-Bridge/docs/training/images/tp_comm_overlap.png
 ```png
 [Binary file]
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/callbacks.md
+File: Megatron-Bridge/docs/training/callbacks.md
 ```md
 # Callbacks
 
@@ -13056,7 +13056,7 @@ class ProprietaryMetricsCallback(Callback):
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/models/llm/nemotron3.md
+File: Megatron-Bridge/docs/models/llm/nemotron3.md
 ```md
 # Nemotron 3 Nano 
 [Nemotron 3 Nano](https://huggingface.co/collections/nvidia/nvidia-nemotron-v3) is a large language model (LLM) trained from scratch by NVIDIA, and designed as a unified model for both reasoning and non-reasoning tasks. The model employs a hybrid Mixture-of-Experts (MoE) architecture, consisting of 23 Mamba-2 and MoE layers, along with 6 Attention layers. Each MoE layer includes 128 experts plus 1 shared expert, with 5 experts activated per token. The model has 3.5B active parameters and 30B parameters in total. 
@@ -13157,7 +13157,7 @@ python examples/peft/merge_lora.py \
 ```
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/index.md
+File: Megatron-Bridge/docs/index.md
 ```md
 ```{include} ../README.md
 :relative-docs: docs/
@@ -13269,7 +13269,7 @@ modelopt/README.md
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/nemotronh/__init__.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/nemotronh/__init__.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -13358,7 +13358,7 @@ __all__ = [
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/models/llm/index.md
+File: Megatron-Bridge/docs/models/llm/index.md
 ```md
 # Large Language Models
 
@@ -13385,12 +13385,12 @@ qwen.md
 ```
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/docs/training/images/activation-recomputation-example-1.jpg
+File: Megatron-Bridge/docs/training/images/activation-recomputation-example-1.jpg
 ```jpg
 [Binary file]
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/utils/dataset_utils.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/utils/dataset_utils.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -13674,7 +13674,7 @@ def infer_mode_from_dataset(dataset_type: str) -> str:
 
 ```
 
-File: /Users/mromeijn/src/Megatron-Bridge/src/megatron/bridge/recipes/__init__.py
+File: Megatron-Bridge/src/megatron/bridge/recipes/__init__.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #

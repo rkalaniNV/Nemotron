@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Curator
+Curator
 ├── docs
 │   ├── about
 │   │   ├── concepts
@@ -415,7 +415,7 @@
 (+ denotes code-map available)
 Config: directory-only view; selected files shown.
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/base.py
+File: Curator/nemo_curator/stages/base.py
 Imports:
   - import contextlib
   - import copy
@@ -491,7 +491,7 @@ Global vars:
 ---
 
 
-File: /Users/mromeijn/src/Curator/nemo_curator/tasks/document.py
+File: Curator/nemo_curator/tasks/document.py
 Imports:
   - from dataclasses import dataclass, field
   - import pandas as pd
@@ -513,7 +513,7 @@ Classes:
 
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Curator/docs/about/concepts/text/data-processing-concepts.md
+File: Curator/docs/about/concepts/text/data-processing-concepts.md
 ```md
 ---
 description: "Text processing workflows including quality filtering, fuzzy deduplication, content cleaning, and pipeline design"
@@ -849,7 +849,7 @@ ray_client.stop()
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/process-data/index.md
+File: Curator/docs/curate-text/process-data/index.md
 ```md
 ---
 description: "Process text data using comprehensive filtering, deduplication, content processing, and specialized tools for high-quality datasets"
@@ -1040,7 +1040,7 @@ Specialized Processing <specialized-processing/index>
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/process-data/language-management/language.md
+File: Curator/docs/curate-text/process-data/language-management/language.md
 ```md
 ---
 description: "Identify document languages accurately using FastText models supporting 176 languages for multilingual text processing"
@@ -1181,7 +1181,7 @@ For quick exploratory inspection, converting a `DocumentBatch` to a Pandas DataF
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/process-data/quality-assessment/classifier.md
+File: Curator/docs/curate-text/process-data/quality-assessment/classifier.md
 ```md
 ---
 description: "Filter text using trained quality classifiers including FastText models and pre-trained language classification"
@@ -1379,7 +1379,7 @@ For effective classifier-based filtering:
 
 ```
 
-File: /Users/mromeijn/src/Curator/docs/curate-text/process-data/quality-assessment/distributed-classifier.md
+File: Curator/docs/curate-text/process-data/quality-assessment/distributed-classifier.md
 ```md
 ---
 description: "Perform distributed data classification using GPU-accelerated models for domain, quality, safety, and content assessment"
@@ -1862,7 +1862,7 @@ pipeline.add_stage(aegis_permissive_classifier)
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/filters/doc_filter.py
+File: Curator/nemo_curator/stages/text/filters/doc_filter.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -1971,7 +1971,7 @@ class DocumentFilter(ABC):
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/filters/score_filter.py
+File: Curator/nemo_curator/stages/text/filters/score_filter.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2503,7 +2503,7 @@ def _validate_and_normalize_filters(  # noqa: C901, PLR0912
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/classifiers/base.py
+File: Curator/nemo_curator/stages/text/classifiers/base.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2770,7 +2770,7 @@ class DistributedDataClassifier(CompositeStage[DocumentBatch, DocumentBatch]):
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/classifiers/domain.py
+File: Curator/nemo_curator/stages/text/classifiers/domain.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2920,7 +2920,7 @@ class MultilingualDomainClassifier(DistributedDataClassifier):
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/stages/text/classifiers/quality.py
+File: Curator/nemo_curator/stages/text/classifiers/quality.py
 ```py
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -3010,7 +3010,7 @@ class QualityClassifier(DistributedDataClassifier):
 
 ```
 
-File: /Users/mromeijn/src/Curator/nemo_curator/config/text/heuristic_filter_english_pipeline.yaml
+File: Curator/nemo_curator/config/text/heuristic_filter_english_pipeline.yaml
 ```yaml
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -3258,7 +3258,7 @@ stages:
 
 ```
 
-File: /Users/mromeijn/src/Curator/tutorials/text/distributed-data-classification/README.md
+File: Curator/tutorials/text/distributed-data-classification/README.md
 ```md
 # Distributed Data Classification
 

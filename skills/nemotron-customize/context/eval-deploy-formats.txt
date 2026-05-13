@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Evaluator
+Evaluator
 ├── docs
 │   └── deployment
 │       ├── launcher-orchestrated
@@ -28,7 +28,7 @@
                             └── vllm.yaml *
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Evaluator/docs/deployment/nemo-fw/index.md
+File: Evaluator/docs/deployment/nemo-fw/index.md
 ```md
 (deployment-nemo-fw)=
 # Deploy and Evaluate Checkpoints Trained by NeMo Framework
@@ -72,7 +72,7 @@ Evaluate TRTLLM Checkpoints <trtllm>
 ```
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/deployment/nemo-fw/hf.md
+File: Evaluator/docs/deployment/nemo-fw/hf.md
 ```md
 # Evaluate Automodel Checkpoints Trained by NeMo Framework
 
@@ -149,7 +149,7 @@ For evaluation, update the URL by replacing `/v1/completions/` with `/v1/chat/co
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/deployment/nemo-fw/mbridge.md
+File: Evaluator/docs/deployment/nemo-fw/mbridge.md
 ```md
 # Evaluate Megatron Bridge Checkpoints Trained by NeMo Framework
 
@@ -218,7 +218,7 @@ For evaluation, update the URL by replacing `/v1/completions/` with `/v1/chat/co
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/docs/deployment/launcher-orchestrated/index.md
+File: Evaluator/docs/deployment/launcher-orchestrated/index.md
 ```md
 ---
 orphan: true
@@ -384,7 +384,7 @@ Lepton Deployment <lepton>
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/examples/local_nim.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/examples/local_nim.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -449,7 +449,7 @@ evaluation:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/examples/slurm_nim.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/examples/slurm_nim.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -513,7 +513,7 @@ evaluation:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/examples/local_vllm_logprobs.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/examples/local_vllm_logprobs.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -579,7 +579,7 @@ evaluation:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/configs/default.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/configs/default.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -617,7 +617,7 @@ evaluation: []
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/configs/deployment/nim.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/configs/deployment/nim.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -656,7 +656,7 @@ endpoints:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/configs/deployment/vllm.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/configs/deployment/vllm.yaml
 ```yaml
 # SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -702,7 +702,7 @@ command: vllm serve ${oc.select:deployment.hf_model_handle,/checkpoint}
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/deployment/nim.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/deployment/nim.yaml
 ```yaml
 defaults:
   - deployment: nim
@@ -721,7 +721,7 @@ deployment:
 
 ```
 
-File: /Users/mromeijn/src/Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/deployment/vllm.yaml
+File: Evaluator/packages/nemo-evaluator-launcher/src/nemo_evaluator_launcher/resources/config_templates/deployment/vllm.yaml
 ```yaml
 defaults:
   - deployment: vllm

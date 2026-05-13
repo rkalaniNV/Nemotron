@@ -1,5 +1,5 @@
 <file_map>
-/Users/mromeijn/src/Automodel
+Automodel
 ├── docs
 │   ├── guides
 │   │   ├── llm
@@ -382,7 +382,7 @@
 Config: directory-only view; selected files shown.
 </file_map>
 <file_contents>
-File: /Users/mromeijn/src/Automodel/nemo_automodel/recipes/llm/train_ft.py
+File: Automodel/nemo_automodel/recipes/llm/train_ft.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 #
@@ -2134,7 +2134,7 @@ if __name__ == "__main__":
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/_peft/lora.py
+File: Automodel/nemo_automodel/components/_peft/lora.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2803,7 +2803,7 @@ class LoRATritonFunction(torch.autograd.Function):
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/_peft/module_matcher.py
+File: Automodel/nemo_automodel/components/_peft/module_matcher.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -2961,7 +2961,7 @@ class ModuleMatcher:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/datasets/utils.py
+File: Automodel/nemo_automodel/components/datasets/utils.py
 ```py
 # Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -3536,7 +3536,7 @@ class SFTSingleTurnPreprocessor:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/datasets/llm/chat_dataset.py
+File: Automodel/nemo_automodel/components/datasets/llm/chat_dataset.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 #
@@ -3914,7 +3914,7 @@ class ChatDataset(Dataset):
 
 ```
 
-File: /Users/mromeijn/src/Automodel/nemo_automodel/components/datasets/llm/column_mapped_text_instruction_dataset.py
+File: Automodel/nemo_automodel/components/datasets/llm/column_mapped_text_instruction_dataset.py
 ```py
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 #
@@ -4247,7 +4247,7 @@ class ColumnMappedTextInstructionDataset(Dataset):
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/guides/llm/finetune.md
+File: Automodel/docs/guides/llm/finetune.md
 ```md
 # Supervised Fine-Tuning (SFT) and Parameter-Efficient Fine-Tuning (PEFT)
 
@@ -5186,7 +5186,7 @@ When choosing a combination, keep these rules in mind:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/guides/llm/dataset.md
+File: Automodel/docs/guides/llm/dataset.md
 ```md
 # Integrate Your Own Text Dataset
 
@@ -5377,7 +5377,7 @@ The `packed_sequence` has two options:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/guides/dataset-overview.md
+File: Automodel/docs/guides/dataset-overview.md
 ```md
 # Dataset Overview: LLM, VLM, and Retrieval Datasets
 
@@ -5995,7 +5995,7 @@ For detailed, end-to-end recipes, browse the example configs under [examples/llm
 
 ```
 
-File: /Users/mromeijn/src/Automodel/docs/guides/checkpointing.md
+File: Automodel/docs/guides/checkpointing.md
 ```md
 # Checkpointing
 
@@ -6344,7 +6344,7 @@ Inside your recipe class, define the new state as an instance attribute using `s
 
 ```
 
-File: /Users/mromeijn/src/Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad.yaml
+File: Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad.yaml
 ```yaml
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -6470,7 +6470,7 @@ ci:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad_peft.yaml
+File: Automodel/examples/llm_finetune/llama3_2/llama3_2_1b_squad_peft.yaml
 ```yaml
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -6580,7 +6580,7 @@ ci:
 
 ```
 
-File: /Users/mromeijn/src/Automodel/examples/llm_finetune/llama3_1/llama3_1_8b_columnmapped_lora.yaml
+File: Automodel/examples/llm_finetune/llama3_1/llama3_1_8b_columnmapped_lora.yaml
 ```yaml
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
