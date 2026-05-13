@@ -68,7 +68,11 @@ Credential variables used by the runbook:
 export NVIDIA_API_KEY="${NVIDIA_API_KEY:-}"
 export NGC_API_KEY="${NGC_API_KEY:-$NVIDIA_API_KEY}"
 export HF_TOKEN="${HF_TOKEN:-}"
+export HF_HOME="${HF_HOME:-$QA_ROOT/hf-cache}"
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
+export WANDB_PROJECT="${WANDB_PROJECT:-nemotron-qa}"
+export WANDB_ENTITY="${WANDB_ENTITY:-}"
+export WANDB_NAME="${WANDB_NAME:-nemotron-qa-$QA_RUN_ID}"
 ```
 
 ### SETUP-001 Install Base Environment And Discover CLI
@@ -908,14 +912,14 @@ Prerequisites: Agent environment available; tiny training data.
 Ask the agent:
 
 ```text
-Prepare a tiny SFT workflow using Lepton. Use the bundled tiny data-prep config, run data_prep/sft_packing on Lepton first, then submit one actual one-GPU SFT training smoke on Lepton.
+Prepare a tiny SFT workflow using Lepton. Use the bundled tiny data-prep config, run data_prep/sft_packing on Lepton first, then submit the packaged tiny Megatron-Bridge SFT training step with SFT_PACKED_DIR pointing at the data-prep output.
 ```
 
 Success criteria:
 
 - Uses `data_prep/sft_packing` before a packed-data Megatron-Bridge SFT smoke.
-- Uses the one-GPU AutoModel smoke command when the selected Lepton profile has one A100.
-- Uses `--batch lepton` and submits real Lepton jobs.
+- Uses `--batch lepton_prep_sft_packing` for data prep and `--batch lepton_sft_megatron_bridge` for training.
+- Does not override model names, dataset names, split sizes, or scheduler knobs from the packaged configs.
 - Keeps models, datasets, checkpoints, and generated outputs on shared storage.
 
 Evidence to collect: agent transcript, generated command plan, Lepton job IDs, and output artifact paths.
@@ -1141,54 +1145,59 @@ mkdir -p "$LEPTON_ROOT"
 
 export LEPTON_WORKSPACE="${LEPTON_WORKSPACE:?Set Lepton workspace name}"
 export LEPTON_API_KEY="${LEPTON_API_KEY:?Set Lepton API key}"
+export LEPTON_NODE_GROUP="${LEPTON_NODE_GROUP:-az-sat-lepton-001}"
+export NEMOTRON_HOST_MOUNT="${NEMOTRON_HOST_MOUNT:-/sovereign-ai-playbook/}"
+export NEMOTRON_WORKSPACE="${NEMOTRON_WORKSPACE:-/mnt/lustre-shared}"
+export NEMOTRON_MOUNT_FROM="${NEMOTRON_MOUNT_FROM:-node-nfs:amlfs}"
+export NEMO_RUN_DIR="${NEMO_RUN_DIR:-$NEMOTRON_WORKSPACE/nemo-run}"
+export HF_HOME="${HF_HOME:-$NEMOTRON_WORKSPACE/hf}"
+export WANDB_PROJECT="${WANDB_PROJECT:-nemotron-qa}"
+export WANDB_ENTITY="${WANDB_ENTITY:-}"
+export WANDB_NAME="${WANDB_NAME:-nemotron-qa-$QA_RUN_ID}"
+: "${WANDB_API_KEY:?Set WANDB_API_KEY for Lepton training and data-prep telemetry}"
 uvx --from leptonai lep login -c "$LEPTON_WORKSPACE:$LEPTON_API_KEY"
-
-cat > "$LEPTON_ROOT/env.lepton.toml" <<'EOF'
-[lepton]
-executor = "lepton"
-container_image = "nvcr.io/nvidia/nemo:25.11.nemotron_3_nano"
-node_group = "az-sat-lepton-001"
-resource_shape = "gpu.a100-80gb"
-nemo_run_dir = "/mnt/lustre-shared/nemo-run"
-nodes = 1
-gpus_per_node = 1
-image_pull_secrets = []
-pip_extras = ["cosmos-xenna"]
-ray_version = "2.48.0"
-# NOTE: OTEL_EXPORTER_OTLP_ENDPOINT intentionally omitted. Setting it to ""
-# can crash Ray's OpenTelemetryMetricRecorder during actor init.
-# Raylet-level tuning: avoid prestarting 96 workers at once on 96-CPU nodes.
-env_vars = { HF_TOKEN = "${oc.env:HF_TOKEN,''}", HF_HOME = "${oc.env:HF_HOME,/mnt/lustre-shared/hf}", RAY_GRAFANA_IFRAME_HOST = "", RAY_DEDUP_LOGS = "0", RAY_worker_maximum_startup_concurrency = "16", RAY_num_prestart_python_workers = "16", RAY_worker_register_timeout_seconds = "1200", WANDB_API_KEY = "${oc.env:WANDB_API_KEY,''}" }
-pre_launch_commands = [
-  "export RAY_worker_maximum_startup_concurrency=16",
-  "export RAY_num_prestart_python_workers=16",
-]
-mounts = [
-  { path = "/sovereign-ai-playbook/", mount_path = "/mnt/lustre-shared", from = "node-nfs:amlfs" },
-]
-
-[lepton_sft_automodel]
-extends = "lepton"
-container_image = "nvcr.io/nvidia/nemo-automodel:26.04"
-startup_commands = [
-  "python -m pip install --quiet --break-system-packages omegaconf",
-]
-EOF
 
 export NEMOTRON_ENV_FILE="$LEPTON_ROOT/env.lepton.toml"
 
-uvx --from leptonai lep node list
-uvx --from leptonai lep node storage -ng az-sat-lepton-001
-uv run --no-sync python - <<'PY'
+uv run --no-sync nemotron steps run env/env_toml \
+  -c lepton \
+  output_path="$NEMOTRON_ENV_FILE" \
+  force=true
+
+python - <<'PY'
 import os
-import tomllib
 from pathlib import Path
 
 path = Path(os.environ["NEMOTRON_ENV_FILE"])
-parsed = tomllib.loads(path.read_text())
-assert "lepton" in parsed, parsed.keys()
-assert "lepton_sft_automodel" in parsed, parsed.keys()
-assert parsed["lepton"]["mounts"][0]["mount_path"] == "/mnt/lustre-shared"
+text = path.read_text()
+text = text.replace('node_group = "lepton-node-group"', f'node_group = "{os.environ["LEPTON_NODE_GROUP"]}"')
+text = text.replace(
+    'WANDB_PROJECT = "nemotron"',
+    'WANDB_PROJECT = "${oc.env:WANDB_PROJECT,nemotron-qa}", WANDB_ENTITY = "${oc.env:WANDB_ENTITY,\'\'}", WANDB_NAME = "${oc.env:WANDB_NAME,nemotron-qa}"',
+)
+path.write_text(text)
+PY
+
+uvx --from leptonai lep node list
+uvx --from leptonai lep node storage -ng "$LEPTON_NODE_GROUP"
+uv run --no-sync python - <<'PY'
+import os
+from pathlib import Path
+
+from nemo_runspec.env import load_env_profile
+from omegaconf import OmegaConf
+
+path = Path(os.environ["NEMOTRON_ENV_FILE"])
+profiles = path.read_text()
+for name in ("lepton_base", "lepton_prep_sft_packing", "lepton_sft_megatron_bridge", "lepton_sft_automodel"):
+    assert f"[{name}]" in profiles, name
+base = OmegaConf.to_container(load_env_profile("lepton_base", config_path=path), resolve=True)
+assert base["mounts"][0]["mount_path"] == os.environ["NEMOTRON_WORKSPACE"]
+assert base["env_vars"]["HF_HOME"] == os.environ["HF_HOME"]
+assert base["env_vars"]["WANDB_API_KEY"]
+assert base["env_vars"]["WANDB_PROJECT"] == os.environ["WANDB_PROJECT"]
+assert "WANDB_ENTITY" in base["env_vars"]
+assert "WANDB_NAME" in base["env_vars"]
 print(path)
 PY
 ```
@@ -1197,9 +1206,10 @@ Success criteria:
 
 - `env.lepton.toml` is generated.
 - Lepton login succeeds.
-- Node group `az-sat-lepton-001` and storage `node-nfs:amlfs` are visible to the workspace.
-- Profile `[lepton]` uses `/sovereign-ai-playbook/` mounted at `/mnt/lustre-shared`.
-- Profile `[lepton_sft_automodel]` uses the AutoModel container image.
+- Configured node group and storage `node-nfs:amlfs` are visible to the workspace.
+- Profile `[lepton_base]` uses the configured shared mount.
+- Data-prep and training profiles are present, including `[lepton_prep_sft_packing]`, `[lepton_sft_megatron_bridge]`, and `[lepton_sft_automodel]`.
+- `HF_HOME`, `WANDB_API_KEY`, `WANDB_PROJECT`, `WANDB_ENTITY`, and `WANDB_NAME` are exported before submission.
 - Secrets are not written in plain text unless explicitly intended by the profile.
 
 Evidence to collect: generated env file path and redacted content sample.
@@ -1210,14 +1220,13 @@ Prerequisites: Env file from `LEP-001`.
 
 ```bash
 test -s "$NEMOTRON_ENV_FILE"
-grep -E "^\[(lepton|lepton_sft_automodel)\]" "$NEMOTRON_ENV_FILE"
+grep -E "^\[(lepton_base|lepton_prep_sft_packing|lepton_prep_pretrain_prep|lepton_sft_megatron_bridge|lepton_pretrain_megatron_bridge|lepton_sft_automodel)\]" "$NEMOTRON_ENV_FILE"
 uvx --from leptonai lep workspace list
 ```
 
 Success criteria:
 
-- Required Lepton profile exists in `env.lepton.toml`.
-- AutoModel-specific Lepton profile exists in `env.lepton.toml`.
+- Required Lepton data-prep and training profiles exist in `env.lepton.toml`.
 - Lepton workspace listing succeeds.
 - This profile-validation case does not replace the actual Lepton runtime cases in `LEP-003`.
 
@@ -1232,73 +1241,63 @@ Lepton job submissions, not simulations.
 
 ```bash
 export NEMOTRON_ENV_FILE="$LEPTON_ROOT/env.lepton.toml"
-export LEPTON_CONTAINER_MOUNT="${LEPTON_CONTAINER_MOUNT:-/mnt/lustre-shared}"
+export LEPTON_CONTAINER_MOUNT="${NEMOTRON_WORKSPACE:-/mnt/lustre-shared}"
 export LEPTON_OUTPUT_ROOT="${LEPTON_OUTPUT_ROOT:-$LEPTON_CONTAINER_MOUNT/output/nemotron-qa-$QA_RUN_ID}"
+export HF_HOME="${HF_HOME:-$LEPTON_CONTAINER_MOUNT/hf}"
+export WANDB_PROJECT="${WANDB_PROJECT:-nemotron-qa}"
+export WANDB_ENTITY="${WANDB_ENTITY:-}"
+export WANDB_NAME="${WANDB_NAME:-nemotron-qa-$QA_RUN_ID}"
+: "${WANDB_API_KEY:?Set WANDB_API_KEY for Lepton training and data-prep telemetry}"
 
-SFT_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/sft/packed" \
+SFT_PREP_DIR="$LEPTON_OUTPUT_ROOT/data_prep/sft_packing"
+PRETRAIN_PREP_DIR="$LEPTON_OUTPUT_ROOT/data_prep/pretrain_prep"
+RL_PREP_DIR="$LEPTON_OUTPUT_ROOT/data_prep/rl_prep"
+
+SFT_OUTPUT_DIR="$SFT_PREP_DIR" \
   uv run --no-sync nemotron steps run data_prep/sft_packing \
   -c tiny \
-  --batch lepton \
-  sample=8 \
-  num_shards=1 \
-  valid_shards=0 \
-  test_shards=0 \
-  pack_size=1024 \
-  force=true \
-  observability.pipeline_logging_interval_s=30
+  --batch lepton_prep_sft_packing
 
-PRETRAIN_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/pretrain/prep" \
+PRETRAIN_OUTPUT_DIR="$PRETRAIN_PREP_DIR" \
   uv run --no-sync nemotron steps run data_prep/pretrain_prep \
   -c tiny \
-  --batch lepton \
-  sample=8 \
-  num_shards=1 \
-  valid_shards=0 \
-  test_shards=0 \
-  force=true \
-  observability.pipeline_logging_interval_s=30
+  --batch lepton_prep_pretrain_prep
 
-RL_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/rl/prep" \
+RL_OUTPUT_DIR="$RL_PREP_DIR" \
   uv run --no-sync nemotron steps run data_prep/rl_prep \
   -c tiny \
-  --batch lepton \
-  sample=8 \
-  num_shards_per_split=1 \
-  force=true \
-  observability.pipeline_logging_interval_s=30
+  --batch lepton_prep_rl_prep
+
+SFT_PACKED_DIR="$SFT_PREP_DIR/splits/train/*.parquet" \
+SFT_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/sft/megatron_bridge" \
+  uv run --no-sync nemotron steps run sft/megatron_bridge \
+  -c tiny \
+  --batch lepton_sft_megatron_bridge
+
+PRETRAIN_BLEND_PATH="$PRETRAIN_PREP_DIR/blend.json" \
+PRETRAIN_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/pretrain/megatron_bridge" \
+  uv run --no-sync nemotron steps run pretrain/megatron_bridge \
+  -c tiny \
+  --batch lepton_pretrain_megatron_bridge
 
 SFT_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/sft/automodel" \
   uv run --no-sync nemotron steps run sft/automodel \
   -c tiny \
-  --batch lepton_sft_automodel \
-  run.env.nodes=1 \
-  run.env.gpus_per_node=1 \
-  run.env.nprocs_per_node=1 \
-  model.pretrained_model_name_or_path=Qwen/Qwen3-0.6B \
-  distributed.ep_size=1 \
-  step_scheduler.max_steps=1 \
-  step_scheduler.global_batch_size=1 \
-  dataset.split='train_sft[:8]' \
-  validation_dataset.split='test_sft[:2]'
+  --batch lepton_sft_automodel
 
-SFT_PACKED_DIR="$LEPTON_OUTPUT_ROOT/sft/packed/splits/train/*.parquet" \
-SFT_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/sft/megatron_bridge" \
-  uv run --no-sync nemotron steps run sft/megatron_bridge \
+PRETRAIN_BLEND_PATH="$PRETRAIN_PREP_DIR/blend.json" \
+PRETRAIN_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/pretrain/automodel" \
+  uv run --no-sync nemotron steps run pretrain/automodel \
   -c tiny \
-  --batch lepton
-
-PRETRAIN_BLEND_PATH="$LEPTON_OUTPUT_ROOT/pretrain/prep/blend.json" \
-PRETRAIN_OUTPUT_DIR="$LEPTON_OUTPUT_ROOT/pretrain/megatron_bridge" \
-  uv run --no-sync nemotron steps run pretrain/megatron_bridge \
-  -c tiny \
-  --batch lepton
+  --batch lepton_pretrain_automodel
 ```
 
 Success criteria:
 
 - Real data-prep and training runs return Lepton job IDs or complete successfully depending on executor behavior.
-- The one-GPU AutoModel smoke is the required training check for the provided one-A100 profile.
-- Megatron-Bridge training commands are follow-on compatibility checks; if they require more GPUs than the selected profile provides, record the resource mismatch instead of treating it as a product failure.
+- The required end-to-end checks use data-prep outputs as training inputs: `SFT_PACKED_DIR` points to the SFT packing output and `PRETRAIN_BLEND_PATH` points to the pretrain prep output.
+- Training commands do not override model names, dataset names, split sizes, or scheduler knobs; those come from `tiny.yaml` and `default.yaml`.
+- AutoModel commands use their packaged tiny configs. Do not force packed-parquet data into AutoModel SFT; the packed output is for Megatron-Bridge SFT.
 - Remote logs show mounted paths and do not print secrets.
 - If Lepton workspace, quota, credentials, images, or shared storage are unavailable, mark the specific run `BLOCKED`.
 
@@ -1311,13 +1310,14 @@ Prerequisites: Agent environment available; generated and reviewed `env.lepton.t
 Ask the agent:
 
 ```text
-Run the tiny training workflow on Lepton. Copy the QA training data to shared storage, run data_prep/sft_packing on Lepton, then submit one actual tiny SFT job on Lepton. Do not substitute metadata checks for the training runtime.
+Run the tiny training workflow on Lepton. Generate the Lepton env file, run data_prep/sft_packing with the packaged tiny config, then submit the tiny SFT Megatron-Bridge training job using SFT_PACKED_DIR from the data-prep output. Do not override model names, dataset names, split sizes, or scheduler knobs.
 ```
 
 Success criteria:
 
-- Uses `nemotron steps run data_prep/sft_packing` with `--batch lepton`.
-- Uses one training step with the `--batch lepton` profile.
+- Uses `nemotron steps run data_prep/sft_packing -c tiny --batch lepton_prep_sft_packing`.
+- Uses `nemotron steps run sft/megatron_bridge -c tiny --batch lepton_sft_megatron_bridge`.
+- Passes the SFT packing output to training through `SFT_PACKED_DIR`.
 - Keeps input/output under shared storage.
 - Returns Lepton job IDs and validates output artifact paths.
 
