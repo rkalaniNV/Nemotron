@@ -20,7 +20,7 @@ The "default model" column shows what the shipped `config/default.yaml`
 selects. Override at CLI:
 
 ```bash
-nemotron steps run pretrain/automodel -c default \
+uv run nemotron steps run pretrain/automodel -c default --dry-run \
   model.pretrained_model_name_or_path=<your-hf-id>
 ```
 
@@ -68,15 +68,16 @@ curate/nemo_curator → data_prep/pretrain_prep → pretrain/automodel        �
 
 ## Workflow
 
-1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray runs
-   (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
-2. Run [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/SKILL.md) on a tokenizer
+1. Run [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/SKILL.md) on a tokenizer
    that matches the trainer.
-3. Write the budget down (target_tokens / seq_length / gbs / train_iters /
+2. Write the budget down (target_tokens / seq_length / gbs / train_iters /
    lr schedule / ckpt cadence) **before code changes**.
-4. Pick backend per the decision tree.
-5. Smoke with `config/tiny.yaml` to verify launch + data access + checkpoint
+3. Pick backend per the decision tree.
+4. Smoke with `config/tiny.yaml` to verify launch + data access + checkpoint
    write/restore.
+5. For remote submission, select the profile from
+   `env/env_toml/config/{lepton,slurm,dgxcloud}.yaml` or the generated env file;
+   do not hardcode profile names here.
 6. Run a short *representative* job at production sequence length and
    parallelism to validate throughput and val-loss movement.
 7. For CPT, evaluate at every checkpoint to catch forgetting early.
@@ -88,8 +89,8 @@ curate/nemo_curator → data_prep/pretrain_prep → pretrain/automodel        �
 ## Smoke commands
 
 ```bash
-nemotron steps run pretrain/automodel       -c tiny
-nemotron steps run pretrain/megatron_bridge -c tiny
+uv run nemotron steps run pretrain/automodel       -c tiny --dry-run
+uv run nemotron steps run pretrain/megatron_bridge -c tiny --dry-run
 ```
 
 ## Patterns to cite

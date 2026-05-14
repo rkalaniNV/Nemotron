@@ -40,6 +40,14 @@ name = "config"
 description = "Path to a BYOB YAML config."
 
 [[parameters]]
+name = "target_source_mapping"
+description = "Benchmark target subjects mapped to source document directories or parquet references. Required for MCQ generation."
+
+[[parameters]]
+name = "filtering_model_configs"
+description = "Model configs used by quality filtering and semantic dedup stages. Keep these explicit for reproducible benchmark generation."
+
+[[parameters]]
 name = "skip_until"
 description = "Optional resume stage enum name for cached generation or translation runs."
 
@@ -74,8 +82,17 @@ recovery = "Keep final MCQ benchmark.parquet columns aligned with references/ben
 name = "new_family_keeps_mcq_assumptions"
 recovery = "For non-MCQ families, define a family-specific schema and replace MCQ-only stages such as distractor expansion and answer-letter validation."
 
+[[errors]]
+name = "resume_cache_missing"
+recovery = "Use skip_until only when the previous stage cache parquet exists under output_dir/expt_name/stage_cache."
+
+[[errors]]
+name = "translation_row_count_drift"
+recovery = "Translated outputs should preserve row count unless remove_low_quality is intentionally enabled; inspect quality cache before filtering."
+
 [reference]
 skill = "src/nemotron/steps/byob/SKILL.md"
+contract = "src/nemotron/steps/byob/references/STEP.md"
 script = "src/nemotron/steps/byob/step.py"
 default_config = "src/nemotron/steps/byob/config/default.yaml"
 tiny_config = "src/nemotron/steps/byob/config/tiny.yaml"

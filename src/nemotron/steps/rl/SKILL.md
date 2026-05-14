@@ -53,17 +53,18 @@ when the next consumer (eval, deployment) expects HF.
 
 ## Workflow
 
-1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray runs
-   (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
-2. Confirm the SFT warm-start checkpoint exists and was trained on a
+1. Confirm the SFT warm-start checkpoint exists and was trained on a
    compatible tokenizer and chat template.
-3. Run [`data_prep/rl_prep`](../data_prep/rl_prep/SKILL.md) when data needs HF
+2. Run [`data_prep/rl_prep`](../data_prep/rl_prep/SKILL.md) when data needs HF
    resolution or sharding.
-4. Pick the step per the decision tree.
-5. Validate the reward path on a tiny set **before scaling rollout count** —
+3. Pick the step per the decision tree.
+4. Validate the reward path on a tiny set **before scaling rollout count** —
    see the rewards pattern above.
-6. Use `config/tiny.yaml` for runner validation; method-specific configs
+5. Use `config/tiny.yaml` for runner validation; method-specific configs
    (`config/nemo_gym.yaml` for resource-server rewards) for production.
+6. For remote submission, select the profile from
+   `env/env_toml/config/{lepton,slurm,dgxcloud}.yaml` or the generated env file;
+   do not hardcode profile names here.
 7. Track KL, reward variance, reward saturation, response length, and
    held-out task evals — not just reward.
 8. Bookend with eval — see
@@ -74,9 +75,9 @@ when the next consumer (eval, deployment) expects HF.
 ## Smoke commands
 
 ```bash
-nemotron steps run rl/nemo_rl/dpo  -c tiny
-nemotron steps run rl/nemo_rl/rlvr -c tiny
-nemotron steps run rl/nemo_rl/rlhf -c tiny
+uv run nemotron steps run rl/nemo_rl/dpo  -c tiny --dry-run
+uv run nemotron steps run rl/nemo_rl/rlvr -c tiny --dry-run
+uv run nemotron steps run rl/nemo_rl/rlhf -c tiny --dry-run
 ```
 
 ## Guardrails

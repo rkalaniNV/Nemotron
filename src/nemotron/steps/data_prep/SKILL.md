@@ -32,23 +32,23 @@ Skip packing when:
 
 ## Workflow
 
-1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray/batch
-   runs (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific
-   files).
-2. Read the target step's `step.toml` for artifacts, parameters, strategies,
+1. Read the target step's `step.toml` for artifacts, parameters, strategies,
    and references.
-3. Start with `config/tiny.yaml` for smoke tests, `config/default.yaml` for
+2. Start with `config/tiny.yaml` for smoke tests, `config/default.yaml` for
    production shape.
-4. Keep tokenizer, chat template, sequence length, split names, and shard
+3. Keep tokenizer, chat template, sequence length, split names, and shard
    policy aligned with the downstream trainer.
+4. For remote submission, select the profile from
+   `env/env_toml/config/{lepton,slurm,dgxcloud}.yaml` or the generated env file;
+   do not hardcode profile names here.
 5. Inspect sample outputs before launching expensive training.
 
 ## Smoke commands
 
 ```bash
-nemotron steps run data_prep/sft_packing   -c tiny
-nemotron steps run data_prep/pretrain_prep -c tiny
-nemotron steps run data_prep/rl_prep       -c tiny
+uv run nemotron steps run data_prep/sft_packing   -c tiny --dry-run
+uv run nemotron steps run data_prep/pretrain_prep -c tiny --dry-run
+uv run nemotron steps run data_prep/rl_prep       -c tiny --dry-run
 ```
 
 ## Patterns to cite

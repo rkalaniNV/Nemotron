@@ -41,14 +41,15 @@ instruction-format adherence).
 
 ## Workflow
 
-1. **Env profile first** — verify the env profile for Lepton/Slurm/Ray runs
-   (`env.toml` by default, or `NEMOTRON_ENV_FILE` for backend-specific files).
-2. Pick backend per the decision tree above.
-3. Read the chosen step's `step.toml` for parameters/strategies/errors.
-4. Smoke-test with `config/tiny.yaml` before scaling.
-5. Keep base model + tokenizer + chat template identical to any later
+1. Pick backend per the decision tree above.
+2. Read the chosen step's `step.toml` for parameters/strategies/errors.
+3. Smoke-test with `config/tiny.yaml` before scaling.
+4. Keep base model + tokenizer + chat template identical to any later
    `sft/*` or `eval/*` consumer — see
    [../patterns/prep-data-is-tokenizer-locked.md](../patterns/prep-data-is-tokenizer-locked.md).
+5. For remote submission, select the profile from
+   `env/env_toml/config/{lepton,slurm,dgxcloud}.yaml` or the generated env file;
+   do not hardcode profile names here.
 6. Treat the adapter as a **separate artifact** until merge — see
    [../patterns/peft-adapter-merge-discipline.md](../patterns/peft-adapter-merge-discipline.md).
 7. Decide whether LoRA is even the right tool — see
@@ -61,8 +62,8 @@ instruction-format adherence).
 ## Smoke commands
 
 ```bash
-nemotron steps run peft/automodel -c tiny
-nemotron steps run peft/megatron_bridge -c tiny   # requires compatible packed_parquet + base checkpoint
+uv run nemotron steps run peft/automodel -c tiny --dry-run
+uv run nemotron steps run peft/megatron_bridge -c tiny --dry-run   # requires compatible packed_parquet + base checkpoint
 ```
 
 ## Guardrails

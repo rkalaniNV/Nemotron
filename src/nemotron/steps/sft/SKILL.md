@@ -36,22 +36,22 @@ Pick an SFT backend and keep data and checkpoint formats compatible.
 
 ## Workflow
 
-1. **Env profile first** — for Lepton/Slurm/Ray runs verify the env profile.
-   Default lookup is repo-root `env.toml`; backend-specific files
-   (`env.lepton.toml`, `env.slurm.toml`) require `NEMOTRON_ENV_FILE`.
-2. Read the chosen step's `step.toml` for parameters/strategies/errors.
-3. Smoke-test with `config/tiny.yaml` before scaling.
-4. Keep `pack_size`, `seq_length`, tokenizer, and chat template identical
+1. Read the chosen step's `step.toml` for parameters/strategies/errors.
+2. Smoke-test with `config/tiny.yaml` before scaling.
+3. Keep `pack_size`, `seq_length`, tokenizer, and chat template identical
    across prep, train, eval, and deployment — see
    [../patterns/prep-data-is-tokenizer-locked.md](../patterns/prep-data-is-tokenizer-locked.md).
+4. For remote submission, select the profile from
+   `env/env_toml/config/{lepton,slurm,dgxcloud}.yaml` or the generated env file;
+   do not hardcode profile names here.
 5. Inspect formatted prompts and loss masks before treating a run as meaningful.
 6. Bookend with eval — see [../patterns/eval-before-and-after-training.md](../patterns/eval-before-and-after-training.md).
 
 ## Smoke commands
 
 ```bash
-nemotron steps run sft/automodel -c tiny
-nemotron steps run sft/megatron_bridge -c tiny   # requires compatible packed_parquet
+uv run nemotron steps run sft/automodel -c tiny --dry-run
+uv run nemotron steps run sft/megatron_bridge -c tiny --dry-run   # requires compatible packed_parquet
 ```
 
 ## Patterns to cite
