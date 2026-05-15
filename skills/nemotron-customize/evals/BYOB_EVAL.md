@@ -9,11 +9,11 @@
 
 ## Example negative questions
 - I need a full supervised fine-tuning (SFT) pipeline for Nemotron. Can you help?
-- Teach me how to create SFT training data for a model. 
-- Help me download a dataset from Huggingface. 
-- I need deploy a model on Slurm. Please help. 
+- Teach me how to create SFT training data for a model.
+- Help me download a dataset from Huggingface.
+- I need deploy a model on Slurm. Please help.
 
-## Expected Behaviors 
+## Expected Behaviors
 - The agent evaluates whether the request should trigger the BYOB path in the `nemotron-customize` skill, using benchmark generation from user-provided domain documents as the target signal.
 - For positive BYOB requests, the agent identifies the work as a BYOB benchmark workflow, not a generic evaluation-only, SFT training, SFT-data creation, dataset download, or deployment task.
 - The agent explains the BYOB objective clearly: create benchmark artifacts from domain documents, especially custom MCQ benchmark outputs for evaluating a customized or fine-tuned Nemotron model.
