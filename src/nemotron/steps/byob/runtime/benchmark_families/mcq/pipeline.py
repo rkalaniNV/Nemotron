@@ -63,8 +63,6 @@ def generate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None 
     """Run the MCQ benchmark generation pipeline and return the final benchmark path."""
     import pandas as pd
 
-    from nemotron.steps.byob.runtime.benchmark_families.mcq.deduplication import TextSemanticDeduplicationMCQ
-    from nemotron.steps.byob.runtime.benchmark_families.mcq.semantic_outlier import TextSemanticOutlierDetectionMCQ
     from nemotron.steps.byob.runtime.benchmark_families.mcq.stages import (
         check_distractor_validity,
         expand_distractors,
@@ -72,7 +70,6 @@ def generate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None 
         generate_questions,
         judge_questions,
     )
-    from nemotron.steps.byob.runtime.benchmark_families.mcq.text_coverage import TextCoverageMCQ
     from nemotron.steps.byob.runtime.benchmark_families.mcq.utils import (
         postprocess_distractor_expansion,
         postprocess_distractor_validity,
@@ -125,6 +122,8 @@ def generate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None 
     if _should_run(skip_until, McqGenerationStage.SEMANTIC_DEDUPLICATION):
         dataset_in = pd.read_parquet(last_output_path)
         if _is_enabled(config.semantic_deduplication_config):
+            from nemotron.steps.byob.runtime.benchmark_families.mcq.deduplication import TextSemanticDeduplicationMCQ
+
             dataset_out = TextSemanticDeduplicationMCQ(config).run(dataset_in)
         else:
             dataset_out = dataset_in.copy()
@@ -144,6 +143,8 @@ def generate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None 
 
     if config.do_coverage_check:
         if _should_run(skip_until, McqGenerationStage.COVERAGE_CHECK):
+            from nemotron.steps.byob.runtime.benchmark_families.mcq.text_coverage import TextCoverageMCQ
+
             dataset_in = pd.read_parquet(last_output_path)
             dataset_out = TextCoverageMCQ(config).analyze(dataset_in)
             dataset_out.to_parquet(paths["coverage"])
@@ -161,6 +162,8 @@ def generate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None 
     if _should_run(skip_until, McqGenerationStage.SEMANTIC_OUTLIER_DETECTION):
         dataset_in = pd.read_parquet(last_output_path)
         if _is_enabled(config.semantic_outlier_detection_config):
+            from nemotron.steps.byob.runtime.benchmark_families.mcq.semantic_outlier import TextSemanticOutlierDetectionMCQ
+
             dataset_out = TextSemanticOutlierDetectionMCQ(config).detect(dataset_in)
         else:
             dataset_out = dataset_in.copy()

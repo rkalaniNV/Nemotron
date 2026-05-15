@@ -493,14 +493,18 @@ configs.
 - Reuse the current repo's CLIs, recipes, runners, and step implementations first.
 - Adapt configs to the user's hardware and dataset (don't blindly copy `default.yaml`).
 - Fire strategies and follow `skill:` pointers when perf-tuning.
-- Ask about hardware, data, backend, and output path — never assume.
+- In interactive sessions, ask about hardware, data, backend, and output path
+  when required; in automated/eval runs, state safe assumptions and continue.
 - Generate only the YAML configs needed for the approved request.
 - Surface tradeoffs (Megatron-Bridge vs AutoModel, full FT vs LoRA) as tables.
-- Present the plan and wait for approval.
+- Present the plan. Wait for approval only in interactive sessions or before
+  destructive actions, external uploads, credential-sensitive operations, or
+  unsupported scope.
 
 ### Don't
 
-- Invent steps. Use Explorer mode or ask.
+- Invent steps. Use Explorer mode; in automated/eval runs, do not block on
+  confirmation when an existing repo-supported path is available.
 - Skip Plan for any pipeline ≥2 stages.
 - Run destructive cleanup such as `rm -rf`. Use a fresh output directory,
   overwrite generated files intentionally, or ask before deleting anything.
@@ -525,12 +529,12 @@ configs.
 
 | Situation | Action |
 |---|---|
-| No existing repo path matches the user's request | Check libraries cited in nearby `step.toml [reference]`. If supported, use Explorer mode. Otherwise ask. |
-| Artifact types won't chain | Explain the gap and ask the user whether to change the training/data-prep plan. Do not add post-training work here. |
+| No existing repo path matches the user's request | Check libraries cited in nearby `step.toml [reference]`. If supported, use Explorer mode. In automated/eval runs, explain the gap and stop rather than waiting for confirmation. |
+| Artifact types won't chain | Explain the gap and, in interactive sessions, ask the user whether to change the training/data-prep plan. In automated/eval runs, state the safest supported alternative and continue only if it remains within scope. Do not add post-training work here. |
 | Strategy points to a missing skill file | Skip the load. Use the `then:` text as guidance. Note in plan: "⚠ Could not read perf-tuning docs for `<topic>` — config may need manual review." |
 | User's hardware is too small | Show the relevant `[[models]]` `min_gpus` table. Suggest in order: smaller model → AutoModel → LoRA. |
-| Two failed Act attempts | Stop. Explain what was tried, what failed, ask the user how to proceed. |
-| User wants a feature that crosses 3+ projects | Confirm YAML and existing repo code cannot serve it. If not, build it Explorer-mode for them now, then suggest `/nemotron-add-step` to land it in the catalog. |
+| Two failed Act attempts | Stop. Explain what was tried and what failed. Ask how to proceed only in interactive sessions. |
+| User wants a feature that crosses 3+ projects | Confirm YAML and existing repo code cannot serve it. In automated/eval runs, do not block for confirmation; explain the limitation and suggest `/nemotron-add-step` to land it in the catalog. |
 
 ---
 
