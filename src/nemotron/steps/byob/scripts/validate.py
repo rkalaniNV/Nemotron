@@ -24,11 +24,14 @@ REQUIRED_FILES = (
     "config/default.yaml",
     "config/tiny.yaml",
     "config/translate.yaml",
+    "config/cpu_smoke.yaml",
     "references/STEP.md",
     "references/guide.md",
     "references/benchmark-schema.md",
     "references/new-family-checklist.md",
     "references/quality-and-filtering.md",
+    "references/cpu-smoke-path.md",
+    "references/curator-pin.md",
     "patterns/index.yaml",
     "eval/golden_cases.yaml",
     "eval/skill_cases.yaml",
@@ -54,7 +57,7 @@ def validate_skill_dir(skill_dir: Path) -> list[str]:
         if not frontmatter.get("when_to_use"):
             errors.append("SKILL.md when_to_use is required")
 
-    for rel_path in ("config/default.yaml", "config/tiny.yaml", "config/translate.yaml"):
+    for rel_path in ("config/default.yaml", "config/tiny.yaml", "config/translate.yaml", "config/cpu_smoke.yaml"):
         path = skill_dir / rel_path
         if path.exists():
             data = yaml.safe_load(path.read_text(encoding="utf-8"))

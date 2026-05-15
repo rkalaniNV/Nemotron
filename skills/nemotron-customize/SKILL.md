@@ -37,6 +37,70 @@ Concise. Technical. No fluff.
 
 ---
 
+## Bootstrap
+
+Run these once in a fresh checkout before invoking the workflow. `uv sync`
+installs the `nemotron` CLI declared in [pyproject.toml](../../pyproject.toml)
+(entry point `nemotron = "nemotron.__main__:main"`) using the Python pinned
+in [.python-version](../../.python-version).
+
+```bash
+git clone <repo-url> && cd Nemotron        # or: cd into existing checkout
+uv sync                                    # creates .venv, installs nemotron
+uv run nemotron --help                     # smoke check the CLI
+uv run nemotron steps list --json | head   # confirm the step catalog loads
+```
+
+Optional, only when needed by a specific step:
+
+```bash
+uv sync --extra byob                       # GPU/Linux/x86_64 BYOB pipeline
+uv sync --extra translation                # corpus translation + FAITH
+uv sync --extra audio                      # audio data prep (Valor32k, etc.)
+```
+
+For Lepton / Slurm / DGX Cloud profile generation and execution, route to the
+[`env/env_toml`](../../src/nemotron/steps/env/env_toml/SKILL.md) step skill —
+it writes the right `env.<backend>.toml` and explains
+`NEMOTRON_ENV_FILE`. Auth and credential variables expected by those
+profiles are summarized in
+[Auth & credentials](#auth--credentials) below.
+
+---
+
+## Quickstart
+
+A literal "run this and see a pipeline appear" path. After
+[Bootstrap](#bootstrap) succeeds:
+
+```bash
+# 1. Discover the catalog and confirm the SFT path is present.
+uv run nemotron steps list --json --consumes training_jsonl
+uv run nemotron steps show data_prep/sft_packing
+uv run nemotron steps show sft/megatron_bridge
+
+# 2. Invoke this skill with a concrete request.
+#    (In Cursor / Claude / etc., type: `/nemotron-customize`.)
+#    Example user prompt to dispatch:
+#      "SFT Nano3 on my chat JSONL. 8x H100. Use Megatron-Bridge.
+#       Output dir ./my-sft-pipeline/."
+
+# 3. After the agent emits the plan and you approve it, you should see:
+#      my-sft-pipeline/
+#      └── configs/
+#          ├── 01_pack.yaml         # data_prep/sft_packing
+#          └── 02_sft.yaml          # sft/megatron_bridge
+
+# 4. Run the generated configs against the existing repo CLIs.
+uv run nemotron steps run data_prep/sft_packing -c my-sft-pipeline/configs/01_pack.yaml
+uv run nemotron steps run sft/megatron_bridge   -c my-sft-pipeline/configs/02_sft.yaml
+```
+
+For a fully worked smoke test (commands + expected generated tree + smoke
+overrides), see [examples/quickstart-sft.md](examples/quickstart-sft.md).
+
+---
+
 ## How information is split (and where to find it)
 
 | Question | Look here |
@@ -49,11 +113,39 @@ Concise. Technical. No fluff.
 | Artifact compatibility / `is_a` hierarchy | [src/nemotron/steps/types.toml](../../src/nemotron/steps/types.toml) |
 | GPU memory / parallelism heuristics | [src/nemotron/steps/hardware.md](../../src/nemotron/steps/hardware.md) |
 | Library API extracts for exceptional code generation | [context/index.toml](context/index.toml) → `context/<pack>.txt` |
+| Per-step context-pack pointer (deterministic) | `step.toml [reference] skills = [...]` (schema field) |
 | Project scaffold rules, only when repo code cannot support the request | [act/PROJECT.md](act/PROJECT.md) |
 | Per-stage code rules, only when repo code cannot support the request | [act/STAGE.md](act/STAGE.md) |
 
 If two sources say the same thing, the **deeper, more specific** one wins
 (`step.toml` > category `SKILL.md` > this file).
+
+### `[reference] skills` is a schema field, not a convention
+
+Each `step.toml` should declare a list of context-pack paths under
+`[reference] skills`. Treat this as a schema contract:
+
+```toml
+[reference]
+script = "src/nemotron/steps/<cat>/<step>/step.py"
+docs   = "docs/customize/steps/<cat>/<step>.md"
+skills = [
+  "skills/nemotron-customize/context/<pack>.txt",
+]
+```
+
+When the field is present, load **exactly those packs** during Act — do not
+guess. When the field is absent, the deterministic fallback is:
+
+1. Look up the step in [context/index.toml](context/index.toml) by `step_id`
+   (and optional `intent`).
+2. If a row matches, use that pack file.
+3. If no row matches, the step has no authored extract; rely on the
+   per-step `SKILL.md` + `step.toml` + `step.py` + `[reference]` URLs.
+
+Steps without any authored pack (currently `convert/*`) always fall
+through to step (3). That is intentional — those steps are stable enough
+that the in-tree manifest is sufficient.
 
 ---
 
@@ -324,6 +416,30 @@ If verification finds issues, fix them silently. Don't say "I noticed an issue."
 
 ---
 
+## Auth & credentials
+
+Pipelines composed by this skill consume hosted endpoints (NVIDIA AI
+Foundation, HuggingFace Hub, W&B). Pass these through env vars, **never**
+inline them into generated YAML. The `env.toml` profiles produced by
+[`env/env_toml`](../../src/nemotron/steps/env/env_toml/SKILL.md) declare
+the same set as `${oc.env:...}` placeholders.
+
+| Variable | Used by | Required for | Notes |
+|---|---|---|---|
+| `HF_TOKEN` (alias `HUGGING_FACE_HUB_TOKEN`) | Tokenizer/model downloads, HF dataset placeholders | Most steps when pulling a gated tokenizer or `data_prep/*` HF blends | Set in shell or `env.<backend>.toml`. Public assets work without it. |
+| `NVIDIA_API_KEY` (alias `NGC_API_KEY`) | NIM / `integrate.api.nvidia.com` LLM endpoints | `byob`, `translate/translation`, `sdg/data_designer` when `provider=nvidia` | Hosted models can be retired — verify the configured `model` exists before scale runs. |
+| `WANDB_API_KEY` | Weights & Biases logging | Any step with `wandb.enabled: true`; subprocess-heavy steps (ModelOpt) need it in profile `env_vars` | Pair with `WANDB_PROJECT` / `WANDB_ENTITY`. |
+| `WANDB_PROJECT`, `WANDB_ENTITY` | W&B logging | Same as above | Default project is `nemotron`; override per pipeline. |
+| `NEMOTRON_ENV_FILE` | `nemo_runspec` env loader | Selecting a non-default env profile (e.g. `env.lepton.toml`) | Loader defaults to `env.toml` at the repo root. |
+| `NEMOTRON_CURATOR_PIN` | Curator git mount in `byob` and `translate/translation` configs | Bumping the pinned Curator commit without editing YAML | See [`src/nemotron/steps/byob/references/curator-pin.md`](../../src/nemotron/steps/byob/references/curator-pin.md). |
+| AWS / GCP creds | `translate/translation` with `backend=aws` or `google` | Cloud-managed translation runs | Configure via the runtime environment (role, `gcloud auth`, etc.); only set project/region in YAML. |
+
+Cluster-level secrets (Lepton `node_group`, Slurm `account`, DGX Cloud
+`client_secret`) belong in `env.<backend>.toml` as `${oc.env:...}`
+placeholders. Generation-time configs should not name them.
+
+---
+
 ## Operational nuances (not in patterns/)
 
 These are generation-time concerns, not ML decision rules. Patterns own ML
@@ -400,7 +516,7 @@ run `/nemotron-add-step` to land it in the catalog.
 | "Translate EN → \<lang\> for training data" | Catalog ([translate/nemo_skills](../../src/nemotron/steps/translate/nemo_skills/)) |
 | "Curate web text" | Catalog ([curate/nemo_curator](../../src/nemotron/steps/curate/nemo_curator/)) |
 | "Train with X exotic backend" | Explorer or **ask** |
-| Post-training-only request | Out of scope for this skill; ask the user to use a more appropriate workflow. |
+| Deployment / serving / inference-only request (NIM, TRT-LLM, vLLM serve, quantization-for-deploy) | Out of scope for this skill; route to the appropriate deployment workflow. RL alignment (DPO/RLVR/RLHF) is **in scope** — it is post-training but composes through the catalog. |
 | Ambiguous | **Ask** |
 
 ---

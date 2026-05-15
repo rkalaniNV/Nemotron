@@ -1,0 +1,112 @@
+# CPU-only / mock-endpoint smoke config for BYOB.
+#
+# Purpose: let an agent on a developer laptop validate config wiring before
+# requesting GPU hardware. This config disables every stage that hard-requires
+# RAPIDS (cudf-cu12 / cuml-cu12) or large embedding models, and routes LLM
+# calls at an environment-overridable base URL so the same file can drive
+# either a local OpenAI-compatible mock server or a hosted endpoint.
+#
+# Use the workflow in `references/cpu-smoke-path.md`:
+#   1. python -m nemotron.steps.byob.scripts.validate
+#   2. uv run nemotron byob --list-families
+#   3. uv run nemotron steps show byob
+#   4. (optional) start a local OpenAI-compatible mock server, then:
+#        export BYOB_MOCK_LLM_URL=http://localhost:8000/v1
+#        export BYOB_MOCK_API_KEY=mock-key
+#        uv run nemotron byob --family mcq --stage prepare \
+#             --config src/nemotron/steps/byob/config/cpu_smoke.yaml
+#
+# The Curator git mount and any RAPIDS-only stages stay disabled here; flip
+# them back on through `tiny.yaml` or `default.yaml` once the agent runs on
+# Linux/x86_64 with the `byob` extra installed.
+
+run:
+  env:
+    mounts:
+      # See references/curator-pin.md for the named alias and bump policy.
+      - ${auto_mount:git+https://github.com/NVIDIA-NeMo/Curator.git@${oc.env:NEMOTRON_CURATOR_PIN,d10cd6ffe9f5ac4cbb176d7b3ada698f22633aea},/opt/Curator}
+
+expt_name: byob_mcq_cpu_smoke
+random_seed: 7
+ndd_batch_size: 2
+stage: all
+
+split: test
+subset: all
+input_dir: /nemo_run/code/src/nemotron/steps/byob/data/tiny_input
+output_dir: /tmp/byob/cpu_smoke
+hf_dataset: cais/mmlu
+language: en-US
+metadata_file: null
+source_subjects:
+  - high_school_mathematics
+
+target_source_mapping:
+  maths:
+    subjects:
+      - high_school_mathematics
+
+few_shot_samples_per_query: 1
+queries_per_target_subject_document: 1
+num_questions_per_query: 1
+chunking_config:
+  window_size: null
+prompt_config: null
+
+generation_model_config: &mock_model
+  alias: gpt-oss-120b
+  model: openai/gpt-oss-120b
+  provider: nvidia
+  api_key_env: BYOB_MOCK_API_KEY
+  base_url: ${oc.env:BYOB_MOCK_LLM_URL,https://integrate.api.nvidia.com/v1}
+  inference_parameters:
+    max_tokens: 256
+    max_parallel_requests: 1
+    temperature: 0.0
+    top_p: 1.0
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+
+judge_model_config: *mock_model
+
+# Semantic dedup pulls cudf-cu12 / cuml-cu12 — disable for CPU-only laptops.
+semantic_deduplication_config:
+  enabled: false
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_clusters: 1
+  eps: 0.07
+  remove_duplicates: false
+
+do_distractor_expansion: false
+distractor_expansion_model_config: *mock_model
+
+# Coverage check loads a sentence-transformers embedding model. Skip on CPU.
+do_coverage_check: false
+coverage_check_config:
+  model_identifier: null
+  window_size: null
+
+distractor_validity_model_config: *mock_model
+
+# Outlier detection uses embeddings + RAPIDS — disable on CPU.
+semantic_outlier_detection_config:
+  enabled: false
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_neighbours_min: 1
+  remove_outliers: false
+
+easiness_threshold: 0.8
+hallucination_threshold: 0.5
+remove_hallucinated: false
+remove_easy: false
+
+# Filtering models would fire LLM calls; keep them aliased but disabled by the
+# `remove_*` flags above so CPU smoke validates wiring without spending quota.
+filtering_model_configs:
+  hallucination:
+    - alias: hal_gpt-oss-120b
+      <<: *mock_model
+  easiness:
+    - alias: eas_gpt-oss-120b
+      <<: *mock_model

@@ -21,6 +21,23 @@ Use this skill to create or translate benchmark artifacts while keeping benchmar
 5. Run `nemotron byob --family mcq --stage generate --config CONFIG`.
 6. Translate an existing benchmark with `--stage translate` and a translation config.
 
+## CPU-only / mock-endpoint smoke
+
+BYOB requires a hosted LLM endpoint and a Linux/x86_64 GPU stack
+(`cudf-cu12`, `cuml-cu12`) for the full pipeline. Before requesting that
+hardware, validate config wiring on a developer laptop using
+[references/cpu-smoke-path.md](references/cpu-smoke-path.md):
+
+1. `python -m nemotron.steps.byob.scripts.validate` — static checks, no LLM.
+2. `uv run nemotron steps show byob` plus `nemotron byob --list-families` —
+   confirm registration and dispatcher import.
+3. Notebook dry-preview (`RUN_BYOB = False` in
+   [use-case-examples/build-your-own-benchmark](../../../../use-case-examples/build-your-own-benchmark/)) — exercises config rewriting without firing model calls.
+4. Run [config/cpu_smoke.yaml](config/cpu_smoke.yaml) against a local
+   OpenAI-compatible mock server (`BYOB_MOCK_LLM_URL`, `BYOB_MOCK_API_KEY`).
+   It disables semantic dedup, outlier detection, coverage check, and
+   distractor expansion so the run never imports the GPU stack.
+
 ## Change Points
 
 - Add new benchmark families under `runtime/benchmark_families/<family>/`.
@@ -56,4 +73,6 @@ Use this skill to create or translate benchmark artifacts while keeping benchmar
 - [references/benchmark-schema.md](references/benchmark-schema.md) for MCQ schema rules
 - [references/new-family-checklist.md](references/new-family-checklist.md) for GSM8K-style or non-MCQ extensions
 - [references/quality-and-filtering.md](references/quality-and-filtering.md) for quality gates
+- [references/cpu-smoke-path.md](references/cpu-smoke-path.md) for the developer-laptop smoke workflow
+- [references/curator-pin.md](references/curator-pin.md) for the Curator git-mount alias and bump policy
 - [patterns/index.yaml](patterns/index.yaml) for skill-local routing hints

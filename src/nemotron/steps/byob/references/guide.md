@@ -29,13 +29,15 @@ nemotron byob --family mcq --stage prepare --config src/nemotron/steps/byob/conf
 nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/config/default.yaml
 ```
 
-The BYOB configs declare Curator through the normal step config mount path:
+The BYOB configs declare Curator through the normal step config mount path.
+The pinned commit is centralized through [curator-pin.md](curator-pin.md) and
+overridable at run time with `NEMOTRON_CURATOR_PIN`:
 
 ```yaml
 run:
   env:
     mounts:
-      - ${auto_mount:git+https://github.com/NVIDIA-NeMo/Curator.git@d10cd6ffe9f5ac4cbb176d7b3ada698f22633aea,/opt/Curator}
+      - ${auto_mount:git+https://github.com/NVIDIA-NeMo/Curator.git@${oc.env:NEMOTRON_CURATOR_PIN,d10cd6ffe9f5ac4cbb176d7b3ada698f22633aea},/opt/Curator}
 ```
 
 Remote profiles should make `/opt/Curator` visible through `PYTHONPATH` or an
