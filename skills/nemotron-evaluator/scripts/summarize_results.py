@@ -16,6 +16,13 @@ def _load_yaml(path: Path) -> Any:
         return yaml.safe_load(f)
 
 
+def _load_result(path: Path) -> Any:
+    if path.suffix == ".json":
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    return _load_yaml(path)
+
+
 def _flatten_numbers(obj: Any, prefix: str = "") -> list[tuple[str, int | float]]:
     rows: list[tuple[str, int | float]] = []
     if isinstance(obj, dict):
@@ -34,17 +41,22 @@ def _flatten_numbers(obj: Any, prefix: str = "") -> list[tuple[str, int | float]
 def _find_results(path: Path) -> list[Path]:
     if path.is_file():
         return [path]
-    return sorted(path.rglob("artifacts/results.yml"))
+    return sorted(
+        {
+            *path.rglob("artifacts/results.yml"),
+            *path.rglob("results.yml"),
+        }
+    )
 
 
 def summarize(path: Path) -> None:
     result_files = _find_results(path)
     if not result_files:
-        raise SystemExit(f"No artifacts/results.yml found under {path}")
+        raise SystemExit(f"No results.yml or artifacts/results.yml found under {path}")
 
     for result_file in result_files:
         print(f"\n{result_file}")
-        data = _load_yaml(result_file) or {}
+        data = _load_result(result_file) or {}
         status = data.get("status") or data.get("status_code")
         if status is not None:
             print(f"status: {status}")
@@ -62,10 +74,22 @@ def summarize(path: Path) -> None:
         if metrics_file.exists():
             with metrics_file.open("r", encoding="utf-8") as f:
                 metrics = json.load(f)
-            count = metrics.get("count") or metrics.get("request_count")
-            latency = metrics.get("avg_latency_ms") or metrics.get("latency_ms_avg")
+            response_stats = metrics.get("response_stats", {})
+            count = (
+                metrics.get("count")
+                or metrics.get("request_count")
+                or response_stats.get("count")
+            )
+            successful = response_stats.get("successful_count")
+            latency = (
+                metrics.get("avg_latency_ms")
+                or metrics.get("latency_ms_avg")
+                or response_stats.get("avg_latency_ms")
+            )
             if count is not None:
                 print(f"requests: {count}")
+            if successful is not None:
+                print(f"successful_requests: {successful}")
             if latency is not None:
                 print(f"avg_latency_ms: {latency}")
 

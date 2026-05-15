@@ -1,47 +1,61 @@
 ---
 name: nemotron-eval-model-eval
-description: Configure Nemotron eval/model_eval to deploy a trained checkpoint behind an OpenAI-compatible endpoint and run NeMo Evaluator benchmark suites. Use for chat/instruction benchmarks, log-probability tasks, reasoning-model evaluation, and producing consolidated eval_results from checkpoint_hf or checkpoint_megatron inputs.
+description: Configure and run the Nemotron eval/model_eval step with NeMo Evaluator for hosted OpenAI-compatible endpoints, standard English benchmarks such as MMLU-Pro, launcher-backed task containers, and result summaries.
 ---
 
-# Model Evaluation (NeMo Evaluator)
+# Model Evaluation
 
-Use `eval/model_eval` to score a checkpoint on standard benchmarks. The step
-deploys the model behind an OpenAI-compatible endpoint, then NeMo Evaluator
-hits that endpoint with the benchmark suite.
+Use `eval/model_eval` when a model is already available through an
+OpenAI-compatible endpoint or when an Evaluator task container should be wired
+through Launcher. Do not edit Nano3 or Super3 recipes for this workflow.
 
-Before changing configs, read `step.toml` end-to-end for the full
-strategies/errors/parameters list.
+## Choose A Runner
 
-## Inputs and outputs
+- Use `runner: direct` for the fastest hosted endpoint smoke test with standard
+  NeMo Evaluator tasks such as `mmlu_pro`, `mmlu`, `hellaswag`, or
+  `arc_challenge`.
+- Use `runner: launcher` when the benchmark needs a task container, a custom
+  framework, or Launcher execution controls.
 
-- Consume **either** `checkpoint_megatron` (iter_* dir from Megatron-Bridge)
-  or `checkpoint_hf` (HF safetensors). Both are optional in the manifest, but
-  exactly one must be present at run time.
-- Produce `eval_results` — benchmark metrics + artifacts + run summary.
+## Hosted MMLU-Pro Smoke
 
-## Configure
+Start from `config/hosted_mmlu_pro.yaml` for a standard English setup
+validation:
 
-- **Match endpoint type to benchmark family.** Chat/instruction → chat
-  endpoint. Log-probability (arc_challenge, hellaswag, piqa, etc.) → completions
-  endpoint with `logprobs` support.
-- **Tokenizer is required for log-probability tasks.** For `checkpoint_megatron`,
-  point at `checkpoint/tokenizer`. For `checkpoint_hf`, use the HF handle or path.
-- **Megatron deployments need the iter_* path**, not the parent output dir.
-- **Reasoning models** need higher `max_new_tokens`, reasoning-trace
-  processing on, and the temperature/top_p from the model card.
-- Reference [src/nemotron/steps/patterns/eval-before-and-after-training.md](../../patterns/eval-before-and-after-training.md)
-  before treating any single eval as a result.
+```bash
+export NVIDIA_API_KEY=<key>
+export NEMO_EVALUATOR_API_KEY_NAME=NVIDIA_API_KEY
+export NEMO_EVALUATOR_MODEL_URL=https://inference-api.nvidia.com/v1/chat/completions
+export NEMO_EVALUATOR_MODEL_ID=nvcf/openai/gpt-oss-120b
 
-## Local files
+python src/nemotron/steps/eval/model_eval/step.py \
+  --config src/nemotron/steps/eval/model_eval/config/hosted_mmlu_pro.yaml
+```
 
-- Contract: [step.toml](step.toml)
-- Runner: [step.py](step.py)
-- Configs: `config/default.yaml`, `config/tiny.yaml`
+The default config uses `limit_samples: 2`. Treat the result as a workflow
+smoke test, not a model-comparison score.
 
-## Guardrails
+## Endpoint Discipline
 
-- Don't compare scores across different endpoint types or different
-  generation settings.
-- Don't add `convert/megatron_to_hf` "just in case" — pick one input artifact
-  and configure the matching deployment path.
-- Inspect a handful of generations before trusting aggregate metrics.
+- Put the raw key only in an environment variable. Configs should use
+  `deployment.api_key_name` or `target.api_endpoint.api_key_name`.
+- Verify hosted model IDs with the endpoint's models API when possible. Some
+  services expose provider-prefixed IDs such as `nvcf/openai/gpt-oss-120b`
+  rather than the marketing name or a shorter alias.
+- Match `endpoint_type` to the task. Chat/instruction tasks use `chat`;
+  log-probability tasks need a completions endpoint and tokenizer settings.
+
+## Local Environment
+
+Install the evaluator framework package used by the task. For MMLU-Pro through
+`simple_evals`, the runtime needs `nemo-evaluator` and `nvidia-simple-evals`.
+Install them in this repo with `uv sync --extra eval`. The step prepends the
+active Python interpreter's `bin` directory to `PATH` so subprocesses can find
+console scripts such as `simple_evals`.
+
+## Results
+
+Direct runs usually write `results.yml`, `eval_factory_metrics.json`, and task
+JSON/HTML files below `<output_dir>/<benchmark>/`. Launcher runs may place
+`artifacts/results.yml` under task-specific invocation directories. The step
+prints numeric score-like fields when it finds either shape.

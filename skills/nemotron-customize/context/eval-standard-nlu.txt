@@ -1,3 +1,21 @@
+Nemotron execution notes:
+
+- For a standard English hosted endpoint smoke test, use
+  `src/nemotron/steps/eval/model_eval/config/hosted_mmlu_pro.yaml`. It runs
+  `mmlu_pro` through the direct NeMo Evaluator API with `limit_samples: 2`.
+- Never write raw endpoint keys into configs. Store the key in an environment
+  variable and set `deployment.api_key_name` or `target.api_endpoint.api_key_name`
+  to that variable name.
+- Verify hosted model IDs with the service model-list API when possible. Some
+  endpoints require provider-prefixed IDs such as `nvcf/openai/gpt-oss-120b`
+  rather than a shorter display name.
+- Direct MMLU-Pro runs need the repo's `eval` extra, which installs
+  `nemo-evaluator` and `nvidia-simple-evals`. Use `uv sync --extra eval` in
+  this repo. The step prepends the active interpreter's `bin` directory to
+  `PATH` so framework CLIs such as `simple_evals` are discoverable.
+- Treat any run with `limit_samples` set as a workflow validation, not a model
+  comparison result.
+
 <file_map>
 Evaluator
 ├── docs

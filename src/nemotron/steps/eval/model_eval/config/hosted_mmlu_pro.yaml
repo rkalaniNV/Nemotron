@@ -1,0 +1,32 @@
+# Hosted OpenAI-compatible endpoint smoke test for MMLU-Pro.
+#
+# This direct runner path uses NeMo Evaluator's core API. It is the quickest
+# setup validation for standard English benchmarks because it does not require
+# a launcher task container.
+
+runner: direct
+output_dir: ./results-hosted-mmlu-pro
+
+endpoint_check:
+  enabled: true
+  max_retries: 1
+  retry_interval: 0
+  request_timeout: 60
+
+deployment:
+  model_id: ${oc.env:NEMO_EVALUATOR_MODEL_ID,nvcf/openai/gpt-oss-120b}
+  url: ${oc.env:NEMO_EVALUATOR_MODEL_URL,https://inference-api.nvidia.com/v1/chat/completions}
+  endpoint_type: chat
+  api_key_name: ${oc.env:NEMO_EVALUATOR_API_KEY_NAME,NVIDIA_API_KEY}
+
+benchmarks:
+  - mmlu_pro
+
+params:
+  temperature: 0
+  top_p: 1
+  max_new_tokens: 1024
+  max_retries: 5
+  parallelism: 1
+  request_timeout: 3600
+  limit_samples: 2

@@ -27,6 +27,9 @@ Ask only for missing information. Use these prompts as the default checklist:
 
 Never put raw API keys into config files. Ask the user to export an env var and
 set `target.api_endpoint.api_key_name` to that env var name.
+For hosted endpoints, verify the exact model id against the service when
+possible. Some endpoints require provider-prefixed IDs returned by `/v1/models`
+instead of shorter names.
 
 ### 2. Recommend
 
@@ -35,8 +38,8 @@ Pick benchmarks from the smallest relevant set:
 - Match benchmarks to the evaluation goal and prompt language, not to the
   model's origin. A sovereign-hosted model can still run standard English
   benchmarks when the user wants English capability measurement.
-- English/general chat: `lm-evaluation-harness.mmlu_instruct`,
-  `lm-evaluation-harness.ifeval`, `simple_evals.gpqa_diamond`.
+- English/general chat: start with `mmlu_pro` for an MMLU-Pro smoke test,
+  then add `ifeval` or `gpqa_diamond` when the endpoint and key are proven.
 - Reasoning models: use larger `max_new_tokens`; see `references/nemotron-cli-eval.md`.
 - Custom language containers or sovereign/Indic examples: read `references/sovereign-benchmarks.md`.
 - Agent/tool capability: prefer Evaluator's tool or agent tasks when available in the checked-out Evaluator mapping.
@@ -53,6 +56,14 @@ container.
 Use the `src/nemotron/steps/eval/model_eval` step when working in this repo:
 
 ```bash
+export NVIDIA_API_KEY=<key>
+export NEMO_EVALUATOR_API_KEY_NAME=NVIDIA_API_KEY
+export NEMO_EVALUATOR_MODEL_URL=https://inference-api.nvidia.com/v1/chat/completions
+export NEMO_EVALUATOR_MODEL_ID=<exact-model-id-from-service>
+
+python src/nemotron/steps/eval/model_eval/step.py \
+  --config src/nemotron/steps/eval/model_eval/config/hosted_mmlu_pro.yaml
+
 python src/nemotron/steps/eval/model_eval/step.py \
   --config src/nemotron/steps/eval/model_eval/config/hosted_mmlu.yaml \
   target.api_endpoint.model_id=<model> \
@@ -67,9 +78,18 @@ python src/nemotron/steps/eval/model_eval/step.py \
   target.api_endpoint.api_key_name=<ENV_VAR>
 ```
 
-The hosted endpoint configs use `deployment: none`, so they do not deploy a
-Nemotron checkpoint. Do not edit the Nano3 or Super3 recipe folders for this
-workflow.
+Hosted endpoint configs do not deploy a Nemotron checkpoint. The direct
+MMLU-Pro config reads endpoint settings from `deployment.*`; Launcher-backed
+configs use `deployment: none` and `target.api_endpoint.*`. Do not edit the
+Nano3 or Super3 recipe folders for this workflow.
+
+For direct NeMo Evaluator runs, install the framework package used by the task
+in the active Python environment. `mmlu_pro` uses `nvidia-simple-evals`, which
+provides the `simple_evals` console script. In this repo, install the eval
+extra with `uv sync --extra eval`; it includes `nemo-evaluator` and
+`nvidia-simple-evals`. The step prepends the active Python interpreter's `bin`
+directory to `PATH`, so running with
+`.venv/bin/python` works even when the venv is not activated.
 
 For non-sovereign container-backed tasks, use the same launcher pattern:
 provide task-level `name`, `container`, and `endpoint_type` in the config, then
@@ -82,6 +102,7 @@ results, remove `limit_samples` and run the complete task list.
 
 After the run completes, find the latest `artifacts/results.yml` under the
 launcher output directory and summarize metrics, status, and artifact path.
+Direct runs may write `results.yml` directly under `<output_dir>/<benchmark>/`.
 Use `scripts/summarize_results.py <results-dir-or-file>` when available.
 
 If the result is from a smoke run or `limit_samples` is set, state that it is

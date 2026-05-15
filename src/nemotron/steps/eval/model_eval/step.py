@@ -76,10 +76,16 @@ _STEP_ONLY_KEYS = {
 
 def _prepend_python_bin_to_path() -> None:
     """Expose console scripts installed beside the active Python interpreter."""
-    python_bin = str(Path(sys.executable).resolve().parent)
+    candidate_bins = [
+        Path(sys.executable).parent,
+        Path(sys.prefix) / ("Scripts" if os.name == "nt" else "bin"),
+    ]
     path_parts = os.environ.get("PATH", "").split(os.pathsep)
-    if python_bin not in path_parts:
-        os.environ["PATH"] = os.pathsep.join([python_bin, *path_parts])
+    for python_bin in reversed(candidate_bins):
+        python_bin_str = str(python_bin)
+        if python_bin_str not in path_parts:
+            path_parts.insert(0, python_bin_str)
+    os.environ["PATH"] = os.pathsep.join(path_parts)
 
 
 def _load_config() -> dict[str, Any]:
