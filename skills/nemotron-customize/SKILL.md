@@ -1,6 +1,6 @@
 ---
 name: nemotron-customize
-description: Compose runnable Nemotron customization pipelines from the current repo's existing steps and runners. Plans a stage DAG, validates artifact wiring against types.toml, fires patterns, then creates only the YAML configs needed for the user's request. Generate new code only when the current codebase cannot support the request.
+description: Compose runnable training pipelines from steps under src/nemotron/steps/. Plans a stage DAG, validates artifact wiring against types.toml, fires patterns, then generates a project. Use when the user wants to fine-tune, pretrain, align, evaluate, or optimize a Nemotron-stack model end-to-end.
 ---
 
 # nemotron-customize
@@ -13,11 +13,9 @@ truth.** This skill orchestrates — it does not duplicate per-step knowledge.
 
 Priority order:
 
-1. Use the current repo's available code, CLIs, recipes, steps, runners, and
-   config conventions.
-2. Create only new YAML config files needed to serve the user's request.
-3. Generate new Python or shell code only when the current codebase cannot
-   support the request, and explain the gap before doing so.
+1. Use the current repo’s available code, CLIs, recipes, steps, runners, and configuration conventions.
+2. Prioritize using existing skills, tools, and steps that already support the user’s request.
+3. Generate new code only when the current codebase cannot support the request, and explain the gap before doing so.
 
 When you need to know what a step does, read its `step.toml` and `SKILL.md`.
 When you need to know whether a chain is sound, read the patterns it cites.
@@ -57,27 +55,6 @@ If two sources say the same thing, the **deeper, more specific** one wins
 
 ---
 
-## Instructions
-
-Use this skill when the user asks for an end-to-end Nemotron-stack pipeline:
-fine-tuning, continued pretraining, alignment training, data curation,
-translation for training data, or other data preprocessing for model training.
-Follow the workflow below in order:
-
-1. **Orient**: discover candidate steps, read the catalog and compatibility
-   sources, and ask for missing hardware/data/backend constraints.
-2. **Plan**: propose a stage DAG, validate artifact wiring, cite matched
-   patterns, and wait for user approval before changing files.
-3. **Act**: create the minimal YAML configs for the selected repo steps.
-   Generate code only if no current repo path can satisfy the request.
-4. **Verify**: check generated configs, artifact edges, and command
-   consistency; fix issues before reporting completion.
-
-Do not treat this skill as general ML advice. The step library under
-[src/nemotron/steps/](../../src/nemotron/steps/) is the source of truth.
-
----
-
 ## Workflow
 
 Four phases, in order: **Orient → Plan → Act → Verify.** Never skip Verify.
@@ -92,11 +69,11 @@ Goal: enumerate candidate steps and gather the user's constraints in one pass.
 machine-readable:
 
 ```bash
-nemotron steps list --json                                 # all steps
-nemotron steps list --json --category sft                  # by category
-nemotron steps list --json --consumes training_jsonl       # by input type
-nemotron steps list --json --produces checkpoint_megatron  # by output type
-nemotron steps show <step_id>                              # full manifest
+uv run nemotron steps list --json                                 # all steps
+uv run nemotron steps list --json --category sft                  # by category
+uv run nemotron steps list --json --consumes training_jsonl       # by input type
+uv run nemotron steps list --json --produces checkpoint_megatron  # by output type
+uv run nemotron steps show <step_id>                              # full manifest
 ```
 
 Implementation: [list_cmd.py](../../src/nemotron/cli/commands/steps/list_cmd.py),
@@ -140,7 +117,7 @@ Present as a numbered list, replies as numbers or Enter for `[defaults]`:
 6. W&B: `[off]` / on (project name?)
 7. Output: `[./<project-name>/]` / current dir
 
-**Never assume hardware, data availability, or framework. Ask.**
+**Never assume hardware, data availability, or frameworks. Ask each question once; otherwise use defaults or auto-select options.**
 
 ---
 
@@ -219,7 +196,7 @@ missing repo capability and get approval for that code path.
 
 ### Phase 3 — Act
 
-Goal: produce the smallest runnable change, preferably YAML config only. No
+Goal: produce the smallest runnable change, preferably YAML config. No
 placeholders. No TODOs.
 
 **Step 3.1 — Prefer the existing repo execution path.**
@@ -231,12 +208,13 @@ Before creating any code, identify how the existing repo can run each stage:
 - Shared runners in [src/nemotron/steps/_runners/](../../src/nemotron/steps/_runners/).
 - Existing configs under the selected step, recipe, or runner directory.
 
-**Step 3.2 — Generate only YAML configs when the repo supports the request.**
+**Step 3.2 — Generate project when the repo supports the request.**
 
 ```
 <project-name>/
 ├── configs/
 │   └── <stage-name>.yaml        # user-specific config for an existing step
+├── env.toml.example
 └── README.md                    # optional: only if the user asks for run docs
 ```
 
@@ -305,8 +283,7 @@ URLs in `[reference]`. That's enough.
 
 ### Phase 4 — Verify
 
-Goal: every preflight check holds against the generated YAML configs and any
-exceptional code, not just the plan.
+Goal: every preflight check holds against the generated project, not just the plan.
 
 Run through:
 
@@ -345,12 +322,12 @@ Those paths live in upstream repos, not here. If you can't read them, **don't
 fail** — use the `then:` text as guidance and put a `⚠` in the plan: "Could
 not read perf-tuning docs for `<topic>` — config may need manual review."
 
-### `${art:...}` belongs only to recipe-backed configs
+### `${art:...}` belongs only to recipes/, not generated projects
 
 The reference recipes under [src/nemotron/recipes/](../../src/nemotron/recipes/)
-may use `${art:data,path}`, `${art:model,iteration}` for W&B-Artifacts lineage.
-Preserve these only when using that existing recipe path. For standalone user
-YAML, prefer plain DATA_ROOT layout unless the user asks for W&B artifacts.
+use `${art:data,path}`, `${art:model,iteration}` for W&B-Artifacts lineage.
+**Don't propagate `${art:...}` into generated stage configs** — they get
+plain DATA_ROOT layout instead (see [act/PROJECT.md](act/PROJECT.md) R2).
 
 ### `bin/idx + blend.json` is version-coupled
 
@@ -416,7 +393,7 @@ Expected handling: use Catalog mode. Read the SFT category, candidate
 `step.toml`, [types.toml](../../src/nemotron/steps/types.toml), and
 [hardware.md](../../src/nemotron/steps/hardware.md); plan a DAG from
 `training_jsonl` to a checkpoint artifact; validate the artifact chain; then
-generate only the YAML config needed by the existing SFT runner after the user
+generate the project contains the YAML config needed by the existing SFT runner after the user
 approves the plan.
 
 ### Multi-stage customization request
@@ -424,12 +401,11 @@ approves the plan.
 User: "Continue pretraining on a domain corpus, then fine-tune on my
 instruction JSONL."
 
-Expected handling: ask for missing constraints such as model, GPU topology,
+Expected handling: ask once for missing constraints such as model, GPU topology,
 backend, output path, and W&B preference. Then plan a prep/pretrain → SFT DAG,
 cite relevant cross-step patterns, and verify each consume/produce edge against
-[types.toml](../../src/nemotron/steps/types.toml). Create YAML configs for the
-existing repo code; do not generate Python unless the plan exposes an unsupported
-repo capability.
+[types.toml](../../src/nemotron/steps/types.toml). Create YAML configs amd other
+related files for the existing repo code as project.
 
 ### Unrelated request
 
@@ -470,8 +446,8 @@ configs.
 
 ## Tool preferences
 
-- **Catalog discovery**: `nemotron steps list --json --consumes <type>` — don't grep `**/step.toml`.
-- **Manifest read**: `nemotron steps show <id>` — fastest single read.
+- **Catalog discovery**: `uv run nemotron steps list --json --consumes <type>` — don't grep `**/step.toml`.
+- **Manifest read**: uv run nemotron steps show <id>` — fastest single read.
 - **Context packs**: load only for exceptional codegen; YAML-only requests should not need them.
 - **Step.py read**: full file — they're <100 lines.
 - **Type validation**: read [types.toml](../../src/nemotron/steps/types.toml) once during Orient; keep in context through Verify.
@@ -488,7 +464,7 @@ configs.
 - Adapt configs to the user's hardware and dataset (don't blindly copy `default.yaml`).
 - Fire strategies and follow `skill:` pointers when perf-tuning.
 - Ask about hardware, data, backend, and output path — never assume.
-- Generate only the YAML configs needed for the approved request.
+- prioritize generating the YAML configs needed for the approved request.
 - Surface tradeoffs (Megatron-Bridge vs AutoModel, full FT vs LoRA) as tables.
 - Present the plan and wait for approval.
 
