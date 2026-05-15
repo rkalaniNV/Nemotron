@@ -80,6 +80,27 @@ uv run nemotron steps run rl/nemo_rl/rlvr -c tiny --dry-run
 uv run nemotron steps run rl/nemo_rl/rlhf -c tiny --dry-run
 ```
 
+## Project layout for generated configs
+
+Keep every generated overlay config and any supporting code under a single
+self-contained project root that also holds the local input data, so the
+whole directory is rsync/scp-portable to the remote machine that will run
+the alignment step.
+
+- `<project>/config/` for generated YAML — never write into
+  `src/nemotron/steps/rl/nemo_rl/<algo>/config/`; the shipped
+  `default.yaml`, `tiny.yaml`, and `nemo_gym.yaml` stay as catalog
+  references.
+- `<project>/data/` for sharded preference / prompt / verifier JSONL
+  produced by `data_prep/rl_prep`.
+- Keep the SFT warm-start `checkpoint_megatron` path, RLHF reward-model
+  `checkpoint_hf` path, and any NeMo-Gym resource-server configs resolvable
+  under the same project root so the whole alignment job ships in one
+  bundle.
+- Project-root scripts only when catalog code cannot serve the request.
+- Do not split generated files into home dirs, scratch dirs, or paths
+  outside the project root that will not ship with the bundle.
+
 ## Guardrails
 
 - Never trust reward gain alone. Score on a held-out task eval before

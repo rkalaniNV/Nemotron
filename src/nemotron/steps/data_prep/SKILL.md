@@ -51,6 +51,26 @@ uv run nemotron steps run data_prep/pretrain_prep -c tiny --dry-run
 uv run nemotron steps run data_prep/rl_prep       -c tiny --dry-run
 ```
 
+## Project layout for generated configs
+
+Keep every generated overlay config and any supporting code under a single
+self-contained project root that also holds the local input data, so the
+whole directory is rsync/scp-portable to the remote machine that will run
+the data_prep step.
+
+- `<project>/config/` for generated YAML — never write into
+  `src/nemotron/steps/data_prep/<step>/config/`; the shipped `default.yaml`
+  and `tiny.yaml` stay as catalog references.
+- `<project>/data/` for source blends (`blend.json`), local JSONL inputs,
+  and the prepared artifact destination (packed Parquet shards, bin/idx +
+  emitted `blend.json`, or RL JSONL splits).
+- Tokenizer, chat-template, and `pack_size` / `seq_length` metadata should
+  be captured under the same project root so downstream training can be
+  shipped together as one portable bundle.
+- Project-root scripts only when catalog code cannot serve the request.
+- Do not split generated files into home dirs, scratch dirs, or paths
+  outside the project root that will not ship with the bundle.
+
 ## Patterns to cite
 
 - [../patterns/prep-data-is-tokenizer-locked.md](../patterns/prep-data-is-tokenizer-locked.md) — repack on tokenizer / template / seq_length changes.

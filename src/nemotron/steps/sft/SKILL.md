@@ -54,6 +54,22 @@ uv run nemotron steps run sft/automodel -c tiny --dry-run
 uv run nemotron steps run sft/megatron_bridge -c tiny --dry-run   # requires compatible packed_parquet
 ```
 
+## Project layout for generated configs
+
+Keep every generated overlay config and any supporting code under a single
+self-contained project root that also holds the local input data, so the
+whole directory is rsync/scp-portable to the remote machine that will run
+the SFT step.
+
+- `<project>/config/` for generated YAML — never write into
+  `src/nemotron/steps/sft/<backend>/config/`; the shipped `default.yaml`
+  and `tiny.yaml` stay as catalog references.
+- `<project>/data/` for local datasets, chat-format JSONL, and packed
+  Parquet splits referenced by the overlay.
+- Project-root scripts only when catalog code cannot serve the request.
+- Do not split generated files into home dirs, scratch dirs, or paths
+  outside the project root that will not ship with the bundle.
+
 ## Patterns to cite
 
 - [../patterns/prep-data-is-tokenizer-locked.md](../patterns/prep-data-is-tokenizer-locked.md) — tokenizer/template/seq_length must match prep.

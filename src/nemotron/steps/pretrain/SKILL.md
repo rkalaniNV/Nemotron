@@ -93,6 +93,24 @@ uv run nemotron steps run pretrain/automodel       -c tiny --dry-run
 uv run nemotron steps run pretrain/megatron_bridge -c tiny --dry-run
 ```
 
+## Project layout for generated configs
+
+Keep every generated overlay config and any supporting code under a single
+self-contained project root that also holds the local input data, so the
+whole directory is rsync/scp-portable to the remote machine that will run
+the pretrain step.
+
+- `<project>/config/` for generated YAML — never write into
+  `src/nemotron/steps/pretrain/<backend>/config/`; the shipped
+  `default.yaml` and `tiny.yaml` stay as catalog references.
+- `<project>/data/` for the bin/idx shards and the `blend.json` emitted by
+  `data_prep/pretrain_prep`, plus any held-out validation slices.
+- Keep checkpoint save dirs and budget/lr-schedule notes under the same
+  project root so the run is reproducible after a remote transfer.
+- Project-root scripts only when catalog code cannot serve the request.
+- Do not split generated files into home dirs, scratch dirs, or paths
+  outside the project root that will not ship with the bundle.
+
 ## Patterns to cite
 
 - [../patterns/pretrain-token-budget-before-scale.md](../patterns/pretrain-token-budget-before-scale.md) — budget contract before scaling.
