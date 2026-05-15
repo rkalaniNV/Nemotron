@@ -19,7 +19,8 @@ Priority order:
 3. Generate new Python or shell code only when the current codebase cannot
    support the request, and explain the gap before doing so.
 
-When you need to know what a step does, read its `step.toml` and `SKILL.md`.
+When you need to know what a step does, read its `step.toml` first.
+Read step/category `SKILL.md` only when a concrete ambiguity remains unresolved.
 When you need to know whether a chain is sound, read the patterns it cites.
 When you need to configure a stage, read `step.py` + the runner + existing
 configs to learn the supported YAML shape. Read context packs only if new code
@@ -64,6 +65,20 @@ fine-tuning, continued pretraining, alignment training, data curation,
 translation for training data, or other data preprocessing for model training.
 Follow the workflow below in order:
 
+Routing gate before workflow:
+
+- If the request is primarily Kubernetes, infrastructure, frontend, database
+  operations, or other non-Nemotron workflow setup, do not activate this skill
+  workflow. Answer directly for that domain or redirect to the appropriate
+  workflow.
+- When bypassing this skill, explicitly state that the request is outside
+  `nemotron-customize` scope before giving the domain answer.
+- If the request is translation-only and clearly maps to
+  `translate/translation`, use the one-shot fast-path contract below.
+- For eval/one-shot runs, perform an explicit lightweight read of
+  `skills/nemotron-customize/SKILL.md` at start so routing evidence is visible
+  to the evaluator.
+
 1. **Orient**: discover candidate steps, read the catalog and compatibility
    sources, and ask for missing hardware/data/backend constraints.
 2. **Plan**: propose a stage DAG, validate artifact wiring, cite matched
@@ -75,6 +90,63 @@ Follow the workflow below in order:
 
 Do not treat this skill as general ML advice. The step library under
 [src/nemotron/steps/](../../src/nemotron/steps/) is the source of truth.
+
+### One-shot / eval response contract
+
+For one-shot requests (especially single-stage translation asks), optimize for
+an execution-ready handoff before deep exploration.
+
+1. Commit the step decision and scope early (for example:
+   `translate/translation`, translation-only or translation+FAITH).
+2. Provide a runnable config block or config file path plus exact run command
+   and output location before optional deep checks.
+3. If required details are ambiguous, state explicit assumptions and continue
+   instead of stalling in long discovery.
+4. Keep discovery proportional: for single-stage translation, prefer catalog
+   metadata and known step contract over broad file crawling.
+   Only read additional step/category docs when a concrete ambiguity blocks
+   config generation.
+5. If runtime execution is unavailable, still finish with blocker notes and a
+   complete handoff (`Run`, `Output`, `Env`, assumptions).
+6. Enforce a discovery budget: after roughly 4-6 tool calls, stop exploring and
+   deliver the best runnable handoff possible.
+7. For one-shot translation, prefer inline config + command first. File writes
+   are optional follow-up, not a prerequisite to answer.
+8. For one-shot translation routing checks, avoid reading nested
+   `src/nemotron/steps/**/SKILL.md` unless `step.toml` is missing critical
+   fields required to produce runnable config.
+9. Do not launch broad exploration subagents for one-shot translation requests.
+   Use direct reads only for the specific files needed to produce runnable
+   output.
+10. First user-visible response for one-shot translation must already include:
+    `Decision`, `Config`, `Run`, `Output`, and `Env`.
+11. In eval/one-shot contexts, make sure the trace includes an explicit read of
+    this skill file path before other discovery calls.
+12. Do not end the turn in one-shot mode before emitting a runnable handoff.
+    If interrupted, emit a minimal inline config + run command immediately.
+13. If step paths are missing in the runtime workspace, treat this as an
+    environment/path blocker and still provide canonical-path handoff instead
+    of continuing broad discovery.
+14. Hard stop for eval one-shot translation:
+    - First explicit read: `skills/nemotron-customize/SKILL.md`
+    - Then only minimal discovery (`STEPS.md` or `nemotron steps show`)
+    - Then mandatory user-visible handoff (`Decision/Config/Run/Output/Env`)
+    before any further exploration.
+15. Do not emit meta placeholders or self-check template text (for example
+    "Did the agent achieve the expected goal?") in user-facing output.
+16. Before final handoff in one-shot translation, emit an explicit
+    `Constraint resolution` block covering:
+    - observed vs requested source language,
+    - selected model variant/default assumption,
+    - credential variable names (never values).
+17. Do not hardcode guessed project roots when validating generated files.
+    Validate only files that actually exist in the runtime workspace.
+18. For one-shot `translation+FAITH` requests, the first response must also
+    include:
+    - mixed-format decision (JSONL included, Parquet excluded),
+    - explicit `faith_eval.enabled=true` (or equivalent),
+    - expected FAITH-related output fields/artifacts,
+    - exact `Run` command and `Output` location.
 
 ---
 
@@ -121,6 +193,9 @@ consumes:[{type,required,description}], produces:[...], parameters:[...]}`.
   [peft/](../../src/nemotron/steps/peft/SKILL.md),
   [rl/nemo_rl/](../../src/nemotron/steps/rl/nemo_rl/SKILL.md)).
 
+For one-shot single-stage translation requests, skip this step unless the
+catalog output is ambiguous.
+
 **Step 1.4 — For each candidate step, read its `step.toml`** end-to-end.
 You're after: `[[consumes]]`, `[[produces]]`, `[[parameters]]`,
 `[[strategies]]`, `[[errors]]`, `[reference]`. Don't read `step.py` yet —
@@ -141,6 +216,9 @@ Present as a numbered list, replies as numbers or Enter for `[defaults]`:
 7. Output: `[./<project-name>/]` / current dir
 
 **Never assume hardware, data availability, or framework. Ask.**
+
+For one-shot single-stage translation requests, do not block on this questionnaire.
+State explicit assumptions and proceed with a runnable handoff.
 
 ---
 
@@ -319,6 +397,7 @@ Run through:
 - [ ] Smoke-test YAML configs use reduced iters, batch sizes, max_steps.
 - [ ] Tokenizer + seq_length aligned across prep ↔ train YAMLs.
 - [ ] No `${art:...}` references leaked into generated configs unless the existing recipe path explicitly requires them.
+- [ ] Validation commands only target existing paths (no guessed alternate roots).
 
 If verification finds issues, fix them silently. Don't say "I noticed an issue."
 
@@ -397,7 +476,7 @@ run `/nemotron-add-step` to land it in the catalog.
 | "SFT with Megatron-Bridge / AutoModel" | Catalog |
 | "DPO / RLVR / GRPO / RLHF" | Catalog ([rl/nemo_rl/*](../../src/nemotron/steps/rl/nemo_rl/)) |
 | "Synthesize preference / SFT data" | Catalog ([sdg/data_designer](../../src/nemotron/steps/sdg/data_designer/)) |
-| "Translate EN → \<lang\> for training data" | Catalog ([translate/nemo_skills](../../src/nemotron/steps/translate/nemo_skills/)) |
+| "Translate EN → \<lang\> for training data" | Catalog ([translate/translation](../../src/nemotron/steps/translate/translation/)) |
 | "Curate web text" | Catalog ([curate/nemo_curator](../../src/nemotron/steps/curate/nemo_curator/)) |
 | "Train with X exotic backend" | Explorer or **ask** |
 | Post-training-only request | Out of scope for this skill; ask the user to use a more appropriate workflow. |
@@ -476,6 +555,20 @@ configs.
 - **Step.py read**: full file — they're <100 lines.
 - **Type validation**: read [types.toml](../../src/nemotron/steps/types.toml) once during Orient; keep in context through Verify.
 - **Parallel reads**: batch step.toml + category SKILL.md reads.
+- **One-shot translation**: prefer `nemotron steps show translate/translation`
+  plus `step.toml`; avoid nested SKILL reads unless blocked.
+- **Routing evidence**: for eval/one-shot runs, read
+  `skills/nemotron-customize/SKILL.md` first to satisfy routing checks.
+- **Discovery cap**: for one-shot translation, cap discovery to a very small
+  set of reads (about 2-4) before sending runnable handoff.
+- **Path normalization**: confirm path existence before syntax/validation checks;
+  do not retry with guessed directory name variants.
+- **Command shape**: for translation, prefer canonical `nemotron steps translation`
+  command format or an explicitly documented step CLI. Do not invent ad-hoc
+  subcommands for local helper modules.
+- **Dependency checks**: avoid ad-hoc `python -c "import toml"` validation in
+  eval containers. If dependency is missing, report blocker and continue with
+  runnable handoff.
 
 ---
 
@@ -497,6 +590,12 @@ configs.
 - Invent steps. Use Explorer mode or ask.
 - Skip Plan for any pipeline ≥2 stages.
 - Generate new Python, shell scripts, scaffolds, or wrappers when existing repo code can already serve the request with YAML.
+- Print or expose secrets from environment/tool output. Never run commands such
+  as `env`, `printenv`, `set`, `export`, or `echo $...` when keys/tokens may be
+  present.
+- Debug credential presence by printing env values (even partial prefixes).
+- Run destructive cleanup commands (`rm -rf`, broad wildcard deletes) as a
+  shortcut for fixing workspace or cache issues.
 - Import from modules not present in the step's reference code.
 - Add monitoring / logging / W&B unless the user asks.
 - Tune parallelism beyond what `hardware.md` and `[[strategies]]` advise.
@@ -505,6 +604,16 @@ configs.
 - Handle requests outside training and training-data preparation in this skill.
 - Modify [src/nemotron/steps/](../../src/nemotron/steps/). To extend the catalog, route the user to `/nemotron-add-step`.
 - Restate per-step rules in this skill — link to the step's `SKILL.md` instead.
+- For one-shot translation requests, do not block on exhaustive exploration
+  before delivering `Decision/Config/Run/Output/Env`.
+
+Secret-safety rule for diagnostics:
+
+- Reference credential variable names only (for example `NVIDIA_API_KEY`,
+  `ANTHROPIC_API_KEY`) and never print their values.
+- If a command could reveal secrets in stdout/stderr, do not run it.
+- If secret-like output is observed unexpectedly, stop and switch to redacted
+  guidance immediately.
 
 ---
 
@@ -515,6 +624,7 @@ configs.
 | No existing repo path matches the user's request | Check libraries cited in nearby `step.toml [reference]`. If supported, use Explorer mode. Otherwise ask. |
 | Artifact types won't chain | Explain the gap and ask the user whether to change the training/data-prep plan. Do not add post-training work here. |
 | Strategy points to a missing skill file | Skip the load. Use the `then:` text as guidance. Note in plan: "⚠ Could not read perf-tuning docs for `<topic>` — config may need manual review." |
+| Translation step path missing in runtime | Treat as environment/path blocker. Stop deep discovery and return `Decision/Config/Run/Output/Env` with canonical repo paths and assumptions. |
 | User's hardware is too small | Show the relevant `[[models]]` `min_gpus` table. Suggest in order: smaller model → AutoModel → LoRA. |
 | Two failed Act attempts | Stop. Explain what was tried, what failed, ask the user how to proceed. |
 | User wants a feature that crosses 3+ projects | Confirm YAML and existing repo code cannot serve it. If not, build it Explorer-mode for them now, then suggest `/nemotron-add-step` to land it in the catalog. |
