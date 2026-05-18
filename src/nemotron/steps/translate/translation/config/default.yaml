@@ -28,6 +28,7 @@ messages_content_field: content
 segmentation_mode: coarse # coarse | fine
 min_segment_chars: 0
 max_concurrent_requests: 64
+generation_config: null   # Optional OpenAI-compatible translation generation settings.
 skip_translated: false
 files_per_partition: null
 blocksize: null
@@ -43,6 +44,10 @@ faith_eval:
   threshold: 2.5
   model_name: ""
   filter_enabled: true
+  max_concurrent_requests: 64
+  generation_config:
+    max_tokens: 2048
+    temperature: 0.0
 
 nmt:
   server_url: http://localhost:5000

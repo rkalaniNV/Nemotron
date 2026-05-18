@@ -31,6 +31,17 @@ import yaml
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 log = logging.getLogger(__name__)
+_GENERATION_CONFIG_KEYS = {
+    "extra_kwargs",
+    "max_tokens",
+    "n",
+    "seed",
+    "stop",
+    "stream",
+    "temperature",
+    "top_k",
+    "top_p",
+}
 
 
 def _required_path(config: dict[str, Any], key: str) -> str:
@@ -139,6 +150,45 @@ def _backend_config(config: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _build_generation_config(raw_config: Any) -> Any | None:
+    if raw_config is None:
+        return None
+    if not isinstance(raw_config, dict):
+        raise ValueError("generation_config must be a mapping")
+
+    from nemo_curator.models.client.llm_client import GenerationConfig
+
+    generation_kwargs: dict[str, Any] = {}
+    extra_kwargs = dict(raw_config.get("extra_kwargs") or {})
+    for key, value in raw_config.items():
+        if key == "extra_kwargs":
+            continue
+        if key in _GENERATION_CONFIG_KEYS:
+            generation_kwargs[key] = value
+        else:
+            extra_kwargs[key] = value
+
+    if extra_kwargs:
+        generation_kwargs["extra_kwargs"] = extra_kwargs
+    return GenerationConfig(**generation_kwargs)
+
+
+def _configure_faith_stage(stage: Any, faith_cfg: dict[str, Any]) -> None:
+    generation_config = _build_generation_config(faith_cfg.get("generation_config"))
+    max_concurrent_requests = faith_cfg.get("max_concurrent_requests")
+
+    if generation_config is None and max_concurrent_requests is None:
+        return
+
+    for execution_stage in stage.decompose():
+        if getattr(execution_stage, "name", "") != "FaithEvalFilter":
+            continue
+        if generation_config is not None:
+            execution_stage.generation_config = generation_config
+        if max_concurrent_requests is not None:
+            execution_stage.max_concurrent_requests = int(max_concurrent_requests)
+
+
 def _text_field(value: Any) -> str | list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
@@ -152,7 +202,7 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
     enable_faith = bool(faith_cfg.get("enabled", False))
     server = config.get("server", {}) or {}
 
-    return TranslationStage(
+    stage = TranslationStage(
         source_lang=str(config["source_language"]).lower(),
         target_lang=str(config["target_language"]).lower(),
         text_field=_text_field(config.get("text_field", "messages.*.content")),
@@ -161,6 +211,7 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
         min_segment_chars=int(config.get("min_segment_chars", 0)),
         client=_build_curator_client(config, enable_faith=enable_faith),
         model_name=str(server.get("model") or ""),
+        generation_config=_build_generation_config(config.get("generation_config")),
         backend_type=str(config.get("backend", "llm")),
         backend_config=_backend_config(config),
         enable_faith_eval=enable_faith,
@@ -175,6 +226,9 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
         skip_translated=bool(config.get("skip_translated", False)),
         translation_column=str(config.get("translation_column", "translated_text")),
     )
+    if enable_faith:
+        _configure_faith_stage(stage, faith_cfg)
+    return stage
 
 
 def run(config: dict[str, Any]) -> Path:
