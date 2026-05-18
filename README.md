@@ -36,6 +36,29 @@
 
 ---
 
+## Use from Claude Code
+
+This repo ships a Claude Code plugin called **`nemotron-customize`** that turns the step catalog under [`src/nemotron/steps/`](./src/nemotron/steps/) into a guided, repo-native pipeline builder.
+
+Install once:
+
+```text
+/plugin marketplace add NVIDIA/Nemotron
+/plugin install nemotron-customize@nvidia-nemotron
+```
+
+Then, from any Claude Code session inside a checkout of this repo, invoke:
+
+```text
+/nemotron-customize
+```
+
+The skill plans the step DAG, validates artifact wiring, and emits the YAML configs needed to run the requested pipeline. See [`skills/nemotron-customize/SKILL.md`](./skills/nemotron-customize/SKILL.md) for the full contract.
+
+> The marketplace installs **only** `nemotron-customize`. The other folders under [`skills/`](./skills/) (model knowledge bases, contributor add-`*` skills) stay on disk for repo browsing but are not loaded as plugins.
+
+---
+
 ## Repository Overview
 
 ```
