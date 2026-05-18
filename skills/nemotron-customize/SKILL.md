@@ -3,7 +3,7 @@ name: nemotron-customize
 description: Use when building runnable Nemotron model-customization pipelines from existing repo steps and artifact contracts.
 version: 0.1.0
 metadata:
-  author: NVIDIA NeMo Team <nemo-toolkit@nvidia.com>
+  author: NVIDIA Nemotron Team
   tags:
     - nemotron
     - customization
@@ -26,6 +26,7 @@ not inspect the step catalog or edit files in that turn.
 ## Requirements
 
 - A checkout of this Nemotron repo with `src/nemotron/steps/` available.
+- **Invoke from the repo root.** All file paths in this document are repo-root-relative (e.g. `src/nemotron/steps/STEPS.md`, `skills/nemotron-customize/references/act/STAGE.md`). Resolve them against the user's current working directory, which must be the Nemotron checkout root.
 - User-provided model, data, hardware, backend, and output constraints before writing configs.
 - Backend credentials only when the selected step requires them, such as translation or W&B-enabled training.
 
@@ -37,7 +38,7 @@ not inspect the step catalog or edit files in that turn.
 
 Invocation: `/nemotron-customize`.
 
-You compose **steps** from [src/nemotron/steps/](../../src/nemotron/steps/)
+You compose **steps** from [src/nemotron/steps/](src/nemotron/steps/)
 into repo-native runnable configs. **The current codebase is the source of
 truth.** This skill orchestrates — it does not duplicate per-step knowledge.
 
@@ -67,13 +68,13 @@ Do not guess `--batch` profiles from examples or naming conventions.
 | What does step X consume / produce / parameterize? | `src/nemotron/steps/<cat>/<X>/step.toml` |
 | When/why pick step X over its siblings? | `src/nemotron/steps/<cat>/<X>/SKILL.md` |
 | Which step in category C should I pick? | `src/nemotron/steps/<cat>/SKILL.md` |
-| What runner code does step X use? | `src/nemotron/steps/<cat>/<X>/step.py` → [_runners/](../../src/nemotron/steps/_runners/) |
+| What runner code does step X use? | `src/nemotron/steps/<cat>/<X>/step.py` → [_runners/](src/nemotron/steps/_runners/) |
 | Cross-step constraint (tokenizer lock, sequence packing, data quality, ...) | `src/nemotron/steps/patterns/<id>.md` |
-| Artifact compatibility / `is_a` hierarchy | [src/nemotron/steps/types.toml](../../src/nemotron/steps/types.toml) |
-| GPU memory / parallelism heuristics | [src/nemotron/steps/hardware.md](../../src/nemotron/steps/hardware.md) |
-| Library API extracts for exceptional code generation | [references/context/index.toml](references/context/index.toml) → `references/context/<pack>.txt` |
-| Project scaffold rules, only when repo code cannot support the request | [references/act/PROJECT.md](references/act/PROJECT.md) |
-| Per-stage code rules, only when repo code cannot support the request | [references/act/STAGE.md](references/act/STAGE.md) |
+| Artifact compatibility / `is_a` hierarchy | [src/nemotron/steps/types.toml](src/nemotron/steps/types.toml) |
+| GPU memory / parallelism heuristics | [src/nemotron/steps/hardware.md](src/nemotron/steps/hardware.md) |
+| Library API extracts for exceptional code generation | [references/context/index.toml](skills/nemotron-customize/references/context/index.toml) → `references/context/<pack>.txt` |
+| Project scaffold rules, only when repo code cannot support the request | [references/act/PROJECT.md](skills/nemotron-customize/references/act/PROJECT.md) |
+| Per-stage code rules, only when repo code cannot support the request | [references/act/STAGE.md](skills/nemotron-customize/references/act/STAGE.md) |
 
 If two sources say the same thing, the **deeper, more specific** one wins
 (`step.toml` > category `SKILL.md` > this file).
@@ -97,14 +98,14 @@ Follow the workflow below in order:
    consistency; fix issues before reporting completion.
 
 Do not treat this skill as general ML advice. The step library under
-[src/nemotron/steps/](../../src/nemotron/steps/) is the source of truth.
+[src/nemotron/steps/](src/nemotron/steps/) is the source of truth.
 
 For single-step command questions, use this shorter flow instead of the full
 pipeline workflow:
 
 1. Confirm the repo root has `pyproject.toml` and `src/nemotron/steps/`.
 2. Run `uv run nemotron steps list --json` when available; otherwise read
-   [STEPS.md](../../src/nemotron/steps/STEPS.md).
+   [STEPS.md](src/nemotron/steps/STEPS.md).
 3. Read the selected step's `step.toml` and the requested checked-in config.
 4. For remote execution, read `NEMOTRON_ENV_FILE` or a repo-root `env*.toml`
    and choose an actual section name whose profile matches the step.
@@ -112,7 +113,7 @@ pipeline workflow:
    config/profile choices.
 
 For translation-only command requests, also read
-[src/nemotron/steps/translate/SKILL.md](../../src/nemotron/steps/translate/SKILL.md)
+[src/nemotron/steps/translate/SKILL.md](src/nemotron/steps/translate/SKILL.md)
 and return `Decision`, `Config`, `Run`, `Output`, and `Env`. Do not continue
 broad repository exploration once those fields are execution-ready.
 
@@ -157,18 +158,18 @@ nemotron steps show <step_id>                              # full manifest
 
 **Step 1.2 — Read these in parallel** (small files, all cheap):
 
-- [src/nemotron/steps/STEPS.md](../../src/nemotron/steps/STEPS.md) — auto-generated catalog (always read first).
-- [src/nemotron/steps/PATTERNS.md](../../src/nemotron/steps/PATTERNS.md) — auto-generated pattern index.
-- [src/nemotron/steps/types.toml](../../src/nemotron/steps/types.toml) — artifact compatibility graph (`is_a` hierarchy).
-- [src/nemotron/steps/hardware.md](../../src/nemotron/steps/hardware.md) — GPU heuristics if hardware is in scope.
+- [src/nemotron/steps/STEPS.md](src/nemotron/steps/STEPS.md) — auto-generated catalog (always read first).
+- [src/nemotron/steps/PATTERNS.md](src/nemotron/steps/PATTERNS.md) — auto-generated pattern index.
+- [src/nemotron/steps/types.toml](src/nemotron/steps/types.toml) — artifact compatibility graph (`is_a` hierarchy).
+- [src/nemotron/steps/hardware.md](src/nemotron/steps/hardware.md) — GPU heuristics if hardware is in scope.
 
 **Step 1.3 — For each candidate category, descend one level**:
 
 - `src/nemotron/steps/<cat>/SKILL.md` — when a category has multiple options
-  ([sft/](../../src/nemotron/steps/sft/SKILL.md),
-  [pretrain/](../../src/nemotron/steps/pretrain/SKILL.md),
-  [peft/](../../src/nemotron/steps/peft/SKILL.md),
-  [rl/nemo_rl/](../../src/nemotron/steps/rl/nemo_rl/SKILL.md)).
+  ([sft/](src/nemotron/steps/sft/SKILL.md),
+  [pretrain/](src/nemotron/steps/pretrain/SKILL.md),
+  [peft/](src/nemotron/steps/peft/SKILL.md),
+  [rl/nemo_rl/](src/nemotron/steps/rl/nemo_rl/SKILL.md)).
 
 **Step 1.4 — For each candidate step, read its `step.toml`** end-to-end.
 You're after: `[[consumes]]`, `[[produces]]`, `[[parameters]]`,
@@ -208,7 +209,7 @@ Goal: produce a markdown plan the user reviews before any code is written.
 - Strategies fired (the `when:` clauses from `step.toml` that match).
 - Patterns cited (from `src/nemotron/steps/patterns/`).
 
-**Step 2.3 — Run preflight validation.** Hard checks: artifact types chain via [types.toml](../../src/nemotron/steps/types.toml); tokenizer/template/sequence length align across prep and train; RL warm-starts from SFT; GPU count satisfies the selected model; applicable patterns are cited. When a check fails: surface it as a `WARNING:` warning in the plan and propose a
+**Step 2.3 — Run preflight validation.** Hard checks: artifact types chain via [types.toml](src/nemotron/steps/types.toml); tokenizer/template/sequence length align across prep and train; RL warm-starts from SFT; GPU count satisfies the selected model; applicable patterns are cited. When a check fails: surface it as a `WARNING:` warning in the plan and propose a
 fix. When the user can't satisfy it (e.g. hardware), propose alternatives in
 descending preference: smaller model → AutoModel instead of Megatron-Bridge →
 LoRA instead of full FT.
@@ -230,9 +231,9 @@ placeholders. No TODOs.
 
 Before creating any code, identify how the existing repo can run each stage:
 
-- CLI commands under [src/nemotron/cli/](../../src/nemotron/cli/).
+- CLI commands under [src/nemotron/cli/](src/nemotron/cli/).
 - Step entrypoints in `src/nemotron/steps/<cat>/<step>/step.py`.
-- Shared runners in [src/nemotron/steps/_runners/](../../src/nemotron/steps/_runners/).
+- Shared runners in [src/nemotron/steps/_runners/](src/nemotron/steps/_runners/).
 - Existing configs under the selected step, recipe, or runner directory.
 
 **Step 3.2 — Generate only YAML configs when the repo supports the request.**
@@ -259,8 +260,8 @@ Each YAML config must:
 If the repo lacks a callable step, runner, CLI, or config surface for the
 requested behavior, load codegen rules:
 
-- Main agent reads [references/act/PROJECT.md](references/act/PROJECT.md) (project scaffold rules).
-- Each per-stage sub-agent reads [references/act/STAGE.md](references/act/STAGE.md) (R1–R5 +
+- Main agent reads [references/act/PROJECT.md](skills/nemotron-customize/references/act/PROJECT.md) (project scaffold rules).
+- Each per-stage sub-agent reads [references/act/STAGE.md](skills/nemotron-customize/references/act/STAGE.md) (R1–R5 +
   code-quality + dry-run + W&B).
 
 Then implement the missing stage with the narrowest possible code change:
@@ -296,9 +297,9 @@ write that stage, drop pack, move on.
 **Step 3.4 — Step.py + the runner are the reference.** Don't invent YAML keys
 or library APIs from memory. Mirror what the in-repo code does:
 
-- [steps/_runners/megatron_bridge.py](../../src/nemotron/steps/_runners/megatron_bridge.py) — used by sft/peft/pretrain Megatron-Bridge steps.
-- [steps/_runners/automodel.py](../../src/nemotron/steps/_runners/automodel.py) — used by AutoModel steps.
-- [steps/_runners/nemo_rl.py](../../src/nemotron/steps/_runners/nemo_rl.py) — used by all NeMo-RL alignment steps.
+- [steps/_runners/megatron_bridge.py](src/nemotron/steps/_runners/megatron_bridge.py) — used by sft/peft/pretrain Megatron-Bridge steps.
+- [steps/_runners/automodel.py](src/nemotron/steps/_runners/automodel.py) — used by AutoModel steps.
+- [steps/_runners/nemo_rl.py](src/nemotron/steps/_runners/nemo_rl.py) — used by all NeMo-RL alignment steps.
 
 When a step has no context pack, the agent combines: per-step `SKILL.md` + `step.toml [[strategies]]` + `step.py` + the URLs in `[reference]`. That is enough.
 
@@ -357,7 +358,7 @@ Use whenever the user's request maps to a step in the catalog.
    satisfy the request.
 2. Look at libraries cited in nearby `step.toml [reference]` URLs.
 3. Read the relevant library docs / examples.
-4. Use [types.toml](../../src/nemotron/steps/types.toml) to type the new
+4. Use [types.toml](src/nemotron/steps/types.toml) to type the new
    stage's consumes/produces.
 5. Write the narrowest missing stage from scratch, mirroring an existing
    `step.py` as a template.
@@ -367,17 +368,17 @@ from `<library>` docs — the output will need more validation than a
 catalog-based stage."
 
 If the same Explorer build keeps appearing across projects, suggest the user
-run `/nemotron-add-step` to land it in the catalog.
+contribute it as a new catalog step under `src/nemotron/steps/`.
 
 ### Choosing a mode
 
 | User says | Mode |
 |---|---|
 | "SFT with Megatron-Bridge / AutoModel" | Catalog |
-| "DPO / RLVR / GRPO / RLHF" | Catalog ([rl/nemo_rl/*](../../src/nemotron/steps/rl/nemo_rl/)) |
-| "Synthesize preference / SFT data" | Catalog ([sdg/data_designer](../../src/nemotron/steps/sdg/data_designer/)) |
-| "Translate EN → \<lang\> for training data" | Catalog ([translate/curator](../../src/nemotron/steps/translate/curator/)) |
-| "Curate web text" | Catalog ([curate/nemo_curator](../../src/nemotron/steps/curate/nemo_curator/)) |
+| "DPO / RLVR / GRPO / RLHF" | Catalog ([rl/nemo_rl/*](src/nemotron/steps/rl/nemo_rl/)) |
+| "Synthesize preference / SFT data" | Catalog ([sdg/data_designer](src/nemotron/steps/sdg/data_designer/)) |
+| "Translate EN → \<lang\> for training data" | Catalog ([translate/curator](src/nemotron/steps/translate/curator/)) |
+| "Curate web text" | Catalog ([curate/nemo_curator](src/nemotron/steps/curate/nemo_curator/)) |
 | "Train with X exotic backend" | Explorer or **ask** |
 | Post-training-only request | Out of scope for this skill; ask the user to use a more appropriate workflow. |
 | Ambiguous | **Ask** |
@@ -408,7 +409,7 @@ run `/nemotron-add-step` to land it in the catalog.
 - Assume GPU count, type, or interconnect.
 - Generate Slurm/Airflow/Kubeflow wrappers.
 - Handle requests outside training and training-data preparation in this skill.
-- Modify [src/nemotron/steps/](../../src/nemotron/steps/). To extend the catalog, route the user to `/nemotron-add-step`.
+- Modify [src/nemotron/steps/](src/nemotron/steps/). To extend the catalog, point the user to the contribution workflow in `CONTRIBUTING.md`.
 - Restate per-step rules in this skill — link to the step's `SKILL.md` instead.
 
 ---
@@ -422,7 +423,7 @@ run `/nemotron-add-step` to land it in the catalog.
 | Strategy points to a missing skill file | Skip the load. Use the `then:` text as guidance. Note in plan: "WARNING: Could not read perf-tuning docs for `<topic>` — config may need manual review." |
 | User's hardware is too small | Show the relevant `[[models]]` `min_gpus` table. Suggest in order: smaller model → AutoModel → LoRA. |
 | Two failed Act attempts | Stop. Explain what was tried, what failed, ask the user how to proceed. |
-| User wants a feature that crosses 3+ projects | Confirm YAML and existing repo code cannot serve it. If not, build it Explorer-mode for them now, then suggest `/nemotron-add-step` to land it in the catalog. |
+| User wants a feature that crosses 3+ projects | Confirm YAML and existing repo code cannot serve it. If not, build it Explorer-mode for them now, then suggest contributing it as a new step under `src/nemotron/steps/`. |
 
 ## Troubleshooting
 
