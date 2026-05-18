@@ -6,7 +6,7 @@ triggers:
   - "Translated data will be used for governance, audit, or high-value model training."
   - "The user needs quality scores or threshold filtering for translated corpus rows."
   - "Translation quality must gate SFT, CPT, or customer-facing training data."
-steps: [translate/translation]
+steps: [translate/curator]
 confidence: high
 ---
 

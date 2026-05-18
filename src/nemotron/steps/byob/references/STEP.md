@@ -1,6 +1,6 @@
 ---
-id: nemotron.steps.byob
-version: 0.1
+id: nemotron.steps.byob.mcq
+version: 0.2
 owner: nemotron
 summary: Generate and translate bring-your-own MCQ benchmarks from domain documents.
 entrypoint:

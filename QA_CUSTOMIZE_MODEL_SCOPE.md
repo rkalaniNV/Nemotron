@@ -140,8 +140,8 @@ Prerequisites: Optional workflow extras from `SETUP-002`.
 
 ```bash
 for STEP in \
-  translate/translation \
-  byob \
+  translate/curator \
+  byob/mcq \
   data_prep/sft_packing \
   data_prep/pretrain_prep \
   data_prep/rl_prep \
@@ -226,8 +226,8 @@ cp "$TR_ROOT/news_en.parquet" "$TR_ROOT/mixed_dir/shard_0002.parquet"
 Prerequisites: Translation extra installed with `uv sync --extra translation`; test data from `Test Data Setup`.
 
 ```bash
-uv run --no-sync nemotron steps show translate/translation
-uv run --no-sync nemotron steps run translate/translation --help
+uv run --no-sync nemotron steps show translate/curator
+uv run --no-sync nemotron steps run translate/curator --help
 uv run --no-sync nemotron steps translation --help
 uv run --no-sync python -c "from nemo_curator.stages.text.experimental.translation import TranslationStage; print(TranslationStage)"
 ```
@@ -548,8 +548,8 @@ Algebra studies symbols and the rules for manipulating them. Linear equations re
 Finance studies how people, firms, and governments allocate money over time. It includes saving, investing, borrowing, lending, budgeting, and risk management.
 EOF
 
-cp src/nemotron/steps/byob/config/tiny.yaml "$BYOB_ROOT/config/byob_mcq.yaml"
-cp src/nemotron/steps/byob/config/translate.yaml "$BYOB_ROOT/config/byob_translate.yaml"
+cp src/nemotron/steps/byob/mcq/config/tiny.yaml "$BYOB_ROOT/config/byob_mcq.yaml"
+cp src/nemotron/steps/byob/mcq/config/translate.yaml "$BYOB_ROOT/config/byob_translate.yaml"
 ```
 
 Patch the BYOB generation config:

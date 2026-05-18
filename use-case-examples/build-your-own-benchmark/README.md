@@ -5,7 +5,7 @@ This example shows the current Nemotron BYOB flow for creating a domain-specific
 The notebook is intentionally aligned with the agentic step structure:
 
 - The reusable step lives in `src/nemotron/steps/byob/`.
-- Starter configs live in `src/nemotron/steps/byob/config/`.
+- Starter configs live in `src/nemotron/steps/byob/mcq/config/`.
 - Runtime execution goes through `nemotron byob`.
 - The notebook creates only example-local inputs, outputs, and a working config.
 

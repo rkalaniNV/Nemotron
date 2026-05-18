@@ -1,6 +1,6 @@
 [step]
-id = "byob"
-name = "Bring Your Own Benchmark"
+id = "byob/mcq"
+name = "Bring Your Own Benchmark — MCQ"
 category = "byob"
 description = "Generate and translate BYOB MCQ benchmark parquet artifacts from domain documents with an extensible benchmark-family runtime."
 tags = ["benchmark", "byob", "mcq", "data-designer", "curator", "translation"]
@@ -93,10 +93,10 @@ recovery = "Translated outputs should preserve row count unless remove_low_quali
 [reference]
 skill = "src/nemotron/steps/byob/SKILL.md"
 contract = "src/nemotron/steps/byob/references/STEP.md"
-script = "src/nemotron/steps/byob/step.py"
-default_config = "src/nemotron/steps/byob/config/default.yaml"
-tiny_config = "src/nemotron/steps/byob/config/tiny.yaml"
-translate_config = "src/nemotron/steps/byob/config/translate.yaml"
+script = "src/nemotron/steps/byob/mcq/step.py"
+default_config = "src/nemotron/steps/byob/mcq/config/default.yaml"
+tiny_config = "src/nemotron/steps/byob/mcq/config/tiny.yaml"
+translate_config = "src/nemotron/steps/byob/mcq/config/translate.yaml"
 runtime = "src/nemotron/steps/byob/runtime/benchmark_families/mcq/pipeline.py"
 skills = [
   "skills/nemotron-customize/references/context/byob-benchmark-curator-translation.txt",

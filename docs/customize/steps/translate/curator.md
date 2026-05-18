@@ -5,7 +5,7 @@ It should stay a thin wrapper around Curator; do not generate custom chunking or
 pandas processing unless a single huge input file needs a one-off preprocessing
 stage.
 
-```{step-toml} src/nemotron/steps/translate/translation/step.toml
+```{step-toml} src/nemotron/steps/translate/curator/step.toml
 ```
 
 ## Agent Checklist
@@ -28,42 +28,42 @@ Install the Curator-backed translation dependencies before running the step:
 uv sync --extra translation
 ```
 
-Run the step directly:
+Run the step through the generic step dispatcher with `-o key=value` overrides:
 
 ```bash
-uv run --extra translation nemotron steps translation \
-  input_path=/path/to/source.jsonl \
-  output_dir=/path/to/translated \
-  source_language=en \
-  target_language=hi
+uv run --extra translation nemotron steps run translate/curator \
+  -o input_path=/path/to/source.jsonl \
+  -o output_dir=/path/to/translated \
+  -o source_language=en \
+  -o target_language=hi
 ```
 
-Use `-c` or `--config` to pass a config file or config name from the step's
-`config/` directory. The direct `nemotron steps translation` shortcut supports
-local execution only.
+Use `-c` or `--config` to pass a config name from the step's `config/`
+directory or a path to a YAML file. Repeat `-o` (or `--override`) for each
+config override; bare ``key=value`` positionals are also still accepted.
 
-For batch executors such as Lepton or Slurm, use the generic step runner:
+For batch executors such as Lepton or Slurm, add ``--batch <profile>``:
 
 ```bash
-uv run nemotron steps run translate/translation \
+uv run nemotron steps run translate/curator \
   -c default \
   --batch lepton_translate \
-  input_path=/mnt/lustre-shared/data/source.jsonl \
-  output_dir=/mnt/lustre-shared/output/translated \
-  source_language=en \
-  target_language=hi
+  -o input_path=/mnt/lustre-shared/data/source.jsonl \
+  -o output_dir=/mnt/lustre-shared/output/translated \
+  -o source_language=en \
+  -o target_language=hi
 ```
 
 ## Reference Implementation
 
-```{literalinclude} ../../../../src/nemotron/steps/translate/translation/step.py
+```{literalinclude} ../../../../src/nemotron/steps/translate/curator/step.py
 :language: python
 :caption: step.py
 ```
 
 ## Starter Config
 
-```{literalinclude} ../../../../src/nemotron/steps/translate/translation/config/default.yaml
+```{literalinclude} ../../../../src/nemotron/steps/translate/curator/config/default.yaml
 :language: yaml
 :caption: config/default.yaml
 ```

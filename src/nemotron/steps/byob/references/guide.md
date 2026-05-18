@@ -25,8 +25,8 @@ lives in `runtime/benchmark_families/mcq/pipeline.py`. The generation run:
 Run generation through the installed CLI:
 
 ```bash
-nemotron byob --family mcq --stage prepare --config src/nemotron/steps/byob/config/default.yaml
-nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/config/default.yaml
+nemotron byob --family mcq --stage prepare --config src/nemotron/steps/byob/mcq/config/default.yaml
+nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/mcq/config/default.yaml
 ```
 
 The BYOB configs declare Curator through the normal step config mount path:

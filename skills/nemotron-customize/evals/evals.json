@@ -1,14 +1,14 @@
 [
   {
     "id": "nemotron-customize-translate-llm-command",
-    "question": "In this repo, give me the command to translate /data/news/*.jsonl from English to Hindi with the translate/translation step. Use text_field=text, output_dir=/data/news_hi, backend=llm, server URL https://integrate.api.nvidia.com/v1, model nvidia/llama-3.3-nemotron-super-49b-v1, and API key env NVIDIA_API_KEY. I only need the command, not a plan.",
+    "question": "In this repo, give me the command to translate /data/news/*.jsonl from English to Hindi with the translate/curator step. Use text_field=text, output_dir=/data/news_hi, backend=llm, server URL https://integrate.api.nvidia.com/v1, model nvidia/llama-3.3-nemotron-super-49b-v1, and API key env NVIDIA_API_KEY. I only need the command, not a plan.",
     "expected_skill": "nemotron-customize",
     "expected_script": null,
-    "ground_truth": "The answer should use the existing translate/translation step and return a complete uv run nemotron steps run translate/translation command with input_path=/data/news/*.jsonl, output_dir=/data/news_hi, source_language=en, target_language=hi, text_field=text, backend=llm, server.url=https://integrate.api.nvidia.com/v1, server.model=nvidia/llama-3.3-nemotron-super-49b-v1, and server.api_key_env=NVIDIA_API_KEY. It should not generate custom Python, route through BYOB, or omit explicit source and target language codes.",
+    "ground_truth": "The answer should use the existing translate/curator step and return a complete uv run nemotron steps run translate/curator command with input_path=/data/news/*.jsonl, output_dir=/data/news_hi, source_language=en, target_language=hi, text_field=text, backend=llm, server.url=https://integrate.api.nvidia.com/v1, server.model=nvidia/llama-3.3-nemotron-super-49b-v1, and server.api_key_env=NVIDIA_API_KEY. It should not generate custom Python, route through BYOB, or omit explicit source and target language codes.",
     "expected_behavior": [
       "Read skills/nemotron-customize/SKILL.md before answering.",
-      "Use the step catalog or src/nemotron/steps/translate/translation/step.toml as the source of truth.",
-      "Return a single runnable translate/translation command because all required inputs were provided.",
+      "Use the step catalog or src/nemotron/steps/translate/curator/step.toml as the source of truth.",
+      "Return a single runnable translate/curator command because all required inputs were provided.",
       "Keep source_language and target_language explicit instead of relying on defaults.",
       "Do not create a custom translation script when the repo already has a step for this workflow."
     ]
@@ -32,10 +32,10 @@
     "question": "I already generated a BYOB benchmark parquet with multiple-choice questions. I need to translate the benchmark from English to Hindi while preserving the MCQ fields. Which customization workflow should I use and what should the command shape look like?",
     "expected_skill": "nemotron-customize",
     "expected_script": null,
-    "ground_truth": "The answer should route this to the BYOB workflow, not generic translate/translation, because the input is a BYOB benchmark with MCQ structure. It should describe using nemotron steps run byob with the translation stage or translate-specific BYOB config, set source and target languages explicitly, and preserve MCQ schema fields. It should not flatten the benchmark into a single text column unless the user explicitly asks for generic corpus translation.",
+    "ground_truth": "The answer should route this to the BYOB workflow, not generic translate/curator, because the input is a BYOB benchmark with MCQ structure. It should describe using nemotron steps run byob/mcq with the translation stage or translate-specific BYOB config, set source and target languages explicitly, and preserve MCQ schema fields. It should not flatten the benchmark into a single text column unless the user explicitly asks for generic corpus translation.",
     "expected_behavior": [
       "Distinguish benchmark translation from generic corpus translation.",
-      "Inspect BYOB-facing references or manifests instead of assuming translate/translation is always correct.",
+      "Inspect BYOB-facing references or manifests instead of assuming translate/curator is always correct.",
       "Explain that MCQ schema preservation is the reason to use BYOB translation.",
       "Ask for missing benchmark path or config values if needed before giving an exact command.",
       "Do not suggest a lossy conversion that drops answer choices or labels."

@@ -103,8 +103,8 @@ uv run nemotron nano3 pretrain -c tiny --dry-run
 uv run nemotron nano3 pretrain -c tiny train.train_iters=5000
 
 # BYOB benchmark generation
-uv run nemotron byob --family mcq --stage prepare --config src/nemotron/steps/byob/config/default.yaml
-uv run nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/config/default.yaml
+uv run nemotron byob --family mcq --stage prepare --config src/nemotron/steps/byob/mcq/config/default.yaml
+uv run nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/mcq/config/default.yaml
 uv run nemotron byob --list-families
 
 # Data preparation

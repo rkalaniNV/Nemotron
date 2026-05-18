@@ -11,8 +11,8 @@
 # Don't add new packs unless they survive the "<250 line authored extract" bar.
 
 [[packs]]
-id = "byob-benchmark-generate"
-step = "byob"
+id = "byob-mcq-generate"
+step = "byob/mcq"
 intent = "generate"
 file = "byob-benchmark-curator-translation.txt"
 description = "Generate or translate BYOB MCQ benchmarks — domain corpus inputs, MCQ schema, Curator semantic deduplication, experimental translation, and round-trip metrics."
@@ -193,8 +193,8 @@ file = "mbridge-parallelism-performance.txt"
 description = "Tune Megatron-Bridge parallelism and performance — TP/PP/FSDP, overlap, recomputation, and sequence packing."
 
 [[packs]]
-id = "translate-translation-generate"
-step = "translate/translation"
+id = "translate-curator-generate"
+step = "translate/curator"
 intent = "generate"
 file = "curator-translation-faith.txt"
 description = "Generate translation stage code with NeMo Curator — JSONL/Parquet I/O, structured fields, and FAITH evaluation."

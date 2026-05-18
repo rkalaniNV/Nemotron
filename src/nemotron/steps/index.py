@@ -25,11 +25,11 @@ import yaml
 DEFAULT_STEPS_ROOT = Path(__file__).resolve().parent
 DEFAULT_PATTERNS_DIR = DEFAULT_STEPS_ROOT / "patterns"
 CATEGORY_TITLES = {
-    "benchmark": "Benchmarking",
     "byob": "Bring Your Own Benchmark",
     "convert": "Conversion",
     "curate": "Data Curation",
     "data_prep": "Data Preparation",
+    "env": "Environment Profiles",
     "eval": "Evaluation",
     "optimize": "Model Optimization",
     "peft": "Parameter-Efficient Fine-Tuning",
