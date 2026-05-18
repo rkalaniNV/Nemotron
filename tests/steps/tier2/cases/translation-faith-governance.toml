@@ -7,7 +7,7 @@ tags = ["translation", "faith", "governance", "chat"]
 request = "Translate this tool-calling chat dataset to German and include FAITH evaluation for governance review."
 
 [expected.steps]
-must_include = ["translate/translation"]
+must_include = ["translate/curator"]
 may_include = []
 must_exclude = ["curate/nemo_curator", "data_prep/sft_packing", "sft/megatron_bridge", "sft/automodel"]
 
@@ -23,5 +23,5 @@ must_have_tiny_config = false
 no_relative_data_paths = true
 
 [expected.disclosure]
-must_read = ["STEPS.md", "PATTERNS.md", "translate/translation/step.toml"]
+must_read = ["STEPS.md", "PATTERNS.md", "translate/curator/step.toml"]
 must_not_read = ["sft/guide.md"]

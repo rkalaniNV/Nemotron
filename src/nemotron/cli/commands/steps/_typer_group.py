@@ -22,12 +22,10 @@ from nemo_runspec.recipe_typer import RecipeTyper
 from nemotron.cli.commands.steps.list_cmd import list_steps
 from nemotron.cli.commands.steps.run_cmd import run_step
 from nemotron.cli.commands.steps.show_cmd import show_step
-from nemotron.cli.commands.steps.translation import META as TRANSLATION_META
-from nemotron.cli.commands.steps.translation import translation
 
 
 def _add_catalog_commands(app: typer.Typer) -> None:
-    app.command("list", help="List discovered steps. Use --json for machine-readable output.")(list_steps)
+    app.command("list", help="List discovered steps. Use --json for machine-readable output or --tree for a grouped view.")(list_steps)
     app.command("show", help="Show a step's manifest, runspec, and parameters.")(show_step)
     app.command(
         "run",
@@ -45,4 +43,3 @@ steps_app = RecipeTyper(
 )
 
 _add_catalog_commands(steps_app)
-steps_app.add_recipe_command(translation, meta=TRANSLATION_META)

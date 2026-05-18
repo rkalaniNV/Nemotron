@@ -125,7 +125,7 @@ Schema preserved per algorithm:
 
 ```
 curate/nemo_curator → data_prep/pretrain_prep → pretrain/{megatron_bridge,automodel}
-curate/nemo_curator → translate/translation → data_prep/sft_packing → sft/megatron_bridge
+curate/nemo_curator → translate/curator → data_prep/sft_packing → sft/megatron_bridge
                                               ↓
                                           (skip packing) → sft/automodel
 sdg/data_designer       → data_prep/sft_packing → sft/megatron_bridge

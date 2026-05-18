@@ -11,15 +11,16 @@ families such as GSM8K.
 
 ## Step Contract
 
-- Step id: `byob`
-- CLI: `nemotron byob`
+- Step id: `byob/mcq`
+- CLI: `nemotron steps run byob/mcq`
 - Source package: `src/nemotron/steps/byob/`
+- Step manifest: `src/nemotron/steps/byob/mcq/step.toml`
 - Generic dispatcher: `src/nemotron/steps/byob/scripts/runtime.py`
 - MCQ orchestration: `src/nemotron/steps/byob/runtime/benchmark_families/mcq/pipeline.py`
 - Optional dependency extra: `byob` (`uv sync --extra byob` or `pip install ".[byob]"`)
-- Generation config: `src/nemotron/steps/byob/config/default.yaml`
-- Tiny smoke config: `src/nemotron/steps/byob/config/tiny.yaml`
-- Translation config: `src/nemotron/steps/byob/config/translate.yaml`
+- Generation config: `src/nemotron/steps/byob/mcq/config/default.yaml`
+- Tiny smoke config: `src/nemotron/steps/byob/mcq/config/tiny.yaml`
+- Translation config: `src/nemotron/steps/byob/mcq/config/translate.yaml`
 - Produces: `mcq_benchmark_parquet`
 - Optional translation produces: `translated_mcq_benchmark_parquet`
 

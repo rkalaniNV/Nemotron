@@ -6,7 +6,7 @@ triggers:
   - "The corpus is large, mostly plain text, and a local NMT service is available."
   - "Translation throughput or cost matters more than nuanced instruction following."
   - "The user mentions an IndicTrans, NMT, or local translation server."
-steps: [translate/translation]
+steps: [translate/curator]
 confidence: high
 ---
 

@@ -6,7 +6,7 @@ triggers:
   - "The user wants to translate a corpus, dataset, or chat records before CPT or SFT."
   - "Training data must be produced in a target language from source-language examples."
   - "A multilingual fine-tuning pipeline needs translated JSONL or Parquet artifacts."
-steps: [translate/translation]
+steps: [translate/curator]
 confidence: high
 ---
 
@@ -18,7 +18,7 @@ Do not apply it to benchmark-only translation. Benchmark translation has differe
 
 ## What to do
 
-Insert `translate/translation` before packing or training. Ask for explicit source and target language codes, the input format, and the field path to translate.
+Insert `translate/curator` before packing or training. Ask for explicit source and target language codes, the input format, and the field path to translate.
 
 Prefer Curator-native reader -> `TranslationStage` -> writer flow. Do not generate custom pandas chunking unless the user has one huge single file and Curator file partitioning is not enough.
 

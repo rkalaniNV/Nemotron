@@ -15,6 +15,8 @@
 """Shared step-id → StepInfo resolution helpers."""
 from __future__ import annotations
 
+import difflib
+
 import typer
 
 from nemotron.steps.index import StepInfo, discover_steps
@@ -23,11 +25,12 @@ from nemotron.steps.index import StepInfo, discover_steps
 def resolve_step(step_id: str) -> StepInfo:
     """Find a step by id, with a helpful error if missing.
 
-    Accepts the canonical id (peft/automodel) or the directory tail (automodel)
-    when unambiguous.
+    Accepts the canonical id (``peft/automodel``) or the directory tail
+    (``automodel``) when unambiguous.
     """
     steps = discover_steps()
     by_id = {s.id: s for s in steps}
+
     if step_id in by_id:
         return by_id[step_id]
 
@@ -36,7 +39,9 @@ def resolve_step(step_id: str) -> StepInfo:
     if len(tail_matches) == 1:
         return tail_matches[0]
 
-    available = ", ".join(sorted(by_id))
     typer.echo(f"Unknown step id: {step_id}", err=True)
-    typer.echo(f"Available: {available}", err=True)
+    suggestions = difflib.get_close_matches(step_id, sorted(by_id), n=3, cutoff=0.5)
+    if suggestions:
+        typer.echo(f"Did you mean: {', '.join(suggestions)}?", err=True)
+    typer.echo("Run `nemotron steps list` to see all available steps.", err=True)
     raise typer.Exit(1)

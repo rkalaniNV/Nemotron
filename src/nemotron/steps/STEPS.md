@@ -4,7 +4,7 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [byob](byob/) | Generate and translate BYOB MCQ benchmark parquet artifacts from domain documents with an extensible benchmark-family runtime. | benchmark_source_corpus, benchmark_parquet (optional) | mcq_benchmark_parquet, translated_mcq_benchmark_parquet (optional) |
+| [byob/mcq](byob/mcq/) | Generate and translate BYOB MCQ benchmark parquet artifacts from domain documents with an extensible benchmark-family runtime. | benchmark_source_corpus, benchmark_parquet (optional) | mcq_benchmark_parquet, translated_mcq_benchmark_parquet (optional) |
 
 ## convert — Conversion
 
@@ -28,7 +28,7 @@
 | [data_prep/rl_prep](data_prep/rl_prep/) | Resolve HuggingFace dataset references in an RL data blend and shard the output JSONL into the prompt / preference layout expected by rl/nemo_rl/*. | training_jsonl | training_jsonl |
 | [data_prep/sft_packing](data_prep/sft_packing/) | Apply the chat template, tokenize training JSONL, and pack examples into Megatron-Bridge-compatible Parquet shards for SFT. | training_jsonl | packed_parquet |
 
-## env
+## env — Environment Profiles
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [eval/model_eval](eval/model_eval/) | Run NeMo Evaluator Launcher benchmark suites against a hosted OpenAI-compatible endpoint or a deployed Megatron checkpoint, producing consolidated evaluation results. | checkpoint_megatron (optional) | eval_results |
+| [eval/model_eval](eval/model_eval/) | Deploy a Megatron Bridge checkpoint behind an OpenAI-compatible endpoint, or evaluate an existing hosted endpoint, with NeMo Evaluator Launcher. | checkpoint_megatron (optional) | eval_results |
 
 ## optimize — Model Optimization
 
@@ -87,4 +87,4 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [translate/translation](translate/translation/) | Translate JSONL or Parquet training corpora with NeMo Curator's TranslationStage, preserving structured fields and optionally attaching FAITH quality scores. | filtered_jsonl | translated_jsonl |
+| [translate/curator](translate/curator/) | Translate JSONL or Parquet training corpora with NeMo Curator's TranslationStage, preserving structured fields and optionally attaching FAITH quality scores. | filtered_jsonl | translated_jsonl |

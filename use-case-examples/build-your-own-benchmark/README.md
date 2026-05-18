@@ -5,8 +5,8 @@ This example shows the current Nemotron BYOB flow for creating a domain-specific
 The notebook is intentionally aligned with the agentic step structure:
 
 - The reusable step lives in `src/nemotron/steps/byob/`.
-- Starter configs live in `src/nemotron/steps/byob/config/`.
-- Runtime execution goes through `nemotron byob`.
+- Starter configs live in `src/nemotron/steps/byob/mcq/config/`.
+- Runtime execution goes through `nemotron steps run byob/mcq`.
 - The notebook creates only example-local inputs, outputs, and a working config.
 
 ## Files
@@ -31,13 +31,19 @@ The notebook defaults to a dry command preview so it does not accidentally spend
 The equivalent CLI is:
 
 ```bash
-uv run nemotron byob --list-families
-uv run nemotron byob --family mcq --stage prepare --config use-case-examples/build-your-own-benchmark/config/finance_wiki.yaml
-uv run nemotron byob --family mcq --stage generate --config use-case-examples/build-your-own-benchmark/config/finance_wiki.yaml
+uv run nemotron steps show byob/mcq                          # see family.choices, parameters
+uv run nemotron steps run byob/mcq \
+  -c use-case-examples/build-your-own-benchmark/config/finance_wiki.yaml \
+  stage=prepare family=mcq
+uv run nemotron steps run byob/mcq \
+  -c use-case-examples/build-your-own-benchmark/config/finance_wiki.yaml \
+  stage=generate family=mcq
 ```
 
 Optional translation uses:
 
 ```bash
-uv run nemotron byob --family mcq --stage translate --config use-case-examples/build-your-own-benchmark/config/finance_wiki_translate.yaml
+uv run nemotron steps run byob/mcq \
+  -c use-case-examples/build-your-own-benchmark/config/finance_wiki_translate.yaml \
+  stage=translate family=mcq
 ```

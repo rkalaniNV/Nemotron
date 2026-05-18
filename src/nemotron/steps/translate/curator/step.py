@@ -2,7 +2,7 @@
 # /// script
 # [tool.runspec]
 # schema = "1"
-# name = "steps/translate/translation"
+# name = "steps/translate/curator"
 #
 # [tool.runspec.run]
 # launch = "python"

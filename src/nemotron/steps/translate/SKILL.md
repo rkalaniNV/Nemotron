@@ -5,12 +5,12 @@ description: Translate JSONL or Parquet training corpora with NeMo Curator, incl
 
 # Nemotron Translation
 
-Use this skill when a user wants to translate corpus data, chat records, or row-oriented training artifacts. The concrete step is [`translate/translation`](translation/SKILL.md).
+Use this skill when a user wants to translate corpus data, chat records, or row-oriented training artifacts. The concrete step is [`translate/curator`](curator/SKILL.md).
 
 ## Default Workflow
 
 1. Install runtime dependencies with `uv sync --extra translation`.
-2. Read [`translation/step.toml`](translation/step.toml) for the step contract.
+2. Read [`curator/step.toml`](curator/step.toml) for the step contract.
 3. Ask for `source_language`, `target_language`, input path, output path, backend, and field path. Do not infer source or target language silently.
 4. For downstream training data, start with `output_mode=replaced`, `merge_scores=false`, and `faith_eval.enabled=false`.
 5. For audit or quality review, use `output_mode=both` and enable `faith_eval`.
@@ -55,7 +55,7 @@ FAITH-related outputs, and includes the exact run command and output path.
 Plain text JSONL through a hosted LLM:
 
 ```bash
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_llm_hi" \
   source_language=en \
@@ -74,7 +74,7 @@ uv run --no-sync nemotron steps translation \
 Structured chat records:
 
 ```bash
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/chat_code_en.jsonl" \
   output_dir="$TR_ROOT/out_chat_hi" \
   source_language=en \
@@ -93,7 +93,7 @@ uv run --no-sync nemotron steps translation \
 NMT server:
 
 ```bash
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_nmt_hi" \
   source_language=en \
@@ -137,7 +137,7 @@ uv run --no-sync nemotron steps translation \
   `pyyaml`, report the blocker and still provide the runnable handoff.
 - Mixed `.jsonl` and `.parquet` roots: bind `input_path` to one format only and
   explicitly state excluded paths or formats.
-- Missing `translate/translation` metadata in a runtime workspace: treat it as
+- Missing `translate/curator` metadata in a runtime workspace: treat it as
   an environment/path issue, state the blocker, and provide the canonical
   command for a complete checkout.
 - Path-not-found during validation: inspect actual created paths before
@@ -146,6 +146,6 @@ uv run --no-sync nemotron steps translation \
 ## Load More
 
 - [`guide.md`](guide.md) for detailed flow, output modes, FAITH, resume semantics, and validation.
-- [`translation/SKILL.md`](translation/SKILL.md) for the concrete step.
-- [`translation/config/default.yaml`](translation/config/default.yaml) for starter config.
-- [`translation/step.py`](translation/step.py) for the reader -> translation stage -> writer implementation.
+- [`curator/SKILL.md`](curator/SKILL.md) for the concrete step.
+- [`curator/config/default.yaml`](curator/config/default.yaml) for starter config.
+- [`curator/step.py`](curator/step.py) for the reader -> translation stage -> writer implementation.
