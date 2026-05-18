@@ -35,6 +35,18 @@ description = "Source field path to translate. Use messages.*.content for OpenAI
 default = "messages.*.content"
 
 [[parameters]]
+name = "input_format"
+description = "Input format: auto infers homogeneous JSONL/Parquet paths; set explicitly when globs or directories are ambiguous."
+default = "auto"
+choices = ["auto", "jsonl", "parquet"]
+
+[[parameters]]
+name = "output_format"
+description = "Output shard format written by Curator."
+default = "jsonl"
+choices = ["jsonl", "parquet"]
+
+[[parameters]]
 name = "backend"
 description = "Translation backend. Use llm for OpenAI-compatible endpoints, nmt for a local service, or cloud backends when configured."
 default = "llm"
@@ -63,14 +75,25 @@ default = "both"
 choices = ["replaced", "raw", "both"]
 
 [[parameters]]
-name = "faith_enabled"
+name = "faith_eval.enabled"
 description = "Whether to run FAITH translation quality scoring through an LLM client."
 default = true
 
 [[parameters]]
-name = "faith_threshold"
+name = "faith_eval.threshold"
 description = "Minimum FAITH average score to keep translated records when filtering is enabled."
 default = 2.5
+
+[[parameters]]
+name = "reconstruct_messages"
+description = "For chat records, emit reconstructed translated messages for inspection and downstream SFT prep."
+default = true
+
+[[parameters]]
+name = "segmentation_mode"
+description = "Translation segmentation mode. Start coarse for JSON, code, tool payloads, or structured chat records."
+default = "coarse"
+choices = ["coarse", "fine"]
 
 [[strategies]]
 when = "The input records are OpenAI-style chat data"
@@ -131,6 +154,7 @@ name = "single_huge_file_memory_pressure"
 recovery = "Curator readers are file-partition oriented. For one huge file, generate a one-off row-chunking pre-step and feed chunks into this step."
 
 [reference]
+skill = "src/nemotron/steps/translate/translation/SKILL.md"
 script = "src/nemotron/steps/translate/translation/step.py"
 docs = "docs/customize/steps/translate/translation.md"
 skills = [
