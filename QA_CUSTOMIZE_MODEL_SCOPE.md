@@ -140,7 +140,7 @@ Prerequisites: Optional workflow extras from `SETUP-002`.
 
 ```bash
 for STEP in \
-  translate/curator \
+  translate/nemo_curator \
   byob/mcq \
   data_prep/sft_packing \
   data_prep/pretrain_prep \
@@ -226,8 +226,8 @@ cp "$TR_ROOT/news_en.parquet" "$TR_ROOT/mixed_dir/shard_0002.parquet"
 Prerequisites: Translation extra installed with `uv sync --extra translation`; test data from `Test Data Setup`.
 
 ```bash
-uv run --no-sync nemotron steps show translate/curator
-uv run --no-sync nemotron steps run translate/curator --help
+uv run --no-sync nemotron steps show translate/nemo_curator
+uv run --no-sync nemotron steps run translate/nemo_curator --help
 uv run --no-sync python -c "from nemo_curator.stages.text.experimental.translation import TranslationStage; print(TranslationStage)"
 ```
 
@@ -246,7 +246,7 @@ Prerequisites: `NVIDIA_API_KEY` or configured hosted LLM credential; live `TRANS
 ```bash
 : "${NVIDIA_API_KEY:?Set NVIDIA_API_KEY for hosted LLM translation}"
 
-uv run --no-sync nemotron steps run translate/curator \
+uv run --no-sync nemotron steps run translate/nemo_curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_llm_hi" \
   source_language=en \
@@ -297,7 +297,7 @@ Evidence to collect: output JSONL files, row-count validation output, sampled ro
 Prerequisites: Hosted LLM backend available; chat test data from `Test Data Setup`.
 
 ```bash
-uv run --no-sync nemotron steps run translate/curator \
+uv run --no-sync nemotron steps run translate/nemo_curator \
   input_path="$TR_ROOT/chat_code_en.jsonl" \
   output_dir="$TR_ROOT/out_chat_hi" \
   source_language=en \
@@ -352,7 +352,7 @@ Evidence to collect: output JSONL, JSON parse validation output, sampled transla
 Prerequisites: Hosted LLM backend available for `FAITH_MODEL`.
 
 ```bash
-uv run --no-sync nemotron steps run translate/curator \
+uv run --no-sync nemotron steps run translate/nemo_curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_faith_annotated" \
   source_language=en \
@@ -386,7 +386,7 @@ Prerequisites: Reachable `NMT_SERVER_URL` implementing the expected translation 
 ```bash
 : "${NMT_SERVER_URL:?Set NMT_SERVER_URL to an NMT service endpoint}"
 
-uv run --no-sync nemotron steps run translate/curator \
+uv run --no-sync nemotron steps run translate/nemo_curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_nmt_hi" \
   source_language=en \
@@ -413,7 +413,7 @@ Evidence to collect: command logs, output files, sampled rows, and service logs 
 Prerequisites: Hosted LLM backend available; `pandas` and `pyarrow` available.
 
 ```bash
-uv run --no-sync nemotron steps run translate/curator \
+uv run --no-sync nemotron steps run translate/nemo_curator \
   input_path="$TR_ROOT/news_en.parquet" \
   output_dir="$TR_ROOT/out_parquet_hi" \
   source_language=en \
@@ -457,7 +457,7 @@ Evidence to collect: Parquet validation output, sampled rows, and redacted logs.
 Prerequisites: Prior translated output from `TR-002` or equivalent.
 
 ```bash
-uv run --no-sync nemotron steps run translate/curator \
+uv run --no-sync nemotron steps run translate/nemo_curator \
   input_path="$TR_ROOT/out_llm_hi" \
   output_dir="$TR_ROOT/out_resume_hi" \
   source_language=en \
@@ -487,7 +487,7 @@ Evidence to collect: resume command logs and output sample.
 Prerequisites: Mixed-format test directory from `Test Data Setup`.
 
 ```bash
-if uv run --no-sync nemotron steps run translate/curator \
+if uv run --no-sync nemotron steps run translate/nemo_curator \
   input_path="$TR_ROOT/mixed_dir" \
   output_dir="$TR_ROOT/out_mixed_should_fail" \
   source_language=en \
@@ -526,7 +526,7 @@ Translate /tmp/nemotron-qa-<run-id>/translation/chat_code_en.jsonl from English 
 
 Success criteria:
 
-- Uses `nemotron steps run translate/curator` for local execution.
+- Uses `nemotron steps run translate/nemo_curator` for local execution.
 - Uses `text_field='messages.*.content'`.
 - Sets `source_language=en` and `target_language=hi`.
 - Keeps credentials in environment variables.

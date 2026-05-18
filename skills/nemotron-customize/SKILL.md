@@ -377,7 +377,7 @@ contribute it as a new catalog step under `src/nemotron/steps/`.
 | "SFT with Megatron-Bridge / AutoModel" | Catalog |
 | "DPO / RLVR / GRPO / RLHF" | Catalog ([rl/nemo_rl/*](src/nemotron/steps/rl/nemo_rl/)) |
 | "Synthesize preference / SFT data" | Catalog ([sdg/data_designer](src/nemotron/steps/sdg/data_designer/)) |
-| "Translate EN → \<lang\> for training data" | Catalog ([translate/curator](src/nemotron/steps/translate/curator/)) |
+| "Translate EN → \<lang\> for training data" | Catalog ([translate/nemo_curator](src/nemotron/steps/translate/nemo_curator/)) |
 | "Curate web text" | Catalog ([curate/nemo_curator](src/nemotron/steps/curate/nemo_curator/)) |
 | "Train with X exotic backend" | Explorer or **ask** |
 | Post-training-only request | Out of scope for this skill; ask the user to use a more appropriate workflow. |

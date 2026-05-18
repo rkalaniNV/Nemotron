@@ -31,7 +31,7 @@ Apply it before `data_prep/sft_packing`. The blend ratios decide what goes into 
 
 **Keep capability slices balanced.** If reasoning, tool use, and chat each need to work, each capability should have enough rows to register against the blend. A 5K-row reasoning slice in a 500K-row corpus is a rounding error.
 
-**Translate, don't paraphrase, when localizing.** When mixing translated open-source data with target-language native data, run `translate/curator` with FAITH scoring (see the step's strategies) and keep faith ≥ 0.7. Low-faith translations dilute the language signal.
+**Translate, don't paraphrase, when localizing.** When mixing translated open-source data with target-language native data, run `translate/nemo_curator` with FAITH scoring (see the step's strategies) and keep faith ≥ 0.7. Low-faith translations dilute the language signal.
 
 **Validate the blend before packing.** Sample 100 rows proportional to the planned blend and inspect. If the sample doesn't look like what you want the model to do, the full blend won't either.
 

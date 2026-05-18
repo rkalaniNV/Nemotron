@@ -1,11 +1,11 @@
 ---
-name: nemotron-translate-curator
-description: Configure and run the concrete translate/curator step for JSONL or Parquet corpus translation with NeMo Curator's experimental TranslationStage.
+name: nemotron-translate-nemo-curator
+description: Configure and run the concrete translate/nemo_curator step for JSONL or Parquet corpus translation with NeMo Curator's experimental TranslationStage.
 ---
 
 # Translation Step (Curator backend)
 
-Use `translate/curator` for corpus translation. Before changing configs or code, read `step.toml` to understand the step contract, consumed artifacts, produced artifacts, parameters, strategies, and failure modes.
+Use `translate/nemo_curator` for corpus translation. Before changing configs or code, read `step.toml` to understand the step contract, consumed artifacts, produced artifacts, parameters, strategies, and failure modes.
 
 ## Inputs And Outputs
 
@@ -29,7 +29,7 @@ Use `translate/curator` for corpus translation. Before changing configs or code,
 For one-shot or eval-style runs, emit an execution-ready handoff before deep
 exploration:
 
-- Step decision and scope: `translate/curator`, either translation-only or translation+FAITH.
+- Step decision and scope: `translate/nemo_curator`, either translation-only or translation+FAITH.
 - Input policy: selected JSONL or Parquet path and excluded incompatible inputs.
 - Config: inline key fields or a config path.
 - Run: exact command.
@@ -42,9 +42,9 @@ inline config in the response before optional file writes.
 
 ## Local Files
 
-- Contract: `src/nemotron/steps/translate/curator/step.toml`
-- Runner: `src/nemotron/steps/translate/curator/step.py`
-- Config: `src/nemotron/steps/translate/curator/config/default.yaml`
+- Contract: `src/nemotron/steps/translate/nemo_curator/step.toml`
+- Runner: `src/nemotron/steps/translate/nemo_curator/step.py`
+- Config: `src/nemotron/steps/translate/nemo_curator/config/default.yaml`
 - Guide: `src/nemotron/steps/translate/guide.md`
 - Patterns: `src/nemotron/steps/patterns/translate-training-corpus.md`
 

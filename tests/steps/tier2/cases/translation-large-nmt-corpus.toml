@@ -7,7 +7,7 @@ tags = ["translation", "nmt", "large-corpus", "throughput"]
 request = "Translate a large English news corpus to Hindi with a local NMT server."
 
 [expected.steps]
-must_include = ["translate/curator"]
+must_include = ["translate/nemo_curator"]
 may_include = []
 must_exclude = ["curate/nemo_curator", "data_prep/sft_packing", "sft/megatron_bridge", "sft/automodel", "eval/model_eval"]
 
@@ -23,5 +23,5 @@ must_have_tiny_config = false
 no_relative_data_paths = true
 
 [expected.disclosure]
-must_read = ["STEPS.md", "PATTERNS.md", "translate/curator/step.toml"]
+must_read = ["STEPS.md", "PATTERNS.md", "translate/nemo_curator/step.toml"]
 must_not_read = ["sft/guide.md"]

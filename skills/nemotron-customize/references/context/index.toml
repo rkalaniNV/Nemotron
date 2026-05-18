@@ -194,7 +194,7 @@ description = "Tune Megatron-Bridge parallelism and performance — TP/PP/FSDP, 
 
 [[packs]]
 id = "translate-curator-generate"
-step = "translate/curator"
+step = "translate/nemo_curator"
 intent = "generate"
 file = "curator-translation-faith.txt"
 description = "Generate translation stage code with NeMo Curator — JSONL/Parquet I/O, structured fields, and FAITH evaluation."

@@ -24,7 +24,7 @@ nemotron
 ├── steps                    # Generic step catalog (list / show / run / lint)
 │   ├── list                 # List discovered steps
 │   ├── show                 # Show step manifest + runspec
-│   ├── run                  # Run any step (e.g. byob/mcq, translate/curator, sft/automodel)
+│   ├── run                  # Run any step (e.g. byob/mcq, translate/nemo_curator, sft/automodel)
 │   └── lint                 # Static checks on step manifests
 ├── nano3                    # Nano3 training recipe
 │   ├── pretrain             # Stage 0: Pretraining

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`translate/curator` turns row-oriented corpus data into translated corpus data. It is intended for data that may later feed data prep, SFT, CPT, BYOB review, or human QA.
+`translate/nemo_curator` turns row-oriented corpus data into translated corpus data. It is intended for data that may later feed data prep, SFT, CPT, BYOB review, or human QA.
 
 The step is a thin Nemotron wrapper around NeMo Curator:
 
@@ -191,7 +191,7 @@ The writer uses overwrite mode. Existing output directory contents are removed a
 
 Curator readers are file-partition oriented. Do not add generic pandas chunking to the step by default.
 
-If the user has one huge file and Curator file partitioning is not enough, create a one-off pre-step that splits the file into homogeneous JSONL or Parquet shards, then run `translate/curator` on the shard directory.
+If the user has one huge file and Curator file partitioning is not enough, create a one-off pre-step that splits the file into homogeneous JSONL or Parquet shards, then run `translate/nemo_curator` on the shard directory.
 
 ## Validation
 
@@ -217,9 +217,9 @@ For negative tests, verify:
 Use translated outputs before downstream prep or training:
 
 ```text
-translate/curator -> data_prep/sft_packing -> sft/megatron_bridge
-translate/curator -> sft/automodel
-translate/curator -> data_prep/pretrain_prep -> pretrain/*
+translate/nemo_curator -> data_prep/sft_packing -> sft/megatron_bridge
+translate/nemo_curator -> sft/automodel
+translate/nemo_curator -> data_prep/pretrain_prep -> pretrain/*
 ```
 
 After translating data for training, run a multilingual tokenizer check before packing or training so sequence length and template assumptions still hold.

@@ -87,4 +87,4 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
-| [translate/curator](translate/curator/) | Translate JSONL or Parquet training corpora with NeMo Curator's TranslationStage, preserving structured fields and optionally attaching FAITH quality scores. | filtered_jsonl | translated_jsonl |
+| [translate/nemo_curator](translate/nemo_curator/) | Translate JSONL or Parquet training corpora with NeMo Curator's TranslationStage, preserving structured fields and optionally attaching FAITH quality scores. | filtered_jsonl | translated_jsonl |

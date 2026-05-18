@@ -36,7 +36,7 @@ def test_steps_help_lists_catalog_commands() -> None:
 
 
 def test_steps_help_does_not_expose_bespoke_translation_command() -> None:
-    """`nemotron steps translation` has been collapsed into `steps run translate/curator`."""
+    """`nemotron steps translation` has been collapsed into `steps run translate/nemo_curator`."""
 
     result = CliRunner().invoke(app, ["steps", "translation", "--help"])
 
@@ -59,10 +59,10 @@ def test_root_does_not_register_top_level_byob_command() -> None:
 
 
 def test_steps_show_resolves_curator_step() -> None:
-    result = CliRunner().invoke(app, ["steps", "show", "translate/curator"])
+    result = CliRunner().invoke(app, ["steps", "show", "translate/nemo_curator"])
 
     assert result.exit_code == 0, result.output
-    assert "translate/curator" in result.output
+    assert "translate/nemo_curator" in result.output
 
 
 def test_steps_show_resolves_byob_mcq_step() -> None:

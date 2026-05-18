@@ -1,5 +1,5 @@
 [step]
-id = "translate/curator"
+id = "translate/nemo_curator"
 name = "Corpus Translation + FAITH Scoring (NeMo Curator)"
 category = "translate"
 description = """Translate JSONL or Parquet training corpora with NeMo Curator's TranslationStage, preserving structured fields and optionally attaching FAITH quality scores."""
@@ -154,9 +154,9 @@ name = "single_huge_file_memory_pressure"
 recovery = "Curator readers are file-partition oriented. For one huge file, generate a one-off row-chunking pre-step and feed chunks into this step."
 
 [reference]
-skill = "src/nemotron/steps/translate/curator/SKILL.md"
-script = "src/nemotron/steps/translate/curator/step.py"
-docs = "docs/customize/steps/translate/curator.md"
+skill = "src/nemotron/steps/translate/nemo_curator/SKILL.md"
+script = "src/nemotron/steps/translate/nemo_curator/step.py"
+docs = "docs/customize/steps/translate/nemo-curator.md"
 skills = [
   "skills/nemotron-customize/references/context/curator-translation-faith.txt",
 ]

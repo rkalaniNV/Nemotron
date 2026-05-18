@@ -5,7 +5,7 @@ It should stay a thin wrapper around Curator; do not generate custom chunking or
 pandas processing unless a single huge input file needs a one-off preprocessing
 stage.
 
-```{step-toml} src/nemotron/steps/translate/curator/step.toml
+```{step-toml} src/nemotron/steps/translate/nemo_curator/step.toml
 ```
 
 ## Agent Checklist
@@ -32,7 +32,7 @@ Run the step through the generic step dispatcher with bare ``key=value``
 overrides appended at the end of the command:
 
 ```bash
-uv run --extra translation nemotron steps run translate/curator \
+uv run --extra translation nemotron steps run translate/nemo_curator \
   input_path=/path/to/source.jsonl \
   output_dir=/path/to/translated \
   source_language=en \
@@ -46,7 +46,7 @@ not begin with ``-`` are routed into the Hydra-style dotlist override layer.
 For batch executors such as Lepton or Slurm, add ``--batch <profile>``:
 
 ```bash
-uv run nemotron steps run translate/curator \
+uv run nemotron steps run translate/nemo_curator \
   -c default \
   --batch lepton_translate \
   input_path=/mnt/lustre-shared/data/source.jsonl \
@@ -57,14 +57,14 @@ uv run nemotron steps run translate/curator \
 
 ## Reference Implementation
 
-```{literalinclude} ../../../../src/nemotron/steps/translate/curator/step.py
+```{literalinclude} ../../../../src/nemotron/steps/translate/nemo_curator/step.py
 :language: python
 :caption: step.py
 ```
 
 ## Starter Config
 
-```{literalinclude} ../../../../src/nemotron/steps/translate/curator/config/default.yaml
+```{literalinclude} ../../../../src/nemotron/steps/translate/nemo_curator/config/default.yaml
 :language: yaml
 :caption: config/default.yaml
 ```

@@ -6,7 +6,7 @@ triggers:
   - "The input is OpenAI-style chat data, tool-calling transcripts, or nested message records."
   - "The translated output must preserve JSON, code blocks, markup, or message structure."
   - "The user wants to translate messages.*.content or another wildcard field path."
-steps: [translate/curator]
+steps: [translate/nemo_curator]
 confidence: high
 ---
 

@@ -1,6 +1,6 @@
 # NeMo Curator Translation + FAITH Context
 
-Use this context when generating a `translate/curator` stage.
+Use this context when generating a `translate/nemo_curator` stage.
 
 ## Product Contract
 
@@ -13,9 +13,9 @@ Use this context when generating a `translate/curator` stage.
 
 ## Reference Implementation
 
-- Step wrapper: `src/nemotron/steps/translate/curator/step.py`
-- Step config: `src/nemotron/steps/translate/curator/config/default.yaml`
-- CLI command: `nemotron steps run translate/curator`
+- Step wrapper: `src/nemotron/steps/translate/nemo_curator/step.py`
+- Step config: `src/nemotron/steps/translate/nemo_curator/config/default.yaml`
+- CLI command: `nemotron steps run translate/nemo_curator`
 - Curator stage: `nemo_curator.stages.text.experimental.translation.TranslationStage`
 - Curator I/O: `JsonlReader`, `ParquetReader`, `JsonlWriter`, `ParquetWriter`
 

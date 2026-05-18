@@ -49,7 +49,7 @@ Here's the plan:
 # Pipeline Plan: thai-nano3-sft-rl
 ## Stages
 1. curate/nemo_curator   → filtered_jsonl
-2. translate/curator → translated_jsonl
+2. translate/nemo_curator → translated_jsonl
 3. data_prep/sft_packing → packed_parquet
 4. sft/megatron_bridge   → checkpoint_megatron
 5. rl/nemo_rl/rlvr       → checkpoint_megatron (RL-tuned)
