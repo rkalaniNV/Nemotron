@@ -8,9 +8,6 @@
 #   - src/nemotron/steps/<cat>/<step>/step.py + _runners/* (code shape)
 #   - URLs in step.toml [reference] for upstream library detail
 #
-# BYOB routing note: the generate and translate entries intentionally point to
-# the same compact pack. Read that pack once and use its Critical Plan Summary
-# before searching for other context files.
 # Don't add new packs unless they survive the "<250 line authored extract" bar.
 
 [[packs]]
@@ -18,14 +15,7 @@ id = "byob-benchmark-generate"
 step = "byob"
 intent = "generate"
 file = "byob-benchmark-curator-translation.txt"
-description = "Primary BYOB context pack for MCQ benchmark generation and STEPS.md fallback — domain corpus inputs, required MCQ schema fields (question, options, answer_index, answer, category plus parquet columns), Curator semantic deduplication with RayDataExecutor/RayActorPoolExecutor/SemanticDeduplicationWorkflow, validation, dependencies, and local-only privacy defaults."
-
-[[packs]]
-id = "byob-benchmark-translate"
-step = "byob"
-intent = "translate"
-file = "byob-benchmark-curator-translation.txt"
-description = "Primary BYOB context pack for benchmark translation — forward translation, backtranslation, round-trip sacrebleu/chrf/ter metrics, schema restoration, row-count validation, benchmark.parquet integrity checks, and required Hugging Face/sentence-transformers runtime dependencies."
+description = "Generate or translate BYOB MCQ benchmarks — domain corpus inputs, MCQ schema, Curator semantic deduplication, experimental translation, and round-trip metrics."
 
 [[packs]]
 id = "curate-nemo-curator-acquire"
