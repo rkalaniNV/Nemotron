@@ -127,14 +127,6 @@ def _register_groups() -> None:
             if debug:
                 typer.echo(f"[nemotron] skipped '{name}' group: {exc}", err=True)
 
-    try:
-        from nemotron.cli.commands.byob import byob
-    except Exception as exc:
-        if debug:
-            typer.echo(f"[nemotron] skipped 'byob' command: {exc}", err=True)
-    else:
-        app.command(name="byob", rich_help_panel="Benchmarking")(byob)
-
 
 # Register groups on import
 _register_groups()

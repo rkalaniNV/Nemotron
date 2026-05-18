@@ -21,7 +21,11 @@ nemotron = "nemotron.cli.bin.nemotron:main"
 
 ```
 nemotron
-├── byob                     # Bring-your-own benchmark generation and translation
+├── steps                    # Generic step catalog (list / show / run / lint)
+│   ├── list                 # List discovered steps
+│   ├── show                 # Show step manifest + runspec
+│   ├── run                  # Run any step (e.g. byob/mcq, translate/curator, sft/automodel)
+│   └── lint                 # Static checks on step manifests
 ├── nano3                    # Nano3 training recipe
 │   ├── pretrain             # Stage 0: Pretraining
 │   ├── sft                  # Stage 1: Supervised fine-tuning
@@ -82,7 +86,8 @@ All commands support these global options (managed by `nemo_runspec.cli_context.
 | `--batch` | `-b` | Detached execution via NeMo-Run |
 | `--dry-run` | `-d` | Preview config without execution |
 | `--stage` | | Stage script to remote for debugging |
-| `key=value` | | Dotlist overrides (any position) |
+| `--override key=value` | `-o` | Repeatable dotlist override (preferred) |
+| `key=value` | | Bare positional dotlist override (still accepted) |
 
 ## Usage Examples
 
@@ -99,13 +104,16 @@ uv run nemotron nano3 pretrain -c tiny --batch MY-CLUSTER
 # Preview without execution
 uv run nemotron nano3 pretrain -c tiny --dry-run
 
-# Override config values
+# Override config values (preferred form)
+uv run nemotron nano3 pretrain -c tiny -o train.train_iters=5000
+
+# Bare positionals are also still accepted
 uv run nemotron nano3 pretrain -c tiny train.train_iters=5000
 
-# BYOB benchmark generation
-uv run nemotron byob --family mcq --stage prepare --config src/nemotron/steps/byob/mcq/config/default.yaml
-uv run nemotron byob --family mcq --stage generate --config src/nemotron/steps/byob/mcq/config/default.yaml
-uv run nemotron byob --list-families
+# BYOB benchmark generation (via the generic step dispatcher)
+uv run nemotron steps run byob/mcq -c default -o stage=prepare -o family=mcq
+uv run nemotron steps run byob/mcq -c default -o stage=generate -o family=mcq
+uv run nemotron steps show byob/mcq        # parameters include family.choices
 
 # Data preparation
 uv run nemotron nano3 data prep pretrain --run MY-CLUSTER

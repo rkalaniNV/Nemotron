@@ -12,41 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the agentic translation CLI command."""
+"""Smoke tests for `nemotron steps` CLI surface for translation.
+
+The bespoke ``nemotron steps translation`` recipe command and the top-level
+``nemotron byob`` command were removed in favour of the generic
+``nemotron steps run <id>`` dispatcher. These tests guard the new contract.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock
-
-import pytest
-import typer
 from typer.testing import CliRunner
 
-import nemotron.cli.commands.steps.translation as translation_module
 from nemotron.cli.bin.nemotron import app
 
 
-def _fake_cfg(**overrides):
-    defaults = {
-        "mode": "local",
-        "passthrough": [],
-        "dry_run": False,
-        "ctx": SimpleNamespace(),
-    }
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
-
-
-def test_root_cli_registers_steps_translation_command() -> None:
-    result = CliRunner().invoke(app, ["steps", "--help"])
-
-    assert result.exit_code == 0
-    assert "translation" in result.output
-
-
-def test_root_cli_registers_steps_catalog_commands() -> None:
+def test_steps_help_lists_catalog_commands() -> None:
     result = CliRunner().invoke(app, ["steps", "--help"])
 
     assert result.exit_code == 0
@@ -55,59 +35,53 @@ def test_root_cli_registers_steps_catalog_commands() -> None:
     assert "run" in result.output
 
 
-def test_root_cli_does_not_register_step_alias() -> None:
+def test_steps_help_does_not_expose_bespoke_translation_command() -> None:
+    """`nemotron steps translation` has been collapsed into `steps run translate/curator`."""
+
+    result = CliRunner().invoke(app, ["steps", "translation", "--help"])
+
+    assert result.exit_code != 0
+
+
+def test_root_does_not_register_step_alias() -> None:
     result = CliRunner().invoke(app, ["step", "--help"])
 
     assert result.exit_code != 0
     assert "No such command" in result.output
 
 
-def test_translation_cli_runs_checked_in_step(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = {
-        "input_path": "/data/source.jsonl",
-        "output_dir": "/data/translated",
-        "source_language": "en",
-        "target_language": "hi",
-    }
-    run_mock = Mock(return_value=Path("/data/translated"))
+def test_root_does_not_register_top_level_byob_command() -> None:
+    """`nemotron byob` has been collapsed into `steps run byob/mcq`."""
 
-    monkeypatch.setattr(translation_module, "parse_recipe_config", lambda ctx: _fake_cfg())
-    monkeypatch.setattr(translation_module, "_load_translation_config", lambda cfg: config)
-    monkeypatch.setattr(translation_module, "_run_translation_step", run_mock)
+    result = CliRunner().invoke(app, ["byob", "--help"])
 
-    translation_module.translation(ctx=Mock())
-
-    run_mock.assert_called_once_with(config)
+    assert result.exit_code != 0
 
 
-def test_translation_cli_rejects_remote_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        translation_module,
-        "parse_recipe_config",
-        lambda ctx: _fake_cfg(mode="run"),
-    )
+def test_steps_show_resolves_curator_step() -> None:
+    result = CliRunner().invoke(app, ["steps", "show", "translate/curator"])
 
-    with pytest.raises(typer.Exit) as exc_info:
-        translation_module.translation(ctx=Mock())
-
-    assert exc_info.value.exit_code == 1
+    assert result.exit_code == 0, result.output
+    assert "translate/curator" in result.output
 
 
-def test_translation_cli_dry_run_skips_execution(monkeypatch: pytest.MonkeyPatch) -> None:
-    run_mock = Mock()
+def test_steps_show_resolves_legacy_translation_alias() -> None:
+    result = CliRunner().invoke(app, ["steps", "show", "translate/translation"])
 
-    monkeypatch.setattr(
-        translation_module,
-        "parse_recipe_config",
-        lambda ctx: _fake_cfg(dry_run=True),
-    )
-    monkeypatch.setattr(
-        translation_module,
-        "_load_translation_config",
-        lambda cfg: {"input_path": "/data/source.jsonl", "output_dir": "/data/translated"},
-    )
-    monkeypatch.setattr(translation_module, "_run_translation_step", run_mock)
+    assert result.exit_code == 0, result.output
+    assert "translate/curator" in result.output
+    assert "deprecated" in result.output.lower() or "deprecated" in (result.stderr or "").lower()
 
-    translation_module.translation(ctx=Mock())
 
-    run_mock.assert_not_called()
+def test_steps_show_resolves_byob_mcq_step() -> None:
+    result = CliRunner().invoke(app, ["steps", "show", "byob/mcq"])
+
+    assert result.exit_code == 0, result.output
+    assert "byob/mcq" in result.output
+
+
+def test_steps_show_resolves_legacy_byob_alias() -> None:
+    result = CliRunner().invoke(app, ["steps", "show", "byob"])
+
+    assert result.exit_code == 0, result.output
+    assert "byob/mcq" in result.output

@@ -12,7 +12,7 @@ families such as GSM8K.
 ## Step Contract
 
 - Step id: `byob/mcq` (legacy alias: `byob`)
-- CLI: `nemotron byob` (alias for `nemotron steps run byob/mcq`)
+- CLI: `nemotron steps run byob/mcq`
 - Source package: `src/nemotron/steps/byob/`
 - Step manifest: `src/nemotron/steps/byob/mcq/step.toml`
 - Generic dispatcher: `src/nemotron/steps/byob/scripts/runtime.py`

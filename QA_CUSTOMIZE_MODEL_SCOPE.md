@@ -84,14 +84,14 @@ uv run nemotron steps --help
 uv run nemotron steps list
 uv run nemotron steps show --help
 uv run nemotron steps run --help
-uv run nemotron byob --help
+uv run nemotron steps show byob/mcq
 ```
 
 Success criteria:
 
 - `uv sync` exits 0.
 - All listed help and discovery commands exit 0.
-- Help output is captured for `nemotron`, `nemotron steps`, and `nemotron byob`.
+- Help output is captured for `nemotron`, `nemotron steps`, and `nemotron steps show byob/mcq`.
 
 Evidence to collect: command logs, CLI help snippets, and final exit status.
 
@@ -228,7 +228,6 @@ Prerequisites: Translation extra installed with `uv sync --extra translation`; t
 ```bash
 uv run --no-sync nemotron steps show translate/curator
 uv run --no-sync nemotron steps run translate/curator --help
-uv run --no-sync nemotron steps translation --help
 uv run --no-sync python -c "from nemo_curator.stages.text.experimental.translation import TranslationStage; print(TranslationStage)"
 ```
 
@@ -247,7 +246,7 @@ Prerequisites: `NVIDIA_API_KEY` or configured hosted LLM credential; live `TRANS
 ```bash
 : "${NVIDIA_API_KEY:?Set NVIDIA_API_KEY for hosted LLM translation}"
 
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_llm_hi" \
   source_language=en \
@@ -298,7 +297,7 @@ Evidence to collect: output JSONL files, row-count validation output, sampled ro
 Prerequisites: Hosted LLM backend available; chat test data from `Test Data Setup`.
 
 ```bash
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/chat_code_en.jsonl" \
   output_dir="$TR_ROOT/out_chat_hi" \
   source_language=en \
@@ -353,7 +352,7 @@ Evidence to collect: output JSONL, JSON parse validation output, sampled transla
 Prerequisites: Hosted LLM backend available for `FAITH_MODEL`.
 
 ```bash
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_faith_annotated" \
   source_language=en \
@@ -387,7 +386,7 @@ Prerequisites: Reachable `NMT_SERVER_URL` implementing the expected translation 
 ```bash
 : "${NMT_SERVER_URL:?Set NMT_SERVER_URL to an NMT service endpoint}"
 
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/news_en" \
   output_dir="$TR_ROOT/out_nmt_hi" \
   source_language=en \
@@ -414,7 +413,7 @@ Evidence to collect: command logs, output files, sampled rows, and service logs 
 Prerequisites: Hosted LLM backend available; `pandas` and `pyarrow` available.
 
 ```bash
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/news_en.parquet" \
   output_dir="$TR_ROOT/out_parquet_hi" \
   source_language=en \
@@ -458,7 +457,7 @@ Evidence to collect: Parquet validation output, sampled rows, and redacted logs.
 Prerequisites: Prior translated output from `TR-002` or equivalent.
 
 ```bash
-uv run --no-sync nemotron steps translation \
+uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/out_llm_hi" \
   output_dir="$TR_ROOT/out_resume_hi" \
   source_language=en \
@@ -488,7 +487,7 @@ Evidence to collect: resume command logs and output sample.
 Prerequisites: Mixed-format test directory from `Test Data Setup`.
 
 ```bash
-if uv run --no-sync nemotron steps translation \
+if uv run --no-sync nemotron steps run translate/curator \
   input_path="$TR_ROOT/mixed_dir" \
   output_dir="$TR_ROOT/out_mixed_should_fail" \
   source_language=en \
@@ -527,7 +526,7 @@ Translate /tmp/nemotron-qa-<run-id>/translation/chat_code_en.jsonl from English 
 
 Success criteria:
 
-- Uses `nemotron steps translation` for local execution.
+- Uses `nemotron steps run translate/curator` for local execution.
 - Uses `text_field='messages.*.content'`.
 - Sets `source_language=en` and `target_language=hi`.
 - Keeps credentials in environment variables.
@@ -653,15 +652,15 @@ PY
 Prerequisites: BYOB extra installed with `uv sync --extra byob`.
 
 ```bash
-uv run --no-sync nemotron byob --help
-uv run --no-sync nemotron byob --list-families
+uv run --no-sync nemotron steps show byob/mcq
+uv run --no-sync python -m nemotron.steps.byob.scripts.run --list-families
 uv run --no-sync python src/nemotron/steps/byob/scripts/validate.py --help
 ```
 
 Success criteria:
 
 - `mcq` is listed as a family.
-- Help output shows `prepare`, `generate`, `translate`, and `all`.
+- `steps show byob/mcq` lists `prepare`, `generate`, `translate`, and `all` under the `stage` parameter choices.
 - Validator help exits 0.
 
 Evidence to collect: CLI logs and family list output.
@@ -673,10 +672,9 @@ Prerequisites: `NGC_API_KEY` or `NVIDIA_API_KEY`; live generation and judge mode
 ```bash
 : "${NGC_API_KEY:?Set NGC_API_KEY or NVIDIA_API_KEY for BYOB generation}"
 
-uv run --no-sync nemotron byob \
-  --family mcq \
-  --stage all \
-  --config "$BYOB_ROOT/config/byob_mcq.yaml"
+uv run --no-sync nemotron steps run byob/mcq \
+  -c "$BYOB_ROOT/config/byob_mcq.yaml" \
+  -o stage=all -o family=mcq
 ```
 
 Validate benchmark artifacts:
@@ -714,15 +712,13 @@ Evidence to collect: artifact listing, Parquet schema validation, row count, and
 Optional stage-by-stage commands for isolating failures:
 
 ```bash
-uv run --no-sync nemotron byob \
-  --family mcq \
-  --stage prepare \
-  --config "$BYOB_ROOT/config/byob_mcq.yaml"
+uv run --no-sync nemotron steps run byob/mcq \
+  -c "$BYOB_ROOT/config/byob_mcq.yaml" \
+  -o stage=prepare -o family=mcq
 
-uv run --no-sync nemotron byob \
-  --family mcq \
-  --stage generate \
-  --config "$BYOB_ROOT/config/byob_mcq.yaml"
+uv run --no-sync nemotron steps run byob/mcq \
+  -c "$BYOB_ROOT/config/byob_mcq.yaml" \
+  -o stage=generate -o family=mcq
 ```
 
 ### BYOB-003 Resume BYOB Generation From A Named Stage
@@ -730,11 +726,9 @@ uv run --no-sync nemotron byob \
 Prerequisites: Outputs from `BYOB-002` or compatible stage cache.
 
 ```bash
-uv run --no-sync nemotron byob \
-  --family mcq \
-  --stage generate \
-  --skip-until JUDGEMENT \
-  --config "$BYOB_ROOT/config/byob_mcq.yaml"
+uv run --no-sync nemotron steps run byob/mcq \
+  -c "$BYOB_ROOT/config/byob_mcq.yaml" \
+  -o stage=generate -o family=mcq -o skip_until=JUDGEMENT
 ```
 
 Success criteria:
@@ -752,10 +746,9 @@ Prerequisites: BYOB translation config; hosted translation credential; benchmark
 ```bash
 : "${NGC_API_KEY:?Set NGC_API_KEY or NVIDIA_API_KEY for BYOB translation}"
 
-uv run --no-sync nemotron byob \
-  --family mcq \
-  --stage translate \
-  --config "$BYOB_ROOT/config/byob_translate.yaml"
+uv run --no-sync nemotron steps run byob/mcq \
+  -c "$BYOB_ROOT/config/byob_translate.yaml" \
+  -o stage=translate -o family=mcq
 ```
 
 Validate translation artifacts:
@@ -801,8 +794,8 @@ Use BYOB to create a tiny MCQ benchmark from /tmp/nemotron-qa-<run-id>/byob/inpu
 
 Success criteria:
 
-- Uses `nemotron byob --family mcq --stage all` for prepare+generate, or explicitly explains why it is running `prepare` and `generate` separately.
-- Uses `nemotron byob --family mcq --stage translate`.
+- Uses `nemotron steps run byob/mcq -o stage=all -o family=mcq` for prepare+generate, or explicitly explains why it is running `prepare` and `generate` separately.
+- Uses `nemotron steps run byob/mcq -o stage=translate -o family=mcq`.
 - Patches config copies only.
 - Validates final Parquet schema.
 

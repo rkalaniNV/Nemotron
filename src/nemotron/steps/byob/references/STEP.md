@@ -5,7 +5,7 @@ owner: nemotron
 summary: Generate and translate bring-your-own MCQ benchmarks from domain documents.
 entrypoint:
   kind: cli
-  command: nemotron byob
+  command: nemotron steps run byob/mcq
   module: nemotron.steps.byob.scripts.run
 consumes:
   - type: benchmark_source_corpus
