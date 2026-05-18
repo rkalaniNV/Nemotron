@@ -244,7 +244,7 @@ required-imports = [
 spec-only-imports = ["cudf", "cuml", "cupy"]
 
 [tool.nemotron.runtime.translate]
-extras = ["byob"]
+extras = ["translate"]
 venv-name = "translate"
 extra-index-urls = ["https://pypi.nvidia.com"]
 torch-backend = "cu128"
@@ -265,7 +265,7 @@ required-imports = [
 ]
 
 [tool.nemotron.runtime.curate]
-extras = ["byob"]
+extras = ["curate"]
 venv-name = "curate"
 extra-index-urls = ["https://pypi.nvidia.com"]
 torch-backend = "cu128"

@@ -25,13 +25,13 @@ stage.
 Install the Curator-backed translation dependencies before running the step:
 
 ```bash
-uv sync --extra translation
+uv sync --extra translate
 ```
 
 Run the step directly:
 
 ```bash
-uv run --extra translation nemotron steps translation \
+uv run --extra translate nemotron steps translation \
   input_path=/path/to/source.jsonl \
   output_dir=/path/to/translated \
   source_language=en \

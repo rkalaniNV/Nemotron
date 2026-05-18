@@ -22,6 +22,14 @@ byob = [
     "nemo-curator[translation_all] @ git+https://example.invalid/Curator.git",
     "cupy-cuda12x==14.0.1",
 ]
+translate = [
+    "nemo-curator[translation_all] @ git+https://example.invalid/Curator.git",
+    "translate-helper==1.0.0",
+]
+curate = [
+    "nemo-curator @ git+https://example.invalid/Curator.git",
+    "curate-helper==1.0.0",
+]
 
 [tool.uv]
 constraint-dependencies = ["transformers>=4.56.0,<5.0"]
@@ -37,7 +45,7 @@ required-imports = ["data_designer"]
 spec-only-imports = ["cupy"]
 
 [tool.nemotron.runtime.translate]
-extras = ["byob"]
+extras = ["translate"]
 venv-name = "translate"
 extra-index-urls = ["https://pypi.nvidia.com"]
 torch-backend = "cu128"
@@ -45,7 +53,7 @@ omit-packages = ["nemo-curator"]
 required-imports = ["nemo_curator", "yaml"]
 
 [tool.nemotron.runtime.curate]
-extras = ["byob"]
+extras = ["curate"]
 venv-name = "curate"
 extra-index-urls = ["https://pypi.nvidia.com"]
 torch-backend = "cu128"
@@ -122,8 +130,8 @@ def test_named_curator_runtime_profiles_from_pyproject(tmp_path: Path) -> None:
     assert set(profiles) == {"byob", "translate", "curate"}
     assert profiles["translate"].venv_name == "translate"
     assert profiles["curate"].venv_name == "curate"
-    assert profiles["translate"].extras == ("byob",)
-    assert profiles["curate"].extras == ("byob",)
+    assert profiles["translate"].extras == ("translate",)
+    assert profiles["curate"].extras == ("curate",)
 
 
 def test_build_requirement_files_from_pyproject_extra(tmp_path: Path) -> None:
@@ -162,8 +170,10 @@ def test_runtime_payloads_ship_uv_constraints_and_overrides(
     assert byob["requirements"] == "byob.requirements.txt"
     assert byob["constraints"] == "byob.constraints.txt"
     assert byob["overrides"] == "byob.overrides.txt"
-    assert manifest["profiles"]["translate"]["requirements"] == "byob.requirements.txt"
-    assert manifest["profiles"]["curate"]["requirements"] == "byob.requirements.txt"
+    assert manifest["profiles"]["translate"]["requirements"] == "translate.requirements.txt"
+    assert manifest["profiles"]["curate"]["requirements"] == "curate.requirements.txt"
+    assert (output_dir / "translate.requirements.txt").read_text(encoding="utf-8") == "translate-helper==1.0.0\n"
+    assert (output_dir / "curate.requirements.txt").read_text(encoding="utf-8") == "curate-helper==1.0.0\n"
     assert (output_dir / "byob.constraints.txt").read_text(encoding="utf-8") == "transformers>=4.56.0,<5.0\n"
     assert (output_dir / "byob.overrides.txt").read_text(encoding="utf-8") == "torch==2.10.0\n"
 
