@@ -47,11 +47,18 @@ Install once:
 /plugin install nemotron-customize@nvidia-nemotron
 ```
 
-Then, from any Claude Code session inside a checkout of this repo, invoke:
+Then, **start Claude Code from the repo root** and invoke the skill:
+
+```bash
+cd /path/to/Nemotron        # repo root: must contain pyproject.toml and src/nemotron/steps/
+claude
+```
 
 ```text
 /nemotron-customize
 ```
+
+The skill resolves all file paths against your current working directory, so it must be invoked from the Nemotron checkout root. Running it from a subdirectory will cause file reads to fail.
 
 The skill plans the step DAG, validates artifact wiring, and emits the YAML configs needed to run the requested pipeline. See [`skills/nemotron-customize/SKILL.md`](./skills/nemotron-customize/SKILL.md) for the full contract.
 
