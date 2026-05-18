@@ -28,10 +28,10 @@ preamble: |
   #   uv run nemotron steps run optimize/modelopt/distill -c tiny --batch slurm_optimize_modelopt_distill
   #   uv run nemotron steps run optimize/modelopt/prune -c tiny --batch slurm_optimize_modelopt_prune
   #   uv run nemotron steps run eval/model_eval -c tiny_chat --batch slurm_eval_model_eval
-  #   uv run nemotron steps run byob -c tiny --batch slurm_byob_cpu stage=all
-  #   uv run nemotron steps run byob -c tiny --batch slurm_byob_full stage=all
+  #   uv run nemotron steps run byob/mcq -c tiny --batch slurm_byob_cpu stage=all
+  #   uv run nemotron steps run byob/mcq -c tiny --batch slurm_byob_full stage=all
   #   uv run nemotron steps run sdg/data_designer -c tiny --batch slurm_sdg_data_designer_tiny
-  #   uv run nemotron steps run translate/translation -c default --batch slurm_translate
+  #   uv run nemotron steps run translate/curator -c default --batch slurm_translate
   #   uv run nemotron steps run curate/nemo_curator -c tiny --batch slurm_curate
 
 checks:
@@ -133,7 +133,7 @@ sections:
       RAY_RUNTIME_ENV_PYTHONPATH: /nemo_run/code/src
       RAY_MAX_LIMIT_FROM_API_SERVER: "100000"
 
-  # Curator-backed steps: byob, translate, and curate all use the Curator
+  # Curator-backed steps: byob/mcq, translate/curator, and curate all use the Curator
   # container. Step YAML declares any /opt/Curator source mount; these profiles
   # provide Slurm resources and runtime deps.
   slurm_curator_base:
@@ -158,7 +158,7 @@ sections:
       - /tmp/byob-venv/bin/uv pip install --python /tmp/byob-venv/bin/python --quiet --no-cache cosmos-xenna==0.2.0 data-designer==0.5.5 bcp47==0.1.0 pandas==2.3.3 pyarrow pyyaml numpy==2.2.6 datasets tqdm pydantic requests
       - export PYTHONPATH=/opt/Curator:$PYTHONPATH
       - source /tmp/byob-venv/bin/activate
-    run_command: PYTHONPATH=/opt/Curator:$PYTHONPATH /tmp/byob-venv/bin/python -m nemotron.steps.byob.step --config {config}
+    run_command: PYTHONPATH=/opt/Curator:$PYTHONPATH /tmp/byob-venv/bin/python -m nemotron.steps.byob.mcq.step --config {config}
     env_vars:
       NVIDIA_API_KEY: ${oc.env:NVIDIA_API_KEY,''}
       NGC_API_KEY: ${oc.env:NGC_API_KEY,''}
@@ -225,7 +225,7 @@ sections:
     env_vars:
       SDG_OUTPUT_DIR: /lustre/${oc.env:USER}/output/sdg/rl/rl_pref
 
-  # translate/translation: use mounted /opt/Curator plus a small target install
+  # translate/curator: use mounted /opt/Curator plus a small target install
   # for the Xenna version required by the pinned Curator checkout.
   slurm_translate:
     extends: slurm_curator_base
@@ -242,7 +242,7 @@ sections:
       - PIP_DISABLE_PIP_VERSION_CHECK=1 /tmp/translate-uv/bin/python -m pip install --quiet uv
       - /tmp/translate-uv/bin/uv pip install --quiet --no-deps --target /tmp/translate-site cosmos-xenna==0.2.0 obstore==0.8.2 portpicker==1.6.0 pulp==3.3.0 attrs==25.4.0 cattrs==25.3.0 jinja2==3.1.6 loguru==0.7.3 tabulate==0.9.0
       - export PYTHONPATH=/opt/Curator:/tmp/translate-site:$PYTHONPATH
-    run_command: PYTHONPATH=/opt/Curator:/tmp/translate-site:$PYTHONPATH python -m nemotron.steps.translate.translation.step --config {config}
+    run_command: PYTHONPATH=/opt/Curator:/tmp/translate-site:$PYTHONPATH python -m nemotron.steps.translate.curator.step --config {config}
     env_vars:
       NVIDIA_API_KEY: ${oc.env:NVIDIA_API_KEY,''}
       NGC_API_KEY: ${oc.env:NGC_API_KEY,''}

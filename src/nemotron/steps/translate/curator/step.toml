@@ -3,7 +3,7 @@ id = "translate/curator"
 name = "Corpus Translation + FAITH Scoring (NeMo Curator)"
 category = "translate"
 description = """Translate JSONL or Parquet training corpora with NeMo Curator's TranslationStage, preserving structured fields and optionally attaching FAITH quality scores."""
-tags = ["translate", "nemo-curator", "faith", "multilingual", "jsonl", "parquet"]
+tags = ["translate", "translation", "nemo-curator", "faith", "multilingual", "jsonl", "parquet"]
 
 [[consumes]]
 type = "filtered_jsonl"
