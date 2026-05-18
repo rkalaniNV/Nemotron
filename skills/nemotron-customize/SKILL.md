@@ -3,7 +3,7 @@ name: nemotron-customize
 description: Use when building runnable Nemotron model-customization pipelines from existing repo steps and artifact contracts.
 version: 0.1.0
 metadata:
-  author: NVIDIA NeMo Team <nemo-toolkit@nvidia.com>
+  author: NVIDIA Nemotron Team
   tags:
     - nemotron
     - customization
@@ -368,7 +368,7 @@ from `<library>` docs — the output will need more validation than a
 catalog-based stage."
 
 If the same Explorer build keeps appearing across projects, suggest the user
-run `/nemotron-add-step` to land it in the catalog.
+contribute it as a new catalog step under `src/nemotron/steps/`.
 
 ### Choosing a mode
 
@@ -409,7 +409,7 @@ run `/nemotron-add-step` to land it in the catalog.
 - Assume GPU count, type, or interconnect.
 - Generate Slurm/Airflow/Kubeflow wrappers.
 - Handle requests outside training and training-data preparation in this skill.
-- Modify [src/nemotron/steps/](src/nemotron/steps/). To extend the catalog, route the user to `/nemotron-add-step`.
+- Modify [src/nemotron/steps/](src/nemotron/steps/). To extend the catalog, point the user to the contribution workflow in `CONTRIBUTING.md`.
 - Restate per-step rules in this skill — link to the step's `SKILL.md` instead.
 
 ---
@@ -423,7 +423,7 @@ run `/nemotron-add-step` to land it in the catalog.
 | Strategy points to a missing skill file | Skip the load. Use the `then:` text as guidance. Note in plan: "WARNING: Could not read perf-tuning docs for `<topic>` — config may need manual review." |
 | User's hardware is too small | Show the relevant `[[models]]` `min_gpus` table. Suggest in order: smaller model → AutoModel → LoRA. |
 | Two failed Act attempts | Stop. Explain what was tried, what failed, ask the user how to proceed. |
-| User wants a feature that crosses 3+ projects | Confirm YAML and existing repo code cannot serve it. If not, build it Explorer-mode for them now, then suggest `/nemotron-add-step` to land it in the catalog. |
+| User wants a feature that crosses 3+ projects | Confirm YAML and existing repo code cannot serve it. If not, build it Explorer-mode for them now, then suggest contributing it as a new step under `src/nemotron/steps/`. |
 
 ## Troubleshooting
 
