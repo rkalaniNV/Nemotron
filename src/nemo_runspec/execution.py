@@ -32,11 +32,13 @@ Commands should show exactly how they build executors and run experiments.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
 import shlex
 import subprocess
+import uuid
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -935,9 +937,10 @@ def _create_lepton_executor(
     if custom_spec:
         executor_kwargs["custom_spec"] = _to_plain(custom_spec)
 
-    # Pre-launch commands: user-defined + auto_mount git repos
+    # Keep Lepton executor pre-launch user-controlled. auto_mount git repos are
+    # cloned in the inline launch script so config decoding, source staging, and
+    # repo setup happen in one predictable order.
     pre_launch = list(_get_env(env, "pre_launch_commands") or [])
-    pre_launch.extend(_git_mount_commands())
     if pre_launch:
         executor_kwargs["pre_launch_commands"] = pre_launch
 
@@ -1058,6 +1061,12 @@ def _cloud_script_path(script_path: str, pod_src_root: str) -> str:
     return script_path
 
 
+def _cloud_config_path(nemotron_home: str, config_bytes: bytes) -> str:
+    """Return a per-submission config path on shared cloud storage."""
+    digest = hashlib.sha256(config_bytes).hexdigest()[:16]
+    return f"{nemotron_home}/config-{digest}-{uuid.uuid4().hex[:8]}.yaml"
+
+
 def _ray_node_source_sync_cmd(pod_src_root: str, ready_marker: str | None) -> str:
     """Return a shell command that ensures chunked source exists on every Ray node.
 
@@ -1145,6 +1154,16 @@ print(f"[stage] source ready on {{len(node_ids)}} Ray node(s)")
     return f"python3 -c {shlex.quote(code)}"
 
 
+def _pwd_symlink_cmd(nemotron_home: str, pod_src_root: str) -> str:
+    """Expose staged source at ``$PWD/src`` for configs using ``${oc.env:PWD}``."""
+    return (
+        f"mkdir -p {nemotron_home}/src"
+        f" && rm -rf {nemotron_home}/src/nemotron {nemotron_home}/src/nemo_runspec"
+        f" && ln -sfn {pod_src_root}/nemotron {nemotron_home}/src/nemotron"
+        f" && ln -sfn {pod_src_root}/nemo_runspec {nemotron_home}/src/nemo_runspec"
+    )
+
+
 def execute_cloud(
     script_path: str,
     train_path: Path,
@@ -1186,10 +1205,11 @@ def execute_cloud(
     # ── 1. Workspace & paths ─────────────────────────────────────────
     workspace = _derive_cloud_workspace(env)
     nemotron_home = f"{workspace}/_nemotron"
-    config_path = f"{nemotron_home}/config.yaml"
+    config_bytes = train_path.read_bytes()
+    config_path = _cloud_config_path(nemotron_home, config_bytes)
 
     # ── 2. Config + source transport ────────────────────────────────
-    env_vars["_NEMOTRON_CONFIG_B64"] = base64.b64encode(train_path.read_bytes()).decode("ascii")
+    env_vars["_NEMOTRON_CONFIG_B64"] = base64.b64encode(config_bytes).decode("ascii")
     transport = data_mover.plan_for(
         executor_type=executor_type or "",
         env_vars=env_vars,
@@ -1279,11 +1299,7 @@ def execute_cloud(
         f" && export RAY_RUNTIME_ENV_PYTHONPATH={transport.pod_src_root}"
     )
     if transport.needs_pwd_symlinks:
-        launch_cmd += (
-            f" && mkdir -p {nemotron_home}/src"
-            f" && ln -sfn {transport.pod_src_root}/nemotron {nemotron_home}/src/nemotron"
-            f" && ln -sfn {transport.pod_src_root}/nemo_runspec {nemotron_home}/src/nemo_runspec"
-        )
+        launch_cmd += f" && {_pwd_symlink_cmd(nemotron_home, transport.pod_src_root)}"
     launch_cmd += f" && export PWD={nemotron_home} && cd {nemotron_home} && {script_cmd}"
     parts.append(launch_cmd)
 
@@ -1350,9 +1366,10 @@ def execute_cloud_ray(
 
     workspace = _derive_cloud_workspace(env)
     nemotron_home = f"{workspace}/_nemotron"
-    config_path = f"{nemotron_home}/config.yaml"
+    config_bytes = train_path.read_bytes()
+    config_path = _cloud_config_path(nemotron_home, config_bytes)
 
-    env_vars["_NEMOTRON_CONFIG_B64"] = base64.b64encode(train_path.read_bytes()).decode("ascii")
+    env_vars["_NEMOTRON_CONFIG_B64"] = base64.b64encode(config_bytes).decode("ascii")
 
     # Same source-transport strategy selection as the non-Ray path.
     transport = data_mover.plan_for(
@@ -1415,11 +1432,7 @@ def execute_cloud_ray(
     if transport.needs_pwd_symlinks:
         # Native-packager path: source sits at /nemo_run/code/src; symlink it
         # under nemotron_home/src so ${oc.env:PWD}/src/... still resolves.
-        head_setup.append(
-            f"mkdir -p {nemotron_home}/src"
-            f" && ln -sfn {transport.pod_src_root}/nemotron {nemotron_home}/src/nemotron"
-            f" && ln -sfn {transport.pod_src_root}/nemo_runspec {nemotron_home}/src/nemo_runspec"
-        )
+        head_setup.append(_pwd_symlink_cmd(nemotron_home, transport.pod_src_root))
     if startup_commands:
         head_setup.extend(startup_commands)
     full_cmd = " && ".join(

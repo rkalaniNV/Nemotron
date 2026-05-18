@@ -6,6 +6,7 @@ run:
 expt_name: byob_mcq_default
 random_seed: 42
 ndd_batch_size: 32
+stage: all
 
 split: test
 subset: all

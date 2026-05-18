@@ -38,7 +38,8 @@ dtype: int32
 text_field: text
 
 # Cap docs / tokens for a fast smoke test.
-sample: 500
+max_rows: 1000
+sample: null
 sample_seed: 42
 force: false
 

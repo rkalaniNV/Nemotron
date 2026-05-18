@@ -64,7 +64,7 @@ def main() -> None:
     run_rl_resolve_pipeline(
         blend=DataBlend.load(cfg["blend_path"]),
         output_dir=cfg["output_dir"],
-        sample=cfg.get("sample"),
+        sample=cfg.get("max_rows") if cfg.get("max_rows") is not None else cfg.get("sample"),
         force=cfg.get("force", False),
         compression=cfg.get("compression", "none"),
         num_shards_per_split=cfg.get("num_shards_per_split", 1),

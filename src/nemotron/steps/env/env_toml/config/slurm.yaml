@@ -226,11 +226,10 @@ sections:
       NVIDIA_API_KEY: ${oc.env:NVIDIA_API_KEY,''}
       NGC_API_KEY: ${oc.env:NGC_API_KEY,''}
 
-  # curate/nemo_curator: runs the Curator container out of the box. The CPU
-  # count avoids Xenna streaming-mode failures on small CPU allocations.
+  # curate/nemo_curator: runs directly in the Curator container. Keep this
+  # simple; translate/byob use curator_runtime because they need extra deps.
   slurm_curate:
     extends: slurm_curator_base
-    run_command: python -m nemotron.steps._bootstrap.curator_runtime --profile curate -- python -m nemotron.steps.curate.nemo_curator.step --config {config}
     env_vars:
       NEMOTRON_CURATOR_RAY_NUM_CPUS: "4"
 

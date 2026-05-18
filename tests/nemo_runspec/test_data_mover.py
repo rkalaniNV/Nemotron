@@ -91,8 +91,7 @@ def test_auto_includes_scopes_to_active_step_subtree(tmp_path):
     includes = _auto_includes(tmp_path, script_path="src/nemotron/steps/sft/automodel/step.py")
 
     assert "src/nemotron/steps/index.py" in includes
-    assert "src/nemotron/steps/sft/__init__.py" in includes
-    assert "src/nemotron/steps/sft/automodel" in includes
+    assert "src/nemotron/steps/sft" in includes
     assert "src/nemotron/steps/_runners" in includes
     assert "src/nemotron/steps/rl" not in includes
     assert "src/nemotron/recipes/nano3" not in includes
@@ -111,10 +110,65 @@ def test_auto_includes_ships_active_step_ancestor_helpers(tmp_path):
 
     includes = _auto_includes(tmp_path, script_path="src/nemotron/steps/data_prep/sft_packing/step.py")
 
-    assert "src/nemotron/steps/data_prep/__init__.py" in includes
-    assert "src/nemotron/steps/data_prep/_common.py" in includes
-    assert "src/nemotron/steps/data_prep/sft_packing" in includes
+    assert "src/nemotron/steps/data_prep" in includes
     assert "src/nemotron/steps/sft" not in includes
+
+
+def test_source_packager_ships_active_branch_support_paths(tmp_path):
+    _write_fake_repo(tmp_path)
+    steps = tmp_path / "src" / "nemotron" / "steps"
+    byob = steps / "byob"
+    (byob / "mcq").mkdir(parents=True)
+    (byob / "legacy").mkdir()
+    (byob / "__init__.py").write_text("from nemotron.steps.byob.adapter import x\n")
+    (byob / "adapter.py").write_text("x = 1\n")
+    (byob / "scripts").mkdir()
+    (byob / "scripts" / "run.py").write_text("")
+    (byob / "runtime").mkdir()
+    (byob / "runtime" / "config.py").write_text("")
+    (byob / "assets").mkdir()
+    (byob / "assets" / "tiny.txt").write_text("")
+    (byob / "mcq" / "step.py").write_text("")
+    (byob / "legacy" / "step.py").write_text("")
+    (steps / "sft" / "automodel").mkdir(parents=True)
+    (steps / "sft" / "automodel" / "step.py").write_text("")
+
+    pkg = SourcePackager(
+        repo_root=str(tmp_path),
+        script_path="src/nemotron/steps/byob/mcq/step.py",
+    )
+    out = pkg.package(None, str(tmp_path), "test")
+    with tarfile.open(out) as tf:
+        names = set(tf.getnames())
+
+    assert "src/nemotron/steps/byob/__init__.py" in names
+    assert "src/nemotron/steps/byob/adapter.py" in names
+    assert "src/nemotron/steps/byob/scripts/run.py" in names
+    assert "src/nemotron/steps/byob/runtime/config.py" in names
+    assert "src/nemotron/steps/byob/assets/tiny.txt" in names
+    assert "src/nemotron/steps/byob/mcq/step.py" in names
+    assert "src/nemotron/steps/sft/automodel/step.py" not in names
+
+
+def test_auto_includes_scopes_active_script_collection_without_step_names(tmp_path):
+    _write_fake_repo(tmp_path)
+    flows = tmp_path / "src" / "nemotron" / "workflows"
+    benchmark = flows / "benchmark"
+    (benchmark / "mcq").mkdir(parents=True)
+    (benchmark / "legacy").mkdir()
+    (flows / "other").mkdir()
+    (benchmark / "__init__.py").write_text("")
+    (benchmark / "adapter.py").write_text("x = 1\n")
+    (benchmark / "assets").mkdir()
+    (benchmark / "assets" / "tiny.txt").write_text("")
+    (benchmark / "mcq" / "run.py").write_text("")
+    (benchmark / "legacy" / "run.py").write_text("")
+    (flows / "other" / "run.py").write_text("")
+
+    includes = _auto_includes(tmp_path, script_path="src/nemotron/workflows/benchmark/mcq/run.py")
+
+    assert "src/nemotron/workflows/benchmark" in includes
+    assert "src/nemotron/workflows/other" not in includes
 
 
 def test_auto_includes_raises_when_src_missing(tmp_path):
@@ -127,6 +181,20 @@ def test_auto_includes_raises_when_src_missing(tmp_path):
 
 def test_source_packager_filters_pycache_and_pyc(tmp_path):
     _write_fake_repo(tmp_path)
+    artifacts = tmp_path / "src" / "nemotron" / "kit" / "artifacts"
+    artifacts.mkdir()
+    for name in (
+        "records.parquet",
+        "table.arrow",
+        "weights.safetensors",
+        "checkpoint.ckpt",
+        "optimizer.pt",
+        "tensor.npy",
+        "index.idx",
+        "model.onnx",
+        "model.h5",
+    ):
+        (artifacts / name).write_text("large artifact")
     pkg = SourcePackager(
         repo_root=str(tmp_path),
         script_path="src/nemotron/recipes/nano3/x.py",
@@ -138,8 +206,24 @@ def test_source_packager_filters_pycache_and_pyc(tmp_path):
     # Pyc + __pycache__ stripped.
     assert not any(n.endswith(".pyc") for n in names)
     assert not any("__pycache__" in n for n in names)
+    assert not any("/artifacts/" in n for n in names)
     # Real package files present.
     assert any(n.endswith("src/nemo_runspec/__init__.py") for n in names)
+
+
+def test_source_packager_warns_when_tarball_exceeds_limit(tmp_path, monkeypatch, capsys):
+    _write_fake_repo(tmp_path)
+    monkeypatch.setenv("NEMOTRON_SRC_TARBALL_WARN_BYTES", "1")
+    pkg = SourcePackager(
+        repo_root=str(tmp_path),
+        script_path="src/nemotron/recipes/nano3/x.py",
+    )
+
+    pkg.package(None, str(tmp_path), "test")
+
+    captured = capsys.readouterr()
+    assert "source tarball is" in captured.err
+    assert "NEMOTRON_SRC_TARBALL_WARN_BYTES=0" in captured.err
 
 
 # ── plan_for ─────────────────────────────────────────────────────────────────
@@ -176,7 +260,7 @@ def test_plan_for_lepton_chunks_source_into_env_vars(tmp_path, monkeypatch):
     assert ".nemotron-src-failed" in script
     assert 'while [ "$i" -lt 600 ]' in script
     assert "timed out waiting for" in script
-    assert not plan.needs_pwd_symlinks
+    assert plan.needs_pwd_symlinks is True
 
 
 def test_plan_for_cloud_ready_marker_is_unique_per_submission(tmp_path, monkeypatch):
@@ -234,7 +318,7 @@ def test_plan_for_dgxcloud_chunks_source_into_env_vars(tmp_path, monkeypatch):
     # Env vars populated, no file-based PVC path.
     assert int(env_vars["_NEMOTRON_SRC_CHUNKS"]) >= 1
     assert "_NEMOTRON_SRC_CHUNK_0" in env_vars
-    assert not plan.needs_pwd_symlinks
+    assert plan.needs_pwd_symlinks is True
 
 
 def test_plan_for_fallback_uses_native_packager_path(tmp_path, monkeypatch):

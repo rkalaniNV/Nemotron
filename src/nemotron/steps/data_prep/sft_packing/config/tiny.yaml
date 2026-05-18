@@ -48,7 +48,8 @@ used_in_filter: null
 used_in_field: used_in
 
 max_doc_tokens: null
-sample: 1000
+max_rows: 1000
+sample: null
 sample_seed: 42
 force: false
 config_name: tiny

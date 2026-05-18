@@ -147,10 +147,9 @@ sections:
     nprocs_per_node: 1
     shared_memory_size: 4096
     pip_extras: []
-    pre_launch_commands:
-      - export RAY_worker_maximum_startup_concurrency=16
-      - export RAY_num_prestart_python_workers=16
-      - wget() { printf '%s\n' '#!/usr/bin/env bash' > init.sh; }
+    env_vars:
+      RAY_worker_maximum_startup_concurrency: "16"
+      RAY_num_prestart_python_workers: "16"
 
   # byob CPU smoke: keeps semantic dedup, coverage, and semantic outlier stages
   # disabled. Those optional stages need the GPU/RAPIDS profile below.
@@ -215,11 +214,10 @@ sections:
       NVIDIA_API_KEY: ${oc.env:NVIDIA_API_KEY,''}
       NGC_API_KEY: ${oc.env:NGC_API_KEY,''}
 
-  # curate/nemo_curator: runs the Curator container out of the box. The CPU
-  # count avoids Xenna streaming-mode failures on medium CPU pods.
+  # curate/nemo_curator: runs directly in the Curator container. Keep this
+  # simple; translate/byob use curator_runtime because they need extra deps.
   lepton_curate:
     extends: lepton_curator_base
-    run_command: python -m nemotron.steps._bootstrap.curator_runtime --profile curate -- python -m nemotron.steps.curate.nemo_curator.step --config {config}
     env_vars:
       NEMOTRON_CURATOR_RAY_NUM_CPUS: "4"
 

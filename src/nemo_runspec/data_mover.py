@@ -52,7 +52,27 @@ _EXCLUDE_NAMES = frozenset(
         "node_modules",
     }
 )
-_EXCLUDE_SUFFIXES = (".pyc", ".pyo", ".pyd")
+_EXCLUDE_SUFFIXES = (
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    # Common data/model artifacts should not ride along in the source tarball.
+    ".parquet",
+    ".arrow",
+    ".bin",
+    ".idx",
+    ".npy",
+    ".npz",
+    ".pt",
+    ".pth",
+    ".safetensors",
+    ".ckpt",
+    ".onnx",
+    ".h5",
+    ".hdf5",
+)
+_SCOPED_COLLECTIONS = frozenset({"recipes", "steps"})
+_DEFAULT_TARBALL_WARN_BYTES = 1_000_000
 
 
 def _tar_filter(info):
@@ -62,99 +82,135 @@ def _tar_filter(info):
     return info
 
 
+def _tarball_warn_bytes() -> int:
+    raw = os.environ.get("NEMOTRON_SRC_TARBALL_WARN_BYTES")
+    if raw is None:
+        return _DEFAULT_TARBALL_WARN_BYTES
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _DEFAULT_TARBALL_WARN_BYTES
+
+
+def _format_bytes(size: int) -> str:
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KiB"
+    return f"{size / (1024 * 1024):.1f} MiB"
+
+
+def _warn_if_large_tarball(path: str) -> None:
+    limit = _tarball_warn_bytes()
+    if not limit:
+        return
+    size = os.path.getsize(path)
+    if size <= limit:
+        return
+    typer.secho(
+        "[stage] warning: source tarball is "
+        f"{_format_bytes(size)}; this may exceed cloud job/env limits. "
+        "Move large artifacts outside src/ or extend the data_mover exclude "
+        "suffix list. Set NEMOTRON_SRC_TARBALL_WARN_BYTES=0 to disable.",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+
+
+@dataclass(frozen=True)
+class _ScriptLocation:
+    package: str
+    collection: str | None
+    branch: str | None
+
+
+def _repo_relative_path(repo_root: Path, path: str) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        try:
+            return candidate.relative_to(repo_root)
+        except ValueError:
+            if "src" in candidate.parts:
+                return Path(*candidate.parts[candidate.parts.index("src") :])
+    return candidate
+
+
+def _script_location(repo_root: Path, script_path: str | None) -> _ScriptLocation | None:
+    if not script_path:
+        return None
+    rel = _repo_relative_path(repo_root, script_path)
+    parts = rel.parts
+    if len(parts) < 3 or parts[0] != "src":
+        return None
+    collection = parts[2] if len(parts) >= 4 else None
+    branch = parts[3] if len(parts) >= 5 else None
+    return _ScriptLocation(
+        package=parts[1],
+        collection=collection,
+        branch=branch,
+    )
+
+
+def _include_collection(
+    includes: list[str],
+    *,
+    pkg_name: str,
+    collection_name: str,
+    collection_dir: Path,
+    branch: str | None = None,
+) -> None:
+    prefix = f"src/{pkg_name}/{collection_name}"
+    for child in sorted(collection_dir.iterdir()):
+        if child.name in _EXCLUDE_NAMES:
+            continue
+        if branch is None or child.is_file() or child.name == branch or child.name.startswith("_"):
+            includes.append(f"{prefix}/{child.name}")
+
+
 def _auto_includes(repo_root: Path, script_path: str | None) -> list[str]:
     """Discover repo-relative paths to ship.
 
-    Walks ``<repo>/src/*`` and ships every top-level package. For packages
-    with ``recipes/`` or ``steps/``, only the active recipe family or step
-    subtree from ``script_path`` is included when possible. This keeps the
-    tarball small because unrelated families and steps can weigh many MiB.
+    Walks ``<repo>/src/*`` and ships every top-level package. For packages with
+    large source collections such as ``recipes/`` or ``steps/``, only the active
+    branch from ``script_path`` is included when possible. This keeps the
+    tarball small because unrelated runnable collections can weigh many MiB.
     """
     src = repo_root / "src"
     if not src.is_dir():
         raise ValueError(f"No src/ under {repo_root}. Set repo_root in env.toml.")
 
     includes: list[str] = []
-
-    # Filters keyed off script_path: ship only the active recipe family or
-    # active step subtree. Lepton's etcd has a hard request cap (~1.5 MiB);
-    # DGXCloud has a tighter per-env-var cap. Without filtering, every
-    # unrelated recipe family + step ships and blows past those limits.
-    family = None
-    step_path: str | None = None
-    if script_path:
-        parts = Path(script_path).parts
-        if "recipes" in parts:
-            idx = parts.index("recipes")
-            if idx + 1 < len(parts):
-                family = parts[idx + 1]
-        elif "steps" in parts:
-            idx = parts.index("steps")
-            tail = parts[idx + 1 : -1]  # drop the step.py filename
-            if tail:
-                step_path = "/".join(tail)
+    script = _script_location(repo_root, script_path)
 
     for pkg in sorted(p for p in src.iterdir() if p.is_dir() and p.name not in _EXCLUDE_NAMES):
-        recipes = pkg / "recipes"
-        steps = pkg / "steps"
-        has_recipes = recipes.is_dir()
-        has_steps = steps.is_dir()
+        active_collection = (
+            script.collection
+            if script and script.package == pkg.name and script.collection and script.branch
+            else None
+        )
+        collection_names = {name for name in _SCOPED_COLLECTIONS if (pkg / name).is_dir()}
+        if active_collection and (pkg / active_collection).is_dir():
+            collection_names.add(active_collection)
 
-        if has_recipes or has_steps:
+        if collection_names:
             for child in sorted(pkg.iterdir()):
-                if child.name in _EXCLUDE_NAMES or child == recipes or child == steps:
+                if child.name in _EXCLUDE_NAMES or child.name in collection_names:
                     continue
                 includes.append(f"src/{pkg.name}/{child.name}")
 
-            if has_recipes:
-                for child in sorted(recipes.iterdir()):
-                    if child.is_file():
-                        includes.append(f"src/{pkg.name}/recipes/{child.name}")
-                if family and (recipes / family).is_dir():
-                    chosen_families = [family]
-                elif step_path:
-                    # Shipping a step — don't drag any recipe family along.
-                    chosen_families = []
-                else:
-                    chosen_families = [
-                        c.name for c in recipes.iterdir() if c.is_dir() and c.name not in _EXCLUDE_NAMES
-                    ]
-                for fam in sorted(chosen_families):
-                    includes.append(f"src/{pkg.name}/recipes/{fam}")
-
-            if has_steps:
-                # Top-level files (e.g. index.py, types.toml) always ride along.
-                for child in sorted(steps.iterdir()):
-                    if child.is_file():
-                        includes.append(f"src/{pkg.name}/steps/{child.name}")
-                if step_path and (steps / step_path).is_dir():
-                    # Active step's leaf + ancestor ``__init__.py`` files so
-                    # ``python -m nemotron.steps.<a>.<b>.step`` can traverse
-                    # the package path. Without these the runner imports the
-                    # leaf module directly but Python can't resolve the chain.
-                    parts = Path(step_path).parts
-                    for i in range(1, len(parts)):
-                        ancestor = "/".join(parts[:i])
-                        ancestor_dir = steps / ancestor
-                        for child in sorted(ancestor_dir.iterdir()):
-                            if child.is_file() and (
-                                child.name == "__init__.py" or child.name.startswith("_")
-                            ):
-                                includes.append(f"src/{pkg.name}/steps/{ancestor}/{child.name}")
-                    includes.append(f"src/{pkg.name}/steps/{step_path}")
-                    # Any shared-infra sibling (``_runners/`` etc.) that step
-                    # wrappers import from — leading-underscore convention.
-                    for child in sorted(steps.iterdir()):
-                        if child.is_dir() and child.name.startswith("_") and child.name not in _EXCLUDE_NAMES:
-                            includes.append(f"src/{pkg.name}/steps/{child.name}")
-                else:
-                    # No active step (e.g. shipping a recipe) — include all.
-                    for child in sorted(steps.iterdir()):
-                        if child.is_dir() and child.name not in _EXCLUDE_NAMES:
-                            includes.append(f"src/{pkg.name}/steps/{child.name}")
+            for collection_name in sorted(collection_names):
+                collection_dir = pkg / collection_name
+                is_active = active_collection == collection_name and script and script.branch
+                if active_collection and not is_active:
+                    continue
+                _include_collection(
+                    includes,
+                    pkg_name=pkg.name,
+                    collection_name=collection_name,
+                    collection_dir=collection_dir,
+                    branch=script.branch if is_active else None,
+                )
         else:
             includes.append(f"src/{pkg.name}")
-    return includes
+    return list(dict.fromkeys(includes))
 
 
 @dataclass(kw_only=True)
@@ -180,6 +236,7 @@ class SourcePackager(_BasePackager):
             with tarfile.open(out, "w:gz") as tf:
                 for rel in _auto_includes(root, self.script_path):
                     tf.add(root / rel, arcname=rel, filter=_tar_filter)
+        _warn_if_large_tarball(out)
         return out
 
 
@@ -265,6 +322,7 @@ def plan_for(
         return Plan(
             packager=run.Packager(),
             pod_src_root=pod_src,
+            needs_pwd_symlinks=True,
             source_ready_marker=ready_marker,
             pre_script_cmds=[
                 'if [ "${NODE_RANK:-0}" = "0" ]; then'

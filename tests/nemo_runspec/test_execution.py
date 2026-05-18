@@ -33,11 +33,13 @@ import pytest
 from omegaconf import OmegaConf
 
 from nemo_runspec.execution import (
+    _cloud_config_path,
+    _cloud_script_path,
     _derive_cloud_workspace,
     _get_env,
     _git_mount_commands,
     _parse_netrc,
-    _cloud_script_path,
+    _pwd_symlink_cmd,
     _ray_node_source_sync_cmd,
     _to_plain,
     _transport_env_cleanup_cmd,
@@ -148,6 +150,16 @@ class TestCloudScriptPath:
         )
 
 
+class TestCloudConfigPath:
+    def test_config_path_is_unique_and_keeps_content_digest(self):
+        first = _cloud_config_path("/mnt/work/_nemotron", b"stage: all\n")
+        second = _cloud_config_path("/mnt/work/_nemotron", b"stage: all\n")
+
+        assert first != second
+        assert re.match(r"^/mnt/work/_nemotron/config-[0-9a-f]{16}-[0-9a-f]{8}\.yaml$", first)
+        assert first.rsplit("-", 1)[0] == second.rsplit("-", 1)[0]
+
+
 class TestRayNodeSourceSync:
     def test_sync_command_pins_extraction_once_per_ray_node(self):
         cmd = _ray_node_source_sync_cmd(
@@ -163,6 +175,19 @@ class TestRayNodeSourceSync:
 
     def test_sync_command_is_noop_without_marker(self):
         assert _ray_node_source_sync_cmd("/mnt/work/_nemotron/src", None) == "true"
+
+
+class TestPwdSymlinkCmd:
+    def test_removes_stale_compat_paths_before_linking(self):
+        cmd = _pwd_symlink_cmd("/mnt/work/_nemotron", "/mnt/work/_nemotron/src-abc")
+
+        assert "mkdir -p /mnt/work/_nemotron/src" in cmd
+        assert "rm -rf /mnt/work/_nemotron/src/nemotron /mnt/work/_nemotron/src/nemo_runspec" in cmd
+        assert "ln -sfn /mnt/work/_nemotron/src-abc/nemotron /mnt/work/_nemotron/src/nemotron" in cmd
+        assert (
+            "ln -sfn /mnt/work/_nemotron/src-abc/nemo_runspec "
+            "/mnt/work/_nemotron/src/nemo_runspec"
+        ) in cmd
 
 
 class TestRayJobStatusAndLogs:
@@ -840,8 +865,8 @@ class TestLeptonAutoMountFiltering:
         executor = create_executor(env=env, env_vars={}, packager=_FakePackager())
         assert executor.mounts == [{"path": "/data", "mount_path": "/data"}]
 
-    def test_pre_launch_includes_auto_mount_commands(self):
-        """Auto_mount registered repos become pre_launch git clones."""
+    def test_pre_launch_keeps_user_commands_only(self):
+        """auto_mount repos are cloned by the inline launch script, not Lepton pre-launch."""
         env = _make_env(
             executor="lepton",
             container_image="img",
@@ -851,9 +876,10 @@ class TestLeptonAutoMountFiltering:
         mounts = {"r": {"url": "u", "ref": "main", "target": "/opt/r"}}
         with patch("nemo_runspec.config.resolvers.get_git_mounts", return_value=mounts):
             executor = create_executor(env=env, env_vars={}, packager=_FakePackager())
-        # user commands preserved + git clone appended
+        # User commands are preserved; auto_mount clone commands are injected
+        # later into the inline launch script where ordering is controlled.
         assert "echo hello" in executor.pre_launch_commands
-        assert any("clone" in c and "/opt/r" in c for c in executor.pre_launch_commands)
+        assert not any("clone" in c and "/opt/r" in c for c in executor.pre_launch_commands)
 
 
 # ---------------------------------------------------------------------------

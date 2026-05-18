@@ -48,6 +48,11 @@ name = "compression"
 description = "Output JSONL compression mode. Keep none for simplest downstream debugging unless storage pressure requires compression."
 default = "none"
 
+[[parameters]]
+name = "max_rows"
+description = "Optional row cap for smoke runs. Alias for sample in the RL resolver."
+default = "null"
+
 [[strategies]]
 when = "Cluster has no HF Hub access"
 then = "Keep resolve_hf_placeholders=true so all data is materialised locally before training."

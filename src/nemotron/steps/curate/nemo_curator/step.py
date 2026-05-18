@@ -37,11 +37,8 @@ import yaml
 from huggingface_hub import snapshot_download
 from nemo_curator.core.client import RayClient
 from nemo_curator.pipeline import Pipeline
-from nemo_curator.stages.text.classifiers import MultilingualDomainClassifier
 from nemo_curator.stages.text.io.reader import JsonlReader
 from nemo_curator.stages.text.io.writer import JsonlWriter
-
-from nemo_curator.stages.text.filters import Filter, ScoreFilter
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 
@@ -56,6 +53,15 @@ def ray_client_kwargs(cfg: dict) -> dict:
     if "num_cpus" not in kwargs and os.environ.get("NEMOTRON_CURATOR_RAY_NUM_CPUS"):
         kwargs["num_cpus"] = int(os.environ["NEMOTRON_CURATOR_RAY_NUM_CPUS"])
     return kwargs
+
+
+def text_filter_stages():
+    """Return Filter/ScoreFilter across supported NeMo Curator releases."""
+    try:
+        from nemo_curator.stages.text.modules import Filter, ScoreFilter
+    except ImportError:
+        from nemo_curator.stages.text.filters import Filter, ScoreFilter
+    return Filter, ScoreFilter
 
 
 def main() -> None:
@@ -73,6 +79,7 @@ def main() -> None:
     pipeline = Pipeline(name="curate_nemo_curator")
     pipeline.add_stage(JsonlReader(file_paths=cfg["input_glob"], fields=[cfg["text_field"]]))
     if allowed_languages:
+        Filter, ScoreFilter = text_filter_stages()
         from nemo_curator.stages.text.filters.fasttext import FastTextLangId
 
         pipeline.add_stage(
@@ -96,6 +103,7 @@ def main() -> None:
     if has_word_filter:
         if not all(key in quality_filters for key in ("min_words", "max_words")):
             raise ValueError("quality_filters must set both min_words and max_words to enable WordCountFilter")
+        _, ScoreFilter = text_filter_stages()
         from nemo_curator.stages.text.filters.heuristic import WordCountFilter
 
         pipeline.add_stage(
@@ -108,6 +116,8 @@ def main() -> None:
             )
         )
     if cfg.get("domains"):
+        from nemo_curator.stages.text.classifiers import MultilingualDomainClassifier
+
         pipeline.add_stage(
             MultilingualDomainClassifier(
                 text_field=cfg["text_field"],
