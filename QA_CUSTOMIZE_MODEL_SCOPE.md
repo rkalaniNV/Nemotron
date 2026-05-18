@@ -367,9 +367,50 @@ uv run --no-sync nemotron steps translation \
   faith_eval.enabled=true \
   faith_eval.filter_enabled=false \
   faith_eval.model_name="$FAITH_MODEL" \
+  faith_eval.generation_config.max_tokens=2048 \
+  faith_eval.generation_config.temperature=0.0 \
   server.url="$TRANSLATION_BASE_URL" \
   server.model="$TRANSLATION_MODEL" \
   server.api_key_env=NVIDIA_API_KEY
+```
+
+Validate output rows and FAITH score columns. This command reads the same
+`$TR_ROOT/news_en` input folder and `$TR_ROOT/out_faith_annotated` output folder
+used by the translation command.
+
+```bash
+uv run --no-sync python - <<'PY'
+from pathlib import Path
+import json
+import os
+
+root = Path(os.environ["TR_ROOT"])
+inp = sum(
+    1
+    for path in (root / "news_en").glob("*.jsonl")
+    for line in path.read_text().splitlines()
+    if line.strip()
+)
+rows = [
+    json.loads(line)
+    for path in (root / "out_faith_annotated").glob("*.jsonl")
+    for line in path.read_text().splitlines()
+    if line.strip()
+]
+
+print(
+    {
+        "input_rows": inp,
+        "output_rows": len(rows),
+        "faith_columns_present": all(
+            "faith_avg" in row and "faith_segment_scores" in row for row in rows
+        ),
+        "filtered": len(rows) != inp,
+        "faith_avg": [row.get("faith_avg") for row in rows],
+        "translation_errors": [row.get("translation_errors") for row in rows],
+    }
+)
+PY
 ```
 
 Success criteria:
