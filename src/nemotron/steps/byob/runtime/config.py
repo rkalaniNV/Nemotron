@@ -23,7 +23,6 @@ import numpy as np
 import yaml
 
 from nemotron.steps.byob.runtime.constants import ALLOWED_HF_DATASETS, AVAILABLE_QUALITY_METRICS, HF_DATASET_TO_SUBSET
-from nemotron.steps.byob.runtime.hf_utils import get_subjects
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +181,6 @@ class ByobConfig:
         assert "num_questions_per_query" in config, (
             "Field `num_questions_per_query` is required in the configuration file"
         )
-        assert config["num_questions_per_query"] > 0, "Field `num_questions_per_query` must be greater than 0"
         assert "generation_model_config" in config, (
             "Field `generation_model_config` is required in the configuration file"
         )
@@ -250,10 +248,6 @@ class ByobConfig:
         assert "window_size" in config["chunking_config"], (
             "Field `window_size` is required in the chunking configuration"
         )
-        assert config["chunking_config"]["window_size"] is None or config["chunking_config"]["window_size"] > 0, (
-            "Field `window_size` must be greater than 0 or None"
-        )
-
         if config["do_coverage_check"]:
             assert "window_size" in config["coverage_check_config"], (
                 "Field `window_size` is required in the coverage check configuration"
@@ -289,6 +283,20 @@ class ByobConfig:
                 "Field `enabled` must be a boolean in the semantic outlier detection configuration"
             )
 
+        if config["num_questions_per_query"] <= 0:
+            raise ValueError("Field `num_questions_per_query` must be greater than 0")
+        if not config["target_source_mapping"]:
+            raise ValueError("Field `target_source_mapping` must be a non-empty mapping")
+        if config["chunking_config"]["window_size"] is not None and config["chunking_config"]["window_size"] <= 0:
+            raise ValueError("Field `chunking_config.window_size` must be greater than 0 or null")
+        if not config["source_subjects"]:
+            raise ValueError("Field `source_subjects` must be a non-empty list")
+        for target_subject, mapping in config["target_source_mapping"].items():
+            if not mapping.get("subjects"):
+                raise ValueError(
+                    f"Field `target_source_mapping.{target_subject}.subjects` must be a non-empty list or mapping"
+                )
+
         if config["prompt_config"] is not None:
             with open(config["prompt_config"]) as f:
                 config["prompt_config"] = yaml.safe_load(f)
@@ -317,10 +325,6 @@ class ByobConfig:
             from nemotron.steps.byob.runtime.benchmark_families.mcq.prompts.utils import get_prompts
 
             config["prompt_config"] = get_prompts()
-
-        # Set to all subjects if not specified
-        if not config["source_subjects"]:
-            config["source_subjects"] = get_subjects(config["hf_dataset"], config["subset"], config["split"])
 
         # Check permissions for output dir
         if os.path.exists(config["output_dir"]):
@@ -365,9 +369,6 @@ class ByobConfig:
                         f"Source subject '{source_subject}' in `target_source_mapping` "
                         f"is not in source subjects ({config['source_subjects']})"
                     )
-                # Use all source subjects if not specified
-                if config["target_source_mapping"][target_subject]["subjects"] == []:
-                    config["target_source_mapping"][target_subject]["subjects"] = config["source_subjects"]
                 # Make an array with equal weights for each source subject
                 labels = config["target_source_mapping"][target_subject]["subjects"]
                 weights = np.ones(len(labels)) / len(labels)
