@@ -10,12 +10,14 @@ Use this skill when a user wants to translate corpus data, chat records, or row-
 ## Default Workflow
 
 1. Install runtime dependencies with `uv sync --extra translate`.
-2. Read [`nemo_curator/step.toml`](nemo_curator/step.toml) for the step contract.
-3. Ask for `source_language`, `target_language`, input path, output path, backend, and field path. Do not infer source or target language silently.
-4. For downstream training data, start with `output_mode=replaced`, `merge_scores=false`, and `faith_eval.enabled=false`.
-5. For audit or quality review, use `output_mode=both` and enable `faith_eval`.
-6. Run a two-row smoke test before a large corpus.
-7. Validate row count, schema, translated field content, and that secrets were not printed.
+2. For local `uv run` execution, export `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` so
+   Ray workers reuse the synchronized project environment.
+3. Read [`nemo_curator/step.toml`](nemo_curator/step.toml) for the step contract.
+4. Ask for `source_language`, `target_language`, input path, output path, backend, and field path. Do not infer source or target language silently.
+5. For downstream training data, start with `output_mode=replaced`, `merge_scores=false`, and `faith_eval.enabled=false`.
+6. For audit or quality review, use `output_mode=both` and enable `faith_eval`.
+7. Run a two-row smoke test before a large corpus.
+8. Validate row count, schema, translated field content, and that secrets were not printed.
 
 For one-shot translation requests, do not end in exploration mode. Provide the
 minimal runnable handoff first:
@@ -135,6 +137,8 @@ uv run --no-sync nemotron steps run translate/nemo_curator \
 - Missing translation dependencies: run `uv sync --extra translate` first.
   If an eval/runtime environment still misses basics such as `toml` or
   `pyyaml`, report the blocker and still provide the runnable handoff.
+- Ray worker imports fail under `uv run`: export
+  `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` before running the translation command.
 - Mixed `.jsonl` and `.parquet` roots: bind `input_path` to one format only and
   explicitly state excluded paths or formats.
 - Missing `translate/nemo_curator` metadata in a runtime workspace: treat it as

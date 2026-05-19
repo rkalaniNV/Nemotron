@@ -64,7 +64,7 @@ sdg/data_designer (rl_pref.yaml)              → data_prep/rl_prep       → rl
 
 ```bash
 nemotron steps run sdg/data_designer -c tiny
-nemotron steps run sdg/data_designer -c default --extra-args=--preview
+nemotron steps run sdg/data_designer -c default preview=true num_records=2
 ```
 
 ## Patterns to cite

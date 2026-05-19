@@ -63,7 +63,7 @@ choices = ["openai_messages", "structured_messages", "dpo_preference"]
 
 [[strategies]]
 when = "Iterating on column specs"
-then = "Run with --preview to emit a small batch via client.preview() before scaling to client.create()."
+then = "Run with preview=true num_records=<small N> to emit a small batch via client.preview() before scaling to client.create()."
 
 [[strategies]]
 when = "Using a self-hosted or non-NVIDIA OpenAI-compatible endpoint"
