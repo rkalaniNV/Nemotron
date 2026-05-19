@@ -42,6 +42,7 @@ _GENERATION_CONFIG_KEYS = {
     "top_k",
     "top_p",
 }
+_SUPPORTED_BACKENDS = {"aws", "google", "llm", "nmt"}
 
 
 def _required_path(config: dict[str, Any], key: str) -> str:
@@ -49,6 +50,31 @@ def _required_path(config: dict[str, Any], key: str) -> str:
     if not value:
         raise ValueError(f"{key} is required")
     return str(value)
+
+
+def _translation_backend(config: dict[str, Any]) -> str:
+    return str(config.get("backend", "llm")).lower()
+
+
+def _validate_backend_and_credentials(config: dict[str, Any]) -> None:
+    backend = _translation_backend(config)
+    if backend not in _SUPPORTED_BACKENDS:
+        supported = ", ".join(sorted(_SUPPORTED_BACKENDS))
+        raise ValueError(f"Invalid backend {backend!r}. Expected one of: {supported}.")
+
+    faith_cfg = config.get("faith_eval", {}) or {}
+    needs_openai_client = backend == "llm" or bool(faith_cfg.get("enabled", False))
+    if not needs_openai_client:
+        return
+
+    server = config.get("server", {}) or {}
+    api_key_env = str(server.get("api_key_env") or "NVIDIA_API_KEY")
+    if server.get("api_key") or os.environ.get(api_key_env):
+        return
+
+    raise ValueError(
+        f"Missing API key: set server.api_key or set environment variable {api_key_env!r} from server.api_key_env."
+    )
 
 
 def _infer_local_dir_format(input_path: Path) -> str:
@@ -121,14 +147,14 @@ def _build_writer(output_dir: str, config: dict[str, Any]) -> Any:
 
 
 def _build_curator_client(config: dict[str, Any], *, enable_faith: bool) -> Any | None:
-    backend = str(config.get("backend", "llm"))
+    backend = _translation_backend(config)
     if backend != "llm" and not enable_faith:
         return None
 
     from nemo_curator.models.client.openai_client import AsyncOpenAIClient
 
     server = config.get("server", {}) or {}
-    api_key_env = str(server.get("api_key_env", "NVIDIA_API_KEY"))
+    api_key_env = str(server.get("api_key_env") or "NVIDIA_API_KEY")
     api_key = server.get("api_key") or os.environ.get(api_key_env)
     if not api_key:
         raise ValueError(
@@ -144,7 +170,7 @@ def _build_curator_client(config: dict[str, Any], *, enable_faith: bool) -> Any 
 
 
 def _backend_config(config: dict[str, Any]) -> dict[str, Any]:
-    backend = str(config.get("backend", "llm"))
+    backend = _translation_backend(config)
     if backend in {"google", "aws", "nmt"}:
         return dict(config.get(backend, {}) or {})
     return {}
@@ -212,7 +238,7 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
         client=_build_curator_client(config, enable_faith=enable_faith),
         model_name=str(server.get("model") or ""),
         generation_config=_build_generation_config(config.get("generation_config")),
-        backend_type=str(config.get("backend", "llm")),
+        backend_type=_translation_backend(config),
         backend_config=_backend_config(config),
         enable_faith_eval=enable_faith,
         faith_threshold=float(faith_cfg.get("threshold", 2.5)),
@@ -232,6 +258,8 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
 
 
 def run(config: dict[str, Any]) -> Path:
+    _validate_backend_and_credentials(config)
+
     from nemo_curator.pipeline import Pipeline
 
     input_path = _required_path(config, "input_path")
@@ -254,7 +282,10 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
     config = yaml.safe_load(args.config.read_text()) or {}
-    run(config)
+    try:
+        run(config)
+    except ValueError as exc:
+        parser.exit(2, f"error: {exc}\n")
 
 
 if __name__ == "__main__":
