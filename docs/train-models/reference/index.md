@@ -12,7 +12,7 @@ content:
 
 # Training Reference
 
-This section provides lookup material for every supervised fine-tuning (SFT), parameter-efficient fine-tuning (PEFT), reinforcement learning (RL), and optimization step packaged under `src/nemotron/steps/`.
+This section provides lookup material for every supervised fine-tuning (SFT), parameter-efficient fine-tuning (PEFT), reinforcement learning (RL), checkpoint conversion, and optimization step packaged under `src/nemotron/steps/`.
 Use these pages to find the exact CLI syntax, configuration file layout, parameters, and configuration overrides for each step.
 
 ## Reference Sections
@@ -83,6 +83,14 @@ The `rl/nemo_rl/dpo`, `rl/nemo_rl/rlvr`, and `rl/nemo_rl/rlhf` references.
 {bdg-success}`reference`
 :::
 
+:::{grid-item-card} {octicon}`sync;1.5em;sd-mr-1` Checkpoint Conversion Steps
+:link: convert/index
+:link-type: doc
+The `convert/hf_to_megatron`, `convert/megatron_to_hf`, and `convert/merge_lora` references.
++++
+{bdg-success}`reference`
+:::
+
 :::{grid-item-card} {octicon}`zap;1.5em;sd-mr-1` Optimization Steps
 :link: optimize/index
 :link-type: doc
@@ -110,5 +118,6 @@ config-conventions
 SFT Steps <sft/index>
 PEFT Steps <peft/index>
 RL Steps <rl/index>
+convert/index
 optimize/index
 ```

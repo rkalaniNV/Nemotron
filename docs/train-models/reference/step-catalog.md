@@ -12,11 +12,11 @@ content:
 
 # Step Catalog
 
-This page catalogs every training step identifier registered under `src/nemotron/steps/` in the `sft`, `peft`, `rl`, and `optimize` directories.
+This page catalogs every training step identifier registered under `src/nemotron/steps/` in the `sft`, `peft`, `rl`, `convert`, and `optimize` directories.
 Each row gives the step identifier, the on-disk manifest path, and the per-step reference page.
 
-Adjacent preparation and conversion steps do not appear in this catalog.
-Those step identifiers include `data_prep/sft_packing`, `data_prep/rl_prep`, and `convert/megatron_to_hf`, and they live under different directories with their own manifests.
+Adjacent preparation steps do not appear in this catalog.
+Those step identifiers include `data_prep/sft_packing` and `data_prep/rl_prep`, and they live under different directories with their own manifests.
 
 ## Supervised Fine-Tuning Steps
 
@@ -40,6 +40,14 @@ Those step identifiers include `data_prep/sft_packing`, `data_prep/rl_prep`, and
 | `rl/nemo_rl/rlvr` | `src/nemotron/steps/rl/nemo_rl/rlvr/step.toml` | [rl/nemo_rl/rlvr](rl/rlvr.md) |
 | `rl/nemo_rl/rlhf` | `src/nemotron/steps/rl/nemo_rl/rlhf/step.toml` | [rl/nemo_rl/rlhf](rl/rlhf.md) |
 
+## Checkpoint Conversion Steps
+
+| Step Identifier | Manifest Path | Reference |
+| --- | --- | --- |
+| `convert/hf_to_megatron` | `src/nemotron/steps/convert/hf_to_megatron/step.toml` | [convert/hf_to_megatron](convert/hf-to-megatron.md) |
+| `convert/megatron_to_hf` | `src/nemotron/steps/convert/megatron_to_hf/step.toml` | [convert/megatron_to_hf](convert/megatron-to-hf.md) |
+| `convert/merge_lora` | `src/nemotron/steps/convert/merge_lora/step.toml` | [convert/merge_lora](convert/merge-lora.md) |
+
 ## Optimization Steps
 
 | Step Identifier | Manifest Path | Reference |
@@ -50,7 +58,7 @@ Those step identifiers include `data_prep/sft_packing`, `data_prep/rl_prep`, and
 
 ## List Steps from the Command Line
 
-This catalog covers the `sft`, `peft`, `rl`, and `optimize` step categories.
+This catalog covers the `sft`, `peft`, `rl`, `convert`, and `optimize` step categories.
 Running `nemotron steps list` with no filter returns all registered steps, including data preparation, evaluation, conversion, environment, and other categories not listed here.
 Use the `--category`, `--consumes`, and `--produces` filters to narrow the results.
 

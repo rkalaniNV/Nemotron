@@ -17,8 +17,37 @@ Artifact names and compatibility rules live in `src/nemotron/steps/types.toml` a
 ## Chaining Guidance
 
 1. AutoModel SFT never consumes `packed_parquet`. Megatron Bridge SFT does not consume raw JSON Lines (JSONL) for the packed pipeline.
-2. RL steps in this repository expect a Megatron policy checkpoint for warm start. If your SFT used AutoModel, insert the appropriate conversion step before RL.
-3. Optimization steps that start from `checkpoint_hf` require a merged base when the trainable artifact was LoRA.
+2. RL steps in this repository expect a Megatron policy checkpoint for warm start. If your SFT used AutoModel, insert `convert/hf_to_megatron` before RL.
+3. Hugging Face-native evaluation or deployment flows expect `checkpoint_hf`. If the source is Megatron Bridge, insert `convert/megatron_to_hf`.
+4. Optimization steps that start from `checkpoint_hf` require a merged base when the trainable artifact was LoRA. Insert `convert/merge_lora` before optimization when the source artifact is `checkpoint_lora`.
+
+## Conversion Commands
+
+Convert a Hugging Face checkpoint to Megatron layout:
+
+```console
+$ nemotron steps run convert/hf_to_megatron -c default \
+    hf_model_id=/path/to/hf_checkpoint \
+    megatron_path=/path/to/output_megatron_checkpoint
+```
+
+Convert a Megatron checkpoint iteration to Hugging Face layout:
+
+```console
+$ nemotron steps run convert/megatron_to_hf -c default \
+    megatron_path=/path/to/megatron/iter_0000100 \
+    hf_model_id=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16 \
+    hf_path=/path/to/output_hf_checkpoint
+```
+
+Merge a LoRA adapter into its original Hugging Face base:
+
+```console
+$ nemotron steps run convert/merge_lora -c default \
+    lora_checkpoint=/path/to/adapter_checkpoint \
+    base_hf_path=/path/to/original_hf_base \
+    output_hf_path=/path/to/merged_hf_checkpoint
+```
 
 ## Where to Look in the Tree
 
@@ -32,4 +61,5 @@ Each step directory contains the following files:
 ## Related Reading
 
 - [Artifact Graph](../explanation/artifact-graph.md)
+- [Convert Checkpoints Between Training Steps](convert-checkpoints.md)
 - [Step Catalog (Training)](../reference/step-catalog.md)

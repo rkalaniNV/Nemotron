@@ -13,7 +13,7 @@ content:
 # Env Profile Generator
 
 The `env/env_toml` step generates the *environment profile* file that every other Nemotron training step reads when it submits a job to a cluster.
-The generator emits a single Tom's Obvious Minimal Language (TOML) file with one named profile per step, including data preparation, supervised fine-tuning (SFT), parameter-efficient fine-tuning (PEFT), reinforcement learning (RL), pretraining, optimization, evaluation, synthetic data generation, translation, and curation profiles.
+The generator emits a single Tom's Obvious Minimal Language (TOML) file with one named profile per step, including data preparation, supervised fine-tuning (SFT), parameter-efficient fine-tuning (PEFT), checkpoint conversion, reinforcement learning (RL), pretraining, optimization, evaluation, synthetic data generation, translation, and curation profiles.
 You typically run this step once, before you submit your first training job to a cluster, and you re-run it only when site values such as the node group, container image, or shared mount path change.
 
 ## Syntax
@@ -105,7 +105,7 @@ Generate a default Lepton environment profile at the repository root and overwri
 $ nemotron steps run env/env_toml -c lepton output_path=env.toml force=true
 ```
 
-The command writes a single `env.toml` file at the repository root with every canonical profile the Nemotron training steps expect, including data-prep, SFT, PEFT, RL, pretrain, optimize, evaluate, synthetic data generation, translation, and curation profiles.
+The command writes a single `env.toml` file at the repository root with every canonical profile the Nemotron training steps expect, including data-prep, SFT, PEFT, conversion, RL, pretrain, optimize, evaluate, synthetic data generation, translation, and curation profiles.
 
 Generate a Lepton environment profile with site-specific node-group and Weights and Biases overrides.
 

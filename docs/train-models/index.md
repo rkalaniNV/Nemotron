@@ -12,6 +12,7 @@ If you are new to fine-tuning, start with [Training Basics](explanation/basics.m
 | SFT | `sft/automodel`, `sft/megatron_bridge` | Supervised fine tuning from chat-formatted JSON Lines (JSONL) or packed Apache Parquet |
 | PEFT | `peft/automodel`, `peft/megatron_bridge` | Adapter training with a smaller trainable surface |
 | RL | `rl/nemo_rl/dpo`, `rl/nemo_rl/rlvr`, `rl/nemo_rl/rlhf` | Alignment after a supervised fine tuning (SFT) policy exists |
+| Convert | `convert/hf_to_megatron`, `convert/megatron_to_hf`, `convert/merge_lora` | Checkpoint format bridges between Hugging Face, Megatron, and LoRA adapter layouts |
 | Optimize | `optimize/modelopt/quantize`, `optimize/modelopt/prune`, `optimize/modelopt/distill` | Compression and quality recovery |
 
 ## Learning Path
@@ -46,7 +47,7 @@ These walkthroughs give hands-on first runs for individual training steps.
 :::{grid-item-card} How-To Guides
 :link: how-to/index
 :link-type: doc
-These guides are task-focused. They explain how to pick a backend, wire data, and run optimization steps.
+These guides are task-focused. They explain how to pick a backend, wire data, convert checkpoints, and run optimization steps.
 +++
 `Intermediate`
 :::

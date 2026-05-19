@@ -39,6 +39,12 @@ Produces
 
 When the type a step expects to consume does not match the type the previous step produced, you must insert an explicit conversion step between the two.
 
+The packaged checkpoint conversion steps cover the common format bridges:
+
+- `convert/hf_to_megatron` converts `checkpoint_hf` to `checkpoint_megatron`.
+- `convert/megatron_to_hf` converts `checkpoint_megatron` to `checkpoint_hf`.
+- `convert/merge_lora` merges `checkpoint_lora` with its original base checkpoint and produces a standalone checkpoint.
+
 ## Common Training Paths
 
 The supervised fine-tuning paths in the Nemotron pipeline follow one of the following two chains.
@@ -49,7 +55,7 @@ The supervised fine-tuning paths in the Nemotron pipeline follow one of the foll
 A typical alignment path starts from a `checkpoint_megatron` policy, adds preference or reward-side data, runs one of the `rl/nemo_rl/...` steps, and produces a new `checkpoint_megatron`.
 
 A typical compression path starts from `checkpoint_hf`, runs `optimize/modelopt/quantize`, and produces `checkpoint_megatron`.
-Add a conversion step after quantization when the next consumer needs a Hugging Face layout again.
+Run `convert/megatron_to_hf` after quantization when the next consumer needs a Hugging Face layout again.
 
 ## Tokenizer and Chat Template Consistency
 
@@ -62,4 +68,5 @@ A mismatch often appears as a plausible training loss curve with poor downstream
 - [Nemotron Steps Basics](../../steps/basics.md) defines the concepts of *step*, *configuration*, *environment profile*, and *artifact*.
 - [Training Basics](basics.md) defines the training-specific terms, including tokenizers and chat templates.
 - [Data and Checkpoint Formats](../how-to/data-and-checkpoint-formats.md) describes the on-disk layouts of each artifact type.
+- [Convert Checkpoints Between Training Steps](../how-to/convert-checkpoints.md) gives command examples for the conversion steps.
 - [Training Libraries](training-libraries.md) describes the ecosystem of libraries that back the steps.

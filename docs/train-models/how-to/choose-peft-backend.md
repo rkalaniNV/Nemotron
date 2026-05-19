@@ -13,7 +13,7 @@ Parameter-efficient fine tuning (PEFT) in Nemotron is implemented as dedicated s
 
 1. If you have one to four graphics processing units (GPUs) and JSON Lines (JSONL) chat data, use `peft/automodel`.
 2. If you have eight or more GPUs, you already run Megatron packing, and you train adapters on a Megatron base, use `peft/megatron_bridge`.
-3. If deployment requires a merged Hugging Face model, plan `convert/merge_lora` after training. Add any Megatron to Hugging Face conversion step that your pipeline needs before merge. Adapter evaluation scores are not identical to merged model scores.
+3. If deployment requires a merged Hugging Face model, plan `convert/merge_lora` after training. Use `backend=hf_peft` for AutoModel adapters and `backend=megatron_bridge` for Megatron-Bridge adapters. Adapter evaluation scores are not identical to merged model scores.
 
 ## Sample Commands
 
@@ -33,3 +33,4 @@ The Megatron Bridge path needs compatible packed Parquet and a base `checkpoint_
 
 - [Choose an SFT Backend](choose-sft-backend.md)
 - [Data and Checkpoint Formats](data-and-checkpoint-formats.md)
+- [Convert Checkpoints Between Training Steps](convert-checkpoints.md)

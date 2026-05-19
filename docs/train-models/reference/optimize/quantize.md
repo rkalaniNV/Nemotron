@@ -14,7 +14,7 @@ content:
 
 This step runs post-training quantization (PTQ) on a Hugging Face (HF) format checkpoint by using NVIDIA Model Optimizer through NVIDIA Megatron-Bridge.
 The step supports every quantization recipe that the installed Megatron-Bridge quantization script accepts.
-The step produces a quantized Megatron distributed checkpoint that you can export back to Hugging Face format with the upstream `export.py` script.
+The step produces a quantized Megatron distributed checkpoint that you can export back to Hugging Face format with `convert/megatron_to_hf`.
 
 ## Syntax
 
@@ -55,7 +55,7 @@ $ nemotron steps run optimize/modelopt/quantize -c nvfp4
 | Direction | Artifact Type | Required | Description |
 | --- | --- | --- | --- |
 | Consumes | `checkpoint_hf` | Yes | A Hugging Face base or aligned checkpoint to quantize. |
-| Produces | `checkpoint_megatron` | — | A quantized Megatron distributed checkpoint. Export the artifact to Hugging Face format with `/opt/Megatron-Bridge/examples/quantization/export.py` when you need a deployable Hugging Face checkpoint. |
+| Produces | `checkpoint_megatron` | — | A quantized Megatron distributed checkpoint. Export the artifact to Hugging Face format with `convert/megatron_to_hf` when you need a deployable Hugging Face checkpoint. |
 
 ## Step Parameters
 
@@ -115,7 +115,7 @@ The manifest records three operator strategies for `optimize/modelopt/quantize`.
 
 - When the target hardware is Hopper or H100, start from `config/fp8.yaml` and set `args.export_quant_cfg=fp8`.
 - When the target hardware is Blackwell or B200, start from `config/nvfp4.yaml` and set `args.export_quant_cfg=nvfp4`.
-- When you need a Hugging Face checkpoint, export the produced Megatron checkpoint by using `/opt/Megatron-Bridge/examples/quantization/export.py` after the quantization run completes.
+- When you need a Hugging Face checkpoint, export the produced Megatron checkpoint with `convert/megatron_to_hf` after the quantization run completes.
 
 ## Command Examples
 
@@ -151,6 +151,7 @@ $ nemotron steps run optimize/modelopt/quantize -c nvfp4 -b slurm_optimize_model
 
 - [Nemotron Steps CLI Reference](../cli-reference.md) covers the shared option set, dotlist overrides, and passthrough arguments.
 - [Run Post-Training Optimization](../../how-to/run-optimization.md) explains the ordering of prune and distill, hardware targets, and quality recovery.
+- [convert/megatron_to_hf](../convert/megatron-to-hf.md) documents the packaged checkpoint export step.
 - [Operator Notes](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/optimize/modelopt/quantize/SKILL.md) collects per-recipe guidance.
 
 ### Upstream
