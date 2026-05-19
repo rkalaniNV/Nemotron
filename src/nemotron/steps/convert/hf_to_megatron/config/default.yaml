@@ -22,6 +22,6 @@
 hf_model_id: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
 megatron_path: ${oc.env:CONVERT_OUTPUT_DIR,${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/convert}/hf_to_megatron/megatron
 
-dtype: bfloat16
+torch_dtype: bfloat16
 device_map: null
 trust_remote_code: true

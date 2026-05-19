@@ -69,6 +69,30 @@ def test_hf_to_megatron_forwards_autobridge_args(monkeypatch: pytest.MonkeyPatch
     ]
 
 
+def test_hf_to_megatron_prefers_torch_dtype_over_deprecated_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict] = []
+    sentinel_dtype = object()
+
+    class FakeAutoBridge:
+        @staticmethod
+        def import_ckpt(**kwargs):
+            calls.append(kwargs)
+
+    _install_fake_megatron_bridge(monkeypatch, FakeAutoBridge)
+    monkeypatch.setattr(convert, "_torch_dtype", lambda name: sentinel_dtype if name == "float16" else name)
+
+    convert.import_hf_to_megatron(
+        {
+            "hf_model_id": "hf-source",
+            "megatron_path": "/tmp/megatron",
+            "dtype": "bfloat16",
+            "torch_dtype": "float16",
+        }
+    )
+
+    assert calls[0]["torch_dtype"] is sentinel_dtype
+
+
 def test_megatron_to_hf_prefers_hf_pretrained_export(monkeypatch: pytest.MonkeyPatch) -> None:
     from_hf_pretrained_calls: list[tuple] = []
     export_calls: list[dict] = []
@@ -159,6 +183,14 @@ def test_merge_backend_auto_uses_base_path_shape() -> None:
         convert._resolve_merge_backend({"backend": "auto", "base_megatron_path": "/tmp/base-megatron"})
         == "megatron_bridge"
     )
+
+
+@pytest.mark.parametrize("backend", ["hf", "peft", "megatron", "mbridge"])
+def test_merge_backend_hidden_aliases_are_rejected(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
+    monkeypatch.setattr(convert, "load_convert_config", lambda _default_config: {"backend": backend})
+
+    with pytest.raises(ValueError, match="auto, hf_peft, megatron_bridge"):
+        convert.run_merge_lora(Path("unused.yaml"))
 
 
 def test_hf_peft_adapter_path_resolves_nested_latest_checkpoint(tmp_path: Path) -> None:

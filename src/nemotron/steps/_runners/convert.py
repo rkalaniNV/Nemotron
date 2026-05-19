@@ -64,11 +64,11 @@ def run_merge_lora(default_config: Path) -> None:
     cfg = load_convert_config(default_config)
     backend = _resolve_merge_backend(cfg)
 
-    if backend in {"hf", "hf_peft", "peft"}:
+    if backend == "hf_peft":
         merge_hf_peft_lora(cfg)
         return
 
-    if backend in {"megatron", "megatron_bridge", "mbridge"}:
+    if backend == "megatron_bridge":
         merge_megatron_bridge_lora(cfg)
         return
 
@@ -76,7 +76,7 @@ def run_merge_lora(default_config: Path) -> None:
 
 
 def import_hf_to_megatron(cfg: Mapping[str, Any]) -> None:
-    dtype = cfg.get("dtype") or cfg.get("torch_dtype")
+    dtype = cfg.get("torch_dtype") or cfg.get("dtype")
     kwargs = {
         "hf_model_id": _required_str(cfg, "hf_model_id"),
         "megatron_path": _required_str(cfg, "megatron_path"),
