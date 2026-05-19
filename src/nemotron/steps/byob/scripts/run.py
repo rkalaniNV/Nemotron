@@ -52,7 +52,11 @@ def main() -> None:
     if stage is None:
         parser.error("--stage is required unless the config contains `stage`")
 
-    output_path = run_byob(config=args.config, stage=stage, family=family, skip_until=skip_until)
+    try:
+        output_path = run_byob(config=args.config, stage=stage, family=family, skip_until=skip_until)
+    except (AssertionError, ValueError) as exc:
+        parser.exit(2, f"error: {exc}\n")
+
     if output_path is not None:
         print(output_path)
 
