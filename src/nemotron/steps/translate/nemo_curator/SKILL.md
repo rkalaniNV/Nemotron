@@ -71,6 +71,8 @@ inline config in the response before optional file writes.
 ## Runtime Prerequisites
 
 - Runtime dependencies must include parser/config basics such as `toml` and `pyyaml`.
+- For local `uv run` execution, export `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` so
+  Ray workers reuse the synchronized project environment.
 - If an eval container misses these packages, report the environment blocker
   and still provide a complete handoff.
 - Do not end with blocker-only output when a command template and expected

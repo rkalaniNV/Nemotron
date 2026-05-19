@@ -31,7 +31,7 @@ It also matters for preference and tool-use data, where schema correctness — n
 
 A single git commit or single tagged directory is the cheapest way; a manifest file (`SDG_RUN.toml`) recording all six is the most auditable.
 
-**Always preview before scaling.** Run with `--preview` (or `tiny.yaml`) until the projection schema is right. The quality bugs that show up in 10 records become expensive at 10,000 records.
+**Always preview before scaling.** Run with `preview=true num_records=<small N>` (or `tiny.yaml`) until the projection schema is right. The quality bugs that show up in 10 records become expensive at 10,000 records.
 
 **Pin the output schema explicitly.** SFT data should project to OpenAI `messages` if downstream is `data_prep/sft_packing` or `sft/automodel`. DPO data must project to `{prompt, chosen, rejected}` for `data_prep/rl_prep` → `rl/nemo_rl/dpo`. Tool-use data uses `structured_messages` with `messages` + `tools`. Don't generate ambiguous schemas hoping a downstream consumer will untangle them.
 

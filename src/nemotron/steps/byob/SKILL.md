@@ -42,7 +42,7 @@ Use this skill to create or translate benchmark artifacts while keeping benchmar
 - Do not drop staged rows inline during translation reassembly. Filtering belongs after rows are restored.
 - Do not add a translation mode selector; BYOB translation always uses Curator experimental translation.
 - Keep semantic dedup as a two-step flow: compute embeddings first, then run KMeans, pairwise similarity, and duplicate identification.
-- Resume with `--skip-until` only when the expected cached parquet for the previous stage already exists.
+- Resume with `skip_until=<STAGE>` only when the expected cached parquet for the previous stage already exists.
 - Use deterministic seeds for sampling and distractor shuffling when comparing benchmark runs.
 
 ## Validate

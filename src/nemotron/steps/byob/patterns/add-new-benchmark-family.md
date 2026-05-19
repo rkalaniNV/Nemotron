@@ -5,7 +5,7 @@ tags: [byob, extensibility, benchmark]
 triggers:
   - Add GSM8K-style benchmark generation.
   - Extend BYOB beyond multiple-choice questions.
-steps: [byob]
+steps: [byob/mcq]
 confidence: high
 ---
 

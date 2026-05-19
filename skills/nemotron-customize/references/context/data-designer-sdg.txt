@@ -37,7 +37,6 @@ num_records: 1000
 seed_dataset:
   path: ${oc.env:PWD}/src/nemotron/steps/sdg/data_designer/data/sft_topic_seeds.jsonl
   strategy: shuffle           # shuffle | ordered
-  sampler_with_replacement: false
 
 models:
   - alias: nvidia-text
@@ -54,8 +53,8 @@ output_projection:
   type: openai_messages
 ```
 
-Use `--preview` for prompt/column iteration before generating at scale via
-`client.create()`.
+Use `preview=true num_records=<small N>` for prompt/column iteration before
+generating at scale via `client.create()`.
 
 Seed columns (e.g. `topic`) are added automatically when `seed_dataset` is
 set; reference them in prompts as `{{ topic }}` without declaring them
@@ -86,7 +85,7 @@ Generates multi-turn ecommerce support conversations with:
 Validation checks for tool-call data (run before SFT):
 
 - Every assistant tool call has a matching `tool_call_id`.
-- Tool arguments are JSON strings, **not** nested objects (OpenAI compatibility).
+- Tool arguments and tool-message content are JSON strings in the projected JSONL.
 - The final assistant answer reflects the tool response and any policy hint.
 - No markdown in fields meant as customer-support chat content.
 

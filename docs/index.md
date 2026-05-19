@@ -49,6 +49,53 @@ End-to-end applications: RAG agents, ML agents, and multi-agent systems.
 
 ::::
 
+## Customization Workflows
+
+Use the generic `nemotron steps run <step-id>` dispatcher for the customization
+steps documented here. The richer workflow docs below describe the same step
+contracts as the compact [Customization](customize/index.md) catalog.
+
+::::{grid} 1 2 2 2
+:gutter: 3
+
+:::{grid-item-card} Translation
+:link: translation/index
+:link-type: doc
+
+Translate JSONL or Parquet corpora with `translate/nemo_curator`, NeMo Curator
+backends, and optional FAITH quality scoring.
+:::
+
+:::{grid-item-card} Build MCQ Benchmarks
+:link: build-benchmarks/index
+:link-type: doc
+
+Generate and translate custom multiple-choice benchmarks with `byob/mcq`.
+:::
+
+:::{grid-item-card} Data Curation
+:link: curate/index
+:link-type: doc
+
+Filter JSONL text with `curate/nemo_curator` before translation or training data preparation.
+:::
+
+:::{grid-item-card} Synthetic Data Generation
+:link: sdg/index
+:link-type: doc
+
+Use `sdg/data_designer` to produce SFT, tool-use, and preference datasets.
+:::
+
+:::{grid-item-card} Model Evaluation
+:link: model-eval/index
+:link-type: doc
+
+Evaluate hosted endpoints or checkpoints with `eval/model_eval`.
+:::
+
+::::
+
 ## Available Training Recipes
 
 ::::{grid} 1 2 2 2
@@ -176,6 +223,85 @@ nemotron/artifacts.md
 :hidden:
 
 customize/index.md
+```
+
+```{toctree}
+:caption: Nemotron Step Basics
+:hidden:
+
+steps/index.md
+steps/basics.md
+steps/getting-started.md
+steps/airgap.md
+```
+
+```{toctree}
+:caption: Translation
+:hidden:
+
+translation/index.md
+translation/getting-started.md
+translation/using-skills.md
+translation/explanation/index.md
+translation/how-to/index.md
+translation/reference/index.md
+```
+
+```{toctree}
+:caption: Build MCQ Benchmarks
+:hidden:
+
+build-benchmarks/index.md
+build-benchmarks/getting-started.md
+build-benchmarks/explanation/index.md
+build-benchmarks/how-to/index.md
+build-benchmarks/reference/index.md
+```
+
+```{toctree}
+:caption: Data Curation
+:hidden:
+
+curate/index.md
+curate/getting-started.md
+curate/how-to/index.md
+curate/reference/index.md
+```
+
+```{toctree}
+:caption: Synthetic Data Generation
+:hidden:
+
+sdg/index.md
+sdg/getting-started.md
+sdg/using-skills.md
+sdg/how-to/index.md
+sdg/reference/index.md
+```
+
+```{toctree}
+:caption: Model Training
+:hidden:
+
+train-models/index.md
+train-models/getting-started.md
+train-models/using-skill.md
+train-models/explanation/index.md
+train-models/tutorials/index.md
+train-models/how-to/index.md
+train-models/reference/index.md
+```
+
+```{toctree}
+:caption: Model Evaluation
+:hidden:
+
+model-eval/index.md
+model-eval/getting-started.md
+model-eval/using-skills.md
+model-eval/explanation/index.md
+model-eval/how-to/index.md
+model-eval/reference/index.md
 ```
 
 ```{toctree}

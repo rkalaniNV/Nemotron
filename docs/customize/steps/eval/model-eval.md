@@ -17,7 +17,7 @@
 :caption: config/default.yaml
 ```
 
-```{literalinclude} ../../../../src/nemotron/steps/eval/model_eval/config/tiny.yaml
+```{literalinclude} ../../../../src/nemotron/steps/eval/model_eval/config/tiny_chat.yaml
 :language: yaml
-:caption: config/tiny.yaml
+:caption: config/tiny_chat.yaml
 ```
