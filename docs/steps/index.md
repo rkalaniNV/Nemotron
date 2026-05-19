@@ -74,11 +74,11 @@ Backed by the `translate/nemo_curator` step.
 :::
 
 :::{grid-item-card} Data Curation and Preparation
-:link: basics
+:link: ../curate/index
 :link-type: doc
 
 Filter raw text with `curate/nemo_curator`, then tokenize and shard it with the `data_prep/pretrain_prep`, `data_prep/sft_packing`, and `data_prep/rl_prep` steps.
-See the Basics page for how these steps feed the training steps.
+Use the curation docs for JSONL filtering and the training docs for data preparation.
 :::
 
 ::::
@@ -147,6 +147,7 @@ The Basics page covers profiles and the `env/env_toml` step in detail.
 | Learn what a step, configuration, and profile are | [Nemotron Steps Basics](basics.md) |
 | List the available steps from the CLI | [Getting Started With Steps](getting-started.md) |
 | Run steps in an airgap environment | [Airgap](airgap.md) |
+| Curate JSONL text | [Data Curation](../curate/index.md) |
 | Generate synthetic training data | [Synthetic Data Generation](../sdg/index.md) |
 | Translate a corpus | [Translation](../translation/index.md) |
 | Build an MCQ benchmark | [Build MCQ Benchmarks](../build-benchmarks/index.md) |

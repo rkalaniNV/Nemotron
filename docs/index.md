@@ -73,6 +73,13 @@ backends, and optional FAITH quality scoring.
 Generate and translate custom multiple-choice benchmarks with `byob/mcq`.
 :::
 
+:::{grid-item-card} Data Curation
+:link: curate/index
+:link-type: doc
+
+Filter JSONL text with `curate/nemo_curator` before translation or training data preparation.
+:::
+
 :::{grid-item-card} Synthetic Data Generation
 :link: sdg/index
 :link-type: doc
@@ -249,6 +256,16 @@ build-benchmarks/getting-started.md
 build-benchmarks/explanation/index.md
 build-benchmarks/how-to/index.md
 build-benchmarks/reference/index.md
+```
+
+```{toctree}
+:caption: Data Curation
+:hidden:
+
+curate/index.md
+curate/getting-started.md
+curate/how-to/index.md
+curate/reference/index.md
 ```
 
 ```{toctree}
