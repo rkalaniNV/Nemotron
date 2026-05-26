@@ -22,12 +22,17 @@ Install translation dependencies before running locally:
 
 ```bash
 uv sync --extra translate
+export RAY_ENABLE_UV_RUN_RUNTIME_ENV=0
 ```
+
+Set `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` for local Curator/Ray translation runs so
+Ray workers use the same installed project environment as the driver process.
 
 If a QA environment needs BYOB and SDG in the same run:
 
 ```bash
 uv sync --extra translate --extra byob --extra data-sdg --group run
+export RAY_ENABLE_UV_RUN_RUNTIME_ENV=0
 ```
 
 For package-resource validation, confirm Curator prompt files are visible from the installed environment:

@@ -60,6 +60,7 @@ inline config in the response before optional file writes.
 
 ## Validate
 
+- Local Curator/Ray setup: after `uv sync --extra translate`, export `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` before translation commands.
 - Import check: `uv run --no-sync python -c "from nemo_curator.stages.text.experimental.translation import TranslationStage; print(TranslationStage)"`.
 - Prompt resource check: verify `translate.yaml` and `faith_eval.yaml` exist under `nemo_curator.stages.text.experimental.translation.prompts`.
 - LLM smoke: translate two plain-text JSONL rows with `faith_eval.enabled=false`.
@@ -71,6 +72,7 @@ inline config in the response before optional file writes.
 ## Runtime Prerequisites
 
 - Runtime dependencies must include parser/config basics such as `toml` and `pyyaml`.
+- Local Ray workers should inherit the project environment; set `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` before local Curator-backed translation runs.
 - If an eval container misses these packages, report the environment blocker
   and still provide a complete handoff.
 - Do not end with blocker-only output when a command template and expected

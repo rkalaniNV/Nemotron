@@ -57,7 +57,7 @@ models:
   - alias: nvidia-text
     model: openai/gpt-oss-20b
     provider: nvidia
-    skip_health_check: true
+    skip_health_check: false
     inference_parameters:
       temperature: 0.75
       top_p: 0.95

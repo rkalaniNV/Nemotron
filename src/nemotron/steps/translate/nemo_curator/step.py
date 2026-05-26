@@ -51,6 +51,13 @@ def _required_path(config: dict[str, Any], key: str) -> str:
     return str(value)
 
 
+def _required_value(config: dict[str, Any], key: str) -> str:
+    value = str(config.get(key) or "").strip()
+    if not value or value == "???":
+        raise ValueError(f"{key} is required")
+    return value
+
+
 def _infer_local_dir_format(input_path: Path) -> str:
     has_jsonl = any(input_path.glob("*.jsonl"))
     has_parquet = any(input_path.glob("*.parquet"))
@@ -196,6 +203,9 @@ def _text_field(value: Any) -> str | list[str]:
 
 
 def _build_translation_stage(config: dict[str, Any]) -> Any:
+    source_lang = _required_value(config, "source_language").lower()
+    target_lang = _required_value(config, "target_language").lower()
+
     from nemo_curator.stages.text.experimental.translation import TranslationStage
 
     faith_cfg = config.get("faith_eval", {}) or {}
@@ -203,8 +213,8 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
     server = config.get("server", {}) or {}
 
     stage = TranslationStage(
-        source_lang=str(config["source_language"]).lower(),
-        target_lang=str(config["target_language"]).lower(),
+        source_lang=source_lang,
+        target_lang=target_lang,
         text_field=_text_field(config.get("text_field", "messages.*.content")),
         output_field=str(config.get("output_field", "translated_text")),
         segmentation_mode=str(config.get("segmentation_mode", "coarse")),

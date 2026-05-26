@@ -21,7 +21,7 @@ models:
   - alias: nvidia-text
     model: nvidia/nemotron-3-nano-30b-a3b
     provider: nvidia
-    skip_health_check: true
+    skip_health_check: false
     inference_parameters:
       temperature: 0.8
       top_p: 1.0

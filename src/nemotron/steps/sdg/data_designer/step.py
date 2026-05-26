@@ -371,6 +371,7 @@ def main() -> None:
     build_columns(builder, columns, dd)
 
     client = DataDesigner(model_providers=build_model_providers(cfg, dd))
+    client.validate(builder)
 
     if cfg.get("preview", False):
         result = client.preview(builder, num_records=cfg["num_records"])

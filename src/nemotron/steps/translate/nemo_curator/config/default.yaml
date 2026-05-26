@@ -9,8 +9,8 @@ input_path: /path/to/filtered_data.jsonl
 output_dir: ./output/translated
 
 # Required. Ask the user; do not infer silently.
-source_language: ""
-target_language: ""
+source_language: ???
+target_language: ???
 
 input_format: auto        # auto | jsonl | parquet
 output_format: jsonl      # jsonl | parquet

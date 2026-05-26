@@ -10,12 +10,13 @@ Use this skill when a user wants to translate corpus data, chat records, or row-
 ## Default Workflow
 
 1. Install runtime dependencies with `uv sync --extra translate`.
-2. Read [`nemo_curator/step.toml`](nemo_curator/step.toml) for the step contract.
-3. Ask for `source_language`, `target_language`, input path, output path, backend, and field path. Do not infer source or target language silently.
-4. For downstream training data, start with `output_mode=replaced`, `merge_scores=false`, and `faith_eval.enabled=false`.
-5. For audit or quality review, use `output_mode=both` and enable `faith_eval`.
-6. Run a two-row smoke test before a large corpus.
-7. Validate row count, schema, translated field content, and that secrets were not printed.
+2. For local Curator/Ray runs, set `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` before running translation commands so Ray workers use the installed project environment.
+3. Read [`nemo_curator/step.toml`](nemo_curator/step.toml) for the step contract.
+4. Ask for `source_language`, `target_language`, input path, output path, backend, and field path. Do not infer source or target language silently.
+5. For downstream training data, start with `output_mode=replaced`, `merge_scores=false`, and `faith_eval.enabled=false`.
+6. For audit or quality review, use `output_mode=both` and enable `faith_eval`.
+7. Run a two-row smoke test before a large corpus.
+8. Validate row count, schema, translated field content, and that secrets were not printed.
 
 For one-shot translation requests, do not end in exploration mode. Provide the
 minimal runnable handoff first:
@@ -132,7 +133,9 @@ uv run --no-sync nemotron steps run translate/nemo_curator \
 - CLI mismatch or unexpected-argument errors: return to the documented command
   shape in this file and confirm supported flags with `--help`; do not invent
   alternate subcommands.
-- Missing translation dependencies: run `uv sync --extra translate` first.
+- Missing translation dependencies: run `uv sync --extra translate` first and
+  export `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` before local Curator/Ray translation
+  commands.
   If an eval/runtime environment still misses basics such as `toml` or
   `pyyaml`, report the blocker and still provide the runnable handoff.
 - Mixed `.jsonl` and `.parquet` roots: bind `input_path` to one format only and

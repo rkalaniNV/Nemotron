@@ -16,7 +16,7 @@ translation_model_config:
     alias: gpt-oss-120b
     model: openai/gpt-oss-120b
     provider: nvidia
-    api_key_env: NGC_API_KEY
+    api_key_env: NVIDIA_API_KEY
     base_url: https://integrate.api.nvidia.com/v1
     inference_parameters:
       max_tokens: 16000
