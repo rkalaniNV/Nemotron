@@ -300,6 +300,7 @@ sections:
     nodes: 4
     env_vars:
       RL_OUTPUT_DIR: /workspace/output/rl/rlhf
+      RL_PREP_MANIFEST: /workspace/output/data_prep/rl_prep/manifest.json
 
   # optimize/modelopt/quantize: switch to the ModelOpt-capable NeMo image.
   dgxcloud_optimize_modelopt_quantize:

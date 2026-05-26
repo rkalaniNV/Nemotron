@@ -329,6 +329,7 @@ sections:
     nodes: 4
     env_vars:
       RL_OUTPUT_DIR: /lustre/${oc.env:USER}/output/rl/rlhf
+      RL_PREP_MANIFEST: /lustre/${oc.env:USER}/output/data_prep/rl_prep/manifest.json
 
   # optimize/modelopt/quantize: switch to the ModelOpt-capable NeMo image.
   slurm_optimize_modelopt_quantize:

@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Tiny SFT for the 2-node slurm_sft profile.
+# Tiny SFT for a remote cluster profile, for example `--run YOUR-CLUSTER`.
 # Pulls base weights from HuggingFace via AutoBridge so no pre-existing
 # Megatron checkpoint is required. Uses the packed_parquet shards produced by
-# `nemotron steps run data_prep/sft_packing -c tiny -r slurm_prep_sft_packing`.
+# `nemotron steps run data_prep/sft_packing -c tiny --run YOUR-CLUSTER`.
 #
 # Note: dataset paths are explicit (Megatron-Bridge's vanilla schema). This
 # step is generic — recipe-specific dir shortcuts live in recipes/, not here.
@@ -58,9 +58,9 @@ dataset:
   seq_length: 4096
   packed_sequence_specs:
     packed_sequence_size: 4096
-    packed_train_data_path: ${oc.env:SFT_PACKED_DIR,/mnt/lustre-shared/output/functional/data_prep/sft_packing/tiny/splits/train}
+    packed_train_data_path: ${oc.env:SFT_PACKED_DIR,./output/data_prep/sft_packing/tiny/splits/train}
     # No validation shards from sample=1000 run; uncomment when valid/ exists.
-    # packed_val_data_path: ${oc.env:SFT_PACKED_VAL_DIR,/mnt/lustre-shared/output/functional/data_prep/sft_packing/tiny/splits/valid}
+    # packed_val_data_path: ${oc.env:SFT_PACKED_VAL_DIR,./output/data_prep/sft_packing/tiny/splits/valid}
 
 train:
   train_iters: 10

@@ -309,6 +309,7 @@ sections:
     nodes: 4
     env_vars:
       RL_OUTPUT_DIR: /mnt/lustre-shared/output/rl/rlhf
+      RL_PREP_MANIFEST: /mnt/lustre-shared/output/data_prep/rl_prep/manifest.json
 
   # optimize/modelopt/quantize: ModelOpt runs against the NeMo image where ModelOpt examples work.
   lepton_optimize_modelopt_quantize:

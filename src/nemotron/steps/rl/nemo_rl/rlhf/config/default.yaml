@@ -295,7 +295,7 @@ env:
           uses_reasoning_parser: false
           return_token_id_information: false
           supports_principle_role: true
-          hf_home: ${oc.env:HF_HOME,/mnt/lustre-shared/hf}
+          hf_home: ${oc.env:HF_HOME,${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/hf}
           vllm_serve_env_vars:
             VLLM_RAY_DP_PACK_STRATEGY: strict
           vllm_serve_kwargs:

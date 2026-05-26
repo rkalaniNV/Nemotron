@@ -38,7 +38,7 @@ model:
   recompute_num_layers: 1
 
 dataset:
-  data_paths: ${oc.env:PRETRAIN_BLEND_PATH,/mnt/lustre-shared/output/functional/data_prep/pretrain_prep/tiny/blend.json}
+  data_paths: ${oc.env:PRETRAIN_BLEND_PATH,./output/data_prep/pretrain_prep/tiny/blend.json}
   seq_length: 4096
 
 train:

@@ -18,12 +18,11 @@
 #
 # Usage:
 #   nemotron steps run data_prep/sft_packing -c tiny                          # local
-#   nemotron steps run data_prep/sft_packing -c tiny -r slurm_prep_sft_packing
-#   nemotron steps run data_prep/sft_packing -c tiny -r lepton_prep_sft_packing
+#   nemotron steps run data_prep/sft_packing -c tiny --run YOUR-CLUSTER
 
 # blend_path is omitted on purpose — step.py defaults to the in-step
 # data/blend_tiny.json so the same config works under any source layout
-# (local, /nemo_run/code on slurm, /mnt/lustre-shared/_nemotron on lepton).
+# (local checkout or remote executor working directory).
 output_dir: ${oc.env:SFT_OUTPUT_DIR,./output/data_prep/sft_packing/tiny}
 
 tokenizer:

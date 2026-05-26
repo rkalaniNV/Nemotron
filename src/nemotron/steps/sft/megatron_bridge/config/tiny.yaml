@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Tiny SFT for the 2-node lepton_sft_megatron_bridge profile.
-# Points at lepton's lustre-shared mount by default.
+# Tiny SFT for a remote cluster profile, for example `--run YOUR-CLUSTER`.
 # Pulls base weights from HuggingFace via AutoBridge so no pre-existing
 # Megatron checkpoint is required. Uses the packed_parquet shards produced by
-# `nemotron steps run data_prep/sft_packing -c tiny -r lepton_prep_sft_packing`.
+# `nemotron steps run data_prep/sft_packing -c tiny --run YOUR-CLUSTER`.
 
 # Override the container's stale Megatron-Bridge with a branch that supports
 # packed-parquet specs.
@@ -45,7 +44,7 @@ dataset:
     # Canonical splits/ layout produced by step.py's
     # realize_packed_shards_into_split_dirs() post-processing — sits at the
     # SFT_OUTPUT_DIR root (the pipeline manages sample-N internally).
-    packed_train_data_path: ${oc.env:SFT_PACKED_DIR,/mnt/lustre-shared/output/functional/data_prep/sft_packing/tiny/splits/train/*.parquet}
+    packed_train_data_path: ${oc.env:SFT_PACKED_DIR,./output/data_prep/sft_packing/tiny/splits/train/*.parquet}
 
 train:
   train_iters: 10

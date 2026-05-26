@@ -61,9 +61,9 @@ hf_load:
 
 checkpoint_patch:
   # Megatron-Core's torch_dist strategy uses multiprocessing.Manager().Queue()
-  # inside filesystem_async.py even for synchronous saves. On Lepton this can
-  # die with EOFError while saving PEFT adapter checkpoints. Use a plain
-  # spawn-context Queue for the same rank-local write-result handoff.
+  # inside filesystem_async.py even for synchronous saves. On some remote
+  # filesystems this can die with EOFError while saving PEFT adapter checkpoints.
+  # Use a plain spawn-context Queue for the same rank-local write-result handoff.
   use_spawn_queue_for_torch_dist: true
 
 logger:

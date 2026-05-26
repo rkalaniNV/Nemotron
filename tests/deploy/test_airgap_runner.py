@@ -140,19 +140,33 @@ def test_airgap_runner_maps_sdg_to_light_sdk_image(tmp_path):
     assert "data_designer" in groups[0].required_imports
 
 
-def test_airgap_runner_maps_byob_to_data_designer_image(tmp_path):
+def test_airgap_runner_maps_byob_mcq_to_data_designer_image(tmp_path):
     runner = _runner_module()
     cfg = runner.load_yaml(runner.AIRGAP_DIR / "airgap.yaml")
-    cfg["workflow"]["stages"] = ["byob:tiny"]
+    cfg["workflow"]["stages"] = ["byob/mcq:tiny"]
 
     targets = runner.expand_targets(cfg)
     infos = runner.validate_targets(targets)
     groups = runner.execution_groups(cfg, output_dir=tmp_path, step_infos=infos)
 
-    assert [target.spec for target in targets] == ["byob:tiny"]
+    assert [target.spec for target in targets] == ["byob/mcq:tiny"]
     assert len(groups) == 1
     assert groups[0].name.startswith("nemo-data-designer-")
     assert "data_designer" in groups[0].required_imports
+
+
+def test_airgap_runner_maps_translate_nemo_curator_to_curator_image(tmp_path):
+    runner = _runner_module()
+    cfg = runner.load_yaml(runner.AIRGAP_DIR / "airgap.yaml")
+    cfg["workflow"]["stages"] = ["translate/nemo_curator:default"]
+
+    targets = runner.expand_targets(cfg)
+    infos = runner.validate_targets(targets)
+    groups = runner.execution_groups(cfg, output_dir=tmp_path, step_infos=infos)
+
+    assert [target.spec for target in targets] == ["translate/nemo_curator:default"]
+    assert len(groups) == 1
+    assert groups[0].name.startswith("nemo-curator-")
 
 
 def test_airgap_runner_target_override_selects_sdg_and_sft():
@@ -322,7 +336,7 @@ def test_airgap_runner_platform_matching_accepts_variant_only_when_compatible():
 
 def test_airgap_runner_progress_state_resumes_and_completes(tmp_path):
     runner = _runner_module()
-    cfg = {"workflow": {"stages": ["byob:tiny"]}}
+    cfg = {"workflow": {"stages": ["byob/mcq:tiny"]}}
     config_path = tmp_path / "airgap.yaml"
     stages = ["validate"]
 
@@ -338,7 +352,7 @@ def test_airgap_runner_progress_state_resumes_and_completes(tmp_path):
     assert state.path.exists()
     assert not state.done_path.exists()
 
-    runner.complete_action(state, "validate", {"targets": ["byob:tiny"]})
+    runner.complete_action(state, "validate", {"targets": ["byob/mcq:tiny"]})
     resumed = runner.load_or_start_run_state(
         tmp_path,
         config_path=config_path,

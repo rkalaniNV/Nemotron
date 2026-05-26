@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Tiny DPO smoke test on the 2-node lepton_rl profile.
+# Tiny DPO smoke test for a remote cluster profile, for example `--run YOUR-CLUSTER`.
 #
 # Mirrors the structure of upstream /opt/nemo-rl/examples/configs/dpo.yaml
 # (every block nemo-rl reads without ``.get()`` defaults must exist), with
@@ -23,7 +23,7 @@
 #   - dataset = a HF preference set via BinaryPreferenceDataset.
 #
 # Usage:
-#   nemotron steps run rl/nemo_rl/dpo -c tiny -r lepton_rl
+#   nemotron steps run rl/nemo_rl/dpo -c tiny --run YOUR-CLUSTER
 
 dpo:
   max_num_epochs: 1
@@ -148,8 +148,8 @@ logger:
 cluster:
   # 1×8 sidesteps a v0.4.0 issue where ``RayWorkerGroup`` worker actors
   # crash silently during their per-actor ``runtime_env`` venv build on
-  # multi-pod Lepton RayClusters (raylet logs show only "workers not
-  # registered within the timeout"). Bump to multi-node once the upstream
+  # some multi-node Ray clusters (raylet logs show only "workers not registered
+  # within the timeout"). Bump to multi-node once the upstream
   # path is confirmed working.
   gpus_per_node: 8
   num_nodes: 2

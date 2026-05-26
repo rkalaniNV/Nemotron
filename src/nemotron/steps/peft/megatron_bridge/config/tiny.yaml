@@ -27,7 +27,7 @@ run:
 dataset:
   packed_sequence_specs:
     packed_sequence_size: 4096
-    packed_train_data_path: ${oc.env:SFT_PACKED_DIR,/mnt/lustre-shared/output/functional/data_prep/sft_packing/tiny/splits/train/*.parquet}
+    packed_train_data_path: ${oc.env:SFT_PACKED_DIR,./output/data_prep/sft_packing/tiny/splits/train/*.parquet}
 
 train:
   train_iters: 5
@@ -61,4 +61,4 @@ checkpoint:
   fully_parallel_save: false
   save_optim: false
   save_rng: false
-  pretrained_checkpoint: ${oc.env:MEGATRON_PRETRAINED_CHECKPOINT,/mnt/lustre-shared/output/functional/sft/megatron_bridge/tiny/sft-tiny-2node}
+  pretrained_checkpoint: ${oc.env:MEGATRON_PRETRAINED_CHECKPOINT,./output/sft/megatron_bridge/tiny/sft-tiny-2node}
