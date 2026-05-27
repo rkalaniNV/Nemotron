@@ -14,8 +14,8 @@ custom algorithm code.
 ## In-repo references (read these first)
 
 - Manifests:    `src/nemotron/steps/optimize/modelopt/<algo>/step.toml`
-- Per-step SKILL: `src/nemotron/steps/optimize/modelopt/<algo>/SKILL.md`
-- Category SKILL: `src/nemotron/steps/optimize/modelopt/SKILL.md`
+- Per-step README: `src/nemotron/steps/optimize/modelopt/<algo>/README.md`
+- Category README: `src/nemotron/steps/optimize/modelopt/README.md`
 - Shared runner: `src/nemotron/steps/_runners/modelopt.py`
 - Configs:      `src/nemotron/steps/optimize/modelopt/<algo>/config/default.yaml`
                 + `tiny.yaml`; quantize also ships `fp8.yaml` and `nvfp4.yaml`.

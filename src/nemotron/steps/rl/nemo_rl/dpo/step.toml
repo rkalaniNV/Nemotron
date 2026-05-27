@@ -77,6 +77,6 @@ name = "reference_policy_mismatch"
 recovery = "Keep the reference policy aligned with the SFT policy checkpoint, tokenizer, and chat template."
 
 [reference]
-skill = "src/nemotron/steps/rl/nemo_rl/dpo/SKILL.md"
+skill = "src/nemotron/steps/rl/nemo_rl/dpo/README.md"
 script = "https://github.com/NVIDIA-NeMo/RL/blob/main/examples/run_dpo.py"
 skills = ["skills/nemotron-customize/references/context/nemo-rl-alignment.txt"]

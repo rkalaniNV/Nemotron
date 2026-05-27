@@ -13,11 +13,11 @@ proven, not before.
 
 | Need | Step | Input | Output |
 |---|---|---|---|
-| FP8 (Hopper/H100) or NVFP4 (Blackwell/B200) post-training quantization | [`optimize/modelopt/quantize`](modelopt/quantize/SKILL.md) | `checkpoint_hf` | `checkpoint_megatron` |
-| Structured architecture pruning (Minitron-style search or fixed export) | [`optimize/modelopt/prune`](modelopt/prune/SKILL.md) | `checkpoint_hf` | `checkpoint_hf` |
-| Teacher-student quality transfer (often after pruning or quantization) | [`optimize/modelopt/distill`](modelopt/distill/SKILL.md) | `checkpoint_hf` (teacher + student) + optional `binidx` | `checkpoint_megatron` |
+| FP8 (Hopper/H100) or NVFP4 (Blackwell/B200) post-training quantization | [`optimize/modelopt/quantize`](modelopt/quantize/README.md) | `checkpoint_hf` | `checkpoint_megatron` |
+| Structured architecture pruning (Minitron-style search or fixed export) | [`optimize/modelopt/prune`](modelopt/prune/README.md) | `checkpoint_hf` | `checkpoint_hf` |
+| Teacher-student quality transfer (often after pruning or quantization) | [`optimize/modelopt/distill`](modelopt/distill/README.md) | `checkpoint_hf` (teacher + student) + optional `binidx` | `checkpoint_megatron` |
 
-The umbrella subcategory [`optimize/modelopt/`](modelopt/SKILL.md) ties the
+The umbrella subcategory [`optimize/modelopt/`](modelopt/README.md) ties the
 three together.
 
 ## Decision tree
@@ -82,7 +82,7 @@ uv run nemotron steps run optimize/modelopt/distill -c tiny --dry-run    # uses 
 - Preserve the full-precision (BF16) source checkpoint and its eval results.
   You'll need them as the teacher if recovery is required.
 - For Mamba/MoE models, check tensor-parallel divisibility before launching
-  (per-step SKILL covers the specific knobs).
+  (per-step README covers the specific knobs).
 - Distill after pruning, not the other way around — pruning before
   distillation lets the student inherit the smaller architecture; distillation
   before pruning wastes the teacher signal on a soon-to-shrink student.

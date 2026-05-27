@@ -79,7 +79,7 @@ name = "unsupported_scheduler_kwargs"
 recovery = "Use lr_scheduler.lr_decay_style and min_lr with containers whose OptimizerParamScheduler does not accept warmup_steps."
 
 [reference]
-skill = "src/nemotron/steps/pretrain/automodel/SKILL.md"
+skill = "src/nemotron/steps/pretrain/automodel/README.md"
 repo = "https://github.com/NVIDIA-NeMo/Automodel"
 readme = "https://github.com/NVIDIA-NeMo/Automodel/blob/main/README.md"
 docs = "https://docs.nvidia.com/nemo/automodel/latest/index.html"

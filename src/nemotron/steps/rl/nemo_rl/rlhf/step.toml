@@ -96,6 +96,6 @@ name = "train_used_as_validation_unintentionally"
 recovery = "Provide a real validation path unless the run is explicitly non-evaluative and documented as such."
 
 [reference]
-skill = "src/nemotron/steps/rl/nemo_rl/rlhf/SKILL.md"
+skill = "src/nemotron/steps/rl/nemo_rl/rlhf/README.md"
 script = "https://github.com/NVIDIA-NeMo/Nemotron/tree/main/src/nemotron/recipes/super3/stage2_rl/stage3_rlhf"
 skills = ["skills/nemotron-customize/references/context/nemo-rl-alignment.txt"]

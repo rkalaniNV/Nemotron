@@ -91,7 +91,7 @@ name = "translation_row_count_drift"
 recovery = "Translated outputs should preserve row count unless remove_low_quality is intentionally enabled; inspect quality cache before filtering."
 
 [reference]
-skill = "src/nemotron/steps/byob/SKILL.md"
+skill = "src/nemotron/steps/byob/README.md"
 contract = "src/nemotron/steps/byob/references/STEP.md"
 script = "src/nemotron/steps/byob/mcq/step.py"
 default_config = "src/nemotron/steps/byob/mcq/config/default.yaml"

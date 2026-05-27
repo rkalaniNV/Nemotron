@@ -117,7 +117,7 @@ name = "bad_loss_masks_or_template"
 recovery = "Inspect packed records from data_prep/sft_packing before training; prompt/template bugs often look like poor SFT quality."
 
 [reference]
-skill = "src/nemotron/steps/sft/megatron_bridge/SKILL.md"
+skill = "src/nemotron/steps/sft/megatron_bridge/README.md"
 recipe = "src/nemotron/recipes/nano3/stage1_sft/"
 config = "src/nemotron/recipes/nano3/stage1_sft/config/default.yaml"
 script = "src/nemotron/recipes/nano3/stage1_sft/train.py"

@@ -96,6 +96,6 @@ name = "reward_function_not_validated"
 recovery = "Run the verifier or resource-server reward path on sample rollouts before increasing rollout count or GPUs."
 
 [reference]
-skill = "src/nemotron/steps/rl/nemo_rl/rlvr/SKILL.md"
+skill = "src/nemotron/steps/rl/nemo_rl/rlvr/README.md"
 script = "https://github.com/NVIDIA-NeMo/RL/blob/main/examples/run_grpo.py"
 skills = ["skills/nemotron-customize/references/context/nemo-rl-alignment.txt"]

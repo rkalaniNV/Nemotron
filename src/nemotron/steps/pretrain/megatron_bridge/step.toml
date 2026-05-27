@@ -81,7 +81,7 @@ name = "transformer_engine_userbuffer_failure"
 recovery = "If CUDA multicast is unavailable, set UB_SKIPMC=1 in run.env.env_vars before Bridge initialization."
 
 [reference]
-skill = "src/nemotron/steps/pretrain/megatron_bridge/SKILL.md"
+skill = "src/nemotron/steps/pretrain/megatron_bridge/README.md"
 repo = "https://github.com/NVIDIA-NeMo/Megatron-Bridge"
 readme = "https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/README.md"
 docs = "https://docs.nvidia.com/nemo/megatron-bridge/latest/"

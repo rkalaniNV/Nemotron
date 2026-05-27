@@ -14,9 +14,9 @@ runner at [../../_runners/modelopt.py](../../_runners/modelopt.py).
 
 | Step | Verb | Output |
 |---|---|---|
-| [`quantize`](quantize/SKILL.md) | Change numeric format (FP8 / NVFP4 / INT-AWQ) | `checkpoint_megatron` |
-| [`prune`](prune/SKILL.md) | Change architecture (Minitron search or fixed export) | `checkpoint_hf` |
-| [`distill`](distill/SKILL.md) | Transfer behavior from teacher to student | `checkpoint_megatron` |
+| [`quantize`](quantize/README.md) | Change numeric format (FP8 / NVFP4 / INT-AWQ) | `checkpoint_megatron` |
+| [`prune`](prune/README.md) | Change architecture (Minitron search or fixed export) | `checkpoint_hf` |
+| [`distill`](distill/README.md) | Transfer behavior from teacher to student | `checkpoint_megatron` |
 
 ## Compose order
 

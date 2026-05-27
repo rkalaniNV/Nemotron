@@ -95,7 +95,7 @@ name = "tiny_calibration_used_as_quality_signal"
 recovery = "Treat tiny calibration runs as launch validation only. Re-run with representative calibration data before evaluating quality."
 
 [reference]
-skill = "src/nemotron/steps/optimize/modelopt/quantize/SKILL.md"
+skill = "src/nemotron/steps/optimize/modelopt/quantize/README.md"
 nemotron_quantization = "https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/super3/quantization.md"
 modelopt_repo = "https://github.com/NVIDIA/Model-Optimizer"
 modelopt_readme = "https://github.com/NVIDIA/Model-Optimizer/blob/main/README.md"

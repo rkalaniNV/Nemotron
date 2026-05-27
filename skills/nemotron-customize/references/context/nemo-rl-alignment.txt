@@ -12,8 +12,8 @@ Generated projects expose clear config files, not Python switches.
 ## In-repo references (read these first)
 
 - Manifests:    `src/nemotron/steps/rl/nemo_rl/<algo>/step.toml`
-- Per-step SKILL: `src/nemotron/steps/rl/nemo_rl/<algo>/SKILL.md`
-- Category SKILL: `src/nemotron/steps/rl/nemo_rl/SKILL.md`
+- Per-step README: `src/nemotron/steps/rl/nemo_rl/<algo>/README.md`
+- Category README: `src/nemotron/steps/rl/nemo_rl/README.md`
 - Shared runner: `src/nemotron/steps/_runners/nemo_rl.py`
 - NeMo-Gym GRPO runner (when `env.should_use_nemo_gym=true`): `src/nemotron/steps/_runners/nemo_rl_grpo_nemo_gym.py`
 

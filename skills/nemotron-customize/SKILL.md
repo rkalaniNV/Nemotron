@@ -50,7 +50,7 @@ Priority order:
 3. Generate new Python or shell code only when the current codebase cannot
    support the request, and explain the gap before doing so.
 
-When you need to know what a step does, read its `step.toml` and `SKILL.md`.
+When you need to know what a step does, read its `step.toml` and `README.md`.
 When you need to know whether a chain is sound, read the patterns it cites.
 When you need to configure a stage, read `step.py` + the runner + existing
 configs to learn the supported YAML shape. Read context packs only if new code
@@ -66,8 +66,8 @@ Do not guess `--batch` profiles from examples or naming conventions.
 | Question | Look here |
 |---|---|
 | What does step X consume / produce / parameterize? | `src/nemotron/steps/<cat>/<X>/step.toml` |
-| When/why pick step X over its siblings? | `src/nemotron/steps/<cat>/<X>/SKILL.md` |
-| Which step in category C should I pick? | `src/nemotron/steps/<cat>/SKILL.md` |
+| When/why pick step X over its siblings? | `src/nemotron/steps/<cat>/<X>/README.md` |
+| Which step in category C should I pick? | `src/nemotron/steps/<cat>/README.md` |
 | What runner code does step X use? | `src/nemotron/steps/<cat>/<X>/step.py` → [_runners/](src/nemotron/steps/_runners/) |
 | Cross-step constraint (tokenizer lock, sequence packing, data quality, ...) | `src/nemotron/steps/patterns/<id>.md` |
 | Artifact compatibility / `is_a` hierarchy | [src/nemotron/steps/types.toml](src/nemotron/steps/types.toml) |
@@ -77,7 +77,7 @@ Do not guess `--batch` profiles from examples or naming conventions.
 | Per-stage code rules, only when repo code cannot support the request | [references/act/STAGE.md](skills/nemotron-customize/references/act/STAGE.md) |
 
 If two sources say the same thing, the **deeper, more specific** one wins
-(`step.toml` > category `SKILL.md` > this file).
+(`step.toml` > category `README.md` > this file).
 
 ---
 
@@ -113,7 +113,7 @@ pipeline workflow:
    config/profile choices.
 
 For translation-only command requests, also read
-[src/nemotron/steps/translate/SKILL.md](src/nemotron/steps/translate/SKILL.md)
+[src/nemotron/steps/translate/README.md](src/nemotron/steps/translate/README.md)
 and return `Decision`, `Config`, `Run`, `Output`, and `Env`. Do not continue
 broad repository exploration once those fields are execution-ready.
 
@@ -165,11 +165,11 @@ nemotron steps show <step_id>                              # full manifest
 
 **Step 1.3 — For each candidate category, descend one level**:
 
-- `src/nemotron/steps/<cat>/SKILL.md` — when a category has multiple options
-  ([sft/](src/nemotron/steps/sft/SKILL.md),
-  [pretrain/](src/nemotron/steps/pretrain/SKILL.md),
-  [peft/](src/nemotron/steps/peft/SKILL.md),
-  [rl/nemo_rl/](src/nemotron/steps/rl/nemo_rl/SKILL.md)).
+- `src/nemotron/steps/<cat>/README.md` — when a category has multiple options
+  ([sft/](src/nemotron/steps/sft/README.md),
+  [pretrain/](src/nemotron/steps/pretrain/README.md),
+  [peft/](src/nemotron/steps/peft/README.md),
+  [rl/nemo_rl/](src/nemotron/steps/rl/nemo_rl/README.md)).
 
 **Step 1.4 — For each candidate step, read its `step.toml`** end-to-end.
 You're after: `[[consumes]]`, `[[produces]]`, `[[parameters]]`,
@@ -348,7 +348,7 @@ If verification finds issues, fix them silently. Don't say "I noticed an issue."
 
 Fast path. Levels 0 → 2 in Orient, then Plan → Act.
 
-`STEPS.md → category/SKILL.md → step.toml → step.py → adapt YAML config`
+`STEPS.md → category/README.md → step.toml → step.py → adapt YAML config`
 
 Use whenever the user's request maps to a step in the catalog.
 
@@ -410,7 +410,7 @@ contribute it as a new catalog step under `src/nemotron/steps/`.
 - Generate Slurm/Airflow/Kubeflow wrappers.
 - Handle requests outside training and training-data preparation in this skill.
 - Modify [src/nemotron/steps/](src/nemotron/steps/). To extend the catalog, point the user to the contribution workflow in `CONTRIBUTING.md`.
-- Restate per-step rules in this skill — link to the step's `SKILL.md` instead.
+- Restate per-step rules in this skill — link to the step's `README.md` instead.
 
 ---
 

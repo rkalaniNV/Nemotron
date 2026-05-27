@@ -13,9 +13,9 @@ checkpoints. All three steps share the runner at
 
 | Step | Reward shape | Recipe URL |
 |---|---|---|
-| [`dpo`](dpo/SKILL.md) | Static `{prompt, chosen, rejected}` preference pairs, reference-policy KL objective | `examples/run_dpo.py` (NeMo-RL) |
-| [`rlvr`](rlvr/SKILL.md) | GRPO with verifiable rewards (math, tests, env success). Two runners: upstream `examples/run_grpo.py` or the in-repo NeMo-Gym runner | `examples/run_grpo.py` (or NeMo-Gym mode) |
-| [`rlhf`](rlhf/SKILL.md) | GRPO with a learned judge / GenRM via NeMo-Gym | NeMo-Gym GRPO runner (in-repo) |
+| [`dpo`](dpo/README.md) | Static `{prompt, chosen, rejected}` preference pairs, reference-policy KL objective | `examples/run_dpo.py` (NeMo-RL) |
+| [`rlvr`](rlvr/README.md) | GRPO with verifiable rewards (math, tests, env success). Two runners: upstream `examples/run_grpo.py` or the in-repo NeMo-Gym runner | `examples/run_grpo.py` (or NeMo-Gym mode) |
+| [`rlhf`](rlhf/README.md) | GRPO with a learned judge / GenRM via NeMo-Gym | NeMo-Gym GRPO runner (in-repo) |
 
 ## Runner gating (the non-obvious part)
 
@@ -37,7 +37,7 @@ The local `defaults: <yaml>` form in YAML is a small layering convenience
 ## Workflow
 
 1. Read the algorithm's `step.toml` for consumed artifacts and main knobs.
-2. Run [`../data_prep/rl_prep`](../../data_prep/rl_prep/SKILL.md) when data starts as
+2. Run [`../data_prep/rl_prep`](../../data_prep/rl_prep/README.md) when data starts as
    HF references or unsharded blends.
 3. Use `config/tiny.yaml` for runner validation. Use `config/nemo_gym.yaml`
    (RLVR/RLHF) when resource-server or GenRM rewards are required.

@@ -29,14 +29,14 @@ skills/                            ← workflow & reference skills (this directo
     │       └── README.md          ← provenance notes
 
 src/nemotron/steps/                ← step library (the catalog skills route into)
-├── SKILL.md                       ← per-category routing
+├── README.md                      ← step-library routing
 ├── STEPS.md                       ← auto-generated catalog
 ├── PATTERNS.md                    ← auto-generated pattern index
 ├── types.toml                     ← artifact-type graph
 ├── patterns/                      ← decision rules
 └── <category>/<step>/             ← each step
     ├── step.toml                  ← machine contract (consumes/produces/params/strategies/errors)
-    ├── SKILL.md                   ← agent prose: when/why/gotchas (per-step)
+    ├── README.md                  ← agent prose: when/why/gotchas (per-step)
     ├── step.py                    ← runspec + entry point
     └── config/                    ← one or more named configs
 ```

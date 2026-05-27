@@ -98,7 +98,7 @@ name = "packed_parquet_used_with_automodel"
 recovery = "Use training_jsonl directly. If the only data artifact is packed_parquet, go back to the source JSONL or choose sft/megatron_bridge."
 
 [reference]
-skill = "src/nemotron/steps/sft/automodel/SKILL.md"
+skill = "src/nemotron/steps/sft/automodel/README.md"
 repo = "https://github.com/NVIDIA-NeMo/Automodel"
 readme = "https://github.com/NVIDIA-NeMo/Automodel/blob/main/README.md"
 docs = "https://docs.nvidia.com/nemo/automodel/latest/index.html"

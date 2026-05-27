@@ -86,7 +86,7 @@ name = "base_and_adapter_paths_mixed"
 recovery = "Keep the base Megatron checkpoint path, adapter save path, and later merged HF output path distinct."
 
 [reference]
-skill = "src/nemotron/steps/peft/megatron_bridge/SKILL.md"
+skill = "src/nemotron/steps/peft/megatron_bridge/README.md"
 recipe = "src/nemotron/recipes/nano3/stage1_sft/"
 script = "src/nemotron/recipes/nano3/stage1_sft/train.py"
 megatron_bridge_repo = "https://github.com/NVIDIA-NeMo/Megatron-Bridge"

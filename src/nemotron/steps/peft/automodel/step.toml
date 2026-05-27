@@ -86,7 +86,7 @@ name = "packed_parquet_used_with_automodel"
 recovery = "Use the source training_jsonl or switch to peft/megatron_bridge if packed Parquet and Megatron checkpoints are required."
 
 [reference]
-skill = "src/nemotron/steps/peft/automodel/SKILL.md"
+skill = "src/nemotron/steps/peft/automodel/README.md"
 repo = "https://github.com/NVIDIA-NeMo/Automodel"
 readme = "https://github.com/NVIDIA-NeMo/Automodel/blob/main/README.md"
 docs = "https://docs.nvidia.com/nemo/automodel/latest/index.html"

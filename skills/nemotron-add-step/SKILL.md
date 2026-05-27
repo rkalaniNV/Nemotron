@@ -1,6 +1,6 @@
 ---
 name: nemotron-add-step
-description: Add a new step under src/nemotron/steps/<category>/<step_id>/ — manifest (step.toml), runner glue, configs, and per-step SKILL.md. Use when extending the catalog so /nemotron-customize can route to it.
+description: Add a new step under src/nemotron/steps/<category>/<step_id>/ — manifest (step.toml), runner glue, configs, and per-step README.md. Use when extending the catalog so /nemotron-customize can route to it.
 ---
 
 # nemotron-add-step

@@ -80,6 +80,6 @@ name = "unsupported_or_custom_architecture"
 recovery = "Keep trust_remote_code=true for supported custom HF repos, and verify the installed Megatron-Bridge AutoBridge supports the architecture."
 
 [reference]
-skill = "src/nemotron/steps/convert/hf_to_megatron/SKILL.md"
+skill = "src/nemotron/steps/convert/hf_to_megatron/README.md"
 script = "https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/examples/conversion/convert_checkpoints.py"
 skills = ["skills/nemotron-customize/references/context/checkpoint-conversion.txt"]

@@ -105,7 +105,7 @@ name = "bad_loss_masks"
 recovery = "Inspect a few packed records for assistant-only loss masks, especially after changing chat_template, messages_field, tools_field, or tool-call formatting."
 
 [reference]
-skill = "src/nemotron/steps/data_prep/sft_packing/SKILL.md"
+skill = "src/nemotron/steps/data_prep/sft_packing/README.md"
 recipe = "src/nemotron/recipes/nano3/stage1_sft/"
 script = "src/nemotron/recipes/nano3/stage1_sft/data_prep.py"
 docs = "src/nemotron/recipes/nano3/stage1_sft/README.md"

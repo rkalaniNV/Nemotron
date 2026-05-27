@@ -14,8 +14,8 @@ instruction-format adherence).
 
 | Backend | Best for | Min GPUs | Input | Output |
 |---|---|---|---|---|
-| [`peft/automodel`](automodel/SKILL.md) | HF-native, single-node, direct chat JSONL, fast iteration | 1–4 | `training_jsonl` | `checkpoint_lora` (HF adapter) |
-| [`peft/megatron_bridge`](megatron_bridge/SKILL.md) | Distributed adapter tuning over a Megatron base, packed-Parquet throughput | 8+ | `packed_parquet` + `checkpoint_megatron` | `checkpoint_lora` (Megatron-format adapter) |
+| [`peft/automodel`](automodel/README.md) | HF-native, single-node, direct chat JSONL, fast iteration | 1–4 | `training_jsonl` | `checkpoint_lora` (HF adapter) |
+| [`peft/megatron_bridge`](megatron_bridge/README.md) | Distributed adapter tuning over a Megatron base, packed-Parquet throughput | 8+ | `packed_parquet` + `checkpoint_megatron` | `checkpoint_lora` (Megatron-format adapter) |
 
 ## Decision tree
 
@@ -35,7 +35,7 @@ instruction-format adherence).
 - Output is an HF-format adapter merged via `convert/merge_lora`.
 
 **If Megatron-Bridge:**
-- Add [`data_prep/sft_packing`](../data_prep/sft_packing/SKILL.md) upstream.
+- Add [`data_prep/sft_packing`](../data_prep/sft_packing/README.md) upstream.
 - Requires a base `checkpoint_megatron` at `checkpoint.pretrained_checkpoint`.
 - Output is a Megatron-format adapter.
 

@@ -56,7 +56,7 @@ name = "rlhf_genrm_server_missing"
 recovery = "Use a step-specific RLHF profile with enough physical nodes for policy/generation, NeMo-Gym GPU workers, and placement headroom. Keep source-transport cleanup in the runner and resource sizing in env.toml."
 
 [reference]
-skill = "src/nemotron/steps/env/env_toml/SKILL.md"
+skill = "src/nemotron/steps/env/env_toml/README.md"
 runner = "src/nemotron/steps/env/env_toml/step.py"
 configs = [
   "src/nemotron/steps/env/env_toml/config/lepton.yaml",

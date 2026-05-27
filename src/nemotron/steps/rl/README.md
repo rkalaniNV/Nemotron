@@ -7,15 +7,15 @@ description: "Choose among Nemotron NeMo-RL alignment steps: DPO, RLVR/GRPO, and
 
 Pick a NeMo-RL alignment step by **how reward is computed**. The catalog
 ships three algorithms — DPO, RLVR, RLHF — all under the
-[`rl/nemo_rl/`](nemo_rl/SKILL.md) subcategory.
+[`rl/nemo_rl/`](nemo_rl/README.md) subcategory.
 
 ## Steps
 
 | Reward source | Step | Required data shape | Output |
 |---|---|---|---|
-| Static preference pairs (no online reward) | [`rl/nemo_rl/dpo`](nemo_rl/dpo/SKILL.md) | `{prompt, chosen, rejected}` | `checkpoint_megatron` |
-| Programmatic / verifiable (math answer, tests, tool success) | [`rl/nemo_rl/rlvr`](nemo_rl/rlvr/SKILL.md) | `{prompt, answer | tests | env_metadata}` | `checkpoint_megatron` |
-| Learned judge / GenRM-style comparison reward | [`rl/nemo_rl/rlhf`](nemo_rl/rlhf/SKILL.md) | `{prompt}` + reward-model `checkpoint_hf` | `checkpoint_megatron` |
+| Static preference pairs (no online reward) | [`rl/nemo_rl/dpo`](nemo_rl/dpo/README.md) | `{prompt, chosen, rejected}` | `checkpoint_megatron` |
+| Programmatic / verifiable (math answer, tests, tool success) | [`rl/nemo_rl/rlvr`](nemo_rl/rlvr/README.md) | `{prompt, answer | tests | env_metadata}` | `checkpoint_megatron` |
+| Learned judge / GenRM-style comparison reward | [`rl/nemo_rl/rlhf`](nemo_rl/rlhf/README.md) | `{prompt}` + reward-model `checkpoint_hf` | `checkpoint_megatron` |
 
 All three consume an SFT-trained `checkpoint_megatron` policy as the warm
 start. RLVR and RLHF additionally support **NeMo-Gym** mode for
@@ -37,7 +37,7 @@ resource-server / GenRM rewards (`env.should_use_nemo_gym=true`).
    not launch fails. See
    [../patterns/rl-validate-rewards-before-scale.md](../patterns/rl-validate-rewards-before-scale.md).
 3. **Materialized data**. If data starts as HF references, run
-   [`data_prep/rl_prep`](../data_prep/rl_prep/SKILL.md) first to resolve placeholders
+   [`data_prep/rl_prep`](../data_prep/rl_prep/README.md) first to resolve placeholders
    into local JSONL.
 
 ## Pipeline placement
@@ -55,7 +55,7 @@ when the next consumer (eval, deployment) expects HF.
 
 1. Confirm the SFT warm-start checkpoint exists and was trained on a
    compatible tokenizer and chat template.
-2. Run [`data_prep/rl_prep`](../data_prep/rl_prep/SKILL.md) when data needs HF
+2. Run [`data_prep/rl_prep`](../data_prep/rl_prep/README.md) when data needs HF
    resolution or sharding.
 3. Pick the step per the decision tree.
 4. Validate the reward path on a tiny set **before scaling rollout count** —

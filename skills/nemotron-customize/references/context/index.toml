@@ -3,7 +3,7 @@
 #
 # One row per (step_id, intent) — the Act sub-agent picks the matching pack.
 # When a step has no row here, the agent reads:
-#   - src/nemotron/steps/<cat>/<step>/SKILL.md (when/why)
+#   - src/nemotron/steps/<cat>/<step>/README.md (when/why)
 #   - src/nemotron/steps/<cat>/<step>/step.toml (params, strategies, errors)
 #   - src/nemotron/steps/<cat>/<step>/step.py + _runners/* (code shape)
 #   - URLs in step.toml [reference] for upstream library detail

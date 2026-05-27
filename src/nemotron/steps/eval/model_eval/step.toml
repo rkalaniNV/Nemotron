@@ -96,12 +96,12 @@ then = "Increase max_new_tokens, enable reasoning-trace processing, and use the 
 [[strategies]]
 when = "The user wants a quick hosted endpoint validation"
 then = "Use config/tiny_chat.yaml with a chat-compatible hosted endpoint; keep limit_samples=1 for smoke tests."
-skill = "src/nemotron/steps/eval/model_eval/SKILL.md"
+skill = "src/nemotron/steps/eval/model_eval/README.md"
 
 [[strategies]]
 when = "You are selecting benchmark names"
 then = "Use exact task IDs from `nemo-evaluator-launcher ls tasks` or `nemo-evaluator-launcher ls task <task_id>`; do not prepend harness names unless that exact dotted ID is listed."
-skill = "src/nemotron/steps/eval/model_eval/SKILL.md"
+skill = "src/nemotron/steps/eval/model_eval/README.md"
 
 [[errors]]
 name = "missing_tokenizer_for_logprobs"
@@ -120,6 +120,6 @@ name = "framework_cli_not_found"
 recovery = "Install the evaluator extra with uv sync --extra evaluator and run through the same environment so Launcher task CLIs are on PATH."
 
 [reference]
-skill = "src/nemotron/steps/eval/model_eval/SKILL.md"
+skill = "src/nemotron/steps/eval/model_eval/README.md"
 script = "https://github.com/NVIDIA-NeMo/Evaluator/blob/main/packages/nemo-evaluator-launcher/examples/local_basic.yaml"
 docs = "https://docs.nvidia.com/nemo/evaluator/latest/get-started/quickstart/launcher.html"

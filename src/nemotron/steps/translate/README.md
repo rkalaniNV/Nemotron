@@ -5,7 +5,7 @@ description: Translate JSONL or Parquet training corpora with NeMo Curator, incl
 
 # Nemotron Translation
 
-Use this skill when a user wants to translate corpus data, chat records, or row-oriented training artifacts. The concrete step is [`translate/nemo_curator`](nemo_curator/SKILL.md).
+Use this skill when a user wants to translate corpus data, chat records, or row-oriented training artifacts. The concrete step is [`translate/nemo_curator`](nemo_curator/README.md).
 
 ## Default Workflow
 
@@ -149,6 +149,6 @@ uv run --no-sync nemotron steps run translate/nemo_curator \
 ## Load More
 
 - [`guide.md`](guide.md) for detailed flow, output modes, FAITH, resume semantics, and validation.
-- [`nemo_curator/SKILL.md`](nemo_curator/SKILL.md) for the concrete step.
+- [`nemo_curator/README.md`](nemo_curator/README.md) for the concrete step.
 - [`nemo_curator/config/default.yaml`](nemo_curator/config/default.yaml) for starter config.
 - [`nemo_curator/step.py`](nemo_curator/step.py) for the reader -> translation stage -> writer implementation.

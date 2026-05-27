@@ -14,9 +14,9 @@ tuple, not after the date.
 
 | Need | Step | Produces |
 |---|---|---|
-| Pack chat JSONL for Megatron-Bridge SFT or PEFT | [`data_prep/sft_packing`](sft_packing/SKILL.md) | `packed_parquet` |
-| Tokenize text into Megatron pretraining shards | [`data_prep/pretrain_prep`](pretrain_prep/SKILL.md) | `binidx` + `blend.json` |
-| Resolve and shard RL prompt or preference data | [`data_prep/rl_prep`](rl_prep/SKILL.md) | `training_jsonl` (sharded) |
+| Pack chat JSONL for Megatron-Bridge SFT or PEFT | [`data_prep/sft_packing`](sft_packing/README.md) | `packed_parquet` |
+| Tokenize text into Megatron pretraining shards | [`data_prep/pretrain_prep`](pretrain_prep/README.md) | `binidx` + `blend.json` |
+| Resolve and shard RL prompt or preference data | [`data_prep/rl_prep`](rl_prep/README.md) | `training_jsonl` (sharded) |
 
 ## When to use `data_prep/sft_packing`
 

@@ -13,8 +13,8 @@ in Python.
 ## In-repo references (read these first)
 
 - Manifests: `src/nemotron/steps/data_prep/<step>/step.toml`
-- Per-step SKILL: `src/nemotron/steps/data_prep/<step>/SKILL.md`
-- Category SKILL: `src/nemotron/steps/data_prep/SKILL.md` (which step + when-to-pack table)
+- Per-step README: `src/nemotron/steps/data_prep/<step>/README.md`
+- Category README: `src/nemotron/steps/data_prep/README.md` (which step + when-to-pack table)
 - Shared helpers: `src/nemotron/steps/data_prep/_common.py`
 
 ## Shared helpers (`data_prep/_common.py`)

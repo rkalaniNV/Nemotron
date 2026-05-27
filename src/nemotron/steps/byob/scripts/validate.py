@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 REQUIRED_FILES = (
-    "SKILL.md",
+    "README.md",
     "step.toml",
     "adapter.py",
     "step.py",
@@ -42,17 +42,17 @@ def validate_skill_dir(skill_dir: Path) -> list[str]:
         if not (skill_dir / rel_path).exists():
             errors.append(f"missing required file: {rel_path}")
 
-    skill_path = skill_dir / "SKILL.md"
+    skill_path = skill_dir / "README.md"
     if skill_path.exists():
         frontmatter = _load_frontmatter(skill_path)
         if frontmatter.get("name") != skill_dir.name:
-            errors.append("SKILL.md name must match the directory name")
+            errors.append("README.md name must match the directory name")
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", str(frontmatter.get("name", ""))):
-            errors.append("SKILL.md name must use lowercase letters, numbers, and hyphens")
+            errors.append("README.md name must use lowercase letters, numbers, and hyphens")
         if not frontmatter.get("description"):
-            errors.append("SKILL.md description is required")
+            errors.append("README.md description is required")
         if not frontmatter.get("when_to_use"):
-            errors.append("SKILL.md when_to_use is required")
+            errors.append("README.md when_to_use is required")
 
     for rel_path in ("config/default.yaml", "config/tiny.yaml", "config/translate.yaml"):
         path = skill_dir / rel_path

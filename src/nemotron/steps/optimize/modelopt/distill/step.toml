@@ -99,7 +99,7 @@ name = "wandb_not_inherited"
 recovery = "Use the upstream distill W&B flags and pass project/entity/name through the run environment instead of wrapping the process."
 
 [reference]
-skill = "src/nemotron/steps/optimize/modelopt/distill/SKILL.md"
+skill = "src/nemotron/steps/optimize/modelopt/distill/README.md"
 modelopt_repo = "https://github.com/NVIDIA/Model-Optimizer"
 modelopt_readme = "https://github.com/NVIDIA/Model-Optimizer/blob/main/README.md"
 modelopt_docs = "https://nvidia.github.io/Model-Optimizer/"

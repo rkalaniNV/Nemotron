@@ -86,6 +86,6 @@ name = "split_names_do_not_match_rl_config"
 recovery = "Preserve train and validation split names expected by rl/nemo_rl configs, or override the RL data paths explicitly."
 
 [reference]
-skill = "src/nemotron/steps/data_prep/rl_prep/SKILL.md"
+skill = "src/nemotron/steps/data_prep/rl_prep/README.md"
 script = "src/nemotron/data_prep/recipes/rl.py"
 skills = ["skills/nemotron-customize/references/context/nemotron-data-prep.txt"]

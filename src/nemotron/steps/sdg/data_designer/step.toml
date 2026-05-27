@@ -98,7 +98,7 @@ name = "unvalidated_generation_scaled"
 recovery = "Run preview or config/tiny.yaml and inspect generated records before raising num_records."
 
 [reference]
-skill = "src/nemotron/steps/sdg/data_designer/SKILL.md"
+skill = "src/nemotron/steps/sdg/data_designer/README.md"
 repo = "https://github.com/NVIDIA-NeMo/DataDesigner"
 readme = "https://github.com/NVIDIA-NeMo/DataDesigner/blob/main/README.md"
 library_docs = "https://nvidia-nemo.github.io/DataDesigner/"

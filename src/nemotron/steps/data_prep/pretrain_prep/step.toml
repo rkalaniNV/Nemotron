@@ -97,7 +97,7 @@ name = "empty_or_overlong_documents"
 recovery = "Check text_field, min_doc_chars, max_doc_tokens, and token counts on a sample before full prep."
 
 [reference]
-skill = "src/nemotron/steps/data_prep/pretrain_prep/SKILL.md"
+skill = "src/nemotron/steps/data_prep/pretrain_prep/README.md"
 script = "src/nemotron/data_prep/recipes/pretrain.py"
 megatron_bridge_repo = "https://github.com/NVIDIA-NeMo/Megatron-Bridge"
 megatron_bridge_docs = "https://docs.nvidia.com/nemo/megatron-bridge/latest/"

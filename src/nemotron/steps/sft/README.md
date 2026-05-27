@@ -11,21 +11,21 @@ Pick an SFT backend and keep data and checkpoint formats compatible.
 
 | Backend | Best for | Min GPUs | Input | Output |
 |---|---|---|---|---|
-| [`sft/automodel`](automodel/SKILL.md) | HF-native outputs, direct JSONL, smaller GPU counts, quick LoRA experiments | 4 | `training_jsonl` (no packing) | `checkpoint_hf` |
-| [`sft/megatron_bridge`](megatron_bridge/SKILL.md) | Large distributed runs with TP/PP/CP, packed-sequence throughput, Nano3/Super3 recipe parity | 8 (Nano3), 32 (Super3) | `packed_parquet` (needs `data_prep/sft_packing`) | `checkpoint_megatron` |
+| [`sft/automodel`](automodel/README.md) | HF-native outputs, direct JSONL, smaller GPU counts, quick LoRA experiments | 4 | `training_jsonl` (no packing) | `checkpoint_hf` |
+| [`sft/megatron_bridge`](megatron_bridge/README.md) | Large distributed runs with TP/PP/CP, packed-sequence throughput, Nano3/Super3 recipe parity | 8 (Nano3), 32 (Super3) | `packed_parquet` (needs `data_prep/sft_packing`) | `checkpoint_megatron` |
 
 ## Decision tree
 
 - Need TP/PP/CP parallelism or official Nano3/Super3 recipe patterns? → **Megatron-Bridge**.
 - Fewer than 8 GPUs? → **AutoModel**.
-- Want LoRA with minimal setup? → **AutoModel** (or [`peft/automodel`](../peft/automodel/SKILL.md)).
+- Want LoRA with minimal setup? → **AutoModel** (or [`peft/automodel`](../peft/automodel/README.md)).
 - Need the highest-throughput multi-node path? → **Megatron-Bridge**.
 - Just want SFT running fast on existing JSONL? → **AutoModel**.
 
 ## Pipeline impact
 
 **If Megatron-Bridge:**
-- Add [`data_prep/sft_packing`](../data_prep/sft_packing/SKILL.md) upstream.
+- Add [`data_prep/sft_packing`](../data_prep/sft_packing/README.md) upstream.
 - Output is `checkpoint_megatron`. For HF-format consumers downstream, add
   [`convert/megatron_to_hf`](../convert/megatron_to_hf/step.toml).
 

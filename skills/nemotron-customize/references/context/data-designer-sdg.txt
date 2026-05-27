@@ -9,7 +9,7 @@ belongs in config (model alias, columns, seed data, output projection) — keep
 ## In-repo references (read these first)
 
 - Step manifest: `src/nemotron/steps/sdg/data_designer/step.toml`
-- Per-step SKILL: `src/nemotron/steps/sdg/data_designer/SKILL.md`
+- Per-step README: `src/nemotron/steps/sdg/data_designer/README.md`
 - Default cfg (SFT): `src/nemotron/steps/sdg/data_designer/config/default.yaml`
 - Smoke cfg:        `src/nemotron/steps/sdg/data_designer/config/tiny.yaml`
 - Preference cfg (DPO): `src/nemotron/steps/sdg/data_designer/config/rl_pref.yaml`

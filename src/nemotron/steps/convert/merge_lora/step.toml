@@ -116,7 +116,7 @@ name = "output_path_overlaps_inputs"
 recovery = "Write output_hf_path to a fresh directory so failed merges cannot overwrite the base or adapter."
 
 [reference]
-skill = "src/nemotron/steps/convert/merge_lora/SKILL.md"
+skill = "src/nemotron/steps/convert/merge_lora/README.md"
 script = "https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/examples/peft/merge_lora.py"
 hf_peft_library = "https://github.com/huggingface/peft"
 skills = ["skills/nemotron-customize/references/context/checkpoint-conversion.txt"]

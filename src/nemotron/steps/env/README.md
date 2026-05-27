@@ -13,7 +13,7 @@ Use this category for execution-profile setup under `src/nemotron/steps/env/`.
 
 ## Guardrails
 
-- Read the specific step `SKILL.md` and `step.toml` before editing env profiles.
+- Read the specific step `README.md` and `step.toml` before editing env profiles.
 - Keep env profile files at the repository root. Default profile discovery uses `env.toml`; generated backend examples use `env.lepton.toml`, `env.slurm.toml`, or `env.dgxcloud.toml` and require `export NEMOTRON_ENV_FILE=<file>`.
 - If the target env file exists, inspect and extend it rather than overwriting; only use `force=true` when the user intentionally asks to replace it.
 - Keep site logistics in env profiles and step runtime flags in the step YAML unless the flag is truly site-wide.

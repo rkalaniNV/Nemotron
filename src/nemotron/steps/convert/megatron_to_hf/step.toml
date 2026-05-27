@@ -79,6 +79,6 @@ name = "incomplete_or_async_checkpoint"
 recovery = "Use a fully written checkpoint iteration. Avoid exporting while async checkpoint save is still in progress."
 
 [reference]
-skill = "src/nemotron/steps/convert/megatron_to_hf/SKILL.md"
+skill = "src/nemotron/steps/convert/megatron_to_hf/README.md"
 script = "https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/examples/conversion/convert_checkpoints.py"
 skills = ["skills/nemotron-customize/references/context/checkpoint-conversion.txt"]

@@ -12,9 +12,9 @@ on `checkpoint_*` type. The artifact graph in
 
 | Source type | Target type | Step |
 |---|---|---|
-| `checkpoint_megatron` | `checkpoint_hf` | [megatron_to_hf](megatron_to_hf/SKILL.md) |
-| `checkpoint_hf` | `checkpoint_megatron` | [hf_to_megatron](hf_to_megatron/SKILL.md) |
-| `checkpoint_lora` (+ original base) | `checkpoint_hf` (merged) | [merge_lora](merge_lora/SKILL.md) |
+| `checkpoint_megatron` | `checkpoint_hf` | [megatron_to_hf](megatron_to_hf/README.md) |
+| `checkpoint_hf` | `checkpoint_megatron` | [hf_to_megatron](hf_to_megatron/README.md) |
+| `checkpoint_lora` (+ original base) | `checkpoint_hf` (merged) | [merge_lora](merge_lora/README.md) |
 
 ## When to insert
 

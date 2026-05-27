@@ -13,8 +13,8 @@ catalog — the budget contract decides everything downstream.
 
 | Backend | Best for | Default model / recipe | Input | Output |
 |---|---|---|---|---|
-| [`pretrain/automodel`](automodel/SKILL.md) | HF-native CPT, single-node, fast iteration | Qwen3-30B-A3B (MoE example) | `binidx` | `checkpoint_hf` |
-| [`pretrain/megatron_bridge`](megatron_bridge/SKILL.md) | Large distributed pretraining/CPT, TP/PP/CP/EP scaling, Nemotron recipe parity | `nemotron_3_nano_pretrain_config` recipe (Nano3) | `binidx` (+ optional `checkpoint_megatron`) | `checkpoint_megatron` |
+| [`pretrain/automodel`](automodel/README.md) | HF-native CPT, single-node, fast iteration | Qwen3-30B-A3B (MoE example) | `binidx` | `checkpoint_hf` |
+| [`pretrain/megatron_bridge`](megatron_bridge/README.md) | Large distributed pretraining/CPT, TP/PP/CP/EP scaling, Nemotron recipe parity | `nemotron_3_nano_pretrain_config` recipe (Nano3) | `binidx` (+ optional `checkpoint_megatron`) | `checkpoint_megatron` |
 
 The "default model" column shows what the shipped `config/default.yaml`
 selects. Override at CLI:
@@ -50,7 +50,7 @@ mandatory blend-with-general-data discipline.
 
 ## Pre-conditions
 
-1. **Compatible bin/idx data** from [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/SKILL.md).
+1. **Compatible bin/idx data** from [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/README.md).
    `blend.json` is the trainer's entry — its tokenizer must match the model's.
 2. **A documented token budget** (target_tokens, seq_length, gbs, train_iters,
    lr schedule, ckpt cadence). See [../patterns/pretrain-token-budget-before-scale.md](../patterns/pretrain-token-budget-before-scale.md).
@@ -68,7 +68,7 @@ curate/nemo_curator → data_prep/pretrain_prep → pretrain/automodel        �
 
 ## Workflow
 
-1. Run [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/SKILL.md) on a tokenizer
+1. Run [`data_prep/pretrain_prep`](../data_prep/pretrain_prep/README.md) on a tokenizer
    that matches the trainer.
 2. Write the budget down (target_tokens / seq_length / gbs / train_iters /
    lr schedule / ckpt cadence) **before code changes**.

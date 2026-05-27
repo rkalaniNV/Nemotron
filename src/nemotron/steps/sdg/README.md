@@ -13,7 +13,7 @@ data-limited and must be expanded carefully.
 ## Steps
 
 The catalog ships one step under this category:
-[`sdg/data_designer`](data_designer/SKILL.md).
+[`sdg/data_designer`](data_designer/README.md).
 
 ## Configurations
 

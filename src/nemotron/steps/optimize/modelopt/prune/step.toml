@@ -94,7 +94,7 @@ name = "invalid_parallel_divisibility"
 recovery = "Check attention heads, query groups, Mamba groups, and layer counts against pp/tp settings after pruning."
 
 [reference]
-skill = "src/nemotron/steps/optimize/modelopt/prune/SKILL.md"
+skill = "src/nemotron/steps/optimize/modelopt/prune/README.md"
 modelopt_repo = "https://github.com/NVIDIA/Model-Optimizer"
 modelopt_readme = "https://github.com/NVIDIA/Model-Optimizer/blob/main/README.md"
 modelopt_docs = "https://nvidia.github.io/Model-Optimizer/"
