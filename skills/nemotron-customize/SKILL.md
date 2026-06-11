@@ -1,9 +1,9 @@
 ---
 name: nemotron-customize
 description: Use when building runnable Nemotron model-customization pipelines from existing repo steps and artifact contracts.
-version: 0.1.0
 metadata:
   author: NVIDIA Nemotron Team
+  version: 0.1.0
   tags:
     - nemotron
     - customization
