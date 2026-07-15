@@ -1,151 +1,159 @@
 # 🔎 Agentic RAG — Deep-Research Trajectory SDG
 
-Generate synthetic **multi-hop, tool-calling RAG trajectories** for aligning
-models to agentic deep research over a real document corpus:
+Generate synthetic training data that teaches a model to **research like an agent**:
+read a question, search a knowledge base, reason over what it finds, search again
+if needed, and answer — with every claim grounded in real retrieved text.
 
 ```
-query → [clarify?] → research plan → (search → reason → search)×N → grounded answer → follow-up
+question → (clarify?) → plan → search → reason → search → … → grounded answer
 ```
 
-The engine is domain-agnostic; the example ships with the **Constitution of India**.
-Point it at any corpus + tools via config and it runs a new domain.
+The engine is **domain-agnostic**. It ships with the **Constitution of India** as a
+worked example; point it at any documents + tools and it generates a new domain.
 
 ---
 
-## 🚀 Quick start
+## What you get
 
-Run from this directory (`.../steps/sdg/agentic_rag`).
+Each output row is one full **agent trajectory** in OpenAI `messages` + `tools`
+format — the user's question, the assistant's reasoning, its tool calls, the real
+retrieved passages, and the final answer — ready for SFT. Every row also carries
+metadata (how many hops, whether the gold passage was retrieved, etc.).
 
-### 0. Install
+---
+
+## Quick start
+
+> Run everything from this folder: `.../steps/sdg/agentic_rag`
+
+### 1 · Install
 
 ```bash
-pip install -e .                 # installs the plugin + deps (data-designer, sentence-transformers)
-export NVIDIA_API_KEY=nvapi-...  # from build.nvidia.com  (needs INFERENCE access)
+pip install -e .
+export NVIDIA_API_KEY=nvapi-...        # from build.nvidia.com
 ```
 
-Verify the key can actually call a model (must print `200`):
+Check the key can call the model (should print `200`):
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://integrate.api.nvidia.com/v1/chat/completions \
+curl -s -o /dev/null -w "%{http_code}\n" https://inference-api.nvidia.com/v1/chat/completions \
   -H "Authorization: Bearer $NVIDIA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'
+  -d '{"model":"nvidia/openai/gpt-oss-120b","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'
 ```
 
-### 1. Build the corpus (offline, one time)
+### 2 · Prepare the corpus (one time, no API key needed)
 
 ```bash
 cd data_prep
 
-# a) chunk the document  →  data/constitution_chunks.jsonl   (~559 chunks / 481 articles)
-python chunk_document.py \
-  --input ../data/constitution_of_india.txt \
+# chunk the document                → data/constitution_chunks.jsonl
+python chunk_document.py --input ../data/constitution_of_india.txt \
   --output ../data/constitution_chunks.jsonl --profile indian_statute
 
-# b) build the MiniLM embedding index  →  data/index/         (all-MiniLM-L6-v2)
-python retriever.py build \
-  --chunks ../data/constitution_chunks.jsonl --index ../data/index --backend embedding
+# build the embedding index (MiniLM) → data/index/
+python retriever.py build --chunks ../data/constitution_chunks.jsonl \
+  --index ../data/index --backend embedding
 
-# c) build multi-hop evidence-set seeds  →  data/bundles.jsonl  (~156 bundles)
-python bundle_builder.py \
-  --chunks ../data/constitution_chunks.jsonl --output ../data/bundles.jsonl \
-  --mode entity_link --size 3 --num 200
+# build multi-hop question seeds     → data/bundles.jsonl
+python bundle_builder.py --chunks ../data/constitution_chunks.jsonl \
+  --output ../data/bundles.jsonl --mode entity_link --size 3 --num 200
 
 cd ..
 ```
 
-Sanity-check retrieval (should surface the right article by meaning):
+Quick retrieval check (should put **Article 32** at the top):
 
 ```bash
 python data_prep/retriever.py query --index data/index --backend embedding \
-  --q "which court to approach when a fundamental right is violated" --k 3 --gold 32 226
-# expect Article 32 near the top, gold_rank = 1
+  --q "which court to approach when a fundamental right is violated" --gold 32 226
 ```
 
-### 2. Generate trajectories (NDD)
+### 3 · Generate trajectories
 
 ```bash
-python step.py --config config/tiny.yaml     --mode preview   # fast smoke test: 2 records
-python step.py --config config/indian_legal.yaml --mode create # full run: num_records in the YAML
+python step.py --config config/tiny.yaml --mode preview    # small smoke test
+python step.py --config config/indian_legal.yaml --mode create   # full run
 ```
 
-Output → `output/sdg/agentic_rag_*.jsonl`: one OpenAI-format `messages`+`tools`
-trajectory per row, plus metadata (`gold_rank_log`, `hops_taken`, `salvaged`,
-sampler labels).
-
-> **403 on the curl?** Your key lacks inference access — generate a fresh one at
-> build.nvidia.com. The rest of the pipeline (chunk/retrieve/bundle) runs without a key.
+Results land in `output/sdg/`. Each run writes two files:
+- `*.jsonl` — the training data (successful trajectories only)
+- `*.raw.jsonl` — every generated row, for inspection/debugging
 
 ---
 
-## 🧩 How it works
+## How it works
 
-### Core ideas
-1. **Document-first, multi-hop by construction** — queries come from an *evidence
-   set* of linked chunks, so answering needs synthesis across sources.
-2. **Grounded retrieval** — RAG tools hit a real MiniLM retriever; only auxiliary
-   tools are LLM-simulated. No fabricated citations.
-3. **Depth is reasoned** — a sufficiency/gap check drives further retrieval to a
-   `min_hops` floor (set per row by `depth_target`), capped at `max_steps`.
-4. **Phased interaction** — DISCUSSION (clarify) → RESEARCH PLAN → autonomous
-   TOOL LOOP → ANSWER. Strict phases keep ASK vs ANSWER unambiguous.
-5. **Long context is assembled, never one-shot** — sliding window + a running
-   findings scratchpad bound what each turn reads.
-6. **Diversity is a configured cross-product** — persona × archetype × outcome ×
-   ambiguity × depth samplers steer each row (not temperature).
+Two stages: an **offline** prep step, then the **generation** step.
 
-### Four extensions over the base reference
-| # | Extension | Where |
-|---|-----------|-------|
-| 1 | Real retriever for RAG tools + gold-rank + guided injection | `agentic_rag/tools.py` |
-| 2 | Sufficiency/gap loop drives depth; `min_hops` floor | `generator._insufficient` |
-| 3 | Sliding window + scratchpad | `agentic_rag/context.py` |
-| 4 | Salvage-on-failure (truncate to last-good hop) | `generator._finalize` |
-
-### Flow
 ```
-OFFLINE (data_prep/):   document → chunks → MiniLM index → multi-hop bundles
-NDD (step.py):          bundle seed + samplers
-                          → user query (shaped by archetype/outcome/ambiguity)
-                          → gate judge → DISCUSSION → RESEARCH PLAN
-                          → TOOL LOOP: think → search(real retriever) → sufficiency → loop/answer
-                          → follow-up → trajectory judge → keep/salvage/drop
-                          → OpenAI messages+tools trajectory
+OFFLINE                          GENERATION (one row at a time)
+─────────                        ──────────────────────────────
+document                         pick a question seed + persona + style
+  │ chunk                          │
+chunks                           user asks a question
+  │ embed                          │
+MiniLM index                     assistant plans, then researches:
+  │ link                            search → read → "enough yet?" → search again
+multi-hop seeds  ───────────▶      │
+                                 assistant writes a grounded answer
+                                   │
+                                 judge → keep / trim / drop
 ```
+
+**Six ideas make the data good:**
+
+1. **Multi-hop by design** — each question is built from a *set* of linked
+   passages, so answering it genuinely requires combining sources.
+2. **Real retrieval** — search tools return real passages from the corpus (via
+   MiniLM embeddings), so citations are never made up.
+3. **Reasoned depth** — the assistant keeps searching until a "do I have enough?"
+   check passes, not for a fixed number of steps.
+4. **Clarify first** — for vague questions it asks a clarifying question before
+   researching, then works on its own.
+5. **Stays coherent when long** — a sliding window plus a running notes
+   "scratchpad" keep each step focused even across many hops.
+6. **Built-in variety** — persona, question type, difficulty, and outcome are
+   sampled per row, so the dataset isn't monotonous.
 
 ---
 
-## 🗂 Layout
+## Files
 
 ```
 agentic_rag/
-├── data_prep/              # corpus side (standalone; no API key needed)
-│   ├── chunk_document.py   #   generic profile-driven chunker
-│   ├── retriever.py        #   MiniLM (+lexical fallback) + gold-rank
-│   └── bundle_builder.py   #   multi-hop evidence-set builder
-├── agentic_rag/            # NDD plugin (the simulation loop)
-│   ├── config.py           #   DeepResearchSimulatorConfig — every knob (single source of truth)
-│   ├── context.py prompts.py tools.py generator.py
-│   ├── llm.py judges.py messages.py persona.py verifiers.py   # reused core
-│   └── plugin_entry.py     #   DD plugin registration
+├── data_prep/            ← offline corpus tools (run without an API key)
+│   ├── chunk_document.py     split a document into clean chunks
+│   ├── retriever.py          MiniLM search index + retrieval checks
+│   └── bundle_builder.py     group linked chunks into multi-hop seeds
+├── agentic_rag/          ← the generation plugin
+│   ├── config.py             every setting lives here (one source of truth)
+│   ├── generator.py          the research loop
+│   ├── tools.py              real search vs. simulated tools
+│   ├── context.py            sliding window + scratchpad
+│   ├── prompts.py            the agent/user/judge prompts
+│   └── …                     llm, judges, messages, persona, verifiers
 ├── config/
-│   ├── indian_legal.yaml   # OUTER config — ALL domain specifics + knobs
-│   └── tiny.yaml           # 2-record smoke test (gpt-oss-120b)
-├── step.py                 # runner: YAML → Data Designer ConfigBuilder
-├── pyproject.toml          # installs plugin via `data_designer.plugins` entry point
-└── data/                   # seed_queries.jsonl tracked; corpus artifacts are generated (see .gitignore)
+│   ├── indian_legal.yaml     the full config (domain + all settings)
+│   └── tiny.yaml             tiny smoke-test config
+├── step.py               ← the runner
+└── data/                 ← source doc + (generated) chunks/index/seeds
 ```
 
-## ⚙️ Configuration
+---
 
-All behaviour is config-driven — nothing domain-specific is hard-coded in the
-plugin. Tune knobs in `config/indian_legal.yaml` (depth, retrieval, context,
-phases, quality gates) and the diversity samplers (persona locale, archetypes,
-outcomes, ambiguity, depth). To retarget a new domain: swap the corpus + tool
-schemas + persona locale in the YAML; the engine is unchanged.
+## Making it your own
 
-## ✅ Status
+Everything domain-specific lives in `config/indian_legal.yaml` — the corpus, the
+tools, the personas, and every tuning knob (how deep to research, how many
+passages to retrieve, how strict the judges are, how much variety to sample).
+The Python code never mentions law or the Constitution. **To do a new domain:**
+swap the documents and tool definitions in the YAML and rerun — nothing else changes.
 
-Corpus side and all wiring are built and validated on the real Constitution;
-the MiniLM retriever grounds correctly (gold articles surface by meaning). The
-plugin loads against the real Data Designer runtime and reaches the model call.
-A live end-to-end run needs an `NVIDIA_API_KEY` with inference access.
+---
+
+## Status
+
+The offline pipeline (chunk → index → seeds) is built and validated on the real
+Constitution, and retrieval grounds correctly. The generator runs end-to-end
+against the live model endpoint and produces trajectories. Ongoing tuning:
+improving how many trajectories pass the quality judges.
