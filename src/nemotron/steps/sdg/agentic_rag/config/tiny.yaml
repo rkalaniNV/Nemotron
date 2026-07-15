@@ -1,0 +1,162 @@
+output_dir: ${oc.env:SDG_OUTPUT_DIR,${oc.env:PWD}/output/sdg}
+output_path: ${output_dir}/agentic_rag_tiny.jsonl
+num_records: 2
+seed_dataset:
+  path: ../data/bundles.jsonl
+  strategy: shuffle
+  fields:
+  - bundle
+  - tools
+providers:
+- name: nvidia-inference
+  endpoint: https://inference-api.nvidia.com/v1
+  provider_type: openai
+  api_key: NVIDIA_API_KEY
+models:
+- alias: user_model
+  model: nvidia/openai/gpt-oss-120b
+  provider: nvidia-inference
+  inference_parameters:
+    temperature: 0.9
+    top_p: 0.95
+    max_tokens: 512
+- alias: assistant_model
+  model: nvidia/openai/gpt-oss-120b
+  provider: nvidia-inference
+  inference_parameters:
+    temperature: 0.6
+    top_p: 0.95
+    max_tokens: 1024
+- alias: api_response_model
+  model: nvidia/openai/gpt-oss-120b
+  provider: nvidia-inference
+  inference_parameters:
+    temperature: 0.5
+    top_p: 0.95
+    max_tokens: 512
+- alias: judge_model
+  model: nvidia/openai/gpt-oss-120b
+  provider: nvidia-inference
+  inference_parameters:
+    temperature: 0.1
+    top_p: 1.0
+    max_tokens: 512
+columns:
+- type: category
+  name: query_archetype
+  values:
+  - definitional
+  - procedural
+  - comparative
+  - temporal
+  - hypothetical_fact_pattern
+  - edge_case
+- type: category
+  name: outcome_type
+  values:
+  - answerable
+  - partial
+  - unanswerable
+  - conflicting
+- type: category
+  name: depth_target
+  values:
+  - moderate
+  - deep
+  - deep
+- type: category
+  name: ambiguity_level
+  values:
+  - low
+  - medium
+  - high
+- type: category
+  name: theme
+  values:
+  - '{"type": "citizen_query", "description": "an ordinary person seeking to understand
+    their rights"}'
+  - '{"type": "practitioner", "description": "a professional needing precise, cross-referenced
+    provisions"}'
+  - '{"type": "student", "description": "a learner asking comparative, conceptual
+    questions"}'
+- type: deep-research-simulator
+  name: trajectory
+  model_alias: assistant_model
+  bundle_column: bundle
+  persona_column: persona
+  theme_column: theme
+  tools_column: tools
+  retrieval_tools:
+  - search_articles
+  - get_article
+  retriever_backend: embedding
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  index_dir: ../data/index
+  corpus_path: ../data/constitution_chunks.jsonl
+  top_k: 4
+  log_gold_rank: true
+  guided_injection: true
+  guided_injection_after: 2
+  min_hops: 1
+  max_steps: 3
+  enforce_sufficiency: true
+  sufficiency_mode: strict
+  max_turns: 1
+  max_correction_attempts: 3
+  interaction_model: strict_phased
+  allow_discussion: true
+  max_discussion_exchanges: 1
+  require_research_plan: true
+  context_window_k: 2
+  compaction_mode: reference
+  use_scratchpad: true
+  store_full_trace: true
+  gate_query: true
+  salvage_min_hops: 2
+  majority_vote_n: 1
+  error_injection_rate: 0.0
+  max_tools: 12
+persona:
+  dataset: nvidia/Nemotron-Personas-India
+  column: persona
+tools:
+- type: function
+  function:
+    name: search_articles
+    description: Semantic search over the constitutional corpus; returns the most
+      relevant passages.
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Natural-language description of what you are looking for.
+      required:
+      - query
+- type: function
+  function:
+    name: get_article
+    description: Retrieve the full text of a specific article by its number.
+    parameters:
+      type: object
+      properties:
+        article:
+          type: string
+          description: Article number
+          e.g. "21" or "371A".: null
+      required:
+      - article
+output_projection:
+  type: structured_messages
+  source_field: conversation_messages
+  messages_field: messages
+  tools_field: tools
+  metadata_fields:
+  - gold_rank_log
+  - hops_taken
+  - salvaged
+  - trajectory_judgment
+  - query_archetype
+  - outcome_type
+  - depth_target
+  - ambiguity_level

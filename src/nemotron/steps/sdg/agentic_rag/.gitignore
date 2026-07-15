@@ -1,0 +1,20 @@
+# Generated corpus artifacts — reproduce with data_prep/ scripts (see README)
+data/constitution_chunks.jsonl
+data/bundles.jsonl
+data/_enriched_seed.jsonl
+data/index/
+data/*_output.jsonl
+data/mock_trajectory.jsonl
+
+# Pipeline outputs
+output/
+*_output.jsonl
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# NOTE: data/seed_queries.jsonl IS tracked — it is a curated example fixture,
+# not a machine-generated artifact.
