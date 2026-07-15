@@ -138,6 +138,55 @@ class EmbeddingRetriever(Retriever):
         return [self._wrap(int(i), sims[int(i)]) for i in top]
 
 
+# ── NVIDIA NeMo Retriever embedding backend (NIM, OOTB) ──────────────────────
+class NIMEmbeddingRetriever(Retriever):
+    """Same interface as EmbeddingRetriever, but embeddings come from the NVIDIA
+    NeMo Retriever embedding NIM (hosted or self-hosted) via `nv_retrieval`.
+
+    Uses the model's asymmetric encoding: passages at index-build time, queries at
+    search time. On-disk format matches EmbeddingRetriever (embeddings.npy +
+    corpus.jsonl + meta.json) so it drops into the existing tool wiring.
+    """
+
+    def __init__(self, corpus, model_name: Optional[str] = None, embeddings=None, embedder=None):
+        super().__init__(corpus)
+        from nv_retrieval import NIMEmbedder, DEFAULT_EMBED_MODEL  # local import
+        self.model_name = model_name or DEFAULT_EMBED_MODEL
+        self._embedder = embedder or NIMEmbedder(model=self.model_name)
+        self._emb = embeddings
+
+    def build(self) -> "NIMEmbeddingRetriever":
+        self._emb = self._embedder.embed_passages(self.texts)
+        return self
+
+    def save(self, index_dir: Path) -> None:
+        import numpy as np
+        index_dir.mkdir(parents=True, exist_ok=True)
+        np.save(index_dir / "embeddings.npy", self._emb)
+        with (index_dir / "corpus.jsonl").open("w", encoding="utf-8") as f:
+            for c in self.corpus:
+                f.write(json.dumps(c, ensure_ascii=False) + "\n")
+        (index_dir / "meta.json").write_text(json.dumps(
+            {"backend": "nim", "model": self.model_name, "n": len(self.ids)}))
+
+    @classmethod
+    def load(cls, index_dir: Path) -> "NIMEmbeddingRetriever":
+        import numpy as np
+        corpus = load_corpus(index_dir / "corpus.jsonl")
+        emb = np.load(index_dir / "embeddings.npy")
+        meta = json.loads((index_dir / "meta.json").read_text())
+        return cls(corpus, model_name=meta.get("model"), embeddings=emb)
+
+    def search(self, query: str, k: int = 5) -> List[RetrievedChunk]:
+        import numpy as np
+        if self._emb is None:
+            self.build()
+        q = self._embedder.embed_queries([query])[0]   # normalised query vector
+        sims = self._emb @ q                            # cosine (both normalised)
+        top = np.argsort(-sims)[:k]
+        return [self._wrap(int(i), sims[int(i)]) for i in top]
+
+
 # ── lexical fallback (dependency-free) ───────────────────────────────────────
 class LexicalRetriever(Retriever):
     """TF-IDF-ish cosine over token counts; no external deps."""
@@ -176,7 +225,18 @@ class LexicalRetriever(Retriever):
 
 
 # ── factory + grounding signal ───────────────────────────────────────────────
-def make_retriever(corpus, backend: str = "embedding") -> Retriever:
+def make_retriever(corpus, backend: str = "nim") -> Retriever:
+    if backend == "nim":
+        try:
+            import httpx  # noqa: F401
+            import os
+            if os.environ.get("NVIDIA_API_KEY"):
+                return NIMEmbeddingRetriever(corpus).build()
+            print("[retriever] NVIDIA_API_KEY not set; falling back to lexical. "
+                  "Set the key to use the NeMo Retriever embedding NIM.")
+        except ImportError:
+            print("[retriever] httpx not installed; falling back to lexical.")
+        return LexicalRetriever(corpus)
     if backend == "embedding":
         try:
             import sentence_transformers  # noqa: F401
@@ -210,12 +270,12 @@ def main() -> None:
     b = sub.add_parser("build", help="encode a corpus and cache the index")
     b.add_argument("--chunks", required=True, type=Path)
     b.add_argument("--index", required=True, type=Path)
-    b.add_argument("--backend", default="embedding", choices=["embedding", "lexical"])
+    b.add_argument("--backend", default="nim", choices=["nim", "embedding", "lexical"])
 
     q = sub.add_parser("query", help="run a smoke-test query")
     q.add_argument("--index", type=Path, help="cached embedding index dir")
     q.add_argument("--chunks", type=Path, help="corpus JSONL (for lexical / no cache)")
-    q.add_argument("--backend", default="embedding", choices=["embedding", "lexical"])
+    q.add_argument("--backend", default="nim", choices=["nim", "embedding", "lexical"])
     q.add_argument("--q", required=True)
     q.add_argument("--k", type=int, default=5)
     q.add_argument("--gold", nargs="*", default=[], help="gold section ids to score rank")
@@ -224,7 +284,10 @@ def main() -> None:
 
     if args.cmd == "build":
         corpus = load_corpus(args.chunks)
-        if args.backend == "embedding":
+        if args.backend == "nim":
+            NIMEmbeddingRetriever(corpus).build().save(args.index)
+            print(f"[retriever] built NIM index ({len(corpus)} chunks) -> {args.index}")
+        elif args.backend == "embedding":
             EmbeddingRetriever(corpus).build().save(args.index)
             print(f"[retriever] built embedding index ({len(corpus)} chunks) -> {args.index}")
         else:
@@ -232,8 +295,9 @@ def main() -> None:
         return
 
     # query
-    if args.index and (args.index / "meta.json").exists() and args.backend == "embedding":
-        r = EmbeddingRetriever.load(args.index)
+    _loaders = {"embedding": EmbeddingRetriever, "nim": NIMEmbeddingRetriever}
+    if args.index and (args.index / "meta.json").exists() and args.backend in _loaders:
+        r = _loaders[args.backend].load(args.index)
     else:
         corpus = load_corpus(args.chunks)
         r = make_retriever(corpus, backend=args.backend)

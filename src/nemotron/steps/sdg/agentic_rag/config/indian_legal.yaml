@@ -76,10 +76,10 @@ columns:
     theme_column: theme
     tools_column: tools
 
-    # retrieval (RAG grounding) — MiniLM over the chunked Constitution
+    # retrieval (RAG grounding) — NVIDIA NeMo Retriever NIM over the chunked Constitution
     retrieval_tools: [search_articles, get_article]
-    retriever_backend: embedding
-    embedding_model: sentence-transformers/all-MiniLM-L6-v2
+    retriever_backend: nim
+    embedding_model: nvidia/llama-nemotron-embed-1b-v2
     index_dir: ../data/index           # prebuilt via data_prep/retriever.py build
     corpus_path: ../data/constitution_chunks.jsonl
     top_k: 4

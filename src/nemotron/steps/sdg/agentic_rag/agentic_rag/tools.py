@@ -23,7 +23,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # make the corpus-side retriever importable (data_prep is a sibling dir)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "data_prep"))
-from retriever import make_retriever, EmbeddingRetriever, gold_rank, RetrievedChunk  # noqa: E402
+from retriever import (  # noqa: E402
+    make_retriever, EmbeddingRetriever, NIMEmbeddingRetriever, gold_rank, RetrievedChunk)
 
 from .llm import call_llm
 from .prompts import API_RESPONSE_SIM_SYSTEM_PROMPT, API_RESPONSE_SIM_TURN_PROMPT
@@ -50,9 +51,10 @@ class ToolEnvironment:
     @property
     def retriever(self):
         if self._retriever is None:
-            if self.cfg.index_dir and (Path(self.cfg.index_dir) / "meta.json").exists() \
-                    and self.cfg.retriever_backend == "embedding":
-                self._retriever = EmbeddingRetriever.load(Path(self.cfg.index_dir))
+            cached = self.cfg.index_dir and (Path(self.cfg.index_dir) / "meta.json").exists()
+            loaders = {"embedding": EmbeddingRetriever, "nim": NIMEmbeddingRetriever}
+            if cached and self.cfg.retriever_backend in loaders:
+                self._retriever = loaders[self.cfg.retriever_backend].load(Path(self.cfg.index_dir))
             else:
                 self._retriever = make_retriever(self.corpus, backend=self.cfg.retriever_backend)
         return self._retriever
