@@ -70,28 +70,35 @@ pip install -e .
 export NVIDIA_API_KEY=nvapi-...        # from build.nvidia.com
 ```
 
-### 2 · Run the whole pipeline (one command)
+### 2 · Generate the trajectories
 
 ```bash
 python pipeline.py --config config/agentic_pipeline.yaml                 # full run
 python pipeline.py --config config/agentic_pipeline.yaml --limit-clusters 2   # smoke test
 ```
 
-`pipeline.py` runs Stage 1 clustering, then Stages 2–6 per cluster, appending to
-`output/sdg/`. It is **resumable** (a `.done` marker per cluster) and bounds disk
-by deleting each cluster's index after use (`--keep-indexes` to retain them).
-Useful flags: `--skip-clustering` (reuse an existing clusters root),
-`--no-llm` (Stage 1–2 chunk/index only, no API).
+`pipeline.py` runs Stage 1 clustering, then Stages 2–5 per cluster, writing **one
+raw trajectory file per cluster** to `output/sdg/raw/<cluster>.jsonl` (all
+trajectories, unjudged). It is **resumable** (a `.done` marker per cluster) and
+bounds disk by deleting each cluster's index after use (`--keep-indexes` to
+retain). Flags: `--skip-clustering`, `--force` (re-run done clusters),
+`--no-llm` (Stage 1–2 chunk/index only).
 
-### 3 · Evaluate (Stage 6, standalone)
+### 3 · Judge & filter (Stage 6 — a separate, re-runnable stage)
+
+Generation and judging are **decoupled**, so you can re-judge without
+regenerating (tweak the rubric/thresholds and re-run this cheaply):
 
 ```bash
-python evaluate.py --input output/sdg/agentic_rag_pipeline.jsonl          # offline stats
-python evaluate.py --input output/sdg/agentic_rag_pipeline.jsonl --judge  # + LLM judge
+python evaluate.py --clusters-root data/clusters --out output/sdg/agentic_rag_pipeline.jsonl --judge
+python evaluate.py --input data/clusters/c000/trajectories.jsonl --out kept.jsonl   # objective-only
 ```
 
-Reports tool-call validity, gold-retrieval rate, hop/variant distributions, and
-(optionally) the judge pass-rate.
+It reads `data/clusters/<cluster>/trajectories.jsonl` and applies **two-tier scoring**: an objective
+gate (every tool call valid + gold evidence retrieved + ends on a grounded
+answer) and, with `--judge`, an LLM **rubric** (faithfulness / coherence /
+completeness / tool_use / user_realism, 1–5). It writes the filtered training set
+(`--out`), a `.scored.jsonl` (every row + its scores), and a `.summary.json`.
 
 ---
 
@@ -134,14 +141,15 @@ agentic_rag/
 │   ├── generator.py              the phased deep-research loop (Stages 3–5)
 │   ├── tools.py                  real retriever vs. LLM-simulated tools (cluster-scoped)
 │   ├── context.py                Stage 5a outer compression (head/tail preserve)
-│   ├── prompts.py                the agent/user/judge prompts
+│   ├── prompts.py                ALL prompts (agent/user/judge/nudges/question-gen) — one file to tune
+│   ├── planner.py                Stage 4 conversation planner (query-kind-driven, diverse)
 │   └── …                         llm, judges, messages, persona, verifiers
 ├── config/
 │   ├── agentic_pipeline.yaml       the streaming pipeline config (Stages 1–6)
 │   └── agentic_pipeline.smoke.yaml cost-bounded smoke config
 ├── pipeline.py               ← the streaming orchestrator (Stages 1–6)
 ├── step.py                   ← per-config Data Designer runner (Stages 3–6)
-├── evaluate.py               ← Stage 6 standalone evaluation
+├── evaluate.py               ← Stage 6 judge/filter stage (raw → filtered + summary)
 └── data/                     ← source doc + (generated) clusters/index/queries
 ```
 

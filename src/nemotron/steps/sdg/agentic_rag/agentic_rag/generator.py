@@ -36,11 +36,14 @@ from .messages import (
     parse_theme,
 )
 from .persona import format_persona_for_prompt
-from .planner import plan_conversation, turn_eff, KIND_DIRECTIVES
+from .planner import plan_conversation, turn_eff
 from .prompts import (
     ASSISTANT_SYSTEM_PROMPT, FINDING_DISTILL_PROMPT, QUERY_GATE_JUDGE_PROMPT,
     RESEARCH_PLAN_PROMPT, SUFFICIENCY_PROMPT, TRAJECTORY_JUDGE_PROMPT,
-    USER_AGENT_SYSTEM_PROMPT, USER_FOLLOWUP_PROMPT,
+    USER_AGENT_SYSTEM_PROMPT, USER_FOLLOWUP_PROMPT, KIND_DIRECTIVES,
+    SEARCH_NUDGE, INSUFFICIENT_NUDGE, INSUFFICIENT_NUDGE_HINT, INSUFFICIENT_NUDGE_TAIL,
+    FINAL_ANSWER_NUDGE, CLARIFY_ANSWER_SYSTEM, ARCHETYPE_HINTS, OUTCOME_HINTS, AMBIGUITY_HINTS,
+    PERSONA_QUERY_PROMPT,
 )
 from .tools import ToolEnvironment, sample_tools
 from .verifiers import ToolCallVerifier
@@ -116,6 +119,10 @@ class DeepResearchSimulatorGenerator(
         # otherwise fall back to inventing one from the persona/seed context.
         user_query = seed_query or self._gen_user_query(
             models, persona, theme, tools, seed_context, directives)
+        # re-voice the persona-agnostic seed query in this row's persona (same
+        # information need, the persona's phrasing) so persona shapes the opening.
+        if seed_query and cfg.persona_voice:
+            user_query = self._persona_voice(models, persona, theme, seed_query) or user_query
         data["user_query"] = user_query
 
         if cfg.gate_query:
@@ -151,12 +158,12 @@ class DeepResearchSimulatorGenerator(
             eff = turn_eff(spec)
             memory = ResearchMemory()
             if eff["allow_discussion"]:      # a clarify-kind turn opens with clarification
-                self._discussion_phase(models, conversation, assistant_history, env, tools)
+                self._discussion_phase(models, persona, conversation, assistant_history, env, tools)
             if eff["require_plan"] and eff["max_steps"] > 1:
                 memory.plan = self._research_plan(models, assistant_history, cur_query)
                 conversation["metadata"]["phases"].append({"turn": turn, "kind": spec.kind, "plan": memory.plan})
 
-            ok, hops = self._tool_loop(models, conversation, assistant_history, env, tools,
+            ok, hops = self._tool_loop(models, persona, conversation, assistant_history, env, tools,
                                        cur_query, memory, turn, eff)
             hops_total += hops
             if not ok:
@@ -198,8 +205,16 @@ class DeepResearchSimulatorGenerator(
             {"role": "user", "content": prompt}])
         return resp.get("content", "") if isinstance(resp, dict) else ""
 
-    def _discussion_phase(self, models, conversation, assistant_history, env, tools) -> None:
-        """Let the assistant ask clarifying questions; the user answers. Bounded."""
+    def _persona_voice(self, models, persona, theme, query) -> str:
+        """Re-ask the seed query in the row's persona voice (same information need)."""
+        resp = call_llm(models, MODEL_USER, [
+            {"role": "user", "content": PERSONA_QUERY_PROMPT.format(
+                persona=format_persona_for_prompt(persona),
+                theme=format_theme_for_prompt(theme), query=query)}])
+        return (resp.get("content", "") if isinstance(resp, dict) else "").strip()
+
+    def _discussion_phase(self, models, persona, conversation, assistant_history, env, tools) -> None:
+        """Let the assistant ask clarifying questions; the user (in persona) answers."""
         cfg = self.config
         for _ in range(cfg.max_discussion_exchanges):
             view = build_assistant_view(assistant_history, None, window_k=cfg.context_window_k,
@@ -210,7 +225,7 @@ class DeepResearchSimulatorGenerator(
                 return  # ready to research; do NOT consume this turn here
             conversation["messages"].append({"role": "assistant", "content": turn.get("content", "")})
             assistant_history.append({"role": "assistant", "content": turn.get("content", "")})
-            answer = call_llm(models, MODEL_USER, _clarify_answer_msgs(conversation))
+            answer = call_llm(models, MODEL_USER, _clarify_answer_msgs(persona, conversation))
             ans = answer.get("content", "") if isinstance(answer, dict) else ""
             conversation["messages"].append({"role": "user", "content": ans})
             assistant_history.append({"role": "user", "content": ans})
@@ -223,7 +238,7 @@ class DeepResearchSimulatorGenerator(
         return plan
 
     # ── the autonomous tool loop (Stages 3-5) ────────────────────────────────
-    def _tool_loop(self, models, conversation, assistant_history, env, tools,
+    def _tool_loop(self, models, persona, conversation, assistant_history, env, tools,
                    user_query, memory, turn, eff) -> Tuple[bool, int]:
         cfg = self.config
         verifier = ToolCallVerifier()
@@ -260,10 +275,8 @@ class DeepResearchSimulatorGenerator(
             # while still below the hop floor (some models ignore tool_choice=
             # "required"), push it to search before it may answer.
             if cfg.force_first_tool and hops < eff["min_hops"]:
-                nudge = ("You must search the knowledge base before answering. "
-                         "Call the search tool now.")
-                conversation["messages"].append({"role": "user", "content": nudge})
-                assistant_history.append({"role": "user", "content": nudge})
+                conversation["messages"].append({"role": "user", "content": SEARCH_NUDGE})
+                assistant_history.append({"role": "user", "content": SEARCH_NUDGE})
                 continue
 
             # no tool_calls: the assistant either asked a clarifying question or
@@ -275,7 +288,7 @@ class DeepResearchSimulatorGenerator(
             if (_looks_like_question(content) and eff["allow_discussion"]
                     and clarify_used < cfg.max_discussion_exchanges):
                 clarify_used += 1
-                ans = call_llm(models, MODEL_USER, _clarify_answer_msgs(conversation))
+                ans = call_llm(models, MODEL_USER, _clarify_answer_msgs(persona, conversation))
                 ans_text = ans.get("content", "") if isinstance(ans, dict) else ""
                 conversation["messages"].append({"role": "user", "content": ans_text})
                 assistant_history.append({"role": "user", "content": ans_text})
@@ -285,10 +298,10 @@ class DeepResearchSimulatorGenerator(
             if eff["enforce_sufficiency"]:
                 insufficient, hint = self._insufficient(models, user_query, memory, hops, eff["min_hops"])
                 if insufficient:
-                    nudge = "You have not yet gathered enough evidence to fully answer. "
+                    nudge = INSUFFICIENT_NUDGE
                     if hint:
-                        nudge += f"In particular, search next for: {hint} "
-                    nudge += "Identify what is still missing and search for it."
+                        nudge += INSUFFICIENT_NUDGE_HINT.format(hint=hint)
+                    nudge += INSUFFICIENT_NUDGE_TAIL
                     conversation["messages"].append({"role": "user", "content": nudge})
                     assistant_history.append({"role": "user", "content": nudge})
                     continue
@@ -307,9 +320,7 @@ class DeepResearchSimulatorGenerator(
             compression_token_limit=cfg.compression_token_limit,
             preserve_last_user_turn=cfg.preserve_last_user_turn, use_scratchpad=cfg.use_scratchpad)
         # nudge only shapes the view; it is NOT stored in the trajectory
-        view = view + [{"role": "user", "content":
-                        "Based on the evidence you have gathered, give your final, well-organized "
-                        "answer now, citing the source identifiers. Do not call any tools."}]
+        view = view + [{"role": "user", "content": FINAL_ANSWER_NUDGE}]
         resp = call_llm(models, MODEL_ASSISTANT, view)  # no tools -> a text answer
         answer = {"role": "assistant",
                   "reasoning_content": resp.get("reasoning_content", "") if isinstance(resp, dict) else "",
@@ -413,7 +424,7 @@ class DeepResearchSimulatorGenerator(
                 salvaged = True
                 status = True
 
-        if status:
+        if status and cfg.inline_judge:
             _, rating, ok = run_inline_judge(models, MODEL_JUDGE, TRAJECTORY_JUDGE_PROMPT.format(
                 tools=format_tools_for_prompt(conversation["tools"]),
                 conversation=format_conversation_history_for_prompt(
@@ -421,6 +432,9 @@ class DeepResearchSimulatorGenerator(
                                      compression_token_limit=cfg.compression_token_limit))))
             data["trajectory_judgment"] = json.dumps({"rating": rating})
             status = ok
+        elif status:
+            # inline judge OFF -> keep every completed trajectory; judging is a separate stage
+            data["trajectory_judgment"] = json.dumps({"rating": "ungraded"})
         else:
             data["trajectory_judgment"] = json.dumps({"rating": "failure", "reason": "unsalvageable"})
 
@@ -458,30 +472,9 @@ class DeepResearchSimulatorGenerator(
 
 
 # ── module helpers ───────────────────────────────────────────────────────────
-_ARCHETYPE_HINTS = {
-    "definitional": "Ask what a specific concept or term means.",
-    "procedural": "Ask about the steps, grounds, or process for something.",
-    "comparative": "Ask to compare or distinguish two related provisions or concepts.",
-    "temporal": "Ask whether something still holds or how it changed over time.",
-    "hypothetical_fact_pattern": "Describe a concrete real-world situation and ask what applies.",
-    "edge_case": "Ask about an unusual, boundary, or exception scenario.",
-}
-_OUTCOME_HINTS = {
-    "answerable": "The material should fully support an answer.",
-    "partial": "The material should support only a partial answer; expect some limits.",
-    "unanswerable": "The request should NOT be fully satisfiable from the material — a correct assistant would decline part of it.",
-    "conflicting": "The situation may involve provisions that appear to tension with each other.",
-}
-_AMBIGUITY_HINTS = {
-    "low": "Give all needed details up front; the assistant should not need to clarify.",
-    "medium": "Leave one key detail implicit so a good assistant may ask to clarify.",
-    "high": "Be underspecified so the assistant must clarify before researching.",
-}
-
-
 def _query_directives(archetype, outcome, ambiguity) -> str:
     parts = []
-    for val, table in ((archetype, _ARCHETYPE_HINTS), (outcome, _OUTCOME_HINTS), (ambiguity, _AMBIGUITY_HINTS)):
+    for val, table in ((archetype, ARCHETYPE_HINTS), (outcome, OUTCOME_HINTS), (ambiguity, AMBIGUITY_HINTS)):
         hint = table.get(str(val).lower())
         if hint:
             parts.append(f"- {hint}")
@@ -509,9 +502,9 @@ def _looks_like_question(text: str) -> bool:
     return t.endswith("?") or t.lower().startswith(("could you", "can you", "to clarify", "which", "what", "do you"))
 
 
-def _clarify_answer_msgs(conversation):
-    return [{"role": "system", "content": "You are the user. Answer the assistant's clarifying question "
-             "naturally and specifically; invent reasonable real-world details if needed."},
+def _clarify_answer_msgs(persona, conversation):
+    return [{"role": "system", "content": CLARIFY_ANSWER_SYSTEM.format(
+                persona=format_persona_for_prompt(persona))},
             {"role": "user", "content": format_conversation_history_for_prompt(conversation["messages"])}]
 
 

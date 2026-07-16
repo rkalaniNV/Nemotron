@@ -142,3 +142,118 @@ TRAJECTORY_JUDGE_PROMPT = """You evaluate an assistant's entire deep-research tr
 
 A trajectory SUCCEEDS if, across the conversation: tool calls are relevant and well-formed; the assistant gathers missing information before answering; it clarifies genuinely ambiguous requests up front; reasoning is coherent and references prior findings; and the final answer is grounded in retrieved evidence and cites its sources. It FAILS on: repeated/irrelevant tool calls, answering before sufficient evidence, fabricated sources, forgetting prior findings, or incoherence. The simulated user must also stay in character as a user throughout.
 """ + _JUDGE_RESPONSE_FORMAT
+
+# System prompt for the judge (was previously empty).
+JUDGE_SYSTEM_PROMPT = ("You are a meticulous evaluator of AI research trajectories. Judge only what "
+                       "the transcript shows; be strict about grounding and coherence.")
+
+# Rubric judge — used by the standalone judge stage (evaluate.py). Scores the
+# SUBJECTIVE dimensions; objective grounding/validity are checked separately.
+TRAJECTORY_RUBRIC_PROMPT = """Score this AI research trajectory on each dimension from 1 (poor) to 5 (excellent).
+
+<TOOLS>
+{tools}
+</TOOLS>
+<CONVERSATION>
+{conversation}
+</CONVERSATION>
+
+Dimensions:
+- faithfulness: the final answer's claims are supported by the retrieved tool results (no fabrication).
+- coherence: reasoning is logical, references prior findings, and the conversation flows naturally.
+- completeness: the final answer fully addresses what the user asked across the whole conversation.
+- tool_use: tool calls are relevant, well-formed, and non-redundant.
+- user_realism: the simulated user stays in character throughout.
+
+Respond strictly as JSON, no other text:
+{{"faithfulness": 1-5, "coherence": 1-5, "completeness": 1-5, "tool_use": 1-5, "user_realism": 1-5, "notes": "<one line>"}}"""
+
+
+# ── In-loop coaching nudges (injected as user turns during research) ──────────
+SEARCH_NUDGE = "You must search the knowledge base before answering. Call the search tool now."
+
+# built as: INSUFFICIENT_NUDGE [+ INSUFFICIENT_NUDGE_HINT] + INSUFFICIENT_NUDGE_TAIL
+INSUFFICIENT_NUDGE = "You have not yet gathered enough evidence to fully answer. "
+INSUFFICIENT_NUDGE_HINT = "In particular, search next for: {hint} "
+INSUFFICIENT_NUDGE_TAIL = "Identify what is still missing and search for it."
+
+# shapes the forced final answer only (this turn is NOT stored in the trajectory)
+FINAL_ANSWER_NUDGE = ("Based on the evidence you have gathered, give your final, well-organized "
+                      "answer now, citing the source identifiers. Do not call any tools.")
+
+# Re-voice the (persona-agnostic) Stage-2 seed query as the opening user turn, so
+# each conversation reflects its sampled persona without regenerating questions.
+PERSONA_QUERY_PROMPT = """You are the person described below. Re-ask the question in your own natural voice — same information need, phrased the way YOU would actually ask it given your background and situation. Keep it a single question. Do NOT add new facts, do NOT answer it, no meta commentary.
+
+<YOUR_PERSONA>
+{persona}
+</YOUR_PERSONA>
+<THEME>
+{theme}
+</THEME>
+<QUESTION>
+{query}
+</QUESTION>
+
+Return only the rephrased question."""
+
+# system prompt for the simulated user answering a clarifying question (in character)
+CLARIFY_ANSWER_SYSTEM = """You are the person described below, talking to a research assistant. Answer its clarifying question naturally and specifically, staying in character and inventing reasonable real-world details from your own situation if needed. Do not refuse and do not break character.
+
+<YOUR_PERSONA>
+{persona}
+</YOUR_PERSONA>"""
+
+# ── Follow-up query-kind directives (Stage 4 planner) ─────────────────────────
+KIND_DIRECTIVES = {
+    "half_baked": "Ask a vague, underspecified follow-up that a good assistant should clarify first.",
+    "simple": "Ask a short, single-fact follow-up.",
+    "crisp": "Ask a precise, well-scoped follow-up naming exactly what you want.",
+    "complex_multistep": "Ask a follow-up whose answer needs combining several sources (multi-hop).",
+}
+
+# ── Fallback query directives (only the persona-invents-the-query path) ───────
+ARCHETYPE_HINTS = {
+    "definitional": "Ask what a specific concept or term means.",
+    "procedural": "Ask about the steps, grounds, or process for something.",
+    "comparative": "Ask to compare or distinguish two related items or concepts.",
+    "temporal": "Ask whether something still holds or how it changed over time.",
+    "hypothetical_fact_pattern": "Describe a concrete real-world situation and ask what applies.",
+    "edge_case": "Ask about an unusual, boundary, or exception scenario.",
+}
+OUTCOME_HINTS = {
+    "answerable": "The material should fully support an answer.",
+    "partial": "The material should support only a partial answer; expect some limits.",
+    "unanswerable": "The request should NOT be fully satisfiable from the material — a correct assistant would decline part of it.",
+    "conflicting": "The situation may involve items that appear to tension with each other.",
+}
+AMBIGUITY_HINTS = {
+    "low": "Give all needed details up front; the assistant should not need to clarify.",
+    "medium": "Leave one key detail implicit so a good assistant may ask to clarify.",
+    "high": "Be underspecified so the assistant must clarify before researching.",
+}
+
+# ── Question generation (Stage 2, offline) ────────────────────────────────────
+QGEN_SYSTEM = """You write realistic user questions that will be answered by an AI research assistant with access to a knowledge-base search tool over a specific document collection.
+- Ground every question in the provided source text; a diligent researcher must be able to answer it from that collection.
+- Do NOT quote the source verbatim; phrase questions the way a real person would ask them.
+- Return ONLY a JSON array, no prose."""
+
+QGEN_USER = """<SOURCE_DOCUMENT id="{doc_id}">
+{shard_text}
+</SOURCE_DOCUMENT>
+
+<RELATED_SECTIONS_IN_THIS_COLLECTION>
+{neighbors}
+</RELATED_SECTIONS_IN_THIS_COLLECTION>
+
+Write exactly {n} distinct user questions grounded in the SOURCE_DOCUMENT above, spanning this difficulty spectrum (assign each question one level):
+{levels}
+
+For "complex_multistep", prefer questions whose answer requires synthesising the source with the related sections listed above (genuine multi-hop).
+
+Return a JSON array of objects, each:
+{{"query": "<the question a real person would type>",
+  "level": "<one of: {level_names}>",
+  "target_sections": ["<ids of sections this question is grounded in, from the source or related list>"],
+  "rationale": "<one line: why answering needs research>"}}"""
