@@ -1,0 +1,133 @@
+# retrieval_sdg pipeline config — every knob lives here (domain-agnostic).
+# Point `input_path` at your queries, set `retrieval.endpoint` at the retrieval
+# service, swap the `tools` list for the customer's, and run. No Python changes needed.
+
+# ── I/O (paths are relative to THIS config file's directory) ──────────────────
+input_path: ../data/queries.jsonl              # query source output: JSONL list of {query}
+seeds_path: ../data/seeds.jsonl                 # written by the query_prep stage
+output_path: ../output/sdg/retrieval_sdg.raw.jsonl # raw trajectories (judge with evaluate.py)
+column_name: conversation_messages
+
+metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log]
+
+# ── Stage A: query_prep (offline; MiniLM only) ─────────────────────────────────
+query_prep:
+  query_field: query
+  dedup:
+    threshold: 0.92                             # cosine >= this collapses near-duplicates
+    embed_model: sentence-transformers/all-MiniLM-L6-v2
+  clustering:
+    algo: kmeans                                # kmeans | hdbscan | agglomerative
+    k: null                                     # null => heuristic (kmeans/agglomerative)
+    min_cluster_size: 5                         # hdbscan only
+  sample:
+    n_target: 200                               # desired final conversation count
+    seed: 7
+
+# ── models & providers ────────────────────────────────────────────────────────
+providers:
+  - name: lepton_gemma
+    endpoint: https://xtcr3jss-gemma-4-31b-it-vllm-ravirajj-az-32k.xenon.lepton.run/v1
+    api_key: LEPTON_API_KEY                       # env var name; open endpoint => unset is fine
+  - name: lepton_qwen
+    endpoint: https://xtcr3jss-qwen-3-5-122b-sdg.xenon.lepton.run/v1
+    api_key: LEPTON_API_KEY
+
+models:
+  - alias: assistant_model                       # the research agent (tool-calling) — Qwen
+    model: Qwen/Qwen3.5-122B-A10B
+    provider: lepton_qwen
+    inference_parameters: {temperature: 0.7, max_tokens: 2000}
+  - alias: user_model                            # simulates the human user — Gemma
+    model: google/gemma-4-31B-it
+    provider: lepton_gemma
+    inference_parameters: {temperature: 0.8, max_tokens: 600}
+  - alias: aux_response_model                     # simulates non-retrieval tools — Qwen
+    model: Qwen/Qwen3.5-122B-A10B
+    provider: lepton_qwen
+    inference_parameters: {temperature: 0.4, max_tokens: 800}
+  - alias: judge_model                            # inline judge + query gate — Qwen
+    model: Qwen/Qwen3.5-122B-A10B
+    provider: lepton_qwen
+    inference_parameters: {temperature: 0.2, max_tokens: 800}
+
+# ── retrieval service (external HTTP wrapper) ─────────────────────────────────
+retrieval:
+  endpoint: http://10.117.9.203:8000/query        # service POST url; empty => the retrieval tool is LLM-simulated (dry runs)
+  tools: [search]                                 # tool names routed to the service (others are LLM-simulated)
+  top_k: 4
+  oversample_factor: 2                            # request top_k*factor, keep a random top_k (drives depth)
+  timeout: 30
+  headers: {}
+  field_map:                                      # matches this service: {query, num_chunks} -> {chunks:[{rank,text}]}
+    query_field: query
+    top_k_field: num_chunks                       # this service names it num_chunks (not top_k)
+    results_path: chunks                          # response key holding the list ("" => body is the list)
+    id_field: id                                  # absent here -> client falls back to a content hash
+    text_field: text
+    score_field: score                            # absent here -> defaults to 0.0 (rank order preserved)
+    doc_id_field: doc_id                          # absent here -> ""
+
+# ── user-defined tool list ────────────────────────────────────────────────────
+# `search` is routed to the retrieval service (see retrieval.tools above); the
+# other three are LLM-simulated by aux_response_model.
+tools:
+  - function:
+      name: search
+      description: Retrieve the most relevant passages (chunks) from the knowledge base for a query.
+      parameters:
+        type: object
+        properties:
+          query: {type: string, description: The search query.}
+        required: [query]
+  - function:
+      name: web_search
+      description: >-
+        Verify the LATEST/CURRENT information from the public web (recent events, up-to-date
+        figures, very recent changes) that the knowledge base cannot provide. Use only when
+        recency genuinely matters — not as a general fallback.
+      parameters:
+        type: object
+        properties:
+          query: {type: string, description: The web search query (something time-sensitive/recent).}
+          num_results: {type: integer, description: How many results to return.}
+        required: [query]
+  - function:
+      name: memory_read
+      description: Read stored user preferences or facts remembered from earlier interactions.
+      parameters:
+        type: object
+        properties:
+          key: {type: string, description: The preference/fact key to look up (e.g. "preferred_citation_style").}
+        required: [key]
+  - function:
+      name: memory_write
+      description: Persist a user preference or fact for use in future turns/sessions.
+      parameters:
+        type: object
+        properties:
+          key: {type: string, description: The preference/fact key to store.}
+          value: {type: string, description: The value to remember.}
+        required: [key, value]
+
+# ── Stage B: engine knobs (-> ConversationSimulatorConfig) ────────────────────
+engine:
+  min_hops: 2
+  max_steps: 6
+  max_turns: 3
+  min_turns: 2
+  max_correction_attempts: 3
+  max_tool_calls_per_turn: 1                       # many NIM endpoints reject >1
+  force_first_tool: true
+  allow_clarify: true
+  context_window_k: 2
+  compaction_mode: reference
+  compression_token_limit: 2000
+  use_scratchpad: true
+  gate_query: true
+  inline_judge: true
+  majority_vote_n: 1
+  max_tools: 12
+  persona_voice: false                             # no persona sampler wired by default
+  conversation_plan:
+    num_turns: {min: 2, max: 3}
