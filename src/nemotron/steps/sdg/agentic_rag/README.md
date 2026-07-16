@@ -5,8 +5,10 @@ read a question, search a knowledge base, reason over what it finds, search agai
 if needed, and answer — with every claim grounded in real retrieved text.
 
 ```
-question → (clarify?) → plan → search → reason → search → … → grounded answer
+cluster docs → question → (clarify?) → plan → search → reason → search → … → grounded answer
 ```
+
+![Agentic-RAG pipeline flow](assets/pipeline_flow.png)
 
 The engine is **domain-agnostic**. It ships with the **Constitution of India** as a
 worked example; point it at any documents + tools and it generates a new domain.
@@ -17,8 +19,43 @@ worked example; point it at any documents + tools and it generates a new domain.
 
 Each output row is one full **agent trajectory** in OpenAI `messages` + `tools`
 format — the user's question, the assistant's reasoning, its tool calls, the real
-retrieved passages, and the final answer — ready for SFT. Every row also carries
-metadata (how many hops, whether the gold passage was retrieved, etc.).
+retrieved passages, and the final answer — ready for SFT. Every row carries
+metadata (cluster, variant, hops, whether the gold passage was retrieved, judge
+verdict) for auditing and filtering.
+
+---
+
+## The pipeline (Stages 1–6, streaming)
+
+The pipeline runs **one cluster at a time**, all the way through, so cluster
+indexes never all exist at once — peak memory/disk is bounded to a single
+cluster. Only the global cluster manifest persists across clusters.
+
+```
+STAGE 1 (once)   cluster WHOLE docs by embedding (no chunking)
+                 → data/clusters/manifest.jsonl   ← global audit ledger (doc → cluster)
+                 → data/clusters/<id>/docs.jsonl
+
+then FOR EACH cluster, sequentially:
+  STAGE 2   chunk the cluster's docs → build its own index → shard long docs by
+            the generator window → generate 2–5 questions/shard across a
+            difficulty spectrum (half-baked → crisp → complex multi-step)
+  STAGE 3   a user-LLM opens with a seeded question; retrieval is scoped to THIS
+            cluster's index (semantic; oversample 2×k then random-subsample to k
+            so a single search is lossy and the agent must take more hops)
+  STAGE 4   each row is a variant: single-turn / multi-turn / multi-step
+  STAGE 5   a model-driven tool loop researches with updated queries; the
+            constant tool is the retriever, others are LLM-simulated; multiple
+            tool calls in a turn run concurrently
+      5a    outer compression: system prompt + everything from the last user
+            turn to the end are kept verbatim; the middle is compressed to a
+            token budget (a knob)
+  STAGE 6   LLM-as-judge rates the trajectory; tool calls are schema-validated
+  → append trajectories (tagged cluster_id) to the output, tear down the index
+```
+
+Every stage is config-driven and every knob lives in the YAML — the Python code
+never mentions law or the Constitution.
 
 ---
 
@@ -33,87 +70,52 @@ pip install -e .
 export NVIDIA_API_KEY=nvapi-...        # from build.nvidia.com
 ```
 
-Check the key can call the model (should print `200`):
+### 2 · Run the whole pipeline (one command)
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://inference-api.nvidia.com/v1/chat/completions \
-  -H "Authorization: Bearer $NVIDIA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"nvidia/openai/gpt-oss-120b","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'
+python pipeline.py --config config/agentic_pipeline.yaml                 # full run
+python pipeline.py --config config/agentic_pipeline.yaml --limit-clusters 2   # smoke test
 ```
 
-### 2 · Prepare the corpus (one time, no API key needed)
+`pipeline.py` runs Stage 1 clustering, then Stages 2–6 per cluster, appending to
+`output/sdg/`. It is **resumable** (a `.done` marker per cluster) and bounds disk
+by deleting each cluster's index after use (`--keep-indexes` to retain them).
+Useful flags: `--skip-clustering` (reuse an existing clusters root),
+`--no-llm` (Stage 1–2 chunk/index only, no API).
+
+### 3 · Evaluate (Stage 6, standalone)
+
+```bash
+python evaluate.py --input output/sdg/agentic_rag_pipeline.jsonl          # offline stats
+python evaluate.py --input output/sdg/agentic_rag_pipeline.jsonl --judge  # + LLM judge
+```
+
+Reports tool-call validity, gold-retrieval rate, hop/variant distributions, and
+(optionally) the judge pass-rate.
+
+---
+
+## Running stages individually
+
+Each offline stage is also a standalone CLI (handy for tuning):
 
 ```bash
 cd data_prep
 
-# chunk the document                → data/constitution_chunks.jsonl
-python chunk_document.py --input ../data/constitution_of_india.txt \
-  --output ../data/constitution_chunks.jsonl --profile indian_statute
+# Stage 1 — cluster whole documents (no chunking)
+python cluster_documents.py --input ../data/constitution_of_india.txt \
+  --doc-unit section --profile indian_statute \
+  --output-root ../data/clusters --algo kmeans --k 12
 
-# build the embedding index (MiniLM) → data/index/
-python retriever.py build --chunks ../data/constitution_chunks.jsonl \
-  --index ../data/index --backend embedding
+# Stage 2 — chunk + generate questions for ONE cluster
+python question_gen.py --cluster-dir ../data/clusters/c000 --profile indian_statute --n-queries 4
 
-# build multi-hop question seeds     → data/bundles.jsonl
-python bundle_builder.py --chunks ../data/constitution_chunks.jsonl \
-  --output ../data/bundles.jsonl --mode entity_link --size 3 --num 200
+# build one retrieval index per cluster
+python retriever.py build --clusters-root ../data/clusters --backend embedding
 
-cd ..
+# quick retrieval check inside a cluster's world
+python retriever.py query --index ../data/clusters/c000/index --q "powers of the President"
 ```
-
-Quick retrieval check (should put **Article 32** at the top):
-
-```bash
-python data_prep/retriever.py query --index data/index --backend embedding \
-  --q "which court to approach when a fundamental right is violated" --gold 32 226
-```
-
-### 3 · Generate trajectories
-
-```bash
-python step.py --config config/tiny.yaml --mode preview    # small smoke test
-python step.py --config config/indian_legal.yaml --mode create   # full run
-```
-
-Results land in `output/sdg/`. Each run writes two files:
-- `*.jsonl` — the training data (successful trajectories only)
-- `*.raw.jsonl` — every generated row, for inspection/debugging
-
----
-
-## How it works
-
-Two stages: an **offline** prep step, then the **generation** step.
-
-```
-OFFLINE                          GENERATION (one row at a time)
-─────────                        ──────────────────────────────
-document                         pick a question seed + persona + style
-  │ chunk                          │
-chunks                           user asks a question
-  │ embed                          │
-MiniLM index                     assistant plans, then researches:
-  │ link                            search → read → "enough yet?" → search again
-multi-hop seeds  ───────────▶      │
-                                 assistant writes a grounded answer
-                                   │
-                                 judge → keep / trim / drop
-```
-
-**Six ideas make the data good:**
-
-1. **Multi-hop by design** — each question is built from a *set* of linked
-   passages, so answering it genuinely requires combining sources.
-2. **Real retrieval** — search tools return real passages from the corpus (via
-   MiniLM embeddings), so citations are never made up.
-3. **Reasoned depth** — the assistant keeps searching until a "do I have enough?"
-   check passes, not for a fixed number of steps.
-4. **Clarify first** — for vague questions it asks a clarifying question before
-   researching, then works on its own.
-5. **Stays coherent when long** — a sliding window plus a running notes
-   "scratchpad" keep each step focused even across many hops.
-6. **Built-in variety** — persona, question type, difficulty, and outcome are
-   sampled per row, so the dataset isn't monotonous.
 
 ---
 
@@ -121,39 +123,46 @@ multi-hop seeds  ───────────▶      │
 
 ```
 agentic_rag/
-├── data_prep/            ← offline corpus tools (run without an API key)
-│   ├── chunk_document.py     split a document into clean chunks
-│   ├── retriever.py          MiniLM search index + retrieval checks
-│   └── bundle_builder.py     group linked chunks into multi-hop seeds
-├── agentic_rag/          ← the generation plugin
-│   ├── config.py             every setting lives here (one source of truth)
-│   ├── generator.py          the research loop
-│   ├── tools.py              real search vs. simulated tools
-│   ├── context.py            sliding window + scratchpad
-│   ├── prompts.py            the agent/user/judge prompts
-│   └── …                     llm, judges, messages, persona, verifiers
+├── data_prep/                ← offline corpus tooling (Stages 1–2, CLI)
+│   ├── cluster_documents.py      Stage 1: whole-doc embed + cluster + manifest
+│   ├── chunk_document.py         size-bounded chunking (profile-driven)
+│   ├── question_gen.py           Stage 2: per-document question generation
+│   └── retriever.py              CLI over the shared retrieval module (per-cluster build)
+├── agentic_rag/              ← the runtime plugin (modular engine + DD adapter)
+│   ├── config.py                 every runtime knob (one source of truth)
+│   ├── retrieval.py              swappable retriever (embedding/lexical) + subsample
+│   ├── generator.py              the phased deep-research loop (Stages 3–5)
+│   ├── tools.py                  real retriever vs. LLM-simulated tools (cluster-scoped)
+│   ├── context.py                Stage 5a outer compression (head/tail preserve)
+│   ├── prompts.py                the agent/user/judge prompts
+│   └── …                         llm, judges, messages, persona, verifiers
 ├── config/
-│   ├── indian_legal.yaml     the full config (domain + all settings)
-│   └── tiny.yaml             tiny smoke-test config
-├── step.py               ← the runner
-└── data/                 ← source doc + (generated) chunks/index/seeds
+│   ├── agentic_pipeline.yaml       the streaming pipeline config (Stages 1–6)
+│   └── agentic_pipeline.smoke.yaml cost-bounded smoke config
+├── pipeline.py               ← the streaming orchestrator (Stages 1–6)
+├── step.py                   ← per-config Data Designer runner (Stages 3–6)
+├── evaluate.py               ← Stage 6 standalone evaluation
+└── data/                     ← source doc + (generated) clusters/index/queries
 ```
 
 ---
 
 ## Making it your own
 
-Everything domain-specific lives in `config/indian_legal.yaml` — the corpus, the
-tools, the personas, and every tuning knob (how deep to research, how many
-passages to retrieve, how strict the judges are, how much variety to sample).
-The Python code never mentions law or the Constitution. **To do a new domain:**
-swap the documents and tool definitions in the YAML and rerun — nothing else changes.
+Everything domain-specific lives in `config/agentic_pipeline.yaml` — the corpus,
+the clustering, the tools, the personas, and every tuning knob (cluster count,
+questions per shard, retrieval depth/subsample, conversation variants, context
+compression budget, judge strictness). **To do a new domain:** point `clustering.input`
+at your documents, swap the tool definitions, and rerun — nothing in the Python
+changes. To swap the retrieval backend (BM25, FAISS, a hosted vector DB),
+implement the `Retriever` interface in `agentic_rag/retrieval.py`.
 
 ---
 
 ## Status
 
-The offline pipeline (chunk → index → seeds) is built and validated on the real
-Constitution, and retrieval grounds correctly. The generator runs end-to-end
-against the live model endpoint and produces trajectories. Ongoing tuning:
-improving how many trajectories pass the quality judges.
+The offline stages (cluster → chunk → index → questions) are built and validated
+on the real Constitution; clustering yields balanced topical clusters, per-cluster
+retrieval grounds correctly, and the lossy-subsample retrieval pushes depth. The
+generator runs end-to-end against the live model endpoint and produces
+trajectories. Ongoing tuning: raising the fraction that pass the quality judges.

@@ -57,6 +57,7 @@ class ChunkProfile:
 class Chunk:
     chunk_id: str
     text: str
+    doc_id: str = ""                     # source document id (cluster/pipeline provenance)
     section_id: str = ""                 # e.g. article number, heading slug, or running index
     section_title: str = ""
     headings: Dict[str, str] = field(default_factory=dict)   # running context (part/chapter/...)
@@ -213,17 +214,18 @@ def _sectionize(body: str, prof: ChunkProfile) -> List[Tuple[str, str, Dict[str,
 
 
 # ── driver ───────────────────────────────────────────────────────────────────
-def build_chunks(raw: str, prof: ChunkProfile) -> List[Chunk]:
+def build_chunks(raw: str, prof: ChunkProfile, doc_id: str = "", id_prefix: str = "") -> List[Chunk]:
     body = _slice_body(raw, prof)
     chunks: List[Chunk] = []
     for sec_id, sec_title, headings, sec_text in _sectionize(body, prof):
         pieces = size_chunks(sec_text, prof)
         for si, piece in enumerate(pieces):
             base = f"sec_{sec_id}" if prof.section_pattern else f"chunk_{len(chunks)}"
-            cid = base if len(pieces) == 1 else f"{base}__{si}"
+            cid = f"{id_prefix}{base}" if len(pieces) == 1 else f"{id_prefix}{base}__{si}"
             chunks.append(Chunk(
                 chunk_id=cid,
                 text=piece,
+                doc_id=doc_id,
                 section_id=sec_id,
                 section_title=sec_title,
                 headings=headings,
