@@ -72,7 +72,9 @@ class ConversationSimulatorGenerator(
         client = self._make_client(cfg)
         env = ToolEnvironment(cfg, client, tools)
 
-        plan = plan_conversation(cfg.conversation_plan, rng, seed_kind=kind, min_turns=cfg.min_turns)
+        plan = plan_conversation(cfg.conversation_plan, rng, seed_kind=kind,
+                                 min_turns=cfg.min_turns, max_turns=cfg.max_turns,
+                                 min_hops=cfg.min_hops, max_steps=cfg.max_steps)
         persona_str = format_persona_for_prompt(persona) if persona else ""
 
         # opening user turn: re-voice the seed query in the persona (optional)
@@ -104,9 +106,17 @@ class ConversationSimulatorGenerator(
                 if not followup:
                     break
                 messages.append({"role": "user", "content": followup})
+            user_idx = len(messages) - 1  # the user message that opened this turn
             spec = plan.turns[turn_idx]
-            total_hops += self._tool_loop(cfg, models, env, tools, messages, memory, spec, rng,
-                                          opening, persona_str, tools_str)
+            hops, produced = self._tool_loop(cfg, models, env, tools, messages, memory, spec, rng,
+                                             opening, persona_str, tools_str)
+            total_hops += hops
+            if not produced:
+                # this turn produced no fresh grounded answer -> DROP it and stop, so the
+                # trajectory ends on the last turn that actually answered (stays coherent;
+                # never reuse a previous turn's answer).
+                del messages[user_idx:]
+                break
 
         return self._finalize(data, cfg, models, messages, env, total_hops, tools_str)
 
@@ -118,41 +128,55 @@ class ConversationSimulatorGenerator(
 
     # ── the multi-step tool loop for ONE user turn ───────────────────────────
     def _tool_loop(self, cfg, models, env, tools, messages, memory, spec, rng, user_query,
-                   persona_str, tools_str) -> int:
-        """Let the assistant drive: it keeps calling tools until it decides to
-        answer. Depth is enforced ONLY by forcing tool_choice while below min_hops
-        — no steering/nudge messages are injected into the trajectory."""
-        hops, asked_clarify = 0, False
+                   persona_str, tools_str):
+        """Run ONE user turn. Returns (hops, produced_answer). Appends a final
+        answer only if it is non-empty; NEVER reuses a previous turn's answer. If
+        the turn can't produce a fresh grounded answer, returns produced=False and
+        the caller drops the turn (keeps the conversation coherent)."""
+        hops, asked_clarify, stall = 0, False, 0
         for _ in range(spec.max_steps):
             force = cfg.force_first_tool and hops < spec.min_hops
             resp = call_llm_with_majority_vote(models, MODEL_ASSISTANT, self._view(cfg, messages, memory),
                                                tools, n=cfg.majority_vote_n,
                                                tool_choice="required" if force else "auto")
-            tool_calls = (resp.get("tool_calls") or [])[: cfg.max_tool_calls_per_turn]
+            tool_calls = _sanitize_tool_calls((resp.get("tool_calls") or [])[: cfg.max_tool_calls_per_turn], tools)
 
             if tool_calls:
                 messages.append(_assistant_msg(resp, tool_calls))
+                env.retrieved_this_hop, env.new_this_hop = False, 0
                 self._execute(env, models, tools, messages, memory, tool_calls, hops, rng, user_query)
                 hops += 1
+                # progress stall: a retrieval that returns only already-seen chunks
+                # means the corpus has nothing more for this line — stop searching.
+                if hops >= spec.min_hops and env.retrieved_this_hop and env.new_this_hop == 0:
+                    stall += 1
+                    if stall >= 2:
+                        break
+                else:
+                    stall = 0
                 continue
 
-            # the assistant chose to speak: if it asked the user a question and this
-            # turn permits clarification, let the user answer; otherwise it's the
-            # grounded final answer for this turn.
             content = resp.get("content", "") or ""
+            # a trailing "?" on a clarify-turn -> let the user answer, then keep going.
             if spec.clarify and cfg.allow_clarify and not asked_clarify and content.strip().endswith("?"):
                 messages.append(_assistant_msg(resp))
                 messages.append({"role": "user",
                                  "content": self._clarify(models, persona_str, tools_str, messages, user_query)})
                 asked_clarify = True
                 continue
-            messages.append(_assistant_msg(resp))
-            return hops
+            if content.strip():                       # a real grounded answer -> done
+                messages.append(_assistant_msg(resp))
+                return hops, True
+            break                                     # empty answer -> try one clean close-out below
 
-        # max_steps reached: one more call with NO tools so it must close out (no nudge).
+        # close out: one tool-free call for a real answer. If STILL empty, the turn
+        # failed — return produced=False (no stale salvage, no empty message appended).
         final = call_llm(models, MODEL_ASSISTANT, self._view(cfg, messages, memory))
-        messages.append(_assistant_msg(final if isinstance(final, dict) else {"content": str(final)}))
-        return hops
+        content = (final.get("content") if isinstance(final, dict) else str(final)) or ""
+        if content.strip():
+            messages.append(_assistant_msg(final if isinstance(final, dict) else {"content": content}))
+            return hops, True
+        return hops, False
 
     # ── execute tool calls: verify -> retrieve/simulate -> record ────────────
     def _execute(self, env, models, tools, messages, memory, tool_calls, hop, rng, user_query) -> None:
@@ -211,6 +235,11 @@ class ConversationSimulatorGenerator(
 
     # ── finalize: judge + write side-effect columns ──────────────────────────
     def _finalize(self, data, cfg, models, messages, env, hops, tools_str) -> dict:
+        # if not even the opening turn produced an answer, there's nothing to keep
+        has_answer = any(m.get("role") == "assistant" and not m.get("tool_calls") and (m.get("content") or "").strip()
+                         for m in messages)
+        if not has_answer:
+            return self._skipped(data, cfg, "no_grounded_answer", "no turn produced a grounded answer")
         last = messages[-1] if messages else {}
         ends_on_answer = last.get("role") == "assistant" and not last.get("tool_calls") and bool(last.get("content"))
         status, judgment = ends_on_answer, {}
@@ -246,6 +275,32 @@ class ConversationSimulatorGenerator(
         if getattr(cfg, "name", None) and cfg.name != "conversation_messages":
             data[cfg.name] = data["conversation_messages"]
         return data
+
+
+def _sanitize_tool_calls(tool_calls: list, tools: List[Dict[str, Any]]) -> list:
+    """Drop arguments not defined in each tool's schema (e.g. a stray top_k the model
+    added) so the RECORDED call matches the schema exactly. Generic across any
+    toolset; keeps trajectories free of schema-error noise while still requiring the
+    real params (missing/wrong-type args are still caught by the verifier)."""
+    allowed_by_name: Dict[str, set] = {}
+    for td in tools:
+        fn = (td["tool"] if isinstance(td, dict) and "tool" in td else td).get("function", {})
+        allowed_by_name[fn.get("name")] = set((fn.get("parameters", {}) or {}).get("properties", {}) or {})
+    cleaned = []
+    for tc in tool_calls:
+        fn = tc.get("function", {})
+        allowed = allowed_by_name.get(fn.get("name"))
+        try:
+            args = json.loads(fn.get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            cleaned.append(tc)
+            continue
+        if allowed is not None and isinstance(args, dict):
+            filtered = {k: v for k, v in args.items() if k in allowed}
+            if filtered != args:
+                tc = {**tc, "function": {**fn, "arguments": json.dumps(filtered, ensure_ascii=False)}}
+        cleaned.append(tc)
+    return cleaned
 
 
 def _assistant_msg(resp: Dict[str, Any], tool_calls: Optional[list] = None) -> Dict[str, Any]:
