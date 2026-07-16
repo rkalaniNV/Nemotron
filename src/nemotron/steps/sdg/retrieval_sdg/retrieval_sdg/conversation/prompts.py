@@ -34,10 +34,10 @@ How to ground your answer:
 - Cite the chunk ids you relied on inline, e.g. "... as established in [id]".
 - Never invent facts, sources, ids, or quotations. If the tools cannot support a claim, say so plainly.
 
-Using other tools sparingly:
-- The knowledge base (retrieval) is your PRIMARY source — use it for the substance of your research.
-- Use web search ONLY when the answer genuinely depends on the latest/current information the knowledge base cannot contain (recent events, up-to-date figures, very recent changes). It is for recency verification, NOT a general fallback — most questions need no web search at all.
-- If the user states or relies on a preference (format, scope, focus), use the memory tools to save it, and recall stored preferences before answering when they would change your response.
+Choosing which tool to use:
+- Retrieval (the knowledge-base search) is your PRIMARY source. Exhaust it FIRST — search, read, refine the query, search again — until further searches stop returning relevant NEW material for the question.
+- Turn to a NON-retrieval tool only ONCE retrieval can no longer help — i.e. its results are exhausted or clearly unrelated to what you still need. Then use whichever tool fits: a web lookup for genuinely recent/current facts the knowledge base cannot contain, or the memory tools to recall/save a user preference.
+- Never use a non-retrieval tool as a shortcut around retrieval. Use it deliberately, only when retrieval has given all it can and something needed is still missing.
 
 When to stop:
 - Only once you have gathered enough grounded evidence to answer the user's request completely.
@@ -60,7 +60,11 @@ conversation as this character.
 </TOOLS_AVAILABLE_TO_THE_ASSISTANT_NOT_YOU>
 
 <INSTRUCTIONS>
-- Ask questions the assistant can answer by researching with its tools; keep them specific and answerable.
+- Ask questions the assistant can answer by researching its OWN knowledge base with its tools.
+- STAY ON THE SUBJECT the assistant is researching. Drill deeper into what it has found or ask a
+  closely related question in the SAME body of material. Do NOT pivot to things its knowledge base
+  cannot contain — other countries, current news/recent events, outside comparisons, or opinions.
+- Keep questions specific and answerable from retrievable text; build on the assistant's last answer.
 - Draw on your persona's voice and concerns, but do NOT announce that you are role-playing.
 - Write like a person chatting: no greetings, no sign-offs, no stage directions, no meta commentary.
 - Do NOT make tool calls, suggest tools by name, or try to answer your own question — that is the assistant's job.
@@ -95,10 +99,10 @@ Answer it briefly and naturally, consistent with your original request."""
 
 # follow-up variety: label -> the concrete instruction injected into USER_FOLLOWUP_DIRECTIVE
 KIND_DIRECTIVES = {
-    "deepen":  "Ask a deeper question that builds on the assistant's answer and needs further research.",
-    "compare": "Ask the assistant to compare or contrast this with a related case or option.",
+    "deepen":  "Ask a deeper question that builds on the assistant's answer and needs further research in the same material.",
+    "compare": "Ask the assistant to compare or contrast two things covered by its OWN knowledge base (not outside sources).",
     "clarify": "Ask the assistant to clarify or expand on a specific point it just made.",
-    "related": "Ask a related but distinct question in the same topic area.",
+    "related": "Ask a related but distinct question in the same topic area and knowledge base.",
     "factual": "Ask a concrete factual follow-up.",
     "comparative": "Ask the assistant to compare this against an alternative.",
     "multi_hop": "Ask a multi-step question that requires chaining several pieces of evidence.",

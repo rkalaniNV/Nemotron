@@ -1,11 +1,13 @@
 """Planner — decide each conversation's shape.
 
-Each row gets a per-conversation plan: how many turns, and for each turn its
-depth (min_hops / max_steps) and whether clarification is allowed. Turn 0's kind
-is the seed kind if the row carries one, otherwise it is SAMPLED from a weighted
-distribution (so opening depth varies without any query-classification pass);
-follow-up turns are likewise drawn from a weighted distribution so conversations
-differ. All defaults are overridable via the config's ``conversation_plan`` dict.
+Two simple knobs drive everything (both from the engine config):
+  - turn COUNT  = min_turns..max_turns, center-weighted so the average lands
+    mid-range (~4-5 for a 3-6 range), with some shorter/longer for diversity.
+  - turn DEPTH  = min_hops..max_steps (searches per turn), applied to every turn.
+
+Turn KIND is for conversational diversity only (NOT depth): the opening kind and
+each follow-up kind are sampled from weighted distributions, and a couple of kinds
+may ask the user a clarifying question. Customers never tune per-kind numbers.
 """
 
 from __future__ import annotations
@@ -14,30 +16,21 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
-# kind -> turn archetype. min_hops floors depth; clarify allows a discussion turn.
-_DEFAULT_ARCHETYPES: Dict[str, Dict[str, Any]] = {
-    "factual":     {"min_hops": 1, "max_steps": 3, "clarify": False},
-    "comparative": {"min_hops": 2, "max_steps": 5, "clarify": False},
-    "multi_hop":   {"min_hops": 3, "max_steps": 7, "clarify": False},
-    "exploratory": {"min_hops": 2, "max_steps": 6, "clarify": True},
-    "ambiguous":   {"min_hops": 2, "max_steps": 5, "clarify": True},
-}
-# seed-kind distribution: sampled for turn 0 when the row carries no kind.
+_KINDS = ["factual", "comparative", "multi_hop", "exploratory", "ambiguous"]
+_CLARIFY_KINDS = {"exploratory", "ambiguous"}          # openings that may clarify
+_FOLLOWUP_CLARIFY = {"clarify"}                        # follow-ups that may clarify
+
+# opening-kind distribution (sampled when the row carries no kind).
 _DEFAULT_SEED_KINDS: List[Dict[str, Any]] = [
-    {"kind": "factual", "weight": 3},
-    {"kind": "comparative", "weight": 2},
-    {"kind": "multi_hop", "weight": 3},
-    {"kind": "exploratory", "weight": 2},
+    {"kind": "factual", "weight": 3}, {"kind": "comparative", "weight": 2},
+    {"kind": "multi_hop", "weight": 3}, {"kind": "exploratory", "weight": 2},
     {"kind": "ambiguous", "weight": 1},
 ]
-# follow-up labels -> which base archetype they reuse, with sampling weights.
+# follow-up-kind distribution (labels resolve to directives in prompts.KIND_DIRECTIVES).
 _DEFAULT_FOLLOWUPS: List[Dict[str, Any]] = [
-    {"kind": "deepen",  "base": "multi_hop",   "weight": 3},
-    {"kind": "compare", "base": "comparative", "weight": 2},
-    {"kind": "clarify", "base": "ambiguous",   "weight": 1},
-    {"kind": "related", "base": "factual",     "weight": 2},
+    {"kind": "deepen", "weight": 3}, {"kind": "compare", "weight": 2},
+    {"kind": "clarify", "weight": 1}, {"kind": "related", "weight": 2},
 ]
-_DEFAULT_NUM_TURNS = {"min": 2, "max": 4}
 
 
 @dataclass
@@ -60,39 +53,46 @@ class ConversationPlan:
         return len(self.turns)
 
 
-def _archetypes(cfg_plan: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    return {**_DEFAULT_ARCHETYPES, **(cfg_plan.get("kind_archetypes") or {})}
-
-
-def _spec(kind: str, arch: Dict[str, Dict[str, Any]]) -> TurnSpec:
-    a = arch.get(kind, _DEFAULT_ARCHETYPES["factual"])
-    return TurnSpec(kind=kind, min_hops=int(a.get("min_hops", 1)),
-                    max_steps=int(a.get("max_steps", 4)), clarify=bool(a.get("clarify", False)))
+def _sample_turns(rng: random.Random, lo: int, hi: int) -> int:
+    """Center-weighted turn count: the average of two uniform draws is triangular,
+    so the count lands mid-range (e.g. ~4-5 for a 3-6 range) rather than flat.
+    Round half up (not banker's rounding) so 4 and 5 stay balanced."""
+    return int((rng.randint(lo, hi) + rng.randint(lo, hi)) / 2 + 0.5)
 
 
 def plan_conversation(cfg_plan: Dict[str, Any], rng: random.Random, *, seed_kind: str = "",
-                      min_turns: int = 2) -> ConversationPlan:
+                      min_turns: int = 3, max_turns: int = 6,
+                      min_hops: int = 2, max_steps: int = 6) -> ConversationPlan:
     cfg_plan = cfg_plan or {}
-    arch = _archetypes(cfg_plan)
-    nt = cfg_plan.get("num_turns") or _DEFAULT_NUM_TURNS
-    lo = max(int(nt.get("min", 2)), int(min_turns))
-    hi = max(lo, int(nt.get("max", lo)))
-    n_turns = rng.randint(lo, hi)
 
-    followups = cfg_plan.get("follow_up_kinds") or _DEFAULT_FOLLOWUPS
-    labels = [f["kind"] for f in followups]
-    weights = [float(f.get("weight", 1)) for f in followups]
-    base_of = {f["kind"]: f.get("base", f["kind"]) for f in followups}
+    # ── turn count (center-weighted over the engine's turn range) ────────────
+    lo, hi = int(min_turns), max(int(min_turns), int(max_turns))
+    nt = cfg_plan.get("num_turns")                     # optional advanced override
+    if nt:
+        lo = max(lo, int(nt.get("min", lo)))
+        hi = max(lo, min(hi, int(nt.get("max", hi))))
+    weights = nt.get("weights") if nt else None
+    if weights:
+        opts = [(int(k), float(v)) for k, v in weights.items() if lo <= int(k) <= hi]
+        n_turns = rng.choices([c for c, _ in opts], weights=[w for _, w in opts], k=1)[0] \
+            if opts else _sample_turns(rng, lo, hi)
+    else:
+        n_turns = _sample_turns(rng, lo, hi)
 
-    # turn 0: honor a provided seed kind, else sample one (replaces classification)
-    if not seed_kind or seed_kind not in arch:
+    mh, ms = int(min_hops), max(int(min_hops), int(max_steps))   # global depth, every turn
+
+    # ── opening turn: honor a provided kind, else sample one ─────────────────
+    if not seed_kind or seed_kind not in _KINDS:
         seeds = cfg_plan.get("seed_kinds") or _DEFAULT_SEED_KINDS
         seed_kind = rng.choices([s["kind"] for s in seeds],
                                 weights=[float(s.get("weight", 1)) for s in seeds], k=1)[0]
-    turns = [_spec(seed_kind, arch)]
+    turns = [TurnSpec(seed_kind, mh, ms, seed_kind in _CLARIFY_KINDS)]
+
+    # ── follow-up turns (weighted kind variety) ──────────────────────────────
+    fu = cfg_plan.get("follow_up_kinds") or _DEFAULT_FOLLOWUPS
+    labels = [f["kind"] for f in fu]
+    fweights = [float(f.get("weight", 1)) for f in fu]
     for _ in range(n_turns - 1):
-        label = rng.choices(labels, weights=weights, k=1)[0]
-        spec = _spec(base_of.get(label, "factual"), arch)
-        spec.kind = label  # display the follow-up label, keep the base archetype's depth
-        turns.append(spec)
+        label = rng.choices(labels, weights=fweights, k=1)[0]
+        turns.append(TurnSpec(label, mh, ms, label in _FOLLOWUP_CLARIFY))
     return ConversationPlan(turns=turns)

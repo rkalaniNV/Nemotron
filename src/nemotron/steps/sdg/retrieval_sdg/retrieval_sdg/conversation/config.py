@@ -39,7 +39,7 @@ class ConversationSimulatorConfig(_Base):
     retrieval_endpoint: str = ""                   # retrieval service POST url
     retrieval_tools: List[str] = Field(default_factory=lambda: ["search"])  # tool names routed to the service
     retrieval_field_map: Dict[str, Any] = Field(default_factory=dict)       # request/response schema mapping
-    retrieval_timeout: int = 30
+    retrieval_timeout: int = 120                    # generous: service can be slow under load
     retrieval_headers: Dict[str, str] = Field(default_factory=dict)
     top_k: int = 4                                 # chunks handed to the assistant per hop
     oversample_factor: int = 2                     # request top_k*factor, keep a random top_k

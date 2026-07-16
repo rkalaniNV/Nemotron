@@ -1,36 +1,100 @@
-{"query": "What are the powers of the President?"}
-{"query": "what are the president's powers"}
-{"query": "How is the Prime Minister appointed?"}
-{"query": "Explain the procedure for appointing the Prime Minister."}
-{"query": "What is the difference between fundamental rights and directive principles?"}
-{"query": "Compare fundamental rights with directive principles of state policy."}
-{"query": "How can the Constitution be amended?"}
-{"query": "What is the amendment procedure under Article 368?"}
-{"query": "What safeguards protect the independence of the judiciary?"}
-{"query": "How are Supreme Court judges appointed and removed?"}
-{"query": "What emergency provisions exist and when can they be invoked?"}
-{"query": "Explain the three types of emergencies and their effects on federalism."}
-{"query": "How can Parliament form a new State or alter State boundaries?"}
-{"query": "What is the procedure to admit or establish a new State into the Union?"}
-{"query": "What is the right to equality under the Constitution?"}
-{"query": "Explain the right to freedom of speech and its reasonable restrictions."}
-{"query": "What does the right against exploitation cover?"}
-{"query": "What is the right to constitutional remedies and which writs are available?"}
-{"query": "How is the President of India elected?"}
-{"query": "What are the qualifications to become a member of the Lok Sabha?"}
-{"query": "What powers does the Governor of a State hold?"}
-{"query": "How are money bills different from ordinary bills in Parliament?"}
-{"query": "What is the role and composition of the Rajya Sabha?"}
-{"query": "How does the anti-defection law work under the Tenth Schedule?"}
-{"query": "What is the distribution of legislative powers between the Union and the States?"}
-{"query": "Explain the Union, State, and Concurrent Lists in the Seventh Schedule."}
-{"query": "What fundamental duties are prescribed for citizens?"}
-{"query": "How is the office of the Vice-President filled and what are its functions?"}
-{"query": "What is the procedure for the removal of the President by impeachment?"}
-{"query": "How are the finances shared between the Centre and the States?"}
-{"query": "What is the role of the Finance Commission?"}
-{"query": "What protections does the Constitution give to minorities and their institutions?"}
-{"query": "How can a High Court judge be transferred or removed?"}
-{"query": "What is the special status and reorganisation history of Union territories?"}
-{"query": "What is the procedure for passing a constitutional amendment bill requiring State ratification?"}
-{"query": "How does the Constitution protect against arbitrary arrest and detention?"}
+{"query": "I keep hearing about the 'basic structure' of the Constitution — what does that actually mean and where did it come from?"}
+{"query": "Is it true the Supreme Court once said even Parliament can't change certain parts of the Constitution?"}
+{"query": "Back in the 1970s there was a huge case about whether Parliament can amend any part of the Constitution — what did the court finally decide?"}
+{"query": "During the Emergency, could people be locked up without any way to challenge it in court? Did the Supreme Court really allow that?"}
+{"query": "Can the government take away my right to life and personal liberty as long as they follow some procedure, or does the procedure have to be fair too?"}
+{"query": "If a law is passed properly by Parliament, can the courts still strike it down for violating fundamental rights?"}
+{"query": "What rules protect women from sexual harassment at the workplace, and were those rules made by the court or by a law?"}
+{"query": "Is being gay still a crime in India, or did the Supreme Court change that?"}
+{"query": "Is privacy actually a fundamental right in India? I heard the Supreme Court ruled on this a few years back."}
+{"query": "My husband said talaq three times in one sitting — is that still valid in India or did the court ban it?"}
+{"query": "When can the government treat two groups of people differently without it being discrimination?"}
+{"query": "Can the government stop me from saying something publicly? What are the limits on free speech?"}
+{"query": "Does the right to life also cover things like livelihood, shelter, and dignity, or just being alive?"}
+{"query": "What's the difference between going to the Supreme Court directly versus going to a High Court for a rights violation?"}
+{"query": "Does a minority-run college have to follow the same reservation rules as everyone else?"}
+{"query": "Can the government put restrictions on my business or profession, and how far can they go?"}
+{"query": "How much can the government regulate colleges run by minority communities?"}
+{"query": "How does reservation work for admissions and government jobs under the Constitution?"}
+{"query": "Can I sue if a factory nearby is polluting my air and water — is a clean environment part of my right to life?"}
+{"query": "If the government takes my land, do I have any constitutional protection left after they removed the right to property?"}
+{"query": "What is this 'creamy layer' thing I keep hearing about in reservation debates?"}
+{"query": "Was there really a very early case right after independence about caste-based reservations in colleges?"}
+{"query": "Why is there a 50% cap on reservations, and can states go above it?"}
+{"query": "Can SC/ST employees get reservation when it comes to promotions too, not just recruitment?"}
+{"query": "How does the 10% reservation for economically weaker sections work, and did the court uphold it?"}
+{"query": "What conditions does the government have to satisfy before giving reservation in promotions?"}
+{"query": "What does the prosecution have to prove to convict someone of murder?"}
+{"query": "What's the difference between murder and culpable homicide? They sound the same to me."}
+{"query": "My brother's wife filed a dowry harassment case against the whole family — I heard courts have said this section gets misused. Is that right?"}
+{"query": "Can the police just arrest someone on the spot, or are there rules they have to follow first?"}
+{"query": "A false FIR was filed against me. Can the High Court or Supreme Court get it cancelled?"}
+{"query": "How have the courts interpreted rape laws after the changes made following the 2012 Delhi case?"}
+{"query": "When exactly can a court hand down the death penalty? What's this 'rarest of rare' idea?"}
+{"query": "If both sides settle, can a serious criminal case still be dropped by the court?"}
+{"query": "If someone stabs another person but they survive, what charge applies?"}
+{"query": "If a woman dies within a few years of marriage over dowry, does the law assume the husband's family is guilty?"}
+{"query": "If I go to the police with a complaint, are they legally required to register an FIR?"}
+{"query": "If the police don't finish their investigation in time, can the accused automatically get bail?"}
+{"query": "How do I apply for bail before I actually get arrested, and what conditions might the court impose?"}
+{"query": "Can the police force someone to undergo a narco or lie-detector test without their consent?"}
+{"query": "Is there a right to a speedy trial in India? My case has been dragging on for years."}
+{"query": "How much weight does a dying person's statement carry as evidence in court?"}
+{"query": "I paid for a flat and the builder is refusing to register it — can a court force him to complete the sale?"}
+{"query": "If someone occupies a piece of land for decades, can they legally claim ownership of it?"}
+{"query": "I've been living in a property under an unregistered agreement — does the law protect me from being thrown out?"}
+{"query": "What's the legal position on property bought in someone else's name to hide the real owner?"}
+{"query": "How is ancestral property divided among family members, and what are my rights as a coparcener?"}
+{"query": "Is buying property through a general power of attorney safe, or did the Supreme Court warn against it?"}
+{"query": "Can the government tax a company for a deal that happened before the tax law even existed?"}
+{"query": "If an arbitration agreement doesn't say where it's seated, do Indian courts still have a say?"}
+{"query": "Is the new bankruptcy law (IBC) constitutionally valid? Someone challenged it, right?"}
+{"query": "Can a business claim credit for the GST it already paid on inputs? What have the courts said?"}
+{"query": "Once a company goes into insolvency, does everything against it freeze? How far does that protection go?"}
+{"query": "I've worked as a daily-wager for the government for years — can I demand to be made permanent?"}
+{"query": "If I'm doing the same work as a permanent employee, can I demand the same pay?"}
+{"query": "When can a temporary or contract government worker actually claim a permanent job?"}
+{"query": "If a company lays me off, what compensation am I legally entitled to?"}
+{"query": "If a company pollutes and causes damage, who has to pay to clean it up?"}
+{"query": "What does 'precautionary principle' mean in environmental cases in India?"}
+{"query": "Can trees be cut or forest land be used freely, or does someone need court/government permission?"}
+{"query": "Are polluting industries made to pay for the environmental harm they cause? Any big case on this?"}
+{"query": "What counts as 'cruelty' as a ground for divorce under Hindu law?"}
+{"query": "My marriage is completely broken but my spouse won't agree to divorce — can the court still grant one?"}
+{"query": "Why did the Supreme Court say adultery is no longer a crime?"}
+{"query": "After the 2019 law, what happens legally if a Muslim man pronounces instant triple talaq?"}
+{"query": "In a custody fight, what does the court actually consider most important — the child's welfare or the parents' rights?"}
+{"query": "Can the central government dismiss a state government whenever it wants, or can courts step in?"}
+{"query": "If the government promised something and then went back on it, do I have any legal remedy?"}
+{"query": "How are judges appointed to the higher courts now — didn't the government try to change that system?"}
+{"query": "What can a Governor actually do with a bill passed by the state assembly — sit on it, reject it, send it back?"}
+{"query": "Can the courts question the dissolution of a state assembly by the President?"}
+{"query": "Can I be arrested just for a post I put online? I thought that law was struck down."}
+{"query": "Is criticizing the government still considered sedition in India?"}
+{"query": "Can I ask Google or a website to remove old information about me — is there a 'right to be forgotten' in India?"}
+{"query": "Can I claim my fundamental rights were violated by another private person, not just the government?"}
+{"query": "If a doctor makes a mistake during treatment, when does it actually count as negligence in law?"}
+{"query": "Can a terminally ill person choose to refuse life support? Is a living will legally valid in India?"}
+{"query": "What were the important Supreme Court decisions that came out of the Emergency period?"}
+{"query": "What are some of the biggest Supreme Court judgments from the 1990s that still matter today?"}
+{"query": "How did public interest litigation become such a big thing in India?"}
+{"query": "What's the difference between a review petition and a curative petition in the Supreme Court?"}
+{"query": "How does the Supreme Court decide which appeals it will even hear under its special powers?"}
+{"query": "Can the government evict slum or pavement dwellers without any notice or rehabilitation?"}
+{"query": "What rights do transgender people have in India — did the Supreme Court recognize a third gender?"}
+{"query": "How did the Supreme Court finally decide the Ayodhya land dispute?"}
+{"query": "Are women of all ages now allowed to enter the Sabarimala temple?"}
+{"query": "Whatever happened with the coal block allocation scam in the courts?"}
+{"query": "What did the Supreme Court do about the 2G spectrum allocation case?"}
+{"query": "Can I get in trouble for criticizing a judge or the courts? What counts as contempt?"}
+{"query": "My family has lived in a rented house for 35 years with only rent receipts and electricity bills in our name, no registered lease. Now the landlord wants us out saying he needs it himself. What protection do we have and what does he have to prove?"}
+{"query": "How did the Supreme Court's view of the right to life grow over time, from the Maneka Gandhi case to the pavement dwellers case?"}
+{"query": "My relative was arrested under an anti-terror law and wasn't produced before a magistrate within 24 hours. Does the Constitution protect him even under these special laws?"}
+{"query": "The state government wants to release some life convicts early, but the Centre is objecting. Who actually has the power to grant remission?"}
+{"query": "If a law violated fundamental rights before but the Constitution was later amended, does that old law come back to life?"}
+{"query": "How do courts decide whether the Centre or the state had the power to make a particular law?"}
+{"query": "Can a government pass a law that pretends to do one thing but really does something it isn't allowed to?"}
+{"query": "When two laws seem to conflict, how do courts decide which one wins?"}
+{"query": "If an MLA switches parties, can they be disqualified, and can the courts review the Speaker's decision on that?"}
+{"query": "Is it legal to keep undertrials in jail for longer than the sentence they'd get if convicted?"}
+{"query": "Is it harder to get bail in big financial fraud cases? What have the courts said about this?"}

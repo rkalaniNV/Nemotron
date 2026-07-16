@@ -26,30 +26,33 @@ query_prep:
 
 # ── models & providers ────────────────────────────────────────────────────────
 providers:
+  - name: nvidia
+    endpoint: https://inference-api.nvidia.com/v1
+    api_key: NVIDIA_API_KEY                        # Bearer token env var
   - name: lepton_gemma
     endpoint: https://xtcr3jss-gemma-4-31b-it-vllm-ravirajj-az-32k.xenon.lepton.run/v1
-    api_key: LEPTON_API_KEY                       # env var name; open endpoint => unset is fine
-  - name: lepton_qwen
-    endpoint: https://xtcr3jss-qwen-3-5-122b-sdg.xenon.lepton.run/v1
-    api_key: LEPTON_API_KEY
+    api_key: LEPTON_API_KEY                        # open endpoint => unset is fine
 
+# max_tokens are generous on purpose: gpt-oss-120b is a REASONING model — it spends
+# tokens on its reasoning trace before the answer, so a tight cap truncates the trace
+# or leaves the answer empty. Keep the assistant especially roomy.
 models:
-  - alias: assistant_model                       # the research agent (tool-calling) — Qwen
-    model: Qwen/Qwen3.5-122B-A10B
-    provider: lepton_qwen
-    inference_parameters: {temperature: 0.7, max_tokens: 2000}
-  - alias: user_model                            # simulates the human user — Gemma
+  - alias: assistant_model                       # the research agent — gpt-oss-120b (emits reasoning)
+    model: nvidia/openai/gpt-oss-120b
+    provider: nvidia
+    inference_parameters: {temperature: 0.7, max_tokens: 65000}
+  - alias: user_model                            # simulates the human user — Gemma (32k ctx model)
     model: google/gemma-4-31B-it
     provider: lepton_gemma
-    inference_parameters: {temperature: 0.8, max_tokens: 600}
-  - alias: aux_response_model                     # simulates non-retrieval tools — Qwen
-    model: Qwen/Qwen3.5-122B-A10B
-    provider: lepton_qwen
-    inference_parameters: {temperature: 0.4, max_tokens: 800}
-  - alias: judge_model                            # inline judge + query gate — Qwen
-    model: Qwen/Qwen3.5-122B-A10B
-    provider: lepton_qwen
-    inference_parameters: {temperature: 0.2, max_tokens: 800}
+    inference_parameters: {temperature: 0.8, max_tokens: 2000}
+  - alias: aux_response_model                     # simulates non-retrieval tools — gpt-oss-120b
+    model: nvidia/openai/gpt-oss-120b
+    provider: nvidia
+    inference_parameters: {temperature: 0.4, max_tokens: 32000}
+  - alias: judge_model                            # inline judge + query gate — gpt-oss-120b (reliable JSON)
+    model: nvidia/openai/gpt-oss-120b
+    provider: nvidia
+    inference_parameters: {temperature: 0.2, max_tokens: 32000}
 
 # ── retrieval service (external HTTP wrapper) ─────────────────────────────────
 retrieval:
@@ -57,7 +60,7 @@ retrieval:
   tools: [search]                                 # tool names routed to the service (others are LLM-simulated)
   top_k: 4
   oversample_factor: 2                            # request top_k*factor, keep a random top_k (drives depth)
-  timeout: 30
+  timeout: 120                                    # the service can be slow under load
   headers: {}
   field_map:                                      # matches this service: {query, num_chunks} -> {chunks:[{rank,text}]}
     query_field: query
@@ -112,22 +115,28 @@ tools:
 
 # ── Stage B: engine knobs (-> ConversationSimulatorConfig) ────────────────────
 engine:
+  # ── the two knobs that shape a conversation ──────────────────────────────────
+  # length: turns are center-weighted, so a 3-6 range AVERAGES ~4-5 turns
+  #         (with some 3s and 6s for diversity).
+  min_turns: 3
+  max_turns: 6
+  # depth: how many search rounds (hops) each turn takes.
   min_hops: 2
   max_steps: 6
-  max_turns: 3
-  min_turns: 2
+
+  # ── loop / quality control (sensible defaults, rarely changed) ───────────────
   max_correction_attempts: 3
-  max_tool_calls_per_turn: 1                       # many NIM endpoints reject >1
-  force_first_tool: true
-  allow_clarify: true
-  context_window_k: 2
-  compaction_mode: reference
-  compression_token_limit: 2000
-  use_scratchpad: true
-  gate_query: true
-  inline_judge: true
-  majority_vote_n: 1
-  max_tools: 12
+  max_tool_calls_per_turn: 1                       # many endpoints reject >1
+  force_first_tool: true                           # force a tool call until min_hops (grounding)
+  allow_clarify: true                              # let clarify-kind turns ask a question first
+  gate_query: false                                # inline eval OFF for now (no query gate)
+  inline_judge: false                              # inline eval OFF for now (no per-trajectory judge)
+  majority_vote_n: 1                               # assistant self-consistency samples
+  max_tools: 12                                    # tool subset offered per row
   persona_voice: false                             # no persona sampler wired by default
-  conversation_plan:
-    num_turns: {min: 2, max: 3}
+
+  # ── context compression ─────────────────────────────────────────────────────
+  context_window_k: 2                              # recent tool results kept raw
+  compaction_mode: reference
+  compression_token_limit: 20000                   # keep the middle raw up to ~20k tokens before compressing
+  use_scratchpad: true

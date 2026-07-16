@@ -38,6 +38,11 @@ class ToolEnvironment:
         self.client = client
         self.tools = tools
         self.retrieval_log: List[Dict[str, Any]] = []
+        # progress signal only (NOT used to filter retrieval): ids seen so far, and
+        # whether the current hop's retrieval brought anything new.
+        self.seen_ids: set = set()
+        self.retrieved_this_hop = False
+        self.new_this_hop = 0
 
     def is_retrieval(self, name: str) -> bool:
         return name in self.cfg.retrieval_tools
@@ -68,7 +73,11 @@ class ToolEnvironment:
         # model puts in the tool call is ignored on purpose (kept constant).
         k = max(1, int(self.cfg.top_k))
         chunks = self.client.retrieve(query, k, rng=rng)
-        self.retrieval_log.append({"query": query, "ids": [c.id for c in chunks]})
+        new = [c.id for c in chunks if c.id not in self.seen_ids]  # progress signal only
+        self.seen_ids.update(c.id for c in chunks)
+        self.retrieved_this_hop = True
+        self.new_this_hop = len(new)
+        self.retrieval_log.append({"query": query, "ids": [c.id for c in chunks], "new": len(new)})
         return json.dumps({"results": [c.to_payload() for c in chunks]}, ensure_ascii=False)
 
     def _simulate(self, name: str, args: Dict[str, Any], models: Dict[str, Any], user_query: str) -> str:
