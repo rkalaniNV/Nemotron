@@ -134,7 +134,8 @@ columns:
     parallel_tools: true           # Stage 5: concurrent multi-tool turns
 
     # quality gates & yield
-    gate_query: false              # keep yield up; grounding is enforced by the loop + judge
+    inline_judge: false            # decouple judging: write all raw, judge as a separate stage
+    gate_query: false              # keep yield up; grounding is enforced by the loop + judge stage
     salvage_min_hops: 2
     majority_vote_n: 1           # gpt-oss returns no tool calls when n>1
     error_injection_rate: 0.0

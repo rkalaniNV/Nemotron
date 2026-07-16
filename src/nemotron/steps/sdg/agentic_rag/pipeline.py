@@ -177,14 +177,13 @@ def main() -> None:
 
     out = Path(cfg["output_path"])
     out.parent.mkdir(parents=True, exist_ok=True)
-    raw = out.with_suffix(".raw.jsonl")
     per_cluster_records = cfg.get("question_gen", {}).get("per_cluster_records")
 
     cluster_dirs = sorted(p for p in clusters_root.iterdir() if p.is_dir() and p.name.startswith("c"))
     if args.limit_clusters:
         cluster_dirs = cluster_dirs[: args.limit_clusters]
 
-    totals = {"clusters": 0, "generated": 0, "kept": 0}
+    totals = {"clusters": 0, "generated": 0}
     for cdir in cluster_dirs:
         done_marker = cdir / ".done"
         if done_marker.exists() and not args.force:
@@ -201,25 +200,22 @@ def main() -> None:
 
         records = run_dd_for_cluster(cfg, base, cdir, clusters_root, client,
                                      use_persona_sampler, per_cluster_records)
-        # append raw + projected training rows (streamed, not held in memory)
-        with raw.open("a", encoding="utf-8") as f:
-            for r in records:
-                f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
-        kept = ddstep.project_and_write(records, cfg, out, append=True)
-
+        # per-cluster RAW: every trajectory (SFT schema), written INTO the cluster
+        # folder. Judging is a separate stage (evaluate.py) that reads these.
+        cluster_raw = cdir / "trajectories.jsonl"
+        n = ddstep.project_and_write(records, cfg, cluster_raw, keep_all=True)
         totals["clusters"] += 1
-        totals["generated"] += len(records)
-        totals["kept"] += kept
-        print(f"[pipeline] {cdir.name}: {len(records)} generated, {kept} kept")
+        totals["generated"] += n
+        print(f"[pipeline] {cdir.name}: {n} trajectories -> {cluster_raw}")
 
         if not args.keep_indexes:
             shutil.rmtree(index_dir, ignore_errors=True)  # bound peak disk
-        done_marker.write_text(json.dumps({"generated": len(records), "kept": kept}))
+        done_marker.write_text(json.dumps({"generated": n}))
 
-    print(f"\n[pipeline] done: {totals['clusters']} clusters, "
-          f"{totals['generated']} generated, {totals['kept']} kept")
-    print(f"  training file: {out}")
-    print(f"  raw dump:      {raw}")
+    print(f"\n[pipeline] done: {totals['clusters']} clusters, {totals['generated']} trajectories")
+    print(f"  per-cluster raw: {clusters_root}/<cluster>/trajectories.jsonl")
+    print("  next — run the judge stage to consolidate + filter into output/sdg:")
+    print(f"    python evaluate.py --clusters-root {clusters_root} --out {out} --judge")
 
 
 def _resolve(base: Path, p: str) -> Path:

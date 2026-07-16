@@ -173,7 +173,9 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path, base: Path, use_p
 
 # ── output projection: OpenAI tool-calling trajectory for SFT ────────────────
 def project_and_write(records: List[Dict[str, Any]], cfg: Dict[str, Any], out_path: Path,
-                      append: bool = False) -> int:
+                      append: bool = False, keep_all: bool = False) -> int:
+    """Project records to the SFT schema and write them. keep_all=True writes
+    every trajectory (the per-cluster raw); otherwise only status=ok rows."""
     proj = cfg["output_projection"]
     src = proj["source_field"]
     meta_fields = proj.get("metadata_fields", [])
@@ -181,7 +183,7 @@ def project_and_write(records: List[Dict[str, Any]], cfg: Dict[str, Any], out_pa
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("a" if append else "w", encoding="utf-8") as f:
         for r in records:
-            if not r.get("conversation_status"):
+            if not keep_all and not r.get("conversation_status"):
                 continue  # keep only successful / salvaged trajectories
             try:
                 messages = json.loads(r[src]) if isinstance(r[src], str) else r[src]

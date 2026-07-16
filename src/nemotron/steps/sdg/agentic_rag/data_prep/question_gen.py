@@ -42,6 +42,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # prefer local package
 
 from chunk_document import PROFILES, ChunkProfile, build_chunks, recursive_split  # noqa: E402
+from agentic_rag.prompts import QGEN_SYSTEM, QGEN_USER  # noqa: E402  (central prompt file)
 
 Caller = Callable[[str, str], str]
 
@@ -104,31 +105,6 @@ def make_openai_caller(model: str, endpoint: str, api_key_env: str,
 
 
 # ── prompts ──────────────────────────────────────────────────────────────────
-QGEN_SYSTEM = """You write realistic user questions that will be answered by an AI research assistant with access to a knowledge-base search tool over a specific document collection.
-- Ground every question in the provided source text; a diligent researcher must be able to answer it from that collection.
-- Do NOT quote the source verbatim; phrase questions the way a real person would ask them.
-- Return ONLY a JSON array, no prose."""
-
-QGEN_USER = """<SOURCE_DOCUMENT id="{doc_id}">
-{shard_text}
-</SOURCE_DOCUMENT>
-
-<RELATED_SECTIONS_IN_THIS_COLLECTION>
-{neighbors}
-</RELATED_SECTIONS_IN_THIS_COLLECTION>
-
-Write exactly {n} distinct user questions grounded in the SOURCE_DOCUMENT above, spanning this difficulty spectrum (assign each question one level):
-{levels}
-
-For "complex_multistep", prefer questions whose answer requires synthesising the source with the related sections listed above (genuine multi-hop).
-
-Return a JSON array of objects, each:
-{{"query": "<the question a real person would type>",
-  "level": "<one of: {level_names}>",
-  "target_sections": ["<ids of sections this question is grounded in, from the source or related list>"],
-  "rationale": "<one line: why answering needs research>"}}"""
-
-
 # ── chunking (retrieval index inputs) ────────────────────────────────────────
 def chunk_cluster(docs: Sequence[Dict], cfg: QGenConfig) -> List[Dict]:
     prof: ChunkProfile = PROFILES[cfg.profile]

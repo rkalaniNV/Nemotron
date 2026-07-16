@@ -83,6 +83,7 @@ class DeepResearchSimulatorConfig(_Base):
 
     # ── phased interaction ────────────────────────────────────────────────────
     interaction_model: Literal["strict_phased", "interleaved"] = "strict_phased"
+    persona_voice: bool = True                    # re-voice the seed query in the row's persona
     allow_discussion: bool = True                 # DISCUSSION phase (clarify before tool loop)
     max_discussion_exchanges: int = 3             # cap clarify turns before forcing the plan
     require_research_plan: bool = True            # assistant emits a plan at the transition
@@ -101,6 +102,8 @@ class DeepResearchSimulatorConfig(_Base):
     max_tool_calls_per_turn: int = 1              # cap tool calls/turn (many NIM endpoints reject >1)
 
     # ── quality gates & yield ─────────────────────────────────────────────────
+    inline_judge: bool = True                     # judge each trajectory during generation;
+                                                  # False -> write all raw, judge as a separate stage
     gate_query: bool = True                       # judge/skip weak queries before the loop
     salvage_min_hops: int = 2                     # keep a late-failed trajectory past this depth
     majority_vote_n: int = 4                      # assistant self-consistency samples

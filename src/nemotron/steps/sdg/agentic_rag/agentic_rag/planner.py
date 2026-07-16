@@ -109,12 +109,3 @@ def turn_eff(spec: TurnSpec) -> Dict[str, Any]:
         "enforce_sufficiency": spec.enforce_sufficiency,
         "require_plan": spec.require_plan,
     }
-
-
-# difficulty descriptions reused to steer follow-up generation toward a target kind
-KIND_DIRECTIVES: Dict[str, str] = {
-    "half_baked": "Ask a vague, underspecified follow-up that a good assistant should clarify first.",
-    "simple": "Ask a short, single-fact follow-up.",
-    "crisp": "Ask a precise, well-scoped follow-up naming exactly what you want.",
-    "complex_multistep": "Ask a follow-up whose answer needs combining several provisions (multi-hop).",
-}
