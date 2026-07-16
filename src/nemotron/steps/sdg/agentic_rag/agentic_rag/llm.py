@@ -4,11 +4,63 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections import Counter
 from contextvars import ContextVar
 from typing import Any, Dict, List
 
 from data_designer.engine.models.utils import ChatMessage
+
+# ── direct OpenAI-compatible clients (bypass DD's facade) ─────────────────────
+# DD's facade drops tool-call function names for this endpoint (every model), so
+# tool-calling is routed through a direct OpenAI client per alias instead. The
+# client config (endpoint / key env / model / params) is injected from the outer
+# YAML via the plugin config and registered here once per process.
+_DIRECT_CLIENTS: Dict[str, Any] = {}
+
+
+def configure_direct_clients(model_clients: Dict[str, Any]) -> None:
+    if not model_clients:
+        return
+    from openai import OpenAI
+    for alias, c in model_clients.items():
+        if alias in _DIRECT_CLIENTS or not c.get("base_url"):
+            continue
+        client = OpenAI(base_url=c["base_url"],
+                        api_key=os.environ.get(c.get("api_key_env", ""), ""),
+                        max_retries=4, timeout=180)
+        _DIRECT_CLIENTS[alias] = {"client": client, "model": c["model"],
+                                  "params": c.get("params", {})}
+
+
+def _to_openai_message(m: Dict[str, Any]) -> Dict[str, Any]:
+    role = m.get("role", "user")
+    # some NIM endpoints reject empty string content (min_length 1), even on an
+    # assistant turn that only carries tool_calls — send a single space instead.
+    content = (m.get("content") or "").strip() or " "
+    out: Dict[str, Any] = {"role": role, "content": content}
+    if role == "assistant" and m.get("tool_calls"):
+        out["tool_calls"] = _clean_tool_calls(m.get("tool_calls"))
+    if role == "tool":
+        out["tool_call_id"] = m.get("tool_call_id") or ""
+    return out
+
+
+def _direct_completion(alias: str, messages: List[Dict[str, Any]], **kwargs):
+    reg = _DIRECT_CLIENTS[alias]
+    n = kwargs.get("n", 1)
+    req: Dict[str, Any] = {"model": reg["model"],
+                           "messages": [_to_openai_message(m) for m in messages],
+                           **reg["params"]}
+    if kwargs.get("tools"):
+        req["tools"] = kwargs["tools"]
+        req["tool_choice"] = kwargs.get("tool_choice", "auto")
+    if n > 1:
+        req["n"] = n
+    resp = reg["client"].chat.completions.create(**req)
+    if n > 1 and len(resp.choices) >= n:
+        return [_choice_to_dict(c) for c in resp.choices]
+    return _choice_to_dict(resp.choices[0])
 
 # When DD runs the client in async mode, the sync loop runs in a worker thread
 # and this holds DD's main event loop so we can bridge `acompletion` back to it.
@@ -102,21 +154,45 @@ def _choice_to_dict(choice: Any) -> Dict[str, Any]:
 
 
 def call_llm(models: Dict[str, Any], alias: str, messages: List[Dict[str, Any]], **kwargs: Any):
+    # prefer a direct OpenAI client (correct tool-call parsing); fall back to DD.
+    if alias in _DIRECT_CLIENTS:
+        return _direct_completion(alias, messages, **kwargs)
     facade = models.get(alias)
     if facade is None:
         raise ValueError(f"Model alias '{alias}' not found")
     response = _facade_completion(facade, _dicts_to_chat_messages(messages), **kwargs)
-    n = kwargs.get("n", 1)
-    if n > 1 and len(response.choices) >= n:
-        return [_choice_to_dict(c) for c in response.choices]
-    return _choice_to_dict(response.choices[0])
+    # DD ≥0.7 returns an OpenAI-style response (.choices); DD 0.6.x returns a
+    # normalized ChatCompletionResponse with a single .message (AssistantMessage).
+    if hasattr(response, "choices"):
+        n = kwargs.get("n", 1)
+        if n > 1 and len(response.choices) >= n:
+            return [_choice_to_dict(c) for c in response.choices]
+        return _choice_to_dict(response.choices[0])
+    return _message_to_dict(response.message)
 
 
-def call_llm_with_majority_vote(models, alias, messages, tools, n: int = 4) -> Dict[str, Any]:
+def _message_to_dict(msg: Any) -> Dict[str, Any]:
+    """Normalize DD 0.6.x AssistantMessage (content/reasoning_content/tool_calls
+    of ToolCall(id,name,arguments_json)) to our internal message dict."""
+    out: Dict[str, Any] = {"role": "assistant", "content": getattr(msg, "content", "") or ""}
+    if getattr(msg, "reasoning_content", None):
+        out["reasoning_content"] = msg.reasoning_content
+    tcs = getattr(msg, "tool_calls", None) or []
+    if tcs:
+        out["tool_calls"] = [{
+            "id": getattr(t, "id", None) or f"call_{i}", "type": "function",
+            "function": {"name": getattr(t, "name", None),
+                         "arguments": getattr(t, "arguments_json", None) or "{}"},
+        } for i, t in enumerate(tcs)]
+    return out
+
+
+def call_llm_with_majority_vote(models, alias, messages, tools, n: int = 4,
+                                tool_choice: str = "auto") -> Dict[str, Any]:
     openai_tools = []
     for td in tools:
         openai_tools.append({"type": "function", "function": td["tool"]["function"]} if "tool" in td else td)
-    result = call_llm(models, alias, messages, tools=openai_tools, n=n)
+    result = call_llm(models, alias, messages, tools=openai_tools, n=n, tool_choice=tool_choice)
     if isinstance(result, list) and len(result) >= n:
         return _apply_majority_vote(result)
     return result[0] if isinstance(result, list) else result

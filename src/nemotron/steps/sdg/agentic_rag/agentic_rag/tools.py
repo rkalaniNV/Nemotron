@@ -17,49 +17,63 @@ from __future__ import annotations
 
 import json
 import random
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# make the corpus-side retriever importable (data_prep is a sibling dir)
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "data_prep"))
-from retriever import make_retriever, EmbeddingRetriever, gold_rank, RetrievedChunk  # noqa: E402
-
+# canonical modular retriever (same module the offline CLI re-exports)
+from .retrieval import make_retriever, EmbeddingRetriever, gold_rank, RetrievedChunk, load_corpus
 from .llm import call_llm
 from .prompts import API_RESPONSE_SIM_SYSTEM_PROMPT, API_RESPONSE_SIM_TURN_PROMPT
 
 API_RESPONSE_MODEL = "api_response_model"
+
+# Process-wide cache so a cluster's index (and MiniLM model) load ONCE, not per
+# row. Keyed by the resolved index dir (or an in-memory corpus fingerprint).
+_RETRIEVER_CACHE: Dict[str, Any] = {}
 
 
 class ToolEnvironment:
     """Holds the retriever + config and answers tool calls for one run."""
 
     def __init__(self, config, corpus: List[Dict[str, Any]], gold_section_ids: List[str],
-                 rng: Optional[random.Random] = None):
+                 rng: Optional[random.Random] = None, index_dir: Optional[str] = None,
+                 gold_doc_ids: Optional[List[str]] = None):
         self.cfg = config
         self.corpus = corpus
         self.gold = [str(g) for g in gold_section_ids]
+        self.gold_docs = [str(g) for g in (gold_doc_ids or [])]   # document-level grounding
         self.rng = rng or random.Random(config.salvage_min_hops)  # deterministic-ish
+        # per-cluster index dir (overrides cfg.index_dir); None -> in-memory over corpus
+        self.index_dir = index_dir or config.index_dir
         self._by_section: Dict[str, List[Dict[str, Any]]] = {}
         for c in corpus:
             self._by_section.setdefault(str(c.get("section_id", "")), []).append(c)
         self._retriever = None
         self._retries: Dict[str, int] = {}  # per gold-section retry counter
+        self._seen: set = set()             # chunk ids already returned (per conversation)
 
-    # ── retriever (lazy) ─────────────────────────────────────────────────────
+    # ── retriever (lazy, cached per index dir across rows) ───────────────────
     @property
     def retriever(self):
-        if self._retriever is None:
-            if self.cfg.index_dir and (Path(self.cfg.index_dir) / "meta.json").exists() \
+        if self._retriever is not None:
+            return self._retriever
+        key = str(self.index_dir) if self.index_dir else f"_mem_{id(self.corpus)}"
+        cached = _RETRIEVER_CACHE.get(key)
+        if cached is None:
+            if self.index_dir and (Path(self.index_dir) / "meta.json").exists() \
                     and self.cfg.retriever_backend == "embedding":
-                self._retriever = EmbeddingRetriever.load(Path(self.cfg.index_dir))
+                cached = EmbeddingRetriever.load(Path(self.index_dir))
             else:
-                self._retriever = make_retriever(self.corpus, backend=self.cfg.retriever_backend)
+                cached = make_retriever(self.corpus, backend=self.cfg.retriever_backend)
+            _RETRIEVER_CACHE[key] = cached
+        self._retriever = cached
         return self._retriever
 
     # ── entry point ──────────────────────────────────────────────────────────
     def respond(self, tool_call: Dict[str, Any], models: Dict[str, Any],
-                user_query: str, tools: List[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+                user_query: str, tools: List[Dict[str, Any]],
+                rng: Optional[random.Random] = None) -> Tuple[str, Dict[str, Any]]:
+        r = rng or self.rng  # per-call rng keeps concurrent tool execution thread-safe
         name = tool_call.get("function", {}).get("name", "")
         try:
             args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
@@ -67,29 +81,40 @@ class ToolEnvironment:
             args = {}
 
         # config-driven error injection (teaches recovery)
-        if self.cfg.error_injection_rate > 0 and self.rng.random() < self.cfg.error_injection_rate:
+        if self.cfg.error_injection_rate > 0 and r.random() < self.cfg.error_injection_rate:
             return json.dumps({"error": "temporary backend error, please retry"}), {"injected_error": True}
 
         if name in self.cfg.retrieval_tools:
-            return self._retrieval_response(name, args)
+            return self._retrieval_response(name, args, r)
         return self._simulated_response(tool_call, models, user_query, tools), {"simulated": True}
 
     # ── retrieval backend (grounded) ─────────────────────────────────────────
-    def _retrieval_response(self, name: str, args: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-        # get_article-style direct lookup by id
-        id_arg = args.get("article") or args.get("article_id") or args.get("section_id") or args.get("id")
+    def _retrieval_response(self, name: str, args: Dict[str, Any],
+                            rng: Optional[random.Random] = None) -> Tuple[str, Dict[str, Any]]:
+        # direct lookup by id (fetch a specific section/document by its id) —
+        # read whatever id-like arg the configured tool provides, generically.
+        id_arg = (args.get("id") or args.get("section") or args.get("section_id")
+                  or args.get("doc_id") or args.get("article") or _first_scalar(args))
         if id_arg is not None and str(id_arg) in self._by_section:
             chunks = self._by_section[str(id_arg)]
-            payload = [{"chunk_id": c["chunk_id"], "article": c.get("section_id"),
-                        "title": c.get("section_title", ""), "text": c.get("text", "")} for c in chunks]
+            payload = [{"chunk_id": c["chunk_id"], "section": c.get("section_id"),
+                        "doc_id": c.get("doc_id", ""), "title": c.get("section_title", ""),
+                        "text": c.get("text", "")} for c in chunks]
+            hit = str(id_arg) in set(self.gold) or any(str(c.get("doc_id")) in set(self.gold_docs) for c in chunks)
             meta = {"tool": name, "mode": "direct", "returned": [c["chunk_id"] for c in chunks],
-                    "gold_rank": gold_rank_from_sections([str(id_arg)], self.gold)}
+                    "gold_rank": (1 if hit else None)}
             return json.dumps({"results": payload}), self._decorate(payload, meta)
 
-        # search-style semantic retrieval
+        # search-style semantic retrieval.
+        # Stage 3: oversample a pool by similarity, drop chunks already returned
+        # this conversation (dedupe → each hop brings NEW text), then RANDOMLY
+        # keep top_k (subsample → a single search is lossy, so depth is rewarded).
         query = args.get("query") or args.get("q") or ""
-        results: List[RetrievedChunk] = self.retriever.search(query, k=self.cfg.top_k)
-        rank = gold_rank(results, self.gold) if self.cfg.log_gold_rank else None
+        r = rng or self.rng
+        k = self.cfg.top_k
+        results = self._pooled_retrieve(query, k, r)
+        self._seen.update(c.chunk_id for c in results)
+        rank = gold_rank(results, self.gold, self.gold_docs) if self.cfg.log_gold_rank else None
 
         # guided injection: gold missing after enough retries -> inject it
         injected = False
@@ -110,6 +135,19 @@ class ToolEnvironment:
         meta = {"tool": name, "mode": "search", "query": query,
                 "returned": [r.chunk_id for r in results], "gold_rank": rank, "injected": injected}
         return json.dumps({"results": payload}), self._decorate(payload, meta)
+
+    def _pooled_retrieve(self, query: str, k: int, rng: random.Random) -> List[RetrievedChunk]:
+        """Retrieve k chunks with optional dedupe (drop already-seen) + subsample."""
+        if not (self.cfg.subsample_retrieval or self.cfg.dedupe_retrieval):
+            return self.retriever.search(query, k=k)
+        pool = self.retriever.search(query, k=k * max(2, self.cfg.oversample_factor))
+        if self.cfg.dedupe_retrieval:
+            fresh = [c for c in pool if c.chunk_id not in self._seen]
+            if fresh:                       # only fall back to repeats if nothing new
+                pool = fresh
+        if self.cfg.subsample_retrieval and len(pool) > k:
+            return [pool[i] for i in sorted(rng.sample(range(len(pool)), k))]
+        return pool[:k]
 
     def _first_gold_chunk(self) -> Optional[Dict[str, Any]]:
         for g in self.gold:
@@ -143,10 +181,12 @@ class ToolEnvironment:
         return resp.get("content", "") if isinstance(resp, dict) else ""
 
 
-def gold_rank_from_sections(returned_sections: List[str], gold: List[str]) -> Optional[int]:
-    for rank, s in enumerate(returned_sections, 1):
-        if s in set(gold):
-            return rank
+def _first_scalar(args: Dict[str, Any]) -> Optional[str]:
+    """First string/number arg value — a generic fallback id for direct lookups
+    when the tool's id parameter isn't one of the common names."""
+    for v in args.values():
+        if isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            return str(v)
     return None
 
 

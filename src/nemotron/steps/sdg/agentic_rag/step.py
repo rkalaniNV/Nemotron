@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
-"""Runner for the agentic-RAG deep-research SDG step.
+"""Data Designer wiring for the agentic-RAG SDG step.
 
-Loads the outer YAML, wires Data Designer (models + samplers + the plugin
-column), and runs preview/create. Mirrors the reference notebook's
-``DataDesignerConfigBuilder`` flow so the pipeline is fully config-driven:
-this file contains NO domain logic — it just translates the YAML into DD calls.
-
-    python step.py --config config/indian_legal.yaml --mode preview
-    python step.py --config config/indian_legal.yaml --mode create
-
-Prerequisites (corpus side, run once — see data_prep/):
-  chunk_document.py  -> data/constitution_chunks.jsonl
-  retriever.py build -> data/index
-  bundle_builder.py  -> data/bundles.jsonl
+Translates the outer YAML into Data Designer calls (models + samplers + the
+plugin column) and projects trajectories to the SFT JSONL. Contains NO domain
+logic. The streaming pipeline (``pipeline.py``) imports the helpers here
+(``build_config_builder``, ``enrich_query_seed``, ``project_and_write``, …) and
+drives generation one cluster at a time; the ``main`` below is a single-config
+convenience runner.
 """
 
 from __future__ import annotations
@@ -75,11 +69,56 @@ def enrich_seed(cfg: Dict[str, Any], base: Path, out_path: Path, include_persona
     return out_path
 
 
+def enrich_query_seed(cfg: Dict[str, Any], queries_path: Path, out_path: Path,
+                      include_persona: bool, tools_json: str) -> int:
+    """Build a per-cluster DD seed from a Stage-2 queries.jsonl.
+
+    Each seed row is self-contained: the pre-generated question, its cluster id,
+    gold sections, the suggested conversation variant, and the tool catalog. The
+    generator reads ``seed_query`` as the user's opening turn (Stage 3). Returns
+    the number of rows written."""
+    rows = [json.loads(l) for l in queries_path.open(encoding="utf-8") if l.strip()]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with out_path.open("w", encoding="utf-8") as f:
+        for i, q in enumerate(rows):
+            row = {
+                "seed_query": q.get("query", ""),
+                "cluster_id": q.get("cluster_id", ""),
+                "gold_sections": json.dumps(q.get("gold_sections", []), ensure_ascii=False),
+                "gold_doc_ids": json.dumps(q.get("gold_doc_ids", []), ensure_ascii=False),
+                "query_level": q.get("level", "crisp"),   # shapes the opening turn
+                "tools": tools_json,
+            }
+            if include_persona:
+                row["persona"] = json.dumps(_FALLBACK_PERSONAS[i % len(_FALLBACK_PERSONAS)], ensure_ascii=False)
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            n += 1
+    return n
+
+
 def _plugin_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
     for col in cfg["columns"]:
         if col.get("type") == "deep-research-simulator":
             return col
     raise ValueError("no deep-research-simulator column in config")
+
+
+# ── direct-client config: {alias: {model, base_url, api_key_env, params}} ────
+def _build_model_clients(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve each model alias to a direct OpenAI-client spec so the generator
+    can bypass DD's facade (which mis-parses tool calls on some endpoints)."""
+    prov = {p["name"]: p for p in cfg.get("providers", [])}
+    out: Dict[str, Any] = {}
+    for m in cfg.get("models", []):
+        p = prov.get(m.get("provider"), {})
+        out[m["alias"]] = {
+            "model": m["model"],
+            "base_url": p.get("endpoint", ""),
+            "api_key_env": p.get("api_key", "NVIDIA_API_KEY"),
+            "params": dict(m.get("inference_parameters", {})),
+        }
+    return out
 
 
 # ── DD wiring (lazy imports so the file is importable without DD) ────────────
@@ -90,6 +129,10 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path, base: Path, use_p
     model_configs = [
         dd.ModelConfig(
             alias=m["alias"], model=m["model"], provider=m.get("provider", "nvidia"),
+            # generation is routed through direct OpenAI clients (see llm.py), so
+            # DD's own readiness probe is unnecessary — and its list-content system
+            # message is rejected by some endpoints (e.g. llama). Skip it.
+            skip_health_check=True,
             inference_parameters=dd.ChatCompletionInferenceParams(
                 **{k: v for k, v in m.get("inference_parameters", {}).items()}),
         )
@@ -120,21 +163,23 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path, base: Path, use_p
         elif t == "deep-research-simulator":
             knobs = {k: v for k, v in col.items() if k not in ("type", "name")}
             # resolve corpus/index paths to absolute so the generator finds them at runtime
-            for pk in ("corpus_path", "index_dir"):
+            for pk in ("corpus_path", "index_dir", "index_base_dir"):
                 if knobs.get(pk):
                     knobs[pk] = str(_resolve(base, knobs[pk]))
+            knobs["model_clients"] = _build_model_clients(cfg)
             cb.add_column(DeepResearchSimulatorConfig(name=col["name"], **knobs))
     return cb
 
 
 # ── output projection: OpenAI tool-calling trajectory for SFT ────────────────
-def project_and_write(records: List[Dict[str, Any]], cfg: Dict[str, Any], out_path: Path) -> int:
+def project_and_write(records: List[Dict[str, Any]], cfg: Dict[str, Any], out_path: Path,
+                      append: bool = False) -> int:
     proj = cfg["output_projection"]
     src = proj["source_field"]
     meta_fields = proj.get("metadata_fields", [])
     kept = 0
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
+    with out_path.open("a" if append else "w", encoding="utf-8") as f:
         for r in records:
             if not r.get("conversation_status"):
                 continue  # keep only successful / salvaged trajectories
@@ -202,6 +247,10 @@ def main() -> None:
 
 
 def _records(result) -> List[Dict[str, Any]]:
+    # current DD: DatasetCreationResults.load_dataset() -> pandas DataFrame
+    if hasattr(result, "load_dataset"):
+        ds = result.load_dataset()
+        return ds.to_dict("records") if hasattr(ds, "to_dict") else list(ds)
     for attr in ("dataset", "records", "data"):
         obj = getattr(result, attr, None)
         if obj is not None:

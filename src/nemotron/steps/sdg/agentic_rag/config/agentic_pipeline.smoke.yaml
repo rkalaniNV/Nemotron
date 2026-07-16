@@ -1,0 +1,138 @@
+# Cost-bounded smoke variant of agentic_pipeline.yaml — a handful of live calls.
+# Reuse existing clusters with:  python pipeline.py --config config/agentic_pipeline.smoke.yaml --skip-clustering --limit-clusters 1
+output_dir: ${oc.env:SDG_OUTPUT_DIR,${oc.env:PWD}/output/sdg}
+output_path: ${output_dir}/agentic_rag_smoke.jsonl
+
+clustering:
+  input: ../data/constitution_of_india.txt
+  doc_unit: section
+  profile: indian_statute
+  output_root: ../data/clusters
+  algo: kmeans
+  k: 12
+  max_chars: 4000
+
+question_gen:
+  profile: indian_statute
+  chunk_max_chars: 2000
+  shard_max_chars: 8000
+  n_queries: 4                   # queries PER DOCUMENT
+  generator_alias: question_model
+  backend: embedding
+  max_docs: 2                    # only 2 docs/cluster
+  queries_per_cluster: 3         # subsample 3 diverse queries/cluster
+  per_cluster_records: 3         # trajectories/cluster
+
+providers:
+  - name: nvidia-inference
+    endpoint: https://inference-api.nvidia.com/v1
+    provider_type: openai
+    api_key: NVIDIA_API_KEY
+
+models:
+  - alias: user_model
+    model: nvidia/meta/llama-3.3-70b-instruct
+    provider: nvidia-inference
+    inference_parameters: {temperature: 0.9, top_p: 0.95, max_tokens: 1024}
+  - alias: assistant_model
+    model: nvidia/openai/gpt-oss-120b
+    provider: nvidia-inference
+    inference_parameters: {temperature: 0.6, top_p: 0.95, max_tokens: 2500}
+  - alias: api_response_model
+    model: nvidia/deepseek-ai/deepseek-v4-flash
+    provider: nvidia-inference
+    inference_parameters: {temperature: 0.5, top_p: 0.95, max_tokens: 512}
+  - alias: judge_model
+    model: nvidia/meta/llama-3.3-70b-instruct
+    provider: nvidia-inference
+    inference_parameters: {temperature: 0.1, top_p: 1.0, max_tokens: 512}
+  - alias: question_model
+    model: nvidia/meta/llama-3.3-70b-instruct
+    provider: nvidia-inference
+    inference_parameters: {temperature: 0.9, top_p: 0.95, max_tokens: 1500}
+
+columns:
+  - type: category
+    name: theme
+    values:
+      - '{"type": "citizen_query", "description": "an ordinary person seeking to understand their rights"}'
+
+  - type: deep-research-simulator
+    name: trajectory
+    model_alias: assistant_model
+    query_column: seed_query
+    cluster_id_column: cluster_id
+    gold_column: gold_sections
+    query_level_column: query_level
+    retrieval_tools: [search_articles, get_article]
+    retriever_backend: embedding
+    index_base_dir: ../data/clusters
+    top_k: 4
+    subsample_retrieval: true
+    oversample_factor: 2
+    guided_injection: false
+    min_hops: 1
+    max_steps: 6
+    enforce_sufficiency: true
+    sufficiency_mode: strict
+    allow_discussion: true
+    max_discussion_exchanges: 1
+    require_research_plan: true
+    # small but genuinely multi-turn plan for the smoke test
+    min_turns: 3
+    dedupe_retrieval: true
+    conversation_plan:
+      num_turns: {min: 3, max: 4}
+      follow_up_kinds:
+        - {kind: complex_multistep, weight: 2}
+        - {kind: crisp, weight: 2}
+        - {kind: simple, weight: 1}
+        - {kind: half_baked, weight: 1}
+      kind_archetypes:
+        half_baked:        {min_hops: 1, max_hops: 3, clarify: true}
+        simple:            {min_hops: 1, max_hops: 2}
+        crisp:             {min_hops: 2, max_hops: 4}
+        complex_multistep: {min_hops: 3, max_hops: 6}
+    context_window_k: 2
+    compaction_mode: reference
+    compression_token_limit: 2000
+    preserve_last_user_turn: true
+    use_scratchpad: true
+    store_full_trace: true
+    parallel_tools: true
+    gate_query: false
+    salvage_min_hops: 1
+    majority_vote_n: 1           # cheap: no self-consistency sampling
+    max_tools: 12
+
+persona:
+  dataset: nvidia/Nemotron-Personas-India
+  locale: en_IN
+
+tools:
+  - type: function
+    function:
+      name: search_articles
+      description: Semantic search over the constitutional corpus; returns the most relevant passages.
+      parameters:
+        type: object
+        properties:
+          query: {type: string, description: Natural-language description of what you are looking for.}
+        required: [query]
+  - type: function
+    function:
+      name: get_article
+      description: Retrieve the full text of a specific article by its number.
+      parameters:
+        type: object
+        properties:
+          article: {type: string, description: 'Article number, e.g. "21" or "371A".'}
+        required: [article]
+
+output_projection:
+  type: structured_messages
+  source_field: conversation_messages
+  messages_field: messages
+  tools_field: tools
+  metadata_fields: [cluster_id, conversation_plan, gold_rank_log, hops_taken,
+                    salvaged, trajectory_judgment]
