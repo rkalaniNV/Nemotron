@@ -293,7 +293,9 @@ def _sanitize_tool_calls(tool_calls: list, tools: List[Dict[str, Any]]) -> list:
         try:
             args = json.loads(fn.get("arguments", "{}"))
         except (json.JSONDecodeError, TypeError):
-            cleaned.append(tc)
+            # model emitted malformed JSON args -> coerce to valid empty JSON so the
+            # recorded call stays API-valid (the endpoint 400s on invalid-JSON replay).
+            cleaned.append({**tc, "function": {**fn, "arguments": "{}"}})
             continue
         if allowed is not None and isinstance(args, dict):
             filtered = {k: v for k, v in args.items() if k in allowed}

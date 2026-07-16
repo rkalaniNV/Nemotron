@@ -56,7 +56,7 @@ models:
 
 # ── retrieval service (external HTTP wrapper) ─────────────────────────────────
 retrieval:
-  endpoint: http://10.117.9.203:8000/query        # service POST url; empty => the retrieval tool is LLM-simulated (dry runs)
+  endpoint: http://10.117.9.203:8002/query        # service POST url; empty => the retrieval tool is LLM-simulated (dry runs)
   tools: [search]                                 # tool names routed to the service (others are LLM-simulated)
   top_k: 4
   oversample_factor: 2                            # request top_k*factor, keep a random top_k (drives depth)
@@ -73,7 +73,7 @@ retrieval:
 
 # ── user-defined tool list ────────────────────────────────────────────────────
 # `search` is routed to the retrieval service (see retrieval.tools above); the
-# other three are LLM-simulated by aux_response_model.
+# other tools are LLM-simulated by aux_response_model.
 tools:
   - function:
       name: search
@@ -82,18 +82,6 @@ tools:
         type: object
         properties:
           query: {type: string, description: The search query.}
-        required: [query]
-  - function:
-      name: web_search
-      description: >-
-        Verify the LATEST/CURRENT information from the public web (recent events, up-to-date
-        figures, very recent changes) that the knowledge base cannot provide. Use only when
-        recency genuinely matters — not as a general fallback.
-      parameters:
-        type: object
-        properties:
-          query: {type: string, description: The web search query (something time-sensitive/recent).}
-          num_results: {type: integer, description: How many results to return.}
         required: [query]
   - function:
       name: memory_read
