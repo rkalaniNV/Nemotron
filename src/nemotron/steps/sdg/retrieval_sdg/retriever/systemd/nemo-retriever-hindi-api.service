@@ -1,0 +1,26 @@
+[Unit]
+Description=Hindi Legal NeMo Retriever HTTP API
+After=network-online.target nemo-retriever-embed.service
+Wants=network-online.target
+Requires=nemo-retriever-embed.service
+
+[Service]
+Type=simple
+User=local-rkalani
+Group=local-rkalani
+WorkingDirectory=/localhome/local-rkalani/nemo-retriever
+Environment=HOME=/localhome/local-rkalani
+Environment=HF_HOME=/localhome/local-rkalani/.cache/huggingface
+Environment=API_TITLE=Hindi Legal NeMo Retriever API
+Environment=LANCEDB_URI=/localhome/local-rkalani/nemo-retriever/lancedb-hindi-legal
+Environment=TABLE_NAME=hindi-legal-judgments
+Environment=MAX_IN_FLIGHT=32
+Environment=QUERY_TIMEOUT_SECONDS=60
+LimitNOFILE=65536
+ExecStart=/localhome/local-rkalani/nemo-retriever/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 8002 --workers 4
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

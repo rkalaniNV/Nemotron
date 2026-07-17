@@ -1,0 +1,21 @@
+[Unit]
+Description=Ingest Hindi legal judgments into NeMo Retriever
+After=network-online.target nemo-retriever-embed.service
+Wants=network-online.target
+Requires=nemo-retriever-embed.service
+
+[Service]
+Type=oneshot
+User=local-rkalani
+Group=local-rkalani
+WorkingDirectory=/localhome/local-rkalani/nemo-retriever
+Environment=HOME=/localhome/local-rkalani
+Environment=HF_HOME=/localhome/local-rkalani/.cache/huggingface
+ExecStart=/localhome/local-rkalani/nemo-retriever/ingest-hindi-legal.sh
+RemainAfterExit=yes
+TimeoutStartSec=infinity
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
