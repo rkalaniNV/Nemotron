@@ -7,9 +7,11 @@ rubric / thresholds) without re-running the pipeline. Two-tier scoring:
   1. OBJECTIVE (deterministic): every tool call parses + validates against its
      schema; the trajectory made at least one retrieval call; and it ends on a
      grounded (tool-free) assistant answer.
-  2. RUBRIC (optional, --judge): an LLM scores the subjective dimensions
-     (faithfulness / coherence / completeness / tool_use / user_realism) 1-5.
-  KEPT if it passes the objective gate and (when judging) every dim >= --min-score.
+  2. DEFECT GATE (optional, --judge): an LLM screens for binary train-harmful
+     defects (unsupported claims / no real research / incoherent / request
+     unresolved / user out of character) and a soft 1-5 quality score.
+  KEPT if it passes the objective gate and (when judging) NO defect fired and
+  quality >= --min-quality.
 
     python evaluate.py --input output/sdg/retrieval_sdg.raw.jsonl --out output/sdg/retrieval_sdg.jsonl --judge
     python evaluate.py --input raw.jsonl --out kept.jsonl              # objective-only, no LLM
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -28,7 +31,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from retrieval_sdg.conversation.verifiers import ToolCallVerifier
 
-RUBRIC_DIMS = ["faithfulness", "coherence", "completeness", "tool_use", "user_realism"]
+# binary train-harmful defects; a row is rejected if ANY fire (see prompts.TRAJECTORY_RUBRIC_PROMPT)
+DISQUALIFIERS = ["unsupported_claims", "no_real_research", "incoherent",
+                 "request_unresolved", "user_out_of_character"]
 
 
 def _load(input_file: Optional[Path], raw_dir: Optional[Path]) -> List[Dict[str, Any]]:
@@ -37,6 +42,61 @@ def _load(input_file: Optional[Path], raw_dir: Optional[Path]) -> List[Dict[str,
     for fp in files:
         rows += [json.loads(l) for l in fp.open(encoding="utf-8") if l.strip()]
     return rows
+
+
+def _char_ngrams(text: str, n: int = 12) -> set:
+    t = " ".join((text or "").split()).lower()
+    return {t[i:i + n] for i in range(len(t) - n + 1)} if len(t) >= n else set()
+
+
+def _evidence_overlap(row: Dict[str, Any], n: int = 12) -> float:
+    """Deterministic, language/domain-agnostic grounding proxy: fraction of each
+    answer's character n-grams that also appear in the RETRIEVED chunk text.
+    High => the answer is drawn from the evidence; low => it was written from the
+    model's own knowledge (drift/hallucination). No regex, no language assumptions."""
+    evidence = _char_ngrams(" ".join(m.get("content", "") for m in row.get("messages", [])
+                                     if m.get("role") == "tool"), n)
+    if not evidence:
+        return 0.0
+    scores = []
+    for m in row.get("messages", []):
+        if m.get("role") == "assistant" and not m.get("tool_calls") and (m.get("content") or "").strip():
+            ag = _char_ngrams(m["content"], n)
+            if ag:
+                scores.append(len(ag & evidence) / len(ag))
+    return round(min(scores), 3) if scores else 0.0   # weakest answer sets the grounding
+
+
+# chunk-id token as emitted by the retrieval client's content-hash fallback (h + hex).
+# Domain/language-agnostic: it only matches the id SHAPE, never any word in the text.
+_ID = re.compile(r"h[0-9a-f]{12}")
+
+
+def _retrieved_ids(msgs: List[Dict[str, Any]]) -> set:
+    ids: set = set()
+    for m in msgs:
+        if m.get("role") == "tool":
+            ids |= set(_ID.findall(m.get("content", "") or ""))
+    return ids
+
+
+def _cited_ids(msgs: List[Dict[str, Any]]) -> set:
+    ids: set = set()
+    for m in msgs:
+        if m.get("role") == "assistant" and not m.get("tool_calls"):
+            ids |= set(_ID.findall(m.get("content", "") or ""))
+    return ids
+
+
+def _citation_integrity(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic, exact grounding check the LLM judge cannot do reliably: every
+    chunk id the assistant CITES must have actually been RETRIEVED in this conversation.
+    Any cited-but-never-retrieved id is a fabricated citation (a hard reject)."""
+    msgs = row.get("messages", [])
+    cited, retrieved = _cited_ids(msgs), _retrieved_ids(msgs)
+    fabricated = sorted(cited - retrieved)
+    return {"cited_ids": len(cited), "fabricated_ids": len(fabricated),
+            "fabricated": fabricated[:10], "citation_ok": not fabricated}
 
 
 def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any]:
@@ -60,9 +120,10 @@ def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any
             retrievals += 1
     last = msgs[-1] if msgs else {}
     ends_on_answer = last.get("role") == "assistant" and not last.get("tool_calls") and bool(last.get("content"))
-    ok = (invalid == 0) and (n_calls > 0) and (retrievals > 0) and ends_on_answer
+    cite = _citation_integrity(row)
+    ok = (invalid == 0) and (n_calls > 0) and (retrievals > 0) and ends_on_answer and cite["citation_ok"]
     return {"tool_calls": n_calls, "invalid_calls": invalid, "retrievals": retrievals,
-            "ends_on_answer": ends_on_answer, "objective_ok": ok}
+            "ends_on_answer": ends_on_answer, **cite, "objective_ok": ok}
 
 
 def _make_judge(model: str, endpoint: str, api_key_env: str):
@@ -75,9 +136,11 @@ def _make_judge(model: str, endpoint: str, api_key_env: str):
     def score(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         # bound the conversation so it fits the judge model's context (some are 32k);
         # tool outputs are snipped, recent turns kept, so the judge still sees the flow.
+        # wide tool snippets so the judge SEES the retrieved evidence (a tight snippet
+        # truncates the chunk text/ids and makes faithful answers look unsupported).
         prompt = TRAJECTORY_RUBRIC_PROMPT.format(
             tools=format_tools_for_prompt(row.get("tools", [])),
-            conversation=format_history_compact(row.get("messages", []), max_chars=60000, tool_snippet=500))
+            conversation=format_history_compact(row.get("messages", []), max_chars=180000, tool_snippet=4000))
         text = caller(JUDGE_SYSTEM_PROMPT, prompt)
         a, b = text.find("{"), text.rfind("}")
         if a < 0 or b <= a:
@@ -86,13 +149,21 @@ def _make_judge(model: str, endpoint: str, api_key_env: str):
             d = json.loads(text[a:b + 1])
         except json.JSONDecodeError:
             return None
-        return {k: int(d.get(k, 0)) for k in RUBRIC_DIMS} | {"notes": str(d.get("notes", ""))[:200]}
+        dq = d.get("disqualifiers", {}) if isinstance(d.get("disqualifiers"), dict) else {}
+        return {"disqualifiers": {k: bool(dq.get(k, False)) for k in DISQUALIFIERS},
+                "quality": int(d.get("quality", 0) or 0), "notes": str(d.get("notes", ""))[:200]}
 
     return score
 
 
-def _rubric_ok(scores: Optional[Dict[str, Any]], min_score: int) -> bool:
-    return bool(scores) and all(scores.get(k, 0) >= min_score for k in RUBRIC_DIMS)
+def _rubric_ok(scores: Optional[Dict[str, Any]], min_quality: int) -> bool:
+    """Keep only if the judge returned a verdict, NO disqualifier fired, and the soft
+    quality score clears the (low, reporting-oriented) floor."""
+    if not scores:
+        return False
+    if any(scores.get("disqualifiers", {}).get(k) for k in DISQUALIFIERS):
+        return False
+    return scores.get("quality", 0) >= min_quality
 
 
 def main() -> None:
@@ -100,8 +171,11 @@ def main() -> None:
     ap.add_argument("--input", type=Path, help="a single raw jsonl")
     ap.add_argument("--raw-dir", type=Path, help="a dir of raw jsonls")
     ap.add_argument("--out", type=Path, required=True, help="filtered training set to write")
-    ap.add_argument("--judge", action="store_true", help="also run the LLM rubric (needs API key)")
-    ap.add_argument("--min-score", type=int, default=3, help="min rubric score (1-5) on every dimension")
+    ap.add_argument("--judge", action="store_true", help="also run the LLM defect gate (needs API key)")
+    ap.add_argument("--min-quality", type=int, default=3,
+                    help="soft quality floor (1-5); the gate is the defect flags, this just drops weak-but-clean rows")
+    ap.add_argument("--min-overlap", type=float, default=0.0,
+                    help="min deterministic answer<->evidence char-ngram overlap (0=report only, don't gate)")
     ap.add_argument("--model", default="nvidia/openai/gpt-oss-120b")  # reliable structured JSON
     ap.add_argument("--endpoint", default="https://inference-api.nvidia.com/v1")
     ap.add_argument("--api-key-env", default="NVIDIA_API_KEY")
@@ -120,9 +194,11 @@ def main() -> None:
     kept, scored_rows = [], []
     for r in rows:
         obj = _objective(r, verifier)
+        overlap = _evidence_overlap(r)                        # deterministic grounding proxy
         scores = judge(r) if (judge and obj["objective_ok"]) else None
-        keep = obj["objective_ok"] and (not args.judge or _rubric_ok(scores, args.min_score))
-        scored_rows.append({**r, "eval": {**obj, "rubric": scores, "kept": keep}})
+        keep = (obj["objective_ok"] and (overlap >= args.min_overlap)
+                and (not args.judge or _rubric_ok(scores, args.min_quality)))
+        scored_rows.append({**r, "eval": {**obj, "grounding_overlap": overlap, "rubric": scores, "kept": keep}})
         if keep:
             kept.append({k: v for k, v in r.items() if k != "eval"})
 
@@ -141,21 +217,52 @@ def main() -> None:
     print(f"\n[judge] kept {len(kept)}/{len(rows)} -> {args.out}")
 
 
+def _role_seq(msgs: List[Dict[str, Any]]) -> str:
+    return "".join((m.get("role") or "?")[0].upper() for m in msgs)   # S/U/A/T
+
+
+def _ctx_tokens(msgs: List[Dict[str, Any]]) -> int:
+    return sum(len(m.get("content", "") or "") + len(m.get("reasoning_content", "") or "") for m in msgs) // 4
+
+
+def _dist(vals: List[int]) -> Dict[str, Any]:
+    v = sorted(vals)
+    return {"min": v[0], "p25": v[len(v) // 4], "median": v[len(v) // 2],
+            "p75": v[(3 * len(v)) // 4], "max": v[-1], "mean": round(sum(v) / len(v))}
+
+
 def _summary(scored: List[Dict[str, Any]], kept: List[Dict[str, Any]], args) -> Dict[str, Any]:
     n = len(scored)
     out: Dict[str, Any] = {
         "total": n,
         "objective_pass": sum(1 for r in scored if r["eval"]["objective_ok"]),
+        "citation_fabrication_rows": sum(1 for r in scored if not r["eval"].get("citation_ok", True)),
+        "cited_ids_total": sum(r["eval"].get("cited_ids", 0) for r in scored),
         "kept": len(kept),
         "keep_rate": round(len(kept) / n, 3) if n else None,
-        "kept_per_cluster": dict(Counter(r.get("cluster_id", "?") for r in kept)),
-        "kept_kinds": dict(Counter(r.get("kind", "?") for r in kept)),
         "kept_hops_distribution": dict(sorted(Counter(r.get("hops_taken", 0) for r in kept).items())),
         "judged": bool(args.judge),
     }
+    if kept:
+        turns = [sum(1 for m in r["messages"] if m.get("role") == "user") for r in kept]
+        out["turns_distribution"] = dict(sorted(Counter(turns).items()))
+        out["top_flow_patterns"] = [{"pattern": p, "count": c}
+                                    for p, c in Counter(_role_seq(r["messages"]) for r in kept).most_common(5)]
+        out["context_length_tokens"] = _dist([_ctx_tokens(r["messages"]) for r in kept])
+    ov = sorted(r["eval"]["grounding_overlap"] for r in scored)
+    if ov:
+        out["grounding_overlap"] = {"mean": round(sum(ov) / len(ov), 3),
+                                    "median": ov[len(ov) // 2],
+                                    "p10": ov[len(ov) // 10], "min": ov[0], "max": ov[-1]}
     if args.judge:
         rub = [r["eval"]["rubric"] for r in scored if r["eval"].get("rubric")]
-        out["mean_rubric"] = {d: round(sum(s[d] for s in rub) / len(rub), 2) for d in RUBRIC_DIMS} if rub else {}
+        j = len(rub)
+        # how often each defect fired among judged rows (lower = cleaner data)
+        out["disqualifier_rate"] = ({k: round(sum(bool(s["disqualifiers"].get(k)) for s in rub) / j, 3)
+                                     for k in DISQUALIFIERS} if j else {})
+        out["clean_rate"] = round(sum(not any(s["disqualifiers"].values()) for s in rub) / j, 3) if j else None
+        out["quality_distribution"] = dict(sorted(Counter(s["quality"] for s in rub).items())) if j else {}
+        out["mean_quality"] = round(sum(s["quality"] for s in rub) / j, 2) if j else None
     return out
 
 

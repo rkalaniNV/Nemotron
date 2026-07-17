@@ -213,16 +213,43 @@ TRAJECTORY_JUDGE_PROMPT = """You are an expert evaluator of grounded, tool-using
 </RUBRIC>
 """ + _JUDGE_RESPONSE_FORMAT
 
-# decoupled evaluate.py rubric — structured 1-5 scores (double braces are literal for str.format)
-TRAJECTORY_RUBRIC_PROMPT = """Score this research-assistant conversation on each dimension from 1 (poor) to \
-5 (excellent). Return ONLY a JSON object with integer scores:
-{{"faithfulness": int, "coherence": int, "completeness": int, "tool_use": int, "user_realism": int, "notes": "str"}}
+# decoupled evaluate.py rubric — DEFECT GATE + soft quality (double braces are literal for str.format)
+#
+# Design: an LLM is reliable at "is this specific bad thing present? yes/no" and
+# UNreliable at calibrated 1-5 aesthetics. So the gate is a set of binary
+# DISQUALIFIERS (train-harmful defects); a row is kept unless one clearly fires.
+# `quality` is a soft 1-5 for ranking/reporting only — it does NOT gate by default.
+TRAJECTORY_RUBRIC_PROMPT = """You are screening one tool-using research conversation for use as SFT TRAINING DATA. \
+Your job is NOT to grade style — it is to catch DEFECTS that would make this example harmful to train on. \
+A clean, ordinary research conversation should PASS. Return ONLY a JSON object:
+{{"disqualifiers": {{"unsupported_claims": bool, "no_real_research": bool, "incoherent": bool,
+"request_unresolved": bool, "user_out_of_character": bool}}, "quality": int, "notes": "str"}}
 
-- faithfulness: the answer's claims are grounded in retrieved text; no invented facts or ids.
-- coherence: the conversation flows logically from turn to turn.
-- completeness: the user's request is actually resolved.
-- tool_use: tools are called sensibly and iteratively — neither lazy nor wasteful.
-- user_realism: the user's messages read like a real person, never an assistant.
+Set each disqualifier to true ONLY when you are confident the defect is clearly present. \
+When you are unsure, or the behaviour is merely imperfect-but-acceptable, set it FALSE (default to keeping). \
+The following are GOOD and must NEVER be flagged: paraphrasing or synthesising the evidence in the assistant's \
+own words; citing sources by name instead of by id; thorough multi-step / multi-hop searching; and honestly \
+saying "the knowledge base doesn't cover that" when the evidence is missing.
+
+Do NOT check whether cited chunk-id tokens (e.g. "[h1a2b3c4d5e6f]") were really retrieved — that is verified \
+separately and exactly by code. You may not even see the full tool text. Judge only the PROSE against the \
+evidence shown; never flag a claim merely because you cannot locate its id.
+
+Disqualifiers — mark TRUE only for a clear, concrete failure:
+- unsupported_claims: the final answer's PROSE asserts substantive facts (names, dates, numbers, cases, rules,
+  definitions, quotes) that plainly contradict, or have no basis in, the retrieved tool text shown to you — i.e.
+  clearly pulled from outside knowledge. A faithful paraphrase is NOT unsupported; if the supporting text might
+  simply be outside the excerpt you can see, do NOT flag it.
+- no_real_research: the assistant did not actually use retrieval to answer — it never searched, or it ignored
+  the results and answered from its own knowledge. (Multi-hop searching is the opposite of this — never flag it.)
+- incoherent: the thread does not hang together — the assistant contradicts itself or an earlier turn, forgets
+  established results, or answers a different question than the one asked.
+- request_unresolved: the user's request is left dangling — neither answered from evidence nor honestly declined.
+- user_out_of_character: the simulated USER stops behaving like a real person — it explains, calls or names tools,
+  apologises, self-identifies as an AI, or emits structured/meta output a real person would not type.
+
+quality (1-5, REPORTING ONLY — a clean row that trips no disqualifier should be at least 4):
+  5 = exemplary grounded multi-hop research with natural user turns; 3 = fine, unremarkable; 1 = barely usable.
 
 <TOOLS>
 {tools}
