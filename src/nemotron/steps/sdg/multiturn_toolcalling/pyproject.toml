@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.20"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mtsdg"
+version = "0.1.0"
+description = "Generic multi-turn long-context tool-calling SDG pipeline (NeMo Data Designer plugin)."
+requires-python = ">=3.10"
+dependencies = [
+    "data-designer",
+    "pydantic>=2.6",
+    "tiktoken>=0.7",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+# Register the generic long-context episode simulator as a Data Designer
+# column-generator plugin so it can be resolved by `column_type`.
+[project.entry-points."data_designer.plugins"]
+episode-simulator = "mtsdg.plugin:episode_simulator"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mtsdg"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
