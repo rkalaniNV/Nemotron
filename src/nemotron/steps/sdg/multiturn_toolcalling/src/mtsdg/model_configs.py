@@ -141,12 +141,15 @@ class DirectChatFacade:
         }
         if "response_format" in kwargs and kwargs["response_format"]:
             body["response_format"] = kwargs["response_format"]
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:  # some self-hosted endpoints need no auth
+            headers["Authorization"] = f"Bearer {self.api_key}"
         # Granular timeout: a non-responding backend must surface on the READ
         # deadline in bounded time, not block for the whole timeout budget. Some
         # upstream models occasionally accept a request and never send headers.
         resp = httpx.post(
             self.url,
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            headers=headers,
             json=body,
             timeout=httpx.Timeout(connect=10.0, read=self.timeout, write=30.0, pool=10.0),
         )

@@ -418,9 +418,10 @@ class EpisodeSimulatorGenerator(
         aliases = [cfg.user_alias, cfg.assistant_alias, cfg.judge_alias, cfg.compressor_alias]
         # Use a direct synchronous HTTP client with a bounded read timeout, so a
         # backend that accepts a request but never responds fails fast instead of
-        # blocking the run. Falls back to DD's model registry if LLM_API_KEY isn't
-        # set (e.g. the mock/engine tests).
-        if os.environ.get("MTSDG_DIRECT_HTTP", "1") != "0" and os.environ.get("LLM_API_KEY"):
+        # blocking the run. Gated on LLM_MODEL (set on real runs; absent in the
+        # mock/engine tests, which fall back to DD's model registry). Supports
+        # no-auth endpoints (empty LLM_API_KEY).
+        if os.environ.get("MTSDG_DIRECT_HTTP", "1") != "0" and os.environ.get("LLM_MODEL"):
             from mtsdg.model_configs import direct_facades_from_env
             models = direct_facades_from_env(aliases)
         else:

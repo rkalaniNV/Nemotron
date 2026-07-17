@@ -11,6 +11,7 @@ retrieve -> assess -> rewrite loop is genuine and grounded in real documents.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from typing import List
@@ -21,13 +22,17 @@ DEFAULT_RETRIEVER_URL = os.environ.get("RETRIEVER_URL", "http://localhost:8000")
 
 
 def _chunk_id(source: str, page: int, rank: int) -> str:
-    base = os.path.basename(source or "doc").replace(".txt", "")
-    return f"{base}_p{page}_r{rank}"
+    # Short, atomic, deterministic id the model can cite VERBATIM. Long/structured
+    # ids (doc-name_pNN_rN) get mangled by the model — it drops the _rN suffix or
+    # abbreviates — which then fails the exact-match grounding gate. The human-
+    # readable document/page lives in the chunk `title`/`source` instead.
+    digest = hashlib.sha1(f"{source}|{page}|{rank}".encode("utf-8")).hexdigest()[:8]
+    return f"c{digest}"
 
 
 def _title(source: str, page: int) -> str:
-    base = os.path.basename(source or "doc").replace(".txt", "")
-    return f"Constitution of India — {base}, p.{page}"
+    base = os.path.basename(source or "doc").replace(".txt", "").replace(".PDF", "").replace(".pdf", "")
+    return f"{base} — p.{page}"
 
 
 def _clean(text: str) -> str:

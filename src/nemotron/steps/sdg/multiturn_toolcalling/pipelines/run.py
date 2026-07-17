@@ -50,7 +50,7 @@ def main() -> None:
     args = ap.parse_args()
 
     if not os.environ.get("LLM_API_KEY", "").strip():
-        raise SystemExit("Set LLM_API_KEY to the provider/proxy key.")
+        print("LLM_API_KEY is empty — assuming a no-auth endpoint (no Authorization header sent).")
     os.makedirs("output", exist_ok=True)
 
     queries = [QuerySeed.model_validate_json(l) for l in open(args.queries, encoding="utf-8") if l.strip()]
