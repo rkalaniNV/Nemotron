@@ -77,7 +77,7 @@ class ConversationSimulatorConfig(_Base):
         return [
             "conversation_messages", "conversation_messages_raw", "conversation_status",
             "conversation_metadata", "user_query", "conversation_plan", "hops_taken",
-            "retrieval_log", "trajectory_judgment", "cluster_id",
+            "retrieval_log", "trajectory_judgment", "cluster_id", "compression",
         ]
 
     @property

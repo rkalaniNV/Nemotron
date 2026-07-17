@@ -67,15 +67,17 @@ def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any
 
 def _make_judge(model: str, endpoint: str, api_key_env: str):
     from retrieval_sdg.core.caller import make_openai_caller
-    from retrieval_sdg.core.messages import format_conversation_history_for_prompt, format_tools_for_prompt
+    from retrieval_sdg.core.messages import format_history_compact, format_tools_for_prompt
     from retrieval_sdg.conversation.prompts import JUDGE_SYSTEM_PROMPT, TRAJECTORY_RUBRIC_PROMPT
     caller = make_openai_caller(model, endpoint, api_key_env,
                                 params={"temperature": 0.1, "max_tokens": 2000})
 
     def score(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        # bound the conversation so it fits the judge model's context (some are 32k);
+        # tool outputs are snipped, recent turns kept, so the judge still sees the flow.
         prompt = TRAJECTORY_RUBRIC_PROMPT.format(
             tools=format_tools_for_prompt(row.get("tools", [])),
-            conversation=format_conversation_history_for_prompt(row.get("messages", [])))
+            conversation=format_history_compact(row.get("messages", []), max_chars=60000, tool_snippet=500))
         text = caller(JUDGE_SYSTEM_PROMPT, prompt)
         a, b = text.find("{"), text.rfind("}")
         if a < 0 or b <= a:

@@ -89,7 +89,7 @@ def _compress_span(middle: List[Dict[str, Any]], window_k: int, mode: str, budge
 # hard ceiling on the assembled view, independent of the per-turn boundary — a
 # single deep turn keeps its tail RAW, which could otherwise blow the context
 # window. Kept above compression_token_limit so it never clamps the middle budget.
-HARD_VIEW_TOKENS = 30000
+HARD_VIEW_TOKENS = 50000
 
 
 def _global_cap(view: List[Dict[str, Any]], window_k: int, mode: str, cap: int) -> List[Dict[str, Any]]:

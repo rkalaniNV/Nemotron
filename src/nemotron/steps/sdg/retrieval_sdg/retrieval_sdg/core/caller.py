@@ -13,7 +13,8 @@ from typing import Callable, Dict, Optional
 def make_openai_caller(model: str, endpoint: str, api_key_env: str = "NVIDIA_API_KEY",
                        params: Optional[Dict] = None) -> Callable[[str, str], str]:
     from openai import OpenAI
-    client = OpenAI(base_url=endpoint, api_key=os.environ.get(api_key_env, ""),
+    # open endpoints need no key, but the OpenAI client requires a non-empty string
+    client = OpenAI(base_url=endpoint, api_key=os.environ.get(api_key_env, "") or "EMPTY",
                     max_retries=4, timeout=120)
     params = params or {}
 

@@ -8,7 +8,7 @@ seeds_path: ../data/seeds.jsonl                 # written by the query_prep stag
 output_path: ../output/sdg/retrieval_sdg.raw.jsonl # raw trajectories (judge with evaluate.py)
 column_name: conversation_messages
 
-metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log]
+metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log, compression]
 
 # ── Stage A: query_prep (offline; MiniLM only) ─────────────────────────────────
 query_prep:
@@ -26,9 +26,9 @@ query_prep:
 
 # ── models & providers ────────────────────────────────────────────────────────
 providers:
-  - name: nvidia
-    endpoint: https://inference-api.nvidia.com/v1
-    api_key: NVIDIA_API_KEY                        # Bearer token env var
+  - name: lepton_gptoss
+    endpoint: https://xtcr3jss-gpt-oss-120b-rapaul-gcp.xenon.lepton.run/v1
+    api_key: LEPTON_API_TOKEN                      # Bearer token env var
   - name: lepton_gemma
     endpoint: https://xtcr3jss-gemma-4-31b-it-vllm-ravirajj-az-32k.xenon.lepton.run/v1
     api_key: LEPTON_API_KEY                        # open endpoint => unset is fine
@@ -38,20 +38,20 @@ providers:
 # or leaves the answer empty. Keep the assistant especially roomy.
 models:
   - alias: assistant_model                       # the research agent — gpt-oss-120b (emits reasoning)
-    model: nvidia/openai/gpt-oss-120b
-    provider: nvidia
+    model: openai/gpt-oss-120b
+    provider: lepton_gptoss
     inference_parameters: {temperature: 0.7, max_tokens: 65000}
   - alias: user_model                            # simulates the human user — Gemma (32k ctx model)
     model: google/gemma-4-31B-it
     provider: lepton_gemma
     inference_parameters: {temperature: 0.8, max_tokens: 2000}
   - alias: aux_response_model                     # simulates non-retrieval tools — gpt-oss-120b
-    model: nvidia/openai/gpt-oss-120b
-    provider: nvidia
+    model: openai/gpt-oss-120b
+    provider: lepton_gptoss
     inference_parameters: {temperature: 0.4, max_tokens: 32000}
   - alias: judge_model                            # inline judge + query gate — gpt-oss-120b (reliable JSON)
-    model: nvidia/openai/gpt-oss-120b
-    provider: nvidia
+    model: openai/gpt-oss-120b
+    provider: lepton_gptoss
     inference_parameters: {temperature: 0.2, max_tokens: 32000}
 
 # ── retrieval service (external HTTP wrapper) ─────────────────────────────────
@@ -126,5 +126,5 @@ engine:
   # ── context compression ─────────────────────────────────────────────────────
   context_window_k: 2                              # recent tool results kept raw
   compaction_mode: reference
-  compression_token_limit: 20000                   # keep the middle raw up to ~20k tokens before compressing
+  compression_token_limit: 30000                   # keep the middle raw up to ~30k tokens before compressing
   use_scratchpad: true

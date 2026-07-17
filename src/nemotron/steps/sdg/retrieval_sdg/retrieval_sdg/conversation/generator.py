@@ -27,7 +27,7 @@ from ..core.messages import format_history_compact, format_tools_for_prompt
 from ..core.persona import format_persona_for_prompt
 from ..retrieval.client import HttpRetrievalClient
 from .config import ConversationSimulatorConfig
-from .context import ResearchMemory, build_assistant_view
+from .context import ResearchMemory, build_assistant_view, _estimate_tokens
 from .judges import run_inline_judge
 from .planner import plan_conversation
 from .prompts import (
@@ -120,11 +120,14 @@ class ConversationSimulatorGenerator(
 
         return self._finalize(data, cfg, models, messages, env, total_hops, tools_str)
 
-    def _view(self, cfg, messages, memory):
-        return build_assistant_view(messages, memory, window_k=cfg.context_window_k,
+    def _view(self, cfg, messages, memory, env=None):
+        view = build_assistant_view(messages, memory, window_k=cfg.context_window_k,
                                     compaction_mode=cfg.compaction_mode,
                                     compression_token_limit=cfg.compression_token_limit,
                                     use_scratchpad=cfg.use_scratchpad)
+        if env is not None:  # audit: did compression reduce this step's view, and by how much?
+            env.note_view(_estimate_tokens(messages), _estimate_tokens(view))
+        return view
 
     # ── the multi-step tool loop for ONE user turn ───────────────────────────
     def _tool_loop(self, cfg, models, env, tools, messages, memory, spec, rng, user_query,
@@ -136,7 +139,7 @@ class ConversationSimulatorGenerator(
         hops, asked_clarify, stall = 0, False, 0
         for _ in range(spec.max_steps):
             force = cfg.force_first_tool and hops < spec.min_hops
-            resp = call_llm_with_majority_vote(models, MODEL_ASSISTANT, self._view(cfg, messages, memory),
+            resp = call_llm_with_majority_vote(models, MODEL_ASSISTANT, self._view(cfg, messages, memory, env),
                                                tools, n=cfg.majority_vote_n,
                                                tool_choice="required" if force else "auto")
             tool_calls = _sanitize_tool_calls((resp.get("tool_calls") or [])[: cfg.max_tool_calls_per_turn], tools)
@@ -171,7 +174,7 @@ class ConversationSimulatorGenerator(
 
         # close out: one tool-free call for a real answer. If STILL empty, the turn
         # failed — return produced=False (no stale salvage, no empty message appended).
-        final = call_llm(models, MODEL_ASSISTANT, self._view(cfg, messages, memory))
+        final = call_llm(models, MODEL_ASSISTANT, self._view(cfg, messages, memory, env))
         content = (final.get("content") if isinstance(final, dict) else str(final)) or ""
         if content.strip():
             messages.append(_assistant_msg(final if isinstance(final, dict) else {"content": content}))
@@ -258,6 +261,7 @@ class ConversationSimulatorGenerator(
         data["trajectory_judgment"] = json.dumps(judgment, ensure_ascii=False)
         data["conversation_metadata"] = json.dumps(
             {"n_retrievals": len(env.retrieval_log), "ends_on_answer": ends_on_answer}, ensure_ascii=False)
+        data["compression"] = env.comp_steps   # count of steps where the view was compressed
         if getattr(cfg, "name", None) and cfg.name != "conversation_messages":
             data[cfg.name] = data["conversation_messages"]
         return data
@@ -270,6 +274,7 @@ class ConversationSimulatorGenerator(
         data["retrieval_log"] = "[]"
         data["trajectory_judgment"] = json.dumps({"rating": "failure", "explanation": detail}, ensure_ascii=False)
         data["conversation_metadata"] = json.dumps({"skipped": True, "reason": reason}, ensure_ascii=False)
+        data["compression"] = 0
         data.setdefault("conversation_plan", "[]")
         data.setdefault("user_query", "")
         if getattr(cfg, "name", None) and cfg.name != "conversation_messages":
