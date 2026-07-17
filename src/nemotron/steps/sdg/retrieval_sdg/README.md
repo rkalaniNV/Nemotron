@@ -24,11 +24,16 @@ generation behavior are configured in `config/pipeline.yaml`.
 - Data Designer
 - A JSONL query source
 - OpenAI-compatible model endpoints
-- An HTTP retrieval endpoint for real generation
+- An HTTP retrieval endpoint for real generation (the included deployment is
+  documented in [`retriever/README.md`](retriever/README.md))
 - API keys exposed through the environment variables named in the config
 
 The checked-in retrieval address is deployment-specific; replace it before running
 outside that network.
+
+To start or rebuild the NeMo Retriever service currently used by the checked-in
+configuration, follow [`retriever/README.md`](retriever/README.md). That deployment
+serves an already-extracted JSONL corpus; it does not extract PDFs.
 
 ## Quick start
 
@@ -160,6 +165,7 @@ retrieval_sdg/
 ├── config/pipeline.yaml       runtime configuration
 ├── pipeline.py                query preparation and generation driver
 ├── evaluate.py                deterministic and LLM evaluation
+├── retriever/                 NeMo Retriever server, ingestion, and systemd units
 ├── retrieval_sdg/
 │   ├── plugin.py              Data Designer registration
 │   ├── query_prep/            embedding, deduplication, clustering, sampling

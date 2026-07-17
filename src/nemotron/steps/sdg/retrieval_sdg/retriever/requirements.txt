@@ -1,0 +1,9 @@
+nemo-retriever[local]==26.5.0
+vllm==0.20.0
+torch==2.11.0
+fastapi==0.138.0
+uvicorn==0.51.0
+lancedb==0.34.0
+pandas==2.3.3
+httpx==0.28.1
+prometheus-fastapi-instrumentator==7.1.0

@@ -1,0 +1,21 @@
+[Unit]
+Description=Persistent vLLM embedding server for NeMo Retriever
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=local-rkalani
+Group=local-rkalani
+WorkingDirectory=/localhome/local-rkalani/nemo-retriever
+Environment=HOME=/localhome/local-rkalani
+Environment=HF_HOME=/localhome/local-rkalani/.cache/huggingface
+Environment=VLLM_WORKER_MULTIPROC_METHOD=spawn
+ExecStart=/localhome/local-rkalani/nemo-retriever/.venv/bin/vllm serve nvidia/llama-nemotron-embed-1b-v2 --runner pooling --host 127.0.0.1 --port 8001 --served-model-name nvidia/llama-nemotron-embed-1b-v2 --trust-remote-code --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.45 --max-num-seqs 256
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=600
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
