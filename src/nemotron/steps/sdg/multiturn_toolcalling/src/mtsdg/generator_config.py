@@ -39,6 +39,17 @@ class EpisodeSimulatorConfig(SingleColumnConfig):
     # Behaviour.
     majority_vote_n: int = 1
     max_steps: int = 4
+    # Dynamic episode length: when both are set (min <= max), each episode uses a
+    # turn count picked in [turn_budget_min, turn_budget_max] — deterministically
+    # per query_id (reproducible, but varied across queries) — instead of the
+    # query's own turn_budget. 0/0 disables (use each query's turn_budget).
+    turn_budget_min: int = 0
+    turn_budget_max: int = 0
+    # Force the query-rewrite loop (broad retrieve -> refine -> retrieve again, in
+    # the SAME turn) on the first N retrieving turns of an episode, so the corpus
+    # actually teaches query rewrite even when the model would one-shot the query.
+    # 0 disables the deterministic force (rely on prompting only).
+    force_rewrite_count: int = 2
     compression_token_budget: int = 400
     max_reasoning_tokens: int = 400
     recent_raw_turns: int = 4

@@ -86,6 +86,8 @@ def main() -> None:
         retrieve_top_k=int(os.environ.get("RETRIEVE_TOP_K", "3")),
         context_token_threshold=args.sim_threshold,
         max_reasoning_tokens=int(os.environ.get("MAX_REASONING_TOKENS", "400")),
+        turn_budget_min=int(os.environ.get("TURN_MIN", "0")),
+        turn_budget_max=int(os.environ.get("TURN_MAX", "0")),
         majority_vote_n=int(os.environ.get("MAJORITY_VOTE_N", "1")),
         run_inline_judge=os.environ.get("INLINE_JUDGE", "0") == "1",
         run_trajectory_judge=os.environ.get("TRAJ_JUDGE", "1") == "1",

@@ -39,8 +39,10 @@ that drills into this topic. Guidance for how the conversation should evolve
   a boundary.
 - Near the end, ask it to summarize what you've learned.
 
-Write ONLY the user's next message: one need at a time, building on what the
-assistant just said. Do not narrate, do not use tools, do not answer yourself.
+Write ONLY the user's next message, and keep it SHORT — one or two sentences, the
+way a real person actually asks (often just a quick question or follow-up). No long
+paragraphs, no multi-part questions, no narration, no tools, don't answer yourself.
+One need at a time, building on what the assistant just said.
 """
 
 # --------------------------------------------------------------------------- #
@@ -64,20 +66,25 @@ Each entry in tool_calls MUST use this exact shape:
   {{"id": "call-1", "type": "function", "function": {{"name": "retrieve", "arguments": "{{\\"query\\": \\"...\\", \\"top_k\\": 3}}"}}}}
 where `arguments` is a JSON STRING. Use only these tool names: retrieve, memory_read, memory_write.
 
-Rules (retrieve sparingly — like a real analyst, not on every turn):
+Rules (retrieve like a real analyst — sparingly, but rewrite when needed):
 - Retrieve ONLY when you genuinely lack the information. You ALREADY have the
-  passages from your recent retrievals and the "Established facts" in the compacted
-  summary — reuse them. If they already cover the user's point, just ANSWER (cite
-  the chunk ids you already have). Only retrieve for a genuinely NEW subtopic the
-  summary/recent turns don't cover. Most follow-up turns need NO new retrieval.
-- When you do retrieve, write ONE specific, well-formed query and prefer to answer
-  from its results.
-- The retriever is imperfect, but REWRITE only when a result is clearly weak or
-  off-target — this should be occasional (once or twice in the whole conversation),
-  not routine. When you rewrite, record why in reasoning.retrieval_assessment.
-- Never repeat a near-identical query, and never re-retrieve facts you have already
-  established. Hard cap: at most 2 retrieves for any single user turn, and aim for
-  0-1 on the large majority of turns.
+  passages from recent retrievals and the "Established facts" in the compacted
+  summary — reuse them. If they cover the user's point, just ANSWER (cite the chunk
+  ids you already have). Most easy follow-up turns need NO new retrieval.
+- QUERY-REWRITE (the key skill — do this for every substantive question that needs
+  retrieval): retrieve in TWO steps within the SAME turn.
+    STEP 1: emit ONE `retrieve` tool call using a BROAD query in the user's own
+            words — do NOT pre-optimize it. Wait for its results.
+    STEP 2: inspect those results in reasoning.retrieval_assessment, then emit a
+            SECOND `retrieve` tool call with a REFINED, precise query (exact
+            case/doctrine/section names, disambiguating terms).
+    Only after STEP 2 do you answer. Emit the two retrieves as separate sequential
+    tool calls (assess between them) — never both in one message. This back-to-back
+    retrieve -> assess -> rewrite -> retrieve -> answer is exactly the behaviour to
+    produce on the main questions.
+- On easy/settled follow-ups, do 0-1 retrieves and reuse context. Never repeat a
+  near-identical query across turns, and never re-retrieve facts you already
+  established. Cap: at most 2 retrieves per user turn (the broad + refined pair).
 - Read memory when a saved preference is relevant; write memory ONLY when the user
   directly asks to remember an allowed preference. The ONLY writable memory keys are:
   preferred_language, verbosity, expertise_level, response_format, preferred_units,

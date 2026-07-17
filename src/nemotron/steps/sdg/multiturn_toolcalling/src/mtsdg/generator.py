@@ -21,6 +21,7 @@ summary appears in the emitted chat. Compaction is recorded only in metadata.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -118,6 +119,13 @@ class EpisodeRunner:
         self, models: Dict[str, Any], query: QuerySeed, retriever: RetrieverClient
     ) -> Dict[str, Any]:
         cfg = self.config
+        # Dynamic episode length: pick a turn count in [min, max], deterministically
+        # per query_id so it varies across queries but is reproducible for one query.
+        if cfg.turn_budget_min and cfg.turn_budget_max and cfg.turn_budget_min <= cfg.turn_budget_max:
+            span = cfg.turn_budget_max - cfg.turn_budget_min + 1
+            h = int(hashlib.sha1(query.query_id.encode("utf-8")).hexdigest(), 16)
+            query.turn_budget = cfg.turn_budget_min + (h % span)
+        self._forced_rewrites = 0  # per-episode counter for the forced query-rewrite loop
         executor = LiveToolExecutor(retriever, allowed_tools=MODEL_TOOLS, default_top_k=cfg.retrieve_top_k)
         state = ConversationState(conversation_id=query.query_id, memory=dict(query.memory_seed))
         meter = ContextMeter(threshold=cfg.context_token_threshold, min_turns_between=cfg.min_turns_between_compression)
@@ -228,6 +236,7 @@ class EpisodeRunner:
         out.append(Message(role="user", content=user_text, turn=turn))
 
         produced_final = False
+        turn_retrieves = 0
         for _step in range(cfg.max_steps):
             view = _conversation_view(all_messages, out, prior_summary, cfg.recent_raw_turns)
             at = self._assistant_turn(models, state, view)
@@ -237,7 +246,28 @@ class EpisodeRunner:
                 self._apply_reasoning(msg, at.reasoning, state, turn, reasoning_errors, reasoning_warnings, strict=False)
                 out.append(msg)
                 out.extend(tool_msgs)
+                turn_retrieves += sum(1 for tc in kept if (tc.get("function", {}) or {}).get("name") == "retrieve")
                 continue
+            # The model wants to answer. On the first few retrieving turns of the
+            # episode, DETERMINISTICALLY force the query-rewrite loop: make it refine
+            # and retrieve once more (same turn) before answering, so the corpus
+            # teaches rewrite even when the model would otherwise one-shot the query.
+            if (turn_retrieves == 1 and self._forced_rewrites < cfg.force_rewrite_count
+                    and _step < cfg.max_steps - 1):
+                self._forced_rewrites += 1
+                nudge = view + [{"role": "user", "content":
+                    "Before you answer: your first query was broad. Refine it with precise terms "
+                    "(exact case names, doctrine, or section numbers) and issue ONE more `retrieve` "
+                    "call now; then answer from the better results."}]
+                atf = self._assistant_turn(models, state, nudge)
+                keptf, tool_msgsf = self._materialize_tools(atf.tool_calls, executor, state, tool_warnings, turn)
+                if any((tc.get("function", {}) or {}).get("name") == "retrieve" for tc in keptf):
+                    msgf = Message(role="assistant", content="", tool_calls=keptf, turn=turn)
+                    self._apply_reasoning(msgf, atf.reasoning, state, turn, reasoning_errors, reasoning_warnings, strict=False)
+                    out.append(msgf)
+                    out.extend(tool_msgsf)
+                    turn_retrieves += sum(1 for tc in keptf if (tc.get("function", {}) or {}).get("name") == "retrieve")
+                    continue  # loop again -> now it answers, with two retrieves this turn
             content = (at.content or "").strip()
             # A model whose structured output needed a JSON repair sometimes leaks
             # meta/apology text ("...conform to the JSON schema...") into `content`.
