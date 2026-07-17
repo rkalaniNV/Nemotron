@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from ..core.llm import call_llm
 from .prompts import AUX_TOOL_SIM_SYSTEM, AUX_TOOL_SIM_TURN
@@ -43,6 +43,16 @@ class ToolEnvironment:
         self.seen_ids: set = set()
         self.retrieved_this_hop = False
         self.new_this_hop = 0
+        # compression audit: how often/how much the per-step view was compressed.
+        self.comp_steps = 0        # assistant steps where compression reduced the view
+        self.comp_raw_max = 0      # largest uncompressed view (tokens)
+        self.comp_view_max = 0     # that view's compressed size (tokens)
+
+    def note_view(self, raw_tokens: int, view_tokens: int) -> None:
+        if view_tokens < raw_tokens:
+            self.comp_steps += 1
+        if raw_tokens > self.comp_raw_max:
+            self.comp_raw_max, self.comp_view_max = raw_tokens, view_tokens
 
     def is_retrieval(self, name: str) -> bool:
         return name in self.cfg.retrieval_tools

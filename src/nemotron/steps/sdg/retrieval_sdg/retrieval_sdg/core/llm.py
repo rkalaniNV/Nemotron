@@ -127,8 +127,11 @@ def _choice_to_dict(choice: Any) -> Dict[str, Any]:
     msg = choice.message
     result: Dict[str, Any] = {"role": getattr(msg, "role", "assistant"),
                               "content": getattr(msg, "content", "") or ""}
-    if getattr(msg, "reasoning_content", None):
-        result["reasoning_content"] = msg.reasoning_content
+    # reasoning models expose the trace as `reasoning_content` (NVIDIA NIM) OR
+    # `reasoning` (vLLM) — capture whichever is present, normalize to one key.
+    rc = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None)
+    if rc:
+        result["reasoning_content"] = rc
     if getattr(msg, "tool_calls", None):
         result["tool_calls"] = [_tc_to_dict(tc) for tc in msg.tool_calls]
     return result
