@@ -4,7 +4,7 @@ Generate multi-turn, retrieval-grounded tool-calling conversations for supervise
 fine-tuning (SFT). Each output row contains OpenAI-style `messages`, tool schemas, and
 generation metadata.
 
-![Flow diagram showing seed queries moving through preparation, planning, user simulation, an iterative research loop, answering, and evaluation to produce SFT-ready JSONL.](assets/retrieval-sdg-flow.png)
+![Code-derived flow diagram showing query preparation, Data Designer generation, the per-turn research loop, and decoupled evaluation.](assets/retrieval-sdg-flow.png)
 
 ## What it does
 
@@ -127,10 +127,14 @@ The deterministic gate requires:
 - at least one tool call;
 - no schema-invalid recorded tool calls;
 - at least one retrieval-shaped result;
-- a final tool-free assistant answer.
+- a final tool-free assistant answer;
+- no cited chunk id that was never retrieved.
 
-With `--judge`, an LLM additionally scores faithfulness, coherence, completeness, tool
-use, and user realism from 1–5. Every score must meet `--min-score`.
+Evaluation also reports answer/evidence character n-gram overlap. Set
+`--min-overlap` to make that metric a hard grounding gate.
+
+With `--judge`, an LLM adds a defect gate plus a 1-5 quality score. Any configured
+disqualifier rejects the row; clean rows must also meet `--min-quality`.
 
 ## Outputs
 
