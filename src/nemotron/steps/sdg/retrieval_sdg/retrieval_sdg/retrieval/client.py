@@ -49,24 +49,39 @@ class Chunk:
 class HttpRetrievalClient:
     def __init__(self, endpoint: str, *, oversample_factor: int = 2, timeout: int = 30,
                  field_map: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None,
+                 max_retries: int = 2, backoff: float = 1.0,
                  post_fn: Optional[Callable[..., Any]] = None):
         self.endpoint = endpoint
         self.oversample_factor = max(1, int(oversample_factor))
         self.timeout = timeout
+        self.max_retries = max(0, int(max_retries))     # extra attempts on transient endpoint errors
+        self.backoff = float(backoff)                   # base seconds between attempts (linear)
         self.fm = {**_DEFAULT_FIELD_MAP, **(field_map or {})}
         self.headers = headers or {"Content-Type": "application/json"}
         self._post_fn = post_fn  # injectable for tests; defaults to requests.post
 
     # ── HTTP ──────────────────────────────────────────────────────────────────
     def _post(self, query: str, n: int) -> Any:
+        """POST with bounded retries so a transient endpoint blip (timeout / 5xx /
+        connection reset) self-heals instead of raising out of the trajectory. Raises
+        the last error only after all attempts are exhausted."""
+        import time
         body = {self.fm["query_field"]: query, self.fm["top_k_field"]: n, **self.fm.get("extra_body", {})}
         post = self._post_fn
         if post is None:
             import requests
             post = requests.post
-        resp = post(self.endpoint, json=body, headers=self.headers, timeout=self.timeout)
-        resp.raise_for_status()
-        return resp.json()
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = post(self.endpoint, json=body, headers=self.headers, timeout=self.timeout)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as exc:                     # timeout / 5xx / conn reset / bad JSON
+                last_exc = exc
+                if attempt < self.max_retries:
+                    time.sleep(self.backoff * (attempt + 1))
+        raise last_exc if last_exc else RuntimeError("retrieval POST failed")
 
     def _parse(self, payload: Any) -> List[Chunk]:
         path = self.fm.get("results_path")
@@ -95,8 +110,16 @@ class HttpRetrievalClient:
     # ── the one method the generator calls ────────────────────────────────────
     def retrieve(self, query: str, k: int, *, rng) -> List[Chunk]:
         """Oversample ``k * oversample_factor`` from the service, then randomly keep
-        ``k`` (deterministic given ``rng``). No dedup across hops."""
-        pool = self._parse(self._post(query, k * self.oversample_factor))
+        ``k`` (deterministic given ``rng``). No dedup across hops.
+
+        If the service is still failing after all retries, return no chunks rather than
+        raising: the hop yields an empty result the assistant can search around, so one
+        flaky endpoint window costs depth on a row — not the whole row (or the run)."""
+        try:
+            payload = self._post(query, k * self.oversample_factor)
+        except Exception:
+            return []
+        pool = self._parse(payload)
         if len(pool) > k:
             idx = sorted(rng.sample(range(len(pool)), k))  # random subset, original (score) order preserved
             pool = [pool[i] for i in idx]

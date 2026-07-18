@@ -37,7 +37,7 @@ def format_persona_for_prompt(persona: Dict[str, Any]) -> str:
     if loc:
         demo.append(f"Location: {loc}")
 
-    sections = [f"Name: {name}"]
+    sections = [f"Name: {name}"] if name != "Unknown" else []   # Nemotron-Personas has no name field
     if demo:
         sections.append("Demographics:\n" + "\n".join(demo))
 
