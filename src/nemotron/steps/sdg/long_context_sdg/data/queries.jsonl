@@ -1,0 +1,2 @@
+{"query": "Explain how users can configure notification preferences.", "instructions": "Use the terminology and language appropriate to the configured domain."}
+{"query_id": "example-rich-001", "query": "Compare the available data export formats and explain when to use each.", "naive_query": "Which export format should I choose?", "persona": {"role": "application user", "expertise": "novice", "style": "concise and practical"}, "instructions": "Answer in the target language configured for this run.", "retrieval_depth": 2, "memory_seed": {"verbosity": "concise"}}

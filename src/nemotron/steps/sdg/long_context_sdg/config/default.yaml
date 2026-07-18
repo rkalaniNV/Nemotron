@@ -1,0 +1,166 @@
+# Copy this file for each workload and replace the example endpoints/model names.
+paths:
+  seeds: ../data/queries.jsonl
+  enriched_seeds: ../data/enriched_seeds.jsonl
+  checkpoint: ../output/checkpoint.jsonl
+  canonical: ../output/canonical.jsonl
+  output_dir: ../output/evaluated
+  export: ../output/sft.jsonl
+
+run:
+  mode: create
+  seed: 7
+  num_records: 0
+  retry_failed: false
+  retry_quarantine: false
+
+instructions: >-
+  Generate a realistic, coherent, long-context conversation in the requested
+  domain and language. Follow seed-specific instructions, ground factual claims
+  in tool results, and do not invent citations or tool output.
+
+providers:
+  - name: primary
+    endpoint: https://model-api.example.com/v1
+    api_key_env: MODEL_API_KEY
+
+models:
+  - alias: assistant
+    model: provider/assistant-model
+    provider: primary
+    skip_health_check: false
+    inference_parameters: {temperature: 0.6, max_tokens: 4096}
+  - alias: user
+    model: provider/user-simulator-model
+    provider: primary
+    skip_health_check: false
+    inference_parameters: {temperature: 0.8, max_tokens: 1024}
+  - alias: compressor
+    model: provider/compressor-model
+    provider: primary
+    skip_health_check: false
+    inference_parameters: {temperature: 0.1, max_tokens: 2048}
+  - alias: judge
+    model: provider/judge-model
+    provider: primary
+    skip_health_check: false
+    inference_parameters: {temperature: 0.1, max_tokens: 2048}
+
+planning:
+  turn_budget: {min: 6, max: 40}
+  honor_seed_turn_budget: false
+  retrieval_depth_weights: {1: 0.65, 2: 0.25, 3: 0.10}
+  max_steps_per_turn: 6
+  ensure_retrieval_turn: true
+  first_turn_intents:
+    research: 0.12
+    rewrite: 0.04
+    clarify: 0.18
+    user_context: 0.16
+    scope: 0.14
+    orientation: 0.12
+    direct_answer: 0.10
+    misconception_check: 0.08
+    example_first: 0.06
+  intents:
+    research: 0.13
+    rewrite: 0.10
+    clarify: 0.09
+    deepen: 0.12
+    compare: 0.09
+    synthesize: 0.10
+    recall: 0.06
+    user_context: 0.06
+    apply_scenario: 0.08
+    challenge_assumption: 0.07
+    summarize: 0.05
+    misconception_check: 0.05
+
+context:
+  compression_threshold: 32000
+  model_token_limit: 65536
+  recent_raw_turns: 4
+  min_turns_between_compression: 3
+  compression_token_budget: 500
+  max_reasoning_tokens: 400
+
+retriever:
+  endpoint: https://retrieval-api.example.com/query
+  method: POST
+  query_field: query
+  top_k_field: top_k
+  top_k: 4
+  results_path: chunks
+  fields:
+    id: id
+    text: text
+    title: title
+    source: source
+    score: score
+    url: url
+    date: date
+  selection: ranked
+  timeout_seconds: 45
+  retries: 4
+  backoff_seconds: 1.0
+  headers: {}
+  extra_body: {}
+
+tools:
+  - schema:
+      type: function
+      function:
+        name: retrieve
+        description: Retrieve evidence relevant to the current request.
+        parameters:
+          type: object
+          properties:
+            query: {type: string}
+            top_k: {type: integer, minimum: 1, maximum: 8}
+          required: [query]
+    executor: long_context_sdg.executors.retrieval:RetrievalExecutor
+  - schema:
+      type: function
+      function:
+        name: memory_read
+        description: Read permitted user or conversation preferences.
+        parameters:
+          type: object
+          properties:
+            scope: {type: string, enum: [user, conversation]}
+            keys: {type: array, items: {type: string}}
+          required: [scope]
+    executor: long_context_sdg.executors.memory:MemoryExecutor
+  - schema:
+      type: function
+      function:
+        name: memory_write
+        description: Save a permitted preference after a clear user request.
+        parameters:
+          type: object
+          properties:
+            key: {type: string}
+            value: {}
+            scope: {type: string, enum: [user, conversation]}
+            reason: {type: string}
+          required: [key, value, scope, reason]
+    executor: long_context_sdg.executors.memory:MemoryExecutor
+
+validation:
+  require_final_answer_each_turn: true
+
+judge:
+  enabled: true
+  min_score: 3
+  dimensions:
+    - grounding
+    - long_range_coherence
+    - tool_use
+    - retrieval_rewrite
+    - user_realism
+    - helpfulness
+    - instruction_adherence
+    - compaction_continuity
+
+export:
+  format: messages_and_tools
