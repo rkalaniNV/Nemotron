@@ -2,16 +2,46 @@
 # Point `input_path` at your queries, set `retrieval.endpoint` at the retrieval
 # service, swap the `tools` list for the customer's, and run. No Python changes needed.
 
-# ── I/O (paths are relative to THIS config file's directory) ──────────────────
-input_path: ../data/queries.jsonl              # query source output: JSONL list of {query}
-seeds_path: ../data/seeds.jsonl                 # written by the query_prep stage
-output_path: ../output/sdg/retrieval_sdg.raw.jsonl # raw trajectories (judge with evaluate.py)
-column_name: conversation_messages
+# Each stage owns its input/output (paths are relative to THIS config file's directory):
+#   Stage 0  query_gen : chunks_path/lancedb   -> query_gen.output   (OPTIONAL)
+#   Stage A  query_prep: query_prep.input      -> query_prep.output  (seeds)
+#   Stage B  engine    : query_prep.output     -> engine.output      (raw trajectories)
 
-metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log, compression]
+# ── Stage 0: query_gen — OPTIONAL (synthesize seed queries FROM the corpus) ────
+# Reads the chunk corpus, clusters a bounded sample in embedding space, and generates
+# diverse end-user questions (topic-cluster x kind), validated answerable by the live
+# retriever. Writes them to `input_path`, which Stage A (query_prep) then dedups.
+#
+# OPTIONAL: delete this whole block (or omit `chunks_path` / `lancedb`) to SKIP query
+# generation and start directly from an existing queries.jsonl at `input_path`.
+query_gen:
+  source: jsonl                                   # jsonl (embed chunks) | lancedb (read precomputed vectors)
+  chunks_path: /home/rapaul/rapaul/ablation/chunks.jsonl
+  # lancedb: {uri: /localhome/local-rkalani/nemo-retriever/lancedb-hindi-legal, table: hindi-legal-judgments}
+  output: ../data/queries.generated.jsonl         # where generated queries are written (query_prep reads this)
 
-# ── Stage A: query_prep (offline; MiniLM only) ─────────────────────────────────
+  n_queries: 100                                  # THE knob — cluster count & pool size derive from it
+  validate: true                                  # keep a query only if it retrieves its source
+  coarse: {enabled: true}                         # MiniLM coarse pre-clustering for topic diversity
+
+  embedding:                                      # hosted embedding model (source: jsonl)
+    backend: cohere                               # cohere (/v2/embed) | nim (retriever's /v1/embeddings) | minilm (local)
+    endpoint: https://xtcr3jss-nemotron-3-embed-1b-rapaul-gcp.xenon.lepton.run/v2/embed
+    api_key_env: LEPTON_API_TOKEN
+
+  # ── advanced (all have code defaults; uncomment to tune) ─────────────────────
+  # queries_per_cluster: 4   multi_hop_chunks: 3   cross_doc: true   candidate_headroom: 3.0
+  # min_coverage: 0.35   model_alias: user_model   max_rounds: 3   seed: 7   max_workers: 8
+  # kind_weights: {multi_hop: 4, comparative: 3, exploratory: 2, factual: 2, ambiguous: 1}
+  # coarse: {enabled: true, candidate_size: 10000, coarse_k: 64}
+  # clustering: {algo: kmeans, k: null, min_cluster_size: 5}   # pool_size / chunks_per_cluster also overridable
+  # field_map: {text_field: text, id_field: chunk_id, doc_id_field: source_id, path_field: source_path}
+  # embedding index-space alt: {backend: nim, model: nvidia/llama-nemotron-embed-1b-v2, endpoint: http://127.0.0.1:8001/v1, input_type: passage}
+
+# ── Stage A: query_prep (offline; MiniLM only) — dedup + cluster + sample ──────
 query_prep:
+  input: ../data/queries.jsonl                # your queries (used when query_gen is OFF; else query_gen.output)
+  output: ../data/seeds.jsonl                 # seeds -> the engine
   query_field: query
   dedup:
     threshold: 0.92                             # cosine >= this collapses near-duplicates
@@ -21,7 +51,8 @@ query_prep:
     k: null                                     # null => heuristic (kmeans/agglomerative)
     min_cluster_size: 5                         # hdbscan only
   sample:
-    n_target: 200                               # desired final conversation count
+    n_target: null                              # keep all. When query_gen runs, query_gen.n_queries is
+                                                # the count; set this only to subsample an EXTERNAL query file.
     seed: 7
 
 # ── models & providers ────────────────────────────────────────────────────────
@@ -101,8 +132,14 @@ tools:
           value: {type: string, description: The value to remember.}
         required: [key, value]
 
-# ── Stage B: engine knobs (-> ConversationSimulatorConfig) ────────────────────
+# ── Stage B: engine (-> ConversationSimulatorConfig) — seeds -> raw trajectories ─
 engine:
+  # ── I/O ──────────────────────────────────────────────────────────────────────
+  input: ../data/seeds.jsonl                      # seeds from query_prep (used when running --stage generate alone)
+  output: ../output/sdg/retrieval_sdg.raw.jsonl   # raw trajectories (judge with evaluate.py)
+  column_name: conversation_messages
+  metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log, compression]
+
   # ── the two knobs that shape a conversation ──────────────────────────────────
   # length: turns are center-weighted, so a 3-6 range AVERAGES ~4-5 turns
   #         (with some 3s and 6s for diversity).

@@ -23,6 +23,11 @@ RESEARCHING with the tools available to you, never from memory or assumption.
 </TOOLS_AVAILABLE_TO_YOU>
 
 <INSTRUCTIONS>
+Before you research:
+- If the user is just greeting you or making small talk, reply naturally — no search needed.
+- If their request is too vague or under-specified to search effectively, ask ONE brief clarifying question
+  FIRST and wait for their answer. Do not guess or search blindly. Once it is clear, research as below.
+
 How to research:
 - Issue ONE tool call at a time. Read its result, reason about what is still missing, then decide the next call.
 - A single search is deliberately lossy — it returns only part of the evidence. If the results are thin, partial, or point elsewhere, search again with a refined query rather than answering early.
@@ -112,6 +117,11 @@ KIND_DIRECTIVES = {
     "multi_hop": "Ask a multi-step question that requires chaining several pieces of evidence.",
     "exploratory": "Ask an open-ended question that invites broader exploration.",
     "ambiguous": "Ask a slightly under-specified question the assistant may need to clarify.",
+    # conversational (no new research) — answerable from what the assistant already said
+    "simplify": "Ask the assistant to put its last answer more simply, or to summarize it in a sentence "
+                "or two. This needs no new lookup — just a clearer restatement of what it already told you.",
+    "acknowledge": "Briefly react to the assistant's answer as a person would (e.g. that it helps, or is "
+                   "surprising), and ask it to restate the single most important point. No new facts needed.",
 }
 
 # ══════════════════════════════════════════════════════════════════════════════

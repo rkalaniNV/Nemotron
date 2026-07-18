@@ -11,7 +11,7 @@ Group=local-rkalani
 WorkingDirectory=/localhome/local-rkalani/nemo-retriever
 Environment=HOME=/localhome/local-rkalani
 Environment=HF_HOME=/localhome/local-rkalani/.cache/huggingface
-ExecStart=/localhome/local-rkalani/nemo-retriever/ingest-hindi-legal.sh
+ExecStart=/localhome/local-rkalani/nemo-retriever/.venv/bin/python /localhome/local-rkalani/nemo-retriever/ingest_processed_chunks.py
 RemainAfterExit=yes
 TimeoutStartSec=infinity
 Restart=on-failure
