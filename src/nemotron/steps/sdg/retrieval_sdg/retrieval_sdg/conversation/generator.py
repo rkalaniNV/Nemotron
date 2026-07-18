@@ -136,9 +136,22 @@ class ConversationSimulatorGenerator(
         answer only if it is non-empty; NEVER reuses a previous turn's answer. If
         the turn can't produce a fresh grounded answer, returns produced=False and
         the caller drops the turn (keeps the conversation coherent)."""
+        # conversational turn: answer from the conversation so far, NO retrieval
+        if getattr(spec, "no_tool", False):
+            resp = call_llm_with_majority_vote(models, MODEL_ASSISTANT,
+                                               self._view(cfg, messages, memory, env), tools,
+                                               n=cfg.majority_vote_n, tool_choice="none")
+            content = (resp.get("content") or "").strip()
+            if content:
+                messages.append(_assistant_msg(resp))
+                return 0, True
+            return 0, False
+
         hops, asked_clarify, stall = 0, False, 0
         for _ in range(spec.max_steps):
-            force = cfg.force_first_tool and hops < spec.min_hops
+            # don't force a tool on a clarify turn until AFTER the assistant has asked its question
+            force = (cfg.force_first_tool and hops < spec.min_hops
+                     and not (spec.clarify and cfg.allow_clarify and not asked_clarify))
             resp = call_llm_with_majority_vote(models, MODEL_ASSISTANT, self._view(cfg, messages, memory, env),
                                                tools, n=cfg.majority_vote_n,
                                                tool_choice="required" if force else "auto")

@@ -39,8 +39,15 @@ def cluster_embeddings(emb, algo: str = "kmeans", k: Optional[int] = None,
     if n <= 1:
         return [0] * n
     if algo == "kmeans":
+        kk = _resolve_k(k, n)
+        # MiniBatchKMeans scales to the large n / large k of chunk-pool clustering
+        # (query_prep's small query sets fall back to full KMeans for stability).
+        if n > 20000 or kk > 200:
+            from sklearn.cluster import MiniBatchKMeans
+            return MiniBatchKMeans(n_clusters=kk, random_state=7, n_init=3,
+                                   batch_size=2048).fit_predict(emb).tolist()
         from sklearn.cluster import KMeans
-        return KMeans(n_clusters=_resolve_k(k, n), n_init=10, random_state=7).fit_predict(emb).tolist()
+        return KMeans(n_clusters=kk, n_init=10, random_state=7).fit_predict(emb).tolist()
     if algo == "agglomerative":
         from sklearn.cluster import AgglomerativeClustering
         if k:

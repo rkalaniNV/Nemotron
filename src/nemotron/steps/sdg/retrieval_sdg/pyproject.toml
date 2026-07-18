@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+lancedb = ["lancedb"]          # only for query_gen source: lancedb (reads precomputed vectors)
 
 # Data Designer discovers the plugin via this entry point.
 [project.entry-points."data_designer.plugins"]

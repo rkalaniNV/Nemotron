@@ -29,6 +29,10 @@ sys.path.insert(0, str(HERE))
 from retrieval_sdg.query_prep import cluster_queries, dedup, sample  # noqa: E402
 
 
+# engine-block keys that are I/O, not ConversationSimulatorConfig knobs (popped before splat)
+_ENGINE_IO = {"input", "output", "column_name", "metadata_fields"}
+
+
 def _resolve(base: Path, p: str) -> Path:
     pp = Path(p)
     return pp if pp.is_absolute() else (base / pp).resolve()
@@ -45,12 +49,77 @@ def _build_model_clients(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# ── Stage 0: query_gen (optional; corpus -> synthesized seed queries) ─────────
+def run_query_gen(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path:
+    qg = cfg.get("query_gen", {})
+    source = qg.get("source", "lancedb")
+    if source == "jsonl" and not qg.get("chunks_path"):
+        raise SystemExit("[query_gen] source: jsonl needs query_gen.chunks_path (the corpus JSONL).")
+    if source == "lancedb" and not qg.get("lancedb", {}).get("uri"):
+        raise SystemExit("[query_gen] source: lancedb needs query_gen.lancedb.uri + table.")
+    chunks_path = str(_resolve(base, qg["chunks_path"])) if qg.get("chunks_path") else ""
+    out_path = _resolve(base, qg.get("output", cfg.get("input_path", "../data/queries.generated.jsonl")))   # query_gen's OWN output
+    models = _build_model_clients(cfg)
+
+    client = None
+    r = cfg.get("retrieval", {})
+    if qg.get("validate", True) and r.get("endpoint"):
+        from retrieval_sdg.retrieval.client import HttpRetrievalClient
+        client = HttpRetrievalClient(r["endpoint"], oversample_factor=r.get("oversample_factor", 2),
+                                     timeout=r.get("timeout", 30), field_map=r.get("field_map", {}),
+                                     headers=r.get("headers") or None)
+    elif qg.get("validate", True):
+        print("[query_gen] WARNING: validate requested but no retrieval.endpoint — "
+              "queries will NOT be answerability-checked.")
+
+    cl = qg.get("clustering", {})
+    from retrieval_sdg.query_gen import run_query_gen as _run
+    seeds = _run(models,
+                 source=source,
+                 lancedb_cfg=qg.get("lancedb"),
+                 chunks_path=chunks_path,
+                 coarse_cfg=qg.get("coarse"),
+                 model_alias=qg.get("model_alias", "user_model"),
+                 field_map=qg.get("field_map"),
+                 n_queries=int(limit or qg.get("n_queries", 400)),
+                 queries_per_cluster=int(qg.get("queries_per_cluster", 4)),
+                 chunks_per_cluster=qg.get("chunks_per_cluster"),
+                 pool_size=qg.get("pool_size"),          # None => derived from n_queries
+                 candidate_headroom=float(qg.get("candidate_headroom", 3.0)),
+                 max_rounds=int(qg.get("max_rounds", 3)),
+                 embed_cfg=qg.get("embedding"),
+                 cluster_algo=cl.get("algo", "kmeans"), n_clusters=cl.get("k"),
+                 min_cluster_size=int(cl.get("min_cluster_size", 5)),
+                 kind_weights=qg.get("kind_weights"),
+                 multi_hop_chunks=int(qg.get("multi_hop_chunks", 3)),
+                 cross_doc=bool(qg.get("cross_doc", True)),
+                 client=client, top_k=int(r.get("top_k", 4)),
+                 validate=qg.get("validate", True) and client is not None,
+                 min_coverage=float(qg.get("min_coverage", 0.35)),
+                 seed=int(qg.get("seed", 7)), max_workers=int(qg.get("max_workers", 8)),
+                 dry_run=bool(qg.get("_dry_run", False)))
+    if qg.get("_dry_run"):
+        return out_path                                    # diagnostics only; nothing written
+    if not seeds:                                          # never clobber input_path with an empty file
+        raise SystemExit(f"[query_gen] produced 0 queries; refusing to overwrite {out_path}. "
+                         "Check the source, endpoint, and validation settings.")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
+        for s in seeds:
+            f.write(json.dumps(s, ensure_ascii=False) + "\n")
+    print(f"[query_gen] wrote {len(seeds)} queries -> {out_path}")
+    return out_path
+
+
 # ── Stage A: query_prep ───────────────────────────────────────────────────────
-def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path:
+def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int],
+                   queries_path: Optional[Path] = None) -> Path:
     qp = cfg.get("query_prep", {})
     field = qp.get("query_field", "query")
-    inp = _resolve(base, cfg["input_path"])
-    seeds_path = _resolve(base, cfg["seeds_path"])
+    # read query_gen's output when it ran; otherwise query_prep.input (bring-your-own queries)
+    inp = queries_path or _resolve(base, qp.get("input", cfg.get("input_path")))
+    seeds_path = _resolve(base, qp.get("output", cfg.get("seeds_path")))
 
     rows = [json.loads(l) for l in inp.open(encoding="utf-8") if l.strip()]
     rows = [r if isinstance(r, dict) else {field: r} for r in rows]
@@ -81,6 +150,7 @@ def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Pat
     with seeds_path.open("w", encoding="utf-8") as f:
         for r in picked:
             f.write(json.dumps({"query": str(r.get(field, "")), "cluster_id": r.get("cluster_id", ""),
+                                "kind": r.get("kind", ""),   # -> planner opening kind (vague => clarify)
                                 "tools": tools_json}, ensure_ascii=False) + "\n")
     print(f"[query_prep] wrote {len(picked)} seeds -> {seeds_path}")
     return seeds_path
@@ -104,13 +174,15 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path):
                          sampling_strategy=dd.SamplingStrategy.SHUFFLE)
 
     r = cfg.get("retrieval", {})
-    knobs: Dict[str, Any] = dict(cfg.get("engine", {}))
+    eng = cfg.get("engine", {})
+    knobs: Dict[str, Any] = {k: v for k, v in eng.items() if k not in _ENGINE_IO}   # I/O keys aren't config knobs
     knobs.update(retrieval_endpoint=r.get("endpoint", ""), retrieval_tools=r.get("tools", ["search"]),
                  retrieval_field_map=r.get("field_map", {}), retrieval_timeout=r.get("timeout", 30),
                  retrieval_headers=r.get("headers", {}), top_k=r.get("top_k", 4),
                  oversample_factor=r.get("oversample_factor", 2))
     knobs["model_clients"] = _build_model_clients(cfg)
-    cb.add_column(ConversationSimulatorConfig(name=cfg.get("column_name", "conversation_messages"), **knobs))
+    name = eng.get("column_name", cfg.get("column_name", "conversation_messages"))
+    cb.add_column(ConversationSimulatorConfig(name=name, **knobs))
     return cb
 
 
@@ -127,11 +199,13 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
     result = client.create(cb, num_records=n)
     records = _records(result)
 
-    out = _resolve(base, cfg["output_path"])
+    eng = cfg.get("engine", {})
+    out = _resolve(base, eng.get("output", cfg.get("output_path", "../output/sdg/retrieval_sdg.raw.jsonl")))
     out.parent.mkdir(parents=True, exist_ok=True)
     tools = cfg["tools"]
-    meta = cfg.get("metadata_fields", ["kind", "difficulty", "cluster_id", "hops_taken",
-                                       "conversation_status", "trajectory_judgment", "retrieval_log"])
+    meta = eng.get("metadata_fields", cfg.get("metadata_fields",
+                   ["kind", "difficulty", "cluster_id", "hops_taken",
+                    "conversation_status", "trajectory_judgment", "retrieval_log"]))
     n_written = 0
     with out.open("w", encoding="utf-8") as f:
         for rec in records:
@@ -169,17 +243,39 @@ def _records(result) -> List[Dict[str, Any]]:
 def main() -> None:
     ap = argparse.ArgumentParser(description="retrieval_sdg pipeline (query_prep + conversation gen).")
     ap.add_argument("--config", required=True, type=Path)
-    ap.add_argument("--stage", choices=["query_prep", "generate", "all"], default="all")
-    ap.add_argument("--limit", type=int, default=None, help="cap sampled seeds / generated rows")
+    ap.add_argument("--stage", choices=["query_gen", "query_prep", "generate", "all"], default="all")
+    ap.add_argument("--limit", type=int, default=None, help="cap generated queries / sampled seeds / rows")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="query_gen only: embed+cluster+sample and print diagnostics, no LLM/tokens, no write")
     args = ap.parse_args()
 
     from omegaconf import OmegaConf
     cfg = OmegaConf.to_container(OmegaConf.load(args.config), resolve=True)
     base = args.config.resolve().parent
 
-    seeds_path = _resolve(base, cfg["seeds_path"])
+    # Stage 0 (query_gen) is opt-in: explicit --stage query_gen, or "all" WHEN a
+    # source is configured (lancedb uri or chunks_path). Otherwise the pipeline
+    # starts from an existing queries.jsonl.
+    _qg = cfg.get("query_gen", {})
+    _has_source = _qg.get("lancedb", {}).get("uri") or _qg.get("chunks_path")
+    gen_out: Optional[Path] = None
+    if args.stage == "query_gen" or (args.stage == "all" and _has_source):
+        if args.dry_run:
+            cfg.setdefault("query_gen", {})["_dry_run"] = True
+        gen_out = run_query_gen(cfg, base, args.limit)  # query_gen's OWN output path; --limit caps it under `all`
+        if args.stage == "query_gen" or args.dry_run:   # dry-run is diagnostics-only; never fall into generate
+            return
+
+    # `n_queries` is the single count knob: when query_gen feeds query_prep, it is
+    # authoritative — query_prep dedups but must not silently re-cap below it.
+    if _has_source:
+        cfg.setdefault("query_prep", {}).setdefault("sample", {})["n_target"] = int(_qg.get("n_queries", 400))
+
+    # engine.input is where `--stage generate` reads seeds; under `all`, query_prep's actual output wins
+    seeds_path = _resolve(base, cfg.get("engine", {}).get("input",
+                          cfg.get("query_prep", {}).get("output", cfg.get("seeds_path"))))
     if args.stage in ("query_prep", "all"):
-        seeds_path = run_query_prep(cfg, base, args.limit)
+        seeds_path = run_query_prep(cfg, base, args.limit, queries_path=gen_out)
     if args.stage in ("generate", "all"):
         if not seeds_path.exists():
             raise SystemExit(f"[pipeline] no seeds at {seeds_path}; run --stage query_prep first.")

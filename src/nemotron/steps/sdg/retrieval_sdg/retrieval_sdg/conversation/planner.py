@@ -17,8 +17,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 _KINDS = ["factual", "comparative", "multi_hop", "exploratory", "ambiguous"]
-_CLARIFY_KINDS = {"exploratory", "ambiguous"}          # openings that may clarify
-_FOLLOWUP_CLARIFY = {"clarify"}                        # follow-ups that may clarify
+_CLARIFY_KINDS = {"exploratory", "ambiguous"}          # openings where the assistant may clarify first
+_FOLLOWUP_CLARIFY = {"clarify"}                        # follow-ups where the assistant may clarify first
+_NO_TOOL_KINDS = {"simplify", "acknowledge"}           # conversational follow-ups: answered from context, NO retrieval
 
 # opening-kind distribution (sampled when the row carries no kind).
 _DEFAULT_SEED_KINDS: List[Dict[str, Any]] = [
@@ -27,9 +28,11 @@ _DEFAULT_SEED_KINDS: List[Dict[str, Any]] = [
     {"kind": "ambiguous", "weight": 1},
 ]
 # follow-up-kind distribution (labels resolve to directives in prompts.KIND_DIRECTIVES).
+# `simplify`/`acknowledge` are conversational (no tool); the rest drive fresh research.
 _DEFAULT_FOLLOWUPS: List[Dict[str, Any]] = [
     {"kind": "deepen", "weight": 3}, {"kind": "compare", "weight": 2},
-    {"kind": "clarify", "weight": 1}, {"kind": "related", "weight": 2},
+    {"kind": "related", "weight": 2}, {"kind": "clarify", "weight": 1},
+    {"kind": "simplify", "weight": 1}, {"kind": "acknowledge", "weight": 1},
 ]
 
 
@@ -39,6 +42,7 @@ class TurnSpec:
     min_hops: int
     max_steps: int
     clarify: bool
+    no_tool: bool = False                              # conversational turn: answer from context, no retrieval
 
 
 @dataclass
@@ -86,7 +90,7 @@ def plan_conversation(cfg_plan: Dict[str, Any], rng: random.Random, *, seed_kind
         seeds = cfg_plan.get("seed_kinds") or _DEFAULT_SEED_KINDS
         seed_kind = rng.choices([s["kind"] for s in seeds],
                                 weights=[float(s.get("weight", 1)) for s in seeds], k=1)[0]
-    turns = [TurnSpec(seed_kind, mh, ms, seed_kind in _CLARIFY_KINDS)]
+    turns = [TurnSpec(seed_kind, mh, ms, seed_kind in _CLARIFY_KINDS)]   # opening always grounds
 
     # ── follow-up turns (weighted kind variety) ──────────────────────────────
     fu = cfg_plan.get("follow_up_kinds") or _DEFAULT_FOLLOWUPS
@@ -94,5 +98,7 @@ def plan_conversation(cfg_plan: Dict[str, Any], rng: random.Random, *, seed_kind
     fweights = [float(f.get("weight", 1)) for f in fu]
     for _ in range(n_turns - 1):
         label = rng.choices(labels, weights=fweights, k=1)[0]
-        turns.append(TurnSpec(label, mh, ms, label in _FOLLOWUP_CLARIFY))
+        no_tool = label in _NO_TOOL_KINDS
+        turns.append(TurnSpec(label, 0 if no_tool else mh, ms,
+                              label in _FOLLOWUP_CLARIFY, no_tool))
     return ConversationPlan(turns=turns)
