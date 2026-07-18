@@ -32,7 +32,7 @@ def run_query_gen(models: Dict[str, Any], *,
                   queries_per_cluster: int = 4,
                   chunks_per_cluster: Optional[int] = None,
                   pool_size: Optional[int] = None,       # None => derived per round
-                  candidate_headroom: float = 3.0,       # generate headroom x n_queries (survive validation)
+                  candidate_headroom: float = 1.5,       # generate headroom x n_queries (survive validation)
                   max_rounds: int = 3,                   # extra batches if still short of target
                   embed_cfg: Optional[dict] = None,
                   cluster_algo: str = "kmeans", n_clusters: Optional[int] = None,

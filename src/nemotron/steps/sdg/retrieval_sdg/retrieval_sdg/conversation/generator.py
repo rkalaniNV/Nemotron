@@ -247,7 +247,8 @@ class ConversationSimulatorGenerator(
             return None
         return HttpRetrievalClient(cfg.retrieval_endpoint, oversample_factor=cfg.oversample_factor,
                                    timeout=cfg.retrieval_timeout, field_map=cfg.retrieval_field_map,
-                                   headers=cfg.retrieval_headers or None)
+                                   headers=cfg.retrieval_headers or None,
+                                   max_retries=getattr(cfg, "retrieval_max_retries", 2))
 
     # ── finalize: judge + write side-effect columns ──────────────────────────
     def _finalize(self, data, cfg, models, messages, env, hops, tools_str) -> dict:

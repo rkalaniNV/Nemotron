@@ -30,7 +30,7 @@ from retrieval_sdg.query_prep import cluster_queries, dedup, sample  # noqa: E40
 
 
 # engine-block keys that are I/O, not ConversationSimulatorConfig knobs (popped before splat)
-_ENGINE_IO = {"input", "output", "column_name", "metadata_fields"}
+_ENGINE_IO = {"input", "output", "column_name", "metadata_fields", "resume", "artifact_path"}
 
 
 def _resolve(base: Path, p: str) -> Path:
@@ -67,7 +67,8 @@ def run_query_gen(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path
         from retrieval_sdg.retrieval.client import HttpRetrievalClient
         client = HttpRetrievalClient(r["endpoint"], oversample_factor=r.get("oversample_factor", 2),
                                      timeout=r.get("timeout", 30), field_map=r.get("field_map", {}),
-                                     headers=r.get("headers") or None)
+                                     headers=r.get("headers") or None,
+                                     max_retries=r.get("max_retries", 2))
     elif qg.get("validate", True):
         print("[query_gen] WARNING: validate requested but no retrieval.endpoint — "
               "queries will NOT be answerability-checked.")
@@ -85,7 +86,7 @@ def run_query_gen(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path
                  queries_per_cluster=int(qg.get("queries_per_cluster", 4)),
                  chunks_per_cluster=qg.get("chunks_per_cluster"),
                  pool_size=qg.get("pool_size"),          # None => derived from n_queries
-                 candidate_headroom=float(qg.get("candidate_headroom", 3.0)),
+                 candidate_headroom=float(qg.get("candidate_headroom", 1.5)),
                  max_rounds=int(qg.get("max_rounds", 3)),
                  embed_cfg=qg.get("embedding"),
                  cluster_algo=cl.get("algo", "kmeans"), n_clusters=cl.get("k"),
@@ -144,6 +145,8 @@ def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int],
     picked = sample(kept, n_target, seed=sm.get("seed", 7))
     print(f"[query_prep] sampled -> {len(picked)}")
 
+    # NOTE: persona is NOT attached here — it's sampled at generation time by DD's native
+    # Person sampler (one per row => constant per trajectory). See build_config_builder.
     # trajectory shape is sampled per-row by the conversation planner (no classify pass).
     tools_json = json.dumps(cfg["tools"], ensure_ascii=False)
     seeds_path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,11 +176,25 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path):
     cb.with_seed_dataset(dd.LocalFileSeedSource(path=str(seed_path)),
                          sampling_strategy=dd.SamplingStrategy.SHUFFLE)
 
+    # one CONSTANT persona per row (=> per trajectory) via DD's native Person sampler,
+    # backed by the managed Nemotron-Personas dataset. Drives the user-sim voice on
+    # EVERY turn. Requires the locale downloaded once: `data-designer download personas
+    # --locale <locale>`. Disable with persona: {enabled: false}.
+    pcfg = cfg.get("persona", {})
+    if pcfg.get("enabled", True):
+        cb.add_column(dd.SamplerColumnConfig(
+            name="persona",                              # matches ConversationSimulatorConfig.persona_column
+            sampler_type=dd.SamplerType.PERSON,
+            params=dd.PersonSamplerParams(
+                locale=pcfg.get("locale", "en_IN"),
+                with_synthetic_personas=bool(pcfg.get("with_synthetic_personas", True)))))
+
     r = cfg.get("retrieval", {})
     eng = cfg.get("engine", {})
     knobs: Dict[str, Any] = {k: v for k, v in eng.items() if k not in _ENGINE_IO}   # I/O keys aren't config knobs
     knobs.update(retrieval_endpoint=r.get("endpoint", ""), retrieval_tools=r.get("tools", ["search"]),
                  retrieval_field_map=r.get("field_map", {}), retrieval_timeout=r.get("timeout", 30),
+                 retrieval_max_retries=r.get("max_retries", 2),
                  retrieval_headers=r.get("headers", {}), top_k=r.get("top_k", 4),
                  oversample_factor=r.get("oversample_factor", 2))
     knobs["model_clients"] = _build_model_clients(cfg)
@@ -188,18 +205,33 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path):
 
 def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Optional[int]) -> Path:
     import data_designer.config as dd
+    from data_designer.config.run_config import ResumeMode
     from data_designer.interface import DataDesigner
 
+    eng = cfg.get("engine", {})
     cb = build_config_builder(cfg, seed_path)
     providers = [dd.ModelProvider(**p) for p in cfg.get("providers", [])]
-    client = DataDesigner(model_providers=providers) if providers else DataDesigner()
+
+    # Crash safety for long runs: DD checkpoints per row-group under a STABLE
+    # artifact_path + dataset_name and resumes from the last completed batch.
+    #   engine.resume: if_possible  (default 'never' — small runs regenerate fresh)
+    # IF_POSSIBLE resumes when the config fingerprint matches, else restarts cleanly.
+    # NOTE: on resume DD's buffer_size must match the original run — leave it default
+    # (unset) on both the first run and any resume so they line up.
+    resume = ResumeMode(str(eng.get("resume", "never")).lower())
+    artifact_path = _resolve(base, eng.get("artifact_path", "../output/sdg/dd_artifacts"))
+    artifact_path.mkdir(parents=True, exist_ok=True)
+    client = DataDesigner(model_providers=providers, artifact_path=artifact_path) if providers \
+        else DataDesigner(artifact_path=artifact_path)
 
     n_seeds = sum(1 for l in seed_path.open(encoding="utf-8") if l.strip())
     n = min(limit, n_seeds) if limit else n_seeds
-    result = client.create(cb, num_records=n)
+    if resume != ResumeMode.NEVER:
+        print(f"[generate] resume={resume.value} artifacts={artifact_path} "
+              f"(a crash mid-run can be resumed by re-running this stage)")
+    result = client.create(cb, num_records=n, dataset_name="retrieval_sdg", resume=resume)
     records = _records(result)
 
-    eng = cfg.get("engine", {})
     out = _resolve(base, eng.get("output", cfg.get("output_path", "../output/sdg/retrieval_sdg.raw.jsonl")))
     out.parent.mkdir(parents=True, exist_ok=True)
     tools = cfg["tools"]
@@ -247,11 +279,16 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="cap generated queries / sampled seeds / rows")
     ap.add_argument("--dry-run", action="store_true",
                     help="query_gen only: embed+cluster+sample and print diagnostics, no LLM/tokens, no write")
+    ap.add_argument("--resume", choices=["never", "if_possible", "always"], default=None,
+                    help="generate stage: resume an interrupted run from its last completed "
+                         "row-group checkpoint (overrides engine.resume in the config)")
     args = ap.parse_args()
 
     from omegaconf import OmegaConf
     cfg = OmegaConf.to_container(OmegaConf.load(args.config), resolve=True)
     base = args.config.resolve().parent
+    if args.resume is not None:                         # CLI flag overrides engine.resume
+        cfg.setdefault("engine", {})["resume"] = args.resume
 
     # Stage 0 (query_gen) is opt-in: explicit --stage query_gen, or "all" WHEN a
     # source is configured (lancedb uri or chunks_path). Otherwise the pipeline

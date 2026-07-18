@@ -9,8 +9,8 @@
 
 # ── Stage 0: query_gen — OPTIONAL (synthesize seed queries FROM the corpus) ────
 # Reads the chunk corpus, clusters a bounded sample in embedding space, and generates
-# diverse end-user questions (topic-cluster x kind), validated answerable by the live
-# retriever. Writes them to `input_path`, which Stage A (query_prep) then dedups.
+# diverse end-user questions (topic-cluster x kind). Writes them to `input_path`, which
+# Stage A (query_prep) then dedups. (Answerability is NOT gated here — see `validate`.)
 #
 # OPTIONAL: delete this whole block (or omit `chunks_path` / `lancedb`) to SKIP query
 # generation and start directly from an existing queries.jsonl at `input_path`.
@@ -20,8 +20,11 @@ query_gen:
   # lancedb: {uri: /localhome/local-rkalani/nemo-retriever/lancedb-hindi-legal, table: hindi-legal-judgments}
   output: ../data/queries.generated.jsonl         # where generated queries are written (query_prep reads this)
 
-  n_queries: 100                                  # THE knob — cluster count & pool size derive from it
-  validate: true                                  # keep a query only if it retrieves its source
+  n_queries: 2000                                # THE knob — cluster count & pool size derive from it
+  max_workers: 16                                 # query_gen concurrency (raised from 8 for the 10k run)
+  validate: false                                 # NO answerability gate: real users don't pre-check retrieval,
+                                                  # and it selects against the hard multi-hop queries we want.
+                                                  # Query quality is judged downstream on the trajectory (evaluate.py).
   coarse: {enabled: true}                         # MiniLM coarse pre-clustering for topic diversity
 
   embedding:                                      # hosted embedding model (source: jsonl)
@@ -55,6 +58,15 @@ query_prep:
                                                 # the count; set this only to subsample an EXTERNAL query file.
     seed: 7
 
+# ── persona (DD-native Person sampler) ────────────────────────────────────────
+# One CONSTANT persona per row (=> per trajectory), used in EVERY user turn (with
+# persona_voice, the opening too). Backed by the managed Nemotron-Personas dataset.
+# One-time setup: data-designer download personas --locale en_IN
+persona:
+  enabled: true
+  locale: en_IN                                 # en_US | en_IN | en_SG | fr_FR | hi_Deva_IN | hi_Latn_IN | ja_JP | ko_KR | pt_BR
+  with_synthetic_personas: true                 # append persona/personality/interests descriptions
+
 # ── models & providers ────────────────────────────────────────────────────────
 providers:
   - name: lepton_gptoss
@@ -71,7 +83,7 @@ models:
   - alias: assistant_model                       # the research agent — gpt-oss-120b (emits reasoning)
     model: openai/gpt-oss-120b
     provider: lepton_gptoss
-    inference_parameters: {temperature: 0.7, max_tokens: 65000}
+    inference_parameters: {temperature: 0.7, max_tokens: 16384}
   - alias: user_model                            # simulates the human user — Gemma (32k ctx model)
     model: google/gemma-4-31B-it
     provider: lepton_gemma
@@ -79,11 +91,11 @@ models:
   - alias: aux_response_model                     # simulates non-retrieval tools — gpt-oss-120b
     model: openai/gpt-oss-120b
     provider: lepton_gptoss
-    inference_parameters: {temperature: 0.4, max_tokens: 32000}
+    inference_parameters: {temperature: 0.4, max_tokens: 8192}
   - alias: judge_model                            # inline judge + query gate — gpt-oss-120b (reliable JSON)
     model: openai/gpt-oss-120b
     provider: lepton_gptoss
-    inference_parameters: {temperature: 0.2, max_tokens: 32000}
+    inference_parameters: {temperature: 0.2, max_tokens: 16384}
 
 # ── retrieval service (external HTTP wrapper) ─────────────────────────────────
 retrieval:
@@ -92,6 +104,7 @@ retrieval:
   top_k: 4
   oversample_factor: 2                            # request top_k*factor, keep a random top_k (drives depth)
   timeout: 120                                    # the service can be slow under load
+  max_retries: 2                                  # bounded retries on transient blips (a flaky window costs depth, not the row)
   headers: {}
   field_map:                                      # matches this service: {query, num_chunks} -> {chunks:[{rank,text}]}
     query_field: query
@@ -137,8 +150,12 @@ engine:
   # ── I/O ──────────────────────────────────────────────────────────────────────
   input: ../data/seeds.jsonl                      # seeds from query_prep (used when running --stage generate alone)
   output: ../output/sdg/retrieval_sdg.raw.jsonl   # raw trajectories (judge with evaluate.py)
+  # crash safety for long runs: DD checkpoints per row-group under artifact_path and
+  # resumes from the last completed batch. On a crash, RE-RUN --stage generate to resume.
+  resume: if_possible                             # never | if_possible | always
+  artifact_path: ../output/sdg/dd_artifacts       # stable checkpoint dir (do not delete mid-run)
   column_name: conversation_messages
-  metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log, compression]
+  metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log, compression, persona]
 
   # ── the two knobs that shape a conversation ──────────────────────────────────
   # length: turns are center-weighted, so a 3-6 range AVERAGES ~4-5 turns
@@ -158,7 +175,7 @@ engine:
   inline_judge: false                              # inline eval OFF for now (no per-trajectory judge)
   majority_vote_n: 1                               # assistant self-consistency samples
   max_tools: 12                                    # tool subset offered per row
-  persona_voice: false                             # no persona sampler wired by default
+  persona_voice: true                              # voice the opening turn in-persona too (all turns in-persona)
 
   # ── context compression ─────────────────────────────────────────────────────
   context_window_k: 2                              # recent tool results kept raw
