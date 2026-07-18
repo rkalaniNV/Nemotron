@@ -126,6 +126,18 @@ def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any
             "ends_on_answer": ends_on_answer, **cite, "objective_ok": ok}
 
 
+def _judge_from_config(config_path):
+    """Resolve the judge caller from pipeline.yaml: the judge_model alias's model +
+    its provider's endpoint + the env-var name that holds the key."""
+    from omegaconf import OmegaConf
+    cfg = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
+    models = {m.get("alias"): m for m in cfg.get("models", [])}
+    provs = {p.get("name"): p for p in cfg.get("providers", [])}
+    jm = models.get("judge_model", {})
+    prov = provs.get(jm.get("provider"), {})
+    return jm.get("model", ""), prov.get("endpoint", ""), prov.get("api_key", "NVIDIA_API_KEY")
+
+
 def _make_judge(model: str, endpoint: str, api_key_env: str):
     from retrieval_sdg.core.caller import make_openai_caller
     from retrieval_sdg.core.messages import format_history_compact, format_tools_for_prompt
@@ -176,11 +188,25 @@ def main() -> None:
                     help="soft quality floor (1-5); the gate is the defect flags, this just drops weak-but-clean rows")
     ap.add_argument("--min-overlap", type=float, default=0.0,
                     help="min deterministic answer<->evidence char-ngram overlap (0=report only, don't gate)")
-    ap.add_argument("--model", default="nvidia/openai/gpt-oss-120b")  # reliable structured JSON
-    ap.add_argument("--endpoint", default="https://inference-api.nvidia.com/v1")
-    ap.add_argument("--api-key-env", default="NVIDIA_API_KEY")
+    # judge model/endpoint: taken from --config's judge_model by default (so it matches
+    # generation), or set explicitly. Explicit flags win; fall back to NVIDIA hosted.
+    ap.add_argument("--config", type=Path, default=None,
+                    help="pipeline.yaml — read the judge_model's model/endpoint/key from it")
+    ap.add_argument("--model", default=None)          # reliable structured JSON
+    ap.add_argument("--endpoint", default=None)
+    ap.add_argument("--api-key-env", default=None)
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
+
+    model, endpoint, api_key_env = args.model, args.endpoint, args.api_key_env
+    if args.config and not (model and endpoint and api_key_env):
+        cfg_model, cfg_endpoint, cfg_key = _judge_from_config(args.config)   # judge_model + its provider
+        model = model or cfg_model
+        endpoint = endpoint or cfg_endpoint
+        api_key_env = api_key_env or cfg_key
+    model = model or "nvidia/openai/gpt-oss-120b"
+    endpoint = endpoint or "https://inference-api.nvidia.com/v1"
+    api_key_env = api_key_env or "NVIDIA_API_KEY"
 
     rows = _load(args.input, args.raw_dir)
     if args.limit:
@@ -189,7 +215,7 @@ def main() -> None:
         raise SystemExit("[judge] no trajectories found (check --input / --raw-dir).")
 
     verifier = ToolCallVerifier()
-    judge = _make_judge(args.model, args.endpoint, args.api_key_env) if args.judge else None
+    judge = _make_judge(model, endpoint, api_key_env) if args.judge else None
 
     kept, scored_rows = [], []
     for r in rows:

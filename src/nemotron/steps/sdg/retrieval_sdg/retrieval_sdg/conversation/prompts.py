@@ -82,10 +82,19 @@ conversation as this character.
 </INSTRUCTIONS>"""
 
 # turn directives (sent as the user-role message; the system prompt above sets the role)
-USER_OPENING_DIRECTIVE = """This is your FIRST message. Express the following information need naturally, \
-in your own voice, as an opening request:
+USER_OPENING_DIRECTIVE = """This is your FIRST message to the assistant. Re-voice the question below \
+as YOUR persona would naturally say it — add persona flavour only.
 
-{need}"""
+Question: {need}
+
+Rules:
+- Preserve the MEANING and INTENT exactly — ask about the same thing, the same subject and entities.
+- Preserve the TYPE and SCOPE — keep the same number of parts, the same comparison/multi-part structure, \
+and the SAME level of detail. If the question is specific, keep it specific; if it is broad or vague, \
+keep it broad or vague (do NOT sharpen a vague question into a precise one, or vice-versa).
+- Change ONLY word choice, tone, and register to fit your persona. Do NOT add facts, drop facts, \
+narrow it, or broaden it.
+- One or two sentences."""
 
 USER_FOLLOWUP_DIRECTIVE = """Conversation so far:
 <CONVERSATION>
