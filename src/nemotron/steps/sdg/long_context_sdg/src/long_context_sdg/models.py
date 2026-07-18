@@ -1,4 +1,4 @@
-"""Retry-friendly direct OpenAI-compatible facades for generation and judging."""
+"""OpenAI-compatible judge client used by offline evaluation."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import httpx
 from .config import PipelineConfig
 
 
-class DirectChatFacade:
+class JudgeChatFacade:
     def __init__(
         self,
         *,
@@ -74,9 +74,10 @@ class DirectChatFacade:
         self.client.close()
 
 
-def _direct_facade(cfg: PipelineConfig, alias: str) -> DirectChatFacade:
+def evaluation_judge_models(cfg: PipelineConfig) -> dict[str, Any]:
+    """Build the judge client used by ``evaluate --rejudge``."""
     providers = {provider.name: provider for provider in cfg.providers}
-    model = next(item for item in cfg.models if item.alias == alias)
+    model = next(item for item in cfg.models if item.alias == "judge")
     provider = providers.get(model.provider)
     if provider is None:
         raise ValueError(
@@ -88,26 +89,11 @@ def _direct_facade(cfg: PipelineConfig, alias: str) -> DirectChatFacade:
         raise ValueError(
             f"model provider `{provider.name}` needs environment variable `{key_ref}`"
         )
-    return DirectChatFacade(
-        model=model.model,
-        endpoint=provider.endpoint,
-        api_key=api_key,
-        parameters=model.inference_parameters,
-    )
-
-
-def direct_models(cfg: PipelineConfig) -> dict[str, DirectChatFacade]:
-    """Build all configured model roles without Data Designer's orchestration layer."""
-    models: dict[str, DirectChatFacade] = {}
-    try:
-        for model in cfg.models:
-            models[model.alias] = _direct_facade(cfg, model.alias)
-    except Exception:
-        for facade in models.values():
-            facade.close()
-        raise
-    return models
-
-
-def offline_judge_models(cfg: PipelineConfig) -> dict[str, Any]:
-    return {"judge": _direct_facade(cfg, "judge")}
+    return {
+        "judge": JudgeChatFacade(
+            model=model.model,
+            endpoint=provider.endpoint,
+            api_key=api_key,
+            parameters=model.inference_parameters,
+        )
+    }

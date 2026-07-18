@@ -8,7 +8,7 @@ import json
 from .config import load_config
 from .evaluation import evaluate_checkpoint
 from .exporters import export_records
-from .models import offline_judge_models
+from .models import evaluation_judge_models
 from .pipeline import generate
 from .seeds import prepare_seed_file
 
@@ -41,7 +41,7 @@ def main() -> None:
         models = None
         if cfg.judge.enabled and not args.no_network:
             try:
-                models = offline_judge_models(cfg)
+                models = evaluation_judge_models(cfg)
             except Exception as exc:
                 print(f"judge unavailable; pending records remain quarantined: {exc}")
         try:

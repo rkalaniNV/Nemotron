@@ -460,12 +460,17 @@ class EpisodeRunner:
                 )
                 return
             correction = "Provide a substantive final answer now, without a tool call."
+        turn_rejections = [
+            item
+            for item in state.rejected_tool_calls
+            if item.get("turn") == turn_plan.turn
+        ]
         raise EpisodeGenerationError(
             f"turn {turn_plan.turn} did not produce a valid final answer within "
             f"{self.config.planning.max_steps_per_turn} steps; completed retrievals="
             f"{self._completed_retrievals(state.retrieval_transcript, turn_plan.turn)}/"
             f"{turn_plan.retrieval_depth}; rejected calls="
-            f"{json.dumps([x for x in state.rejected_tool_calls if x.get('turn') == turn_plan.turn], ensure_ascii=False)}"
+            f"{json.dumps(turn_rejections, ensure_ascii=False)}"
         )
 
     def _next_user(self, models, seed, intent: str, view: list[dict[str, Any]]) -> str:

@@ -18,7 +18,7 @@ The package provides:
 - deterministic validation followed by an optional model judge;
 - append-only, episode-level checkpoints and safe resume;
 - canonical, partitioned, and trainer-oriented JSONL outputs;
-- Data Designer orchestration and a direct OpenAI-compatible runner.
+- Data Designer orchestration with a prepare, generate, evaluate, and export CLI.
 
 ## Architecture
 
@@ -26,10 +26,8 @@ The package provides:
 raw seed JSONL
     |
     +-- prepare --> enriched seed JSONL
-    |                  |
-    |                  +-- Data Designer generate --+
-    |                                               |
-    +---------------- direct runner ----------------+-- EpisodeRunner
+                       |
+                       +-- Data Designer generate ---- EpisodeRunner
                                                         |
                       deterministic plan <--------------+
                                                         |
@@ -83,8 +81,6 @@ Unknown YAML keys are rejected, so misspellings fail before generation.
 
 ## Running the pipeline
 
-### Data Designer workflow
-
 Prepare validates, enriches, and atomically replaces the enriched seed file:
 
 ```bash
@@ -122,34 +118,35 @@ Export accepted records in `export.format`:
 uv run long-context-sdg export --config config/my-workload.yaml
 ```
 
-### Direct OpenAI-compatible workflow
+Data Designer is the only supported generation path. The package does not ship
+a separate standalone model runner.
 
-The direct runner enriches raw seeds in memory, uses the same runtime,
-checkpoints each completed episode, evaluates, and exports:
+## Multilingual generation
 
-```bash
-uv run python scripts/run_direct.py --config config/my-workload.yaml
+The target language is controlled by the global and per-seed `instructions`;
+there is no English-only runtime restriction. For example:
+
+```yaml
+instructions: >-
+  Write every visible user and assistant turn in natural Hindi. Keep exact
+  retrieved chunk identifiers unchanged. Translate explanations, but preserve
+  source-language quotations and standard technical terms when translation
+  would reduce precision. Write the synthetic reasoning.think field in English.
 ```
 
-Override `run.num_records` for a bounded integration run:
+The retrieval corpus and generated conversation may use different languages.
+Cross-language retrieval quality depends on the embedding model and index, not
+this pipeline. Before a large run, probe representative target-language queries
+and inspect whether the returned chunks are relevant, authoritative, and current.
+An English source corpus can still ground a Hindi conversation when retrieval
+and the role models are sufficiently multilingual.
 
-```bash
-uv run python scripts/run_direct.py \
-  --config config/my-workload.yaml \
-  --num-records 2
-```
-
-Normal reruns resume from the checkpoint. `--fresh` deletes only the checkpoint,
-canonical, partition, summary, and export files named by that configuration:
-
-```bash
-uv run python scripts/run_direct.py \
-  --config config/my-workload.yaml \
-  --fresh
-```
-
-Treat `--fresh` as destructive for that workload. Use a separate output tree for
-every materially different configuration.
+`reasoning.think` is a model-generated, bounded field retained as
+`reasoning_content`; it is not an observation of the serving model's hidden
+chain of thought. Its language is not guaranteed unless requested and validated.
+If downstream training requires English reasoning with target-language visible
+turns, state both requirements explicitly and add a language check to dataset
+quality control.
 
 ## Seed format
 
@@ -302,7 +299,7 @@ Do not reuse one checkpoint path across different generation configurations.
 
 | Key | Default / values | Effect |
 |---|---|---|
-| `mode` | `preview`; `preview` or `create` | Selects the Data Designer execution mode. The direct runner does not use it. |
+| `mode` | `preview`; `preview` or `create` | Selects the Data Designer execution mode. |
 | `seed` | `7` | Deterministic seed enrichment and episode planning. Included in the checkpoint fingerprint. |
 | `num_records` | `0`; ≥0 | Zero means all seeds. A positive value limits the ordered input prefix. |
 | `retry_failed` | `false` | Regenerate queries whose latest checkpoint attempt is `generation_failed`. |
@@ -323,12 +320,11 @@ are appended after the global instructions.
 | Key | Effect |
 |---|---|
 | `name` | Unique provider identifier referenced by models. |
-| `endpoint` | OpenAI-compatible API base URL for the direct runner and provider endpoint for Data Designer. |
-| `api_key_env` | Name of the environment variable containing the credential. An empty string omits authorization in the direct runner. |
+| `endpoint` | Model provider endpoint passed to Data Designer and used for offline rejudging. |
+| `api_key_env` | Name of the environment variable containing the provider credential. |
 
-Provider names must be unique. The direct runner requires a provider entry for
-every model. Data Designer may additionally support providers configured by its
-own installation.
+Provider names must be unique. Data Designer may additionally support providers
+configured by its own installation.
 
 ### `models`
 
@@ -348,15 +344,16 @@ Each model has:
 | `alias` | Runtime role name; aliases must be unique. |
 | `model` | Provider-specific model identifier. |
 | `provider` | Provider name. |
-| `skip_health_check` | Passed to Data Designer; ignored by the direct runner. |
+| `skip_health_check` | Passed to Data Designer. |
 | `inference_parameters` | Provider-supported chat parameters such as `temperature` and `max_tokens`. |
 
-The direct facade sends inference parameters to `/chat/completions`, except
-transport-only `timeout` and `max_parallel_requests`. It uses persistent HTTP
-clients, bounded connection/request timeouts, and the runtime retries model
-calls up to eight times with exponential backoff. Structured responses receive
-up to three schema-correction attempts. These retry counts are implementation
-constants, not YAML knobs in this version.
+Data Designer supplies the configured role models during generation. The
+offline rejudge client sends the judge's inference parameters to
+`/chat/completions`, except transport-only `timeout` and
+`max_parallel_requests`. Runtime model calls are retried up to eight times with
+exponential backoff, and structured responses receive up to three
+schema-correction attempts. These retry counts are implementation constants,
+not YAML knobs in this version.
 
 ### `context`
 
@@ -540,8 +537,7 @@ Before generation, the pipeline:
 1. parses every checkpoint line;
 2. rejects mixed configuration fingerprints;
 3. derives completed query IDs according to retry policy;
-4. writes an ordered pending seed file for Data Designer, or skips completed
-   seeds in the direct runner.
+4. writes an ordered pending seed file for Data Designer.
 
 The fingerprint covers generation-affecting configuration and `run.seed`. It
 excludes paths plus orchestration-only `mode`, record count, and retry flags.
@@ -629,8 +625,7 @@ training.
 - Version and review every config used to generate a dataset.
 - Store credentials in environment variables or a secret manager.
 - Use a unique output tree per fingerprint and workload.
-- Run `prepare` before Data Designer generation; the direct runner consumes raw
-  seeds itself.
+- Run `prepare` before Data Designer generation.
 - Start with a small record limit and inspect outputs manually.
 - Monitor checkpoint line count and status summary, not export count alone.
 - Budget for multiple model calls per turn, retrieval retries, structured-output
@@ -700,10 +695,10 @@ Check compressor structured-output reliability, context length, provenance IDs,
 and token budgets. Lower the compression threshold only after confirming the
 compressor can summarize the earlier prefix accurately.
 
-**Direct model call is unauthorized**
+**Offline judge call is unauthorized**
 
 Confirm `providers[].api_key_env` names an exported variable. An empty value is
-valid only for an endpoint intentionally configured without authentication.
+valid only for a judge endpoint intentionally configured without authentication.
 
 **Expected response fields are missing**
 
@@ -718,7 +713,6 @@ not index arrays. The resolved result container must be a list of objects.
 |---|---|
 | `config/default.yaml` | Complete domain-neutral template with placeholders and all supported knobs. |
 | `data/queries.jsonl` | Minimal raw and rich generic seed examples. |
-| `scripts/run_direct.py` | Generic direct runner with bounded selection, fingerprint-safe resume, optional configured-output reset, evaluation, export, and client cleanup. |
 | `pyproject.toml` | Package metadata, dependencies, console command, Data Designer plugin entry point, and test/lint settings. |
 | `uv.lock` | Reproducible dependency resolution. |
 
@@ -735,7 +729,7 @@ not index arrays. The resolved result container must be a list of objects.
 | `src/long_context_sdg/generator.py` | Data Designer column generator and episode checkpoint adapter. |
 | `src/long_context_sdg/generator_config.py` | Data Designer column and side-effect-column contract. |
 | `src/long_context_sdg/llm.py` | Sync/async facade normalization, retries, JSON extraction, and structured validation. |
-| `src/long_context_sdg/models.py` | Persistent direct chat clients and provider credential resolution. |
+| `src/long_context_sdg/models.py` | Offline rejudge client and provider credential resolution. |
 | `src/long_context_sdg/pipeline.py` | Data Designer models/providers, pending-seed construction, and orchestration. |
 | `src/long_context_sdg/planning.py` | Seeded intent planning and non-opening retrieval fallback. |
 | `src/long_context_sdg/plugin.py` | Data Designer plugin registration. |
@@ -770,7 +764,7 @@ not index arrays. The resolved result container must be a list of objects.
 - Checkpoints are episode-level and single-writer.
 - Optional tool calls have no hard per-action, per-turn, or per-conversation cap.
 - Only `research` and `rewrite` intent labels make retrieval mandatory.
-- Direct model retry and structured-correction counts are not configurable in
+- Model retry and structured-correction counts are not configurable in
   YAML.
 - Token counts are estimates and may differ from the serving model tokenizer.
 - `model_token_limit` is a compression-failure boundary, not a universal hard

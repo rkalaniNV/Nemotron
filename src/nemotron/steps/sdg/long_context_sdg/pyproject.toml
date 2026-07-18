@@ -32,7 +32,3 @@ packages = ["src/long_context_sdg"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-
-[tool.ruff.lint.per-file-ignores]
-# The standalone direct runner bootstraps the sibling `src` directory before imports.
-"scripts/run_direct.py" = ["E402"]
