@@ -256,7 +256,8 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
             n_written += 1
     print(f"[generate] {len(records)} generated, {n_written} trajectories -> {out}")
     print("  next — judge & filter into the final SFT set:")
-    print(f"    python evaluate.py --input {out} --out output/sdg/retrieval_sdg.jsonl --judge")
+    print(f"    python evaluate.py --config config/pipeline.yaml --input {out} "
+          f"--out output/sdg/retrieval_sdg.jsonl --judge")
     return out
 
 

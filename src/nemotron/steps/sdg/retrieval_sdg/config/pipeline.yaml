@@ -169,13 +169,14 @@ engine:
   # ── loop / quality control (sensible defaults, rarely changed) ───────────────
   max_correction_attempts: 3
   max_tool_calls_per_turn: 1                       # many endpoints reject >1
-  force_first_tool: true                           # force a tool call until min_hops (grounding)
+  force_first_tool: false                          # let the assistant decide (measure natural tool use)
   allow_clarify: true                              # let clarify-kind turns ask a question first
   gate_query: false                                # inline eval OFF for now (no query gate)
   inline_judge: false                              # inline eval OFF for now (no per-trajectory judge)
   majority_vote_n: 1                               # assistant self-consistency samples
   max_tools: 12                                    # tool subset offered per row
-  persona_voice: true                              # voice the opening turn in-persona too (all turns in-persona)
+  persona_voice: true                              # re-voice the opening in-persona, but PRESERVE the query's
+                                                   # intent/scope/type (see USER_OPENING_DIRECTIVE) — flavour only
 
   # ── context compression ─────────────────────────────────────────────────────
   context_window_k: 2                              # recent tool results kept raw
