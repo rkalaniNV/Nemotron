@@ -115,5 +115,7 @@ def user_system(seed: EpisodeSeed) -> str:
         "Simulate only the user. Continue naturally from the conversation, stay in persona, and do not emit "
         "tool calls or describe being a simulator.\n"
         f"Role: {persona.role}; expertise: {persona.expertise}; style: {persona.style}.\n"
+        f"Persona description: {persona.description or 'not specified'}.\n"
+        f"Target language: {persona.language or 'follow the effective instructions'}.\n"
         f"Topic: {seed.query}\nEffective instructions: {seed.instructions}"
     )

@@ -63,6 +63,10 @@ class EpisodeRunner:
                 episode_plan=plan.model_dump(),
                 metadata={
                     "query": seed.query,
+                    "persona": seed.persona.model_dump(),
+                    "query_provenance": seed.query_provenance.model_dump()
+                    if seed.query_provenance
+                    else None,
                     "instructions": seed.instructions,
                     "turn_budget": seed.turn_budget,
                     "retrieval_depth": seed.retrieval_depth,
@@ -212,6 +216,10 @@ class EpisodeRunner:
             episode_plan=plan.model_dump(),
             metadata={
                 "query": seed.query,
+                "persona": seed.persona.model_dump(),
+                "query_provenance": seed.query_provenance.model_dump()
+                if seed.query_provenance
+                else None,
                 "instructions": seed.instructions,
                 "turn_budget": seed.turn_budget,
                 "retrieval_depth": seed.retrieval_depth,

@@ -1,0 +1,43 @@
+# Review and version this taxonomy for each domain. Leaf weights control exact
+# topic quotas; seed queries build each leaf's semantic evidence pool.
+version: "1.0"
+topics:
+  - id: foundations
+    label: Foundations
+    description: Core concepts, terminology, mechanisms, and limitations.
+    weight: 0.45
+    children:
+      - id: foundations-concepts
+        label: Concepts and mechanisms
+        description: Explain how central concepts work and interact.
+        weight: 0.60
+        seed_queries:
+          - core concepts mechanisms overview
+          - how the main components interact
+      - id: foundations-limitations
+        label: Assumptions and limitations
+        description: Boundaries, failure modes, and common misunderstandings.
+        weight: 0.40
+        seed_queries:
+          - assumptions limitations failure modes
+          - common misconceptions and edge cases
+
+  - id: decisions
+    label: Decisions and application
+    description: Comparison, implementation, and context-sensitive choices.
+    weight: 0.55
+    children:
+      - id: decisions-comparison
+        label: Comparing alternatives
+        description: Trade-offs among approaches under explicit constraints.
+        weight: 0.45
+        seed_queries:
+          - compare alternative approaches trade-offs
+          - selection criteria benefits risks
+      - id: decisions-application
+        label: Applying guidance
+        description: Adapt evidence to realistic scenarios and constraints.
+        weight: 0.55
+        seed_queries:
+          - implementation guidance practical scenario
+          - adapting recommendations to constraints

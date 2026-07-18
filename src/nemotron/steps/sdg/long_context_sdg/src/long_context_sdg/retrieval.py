@@ -11,8 +11,8 @@ from typing import Any
 
 import httpx
 
-from .config import RetrieverConfig
 from .schemas import RetrievalChunk
+from .service_config import RetrieverConfig
 
 
 def _get_path(value: Any, path: str, default: Any = None) -> Any:

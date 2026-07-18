@@ -61,6 +61,7 @@ def enrich_seed(record: dict[str, Any], cfg: PipelineConfig) -> EpisodeSeed:
         turn_budget=turn_budget,
         retrieval_depth=depth,
         memory_seed=memory,
+        query_provenance=record.get("query_provenance"),
     )
 
 

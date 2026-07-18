@@ -25,6 +25,7 @@ long-context-sdg = "long_context_sdg.__main__:main"
 
 [project.entry-points."data_designer.plugins"]
 long-context-episode-simulator = "long_context_sdg.plugin:long_context_episode_simulator"
+persona-query-generator = "long_context_sdg.plugin:persona_query_generator"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/long_context_sdg"]

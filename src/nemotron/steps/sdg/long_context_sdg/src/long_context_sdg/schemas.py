@@ -23,6 +23,26 @@ class Persona(BaseModel):
     role: str = "user"
     expertise: str = "intermediate"
     style: str = "natural and curious"
+    description: str = ""
+    language: str = ""
+    source_id: str = ""
+    source_dataset: str = ""
+    source_revision: str = ""
+    source_split: str = ""
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class QueryProvenance(BaseModel):
+    synthesis_fingerprint: str = ""
+    taxonomy_id: str = ""
+    archetype: str = ""
+    answerability: Literal["answerable", "insufficient"] = "answerable"
+    evidence_chunk_ids: list[str] = Field(default_factory=list)
+    evidence_hashes: list[str] = Field(default_factory=list)
+    evidence_sources: list[str] = Field(default_factory=list)
+    generator_alias: str = ""
+    judge_alias: str = ""
+    prompt_version: str = "query-synthesis-v1"
 
 
 class EpisodeSeed(BaseModel):
@@ -34,6 +54,7 @@ class EpisodeSeed(BaseModel):
     turn_budget: int = Field(18, ge=6, le=40)
     retrieval_depth: int = Field(2, ge=1, le=3)
     memory_seed: dict[str, Any] = Field(default_factory=dict)
+    query_provenance: QueryProvenance | None = None
 
 
 class TurnPlan(BaseModel):

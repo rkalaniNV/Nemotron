@@ -8,13 +8,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from omegaconf import OmegaConf
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
-
-class StrictConfigModel(BaseModel):
-    """Reject misspelled or obsolete YAML keys instead of silently ignoring them."""
-
-    model_config = ConfigDict(extra="forbid")
+from .config_base import StrictConfigModel
+from .service_config import ModelConfig, ProviderConfig, RetrieverConfig
 
 
 class PathsConfig(StrictConfigModel):
@@ -32,20 +29,6 @@ class RunConfig(StrictConfigModel):
     num_records: int = Field(0, ge=0)
     retry_failed: bool = False
     retry_quarantine: bool = False
-
-
-class ProviderConfig(StrictConfigModel):
-    name: str
-    endpoint: str
-    api_key_env: str
-
-
-class ModelConfig(StrictConfigModel):
-    alias: str
-    model: str
-    provider: str = "primary"
-    skip_health_check: bool = False
-    inference_parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class TurnRange(StrictConfigModel):
@@ -144,32 +127,6 @@ class ContextConfig(StrictConfigModel):
         if self.compression_threshold >= self.model_token_limit:
             raise ValueError("compression_threshold must be below model_token_limit")
         return self
-
-
-class RetrieverFields(StrictConfigModel):
-    id: str = "id"
-    text: str = "text"
-    title: str = "title"
-    source: str = "source"
-    score: str = "score"
-    url: str = "url"
-    date: str = "date"
-
-
-class RetrieverConfig(StrictConfigModel):
-    endpoint: str
-    method: Literal["GET", "POST"] = "POST"
-    query_field: str = "query"
-    top_k_field: str = "top_k"
-    top_k: int = Field(4, ge=1, le=100)
-    results_path: str = "chunks"
-    fields: RetrieverFields = Field(default_factory=RetrieverFields)
-    selection: Literal["ranked", "diverse", "sampled"] = "ranked"
-    timeout_seconds: float = Field(45, gt=0)
-    retries: int = Field(4, ge=1, le=20)
-    backoff_seconds: float = Field(1.0, ge=0)
-    headers: dict[str, str] = Field(default_factory=dict)
-    extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolConfig(StrictConfigModel):

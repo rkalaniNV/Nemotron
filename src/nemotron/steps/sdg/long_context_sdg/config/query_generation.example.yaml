@@ -1,0 +1,124 @@
+# Standalone query-generation configuration. Its seed JSONL output is the
+# conversation generator's paths.seeds input. Replace service placeholders.
+paths:
+  seeds: ../data/generated_queries.jsonl
+  evidence_manifest: ../output/query_generation/evidence_manifest.json
+  candidates: ../output/query_generation/candidates.jsonl
+  checkpoint: ../output/query_generation/checkpoint.jsonl
+  report: ../output/query_generation/report.json
+
+run:
+  mode: create
+  seed: 7
+
+providers:
+  - name: primary
+    endpoint: https://model-api.example.com/v1
+    api_key_env: MODEL_API_KEY
+
+models:
+  - alias: assistant
+    model: provider/query-generator-model
+    provider: primary
+    skip_health_check: false
+    inference_parameters: {temperature: 0.8, max_tokens: 1024}
+  - alias: judge
+    model: provider/query-judge-model
+    provider: primary
+    skip_health_check: false
+    inference_parameters: {temperature: 0.1, max_tokens: 1024}
+
+retriever:
+  endpoint: https://retrieval-api.example.com/query
+  method: POST
+  query_field: query
+  top_k_field: top_k
+  top_k: 8
+  results_path: chunks
+  fields:
+    id: id
+    text: text
+    title: title
+    source: source
+    score: score
+    url: url
+    date: date
+  selection: ranked
+  timeout_seconds: 45
+  retries: 4
+  backoff_seconds: 1.0
+  headers: {}
+  extra_body: {}
+
+query_generation:
+  num_queries: 100
+  taxonomy_path: taxonomy.example.yaml
+  generator_alias: assistant
+  judge_alias: judge
+  max_attempts: 3
+  min_judge_score: 4
+  min_query_chars: 8
+  max_query_chars: 400
+
+  # Exact largest-remainder quotas are used. For 100 queries, these defaults
+  # yield 65/15/10/5/3/2 before model generation.
+  archetype_weights:
+    research: 0.65
+    applied_scenario: 0.15
+    comparison: 0.10
+    misconception: 0.05
+    clarification: 0.03
+    insufficient_evidence: 0.02
+
+  persona_mode_weights:
+    general_interest: 0.40
+    situated_need: 0.40
+    domain_adjacent: 0.20
+
+  # These are Data Designer managed Nemotron-Personas locales. Download them
+  # before generation and record the reviewed NGC asset revision here.
+  persona_locales:
+    - locale: en_IN
+      language: en
+      weight: 0.50
+      asset_revision: replace-with-reviewed-ngc-version
+      narrative_fields:
+        persona: 0.40
+        professional_persona: 0.30
+        skills_and_expertise: 0.15
+        hobbies_and_interests: 0.15
+      attribute_fields: [occupation, education_level, first_language, state]
+      age_range: [18, 114]
+    - locale: hi_Deva_IN
+      language: hi-Deva
+      weight: 0.40
+      asset_revision: replace-with-reviewed-ngc-version
+      narrative_fields:
+        persona: 0.40
+        professional_persona: 0.30
+        skills_and_expertise: 0.15
+        hobbies_and_interests: 0.15
+      attribute_fields: [occupation, education_level, first_language, state]
+      age_range: [18, 114]
+    - locale: hi_Latn_IN
+      language: hi-Latn
+      weight: 0.10
+      asset_revision: replace-with-reviewed-ngc-version
+      narrative_fields:
+        persona: 0.40
+        professional_persona: 0.30
+        skills_and_expertise: 0.15
+        hobbies_and_interests: 0.15
+      attribute_fields: [occupation, education_level, first_language, state]
+      age_range: [18, 114]
+
+  evidence:
+    pool_size: 32
+    bundle_min: 2
+    bundle_max: 4
+    max_per_source: 2
+    min_chunk_chars: 160
+    retrievability_top_k: 8
+    max_lexical_overlap: 0.35
+    max_verbatim_tokens: 12
+    duplicate_similarity: 0.85

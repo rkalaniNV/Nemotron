@@ -1,12 +1,15 @@
 # Long-Context Synthetic Data Generation
 
-`long_context_sdg` generates realistic, multi-turn, tool-using conversations for
-supervised fine-tuning. The pipeline is domain- and language-neutral: behavior
-comes from YAML instructions, seed records, model choices, retrieval mappings,
-tool schemas, and executor implementations.
+`long_context_sdg` generates realistic long-context training data through
+independent query-synthesis, conversation-generation, and evaluation stages.
+The pipeline is domain- and language-neutral: behavior comes from reviewed
+taxonomy YAML, managed persona locales, seed records, instructions, model
+choices, retrieval mappings, tool schemas, and executor implementations.
 
 The package provides:
 
+- taxonomy-stratified, persona-conditioned synthetic query generation;
+- exact query quotas across topics, archetypes, persona modes, and languages;
 - deterministic episode planning with 6–40-turn conversations;
 - a separate opening-intent distribution so the first assistant response does
   not always retrieve;
@@ -18,35 +21,47 @@ The package provides:
 - deterministic validation followed by an optional model judge;
 - append-only, episode-level checkpoints and safe resume;
 - canonical, partitioned, and trainer-oriented JSONL outputs;
-- Data Designer orchestration with a prepare, generate, evaluate, and export CLI.
+- Data Designer orchestration with `synthesize`, `prepare`, `generate`,
+  `evaluate`, and `export` commands.
 
 ## Architecture
 
 ```text
-raw seed JSONL
-    |
-    +-- prepare --> enriched seed JSONL
-                       |
-                       +-- Data Designer generate ---- EpisodeRunner
-                                                        |
-                      deterministic plan <--------------+
-                                                        |
-                 user model <--> assistant model <--> ToolRegistry
-                                                        |-- retrieval
-                                                        |-- memory
-                                                        |-- custom executor
-                                                        `-- simulated executor
-                                                        |
-                               compressor model <-------+ (hidden active view)
-                                                        |
-                 deterministic validator --> judge model
-                                                        |
-                                               checkpoint JSONL
-                                                        |
-                               evaluate --> canonical + status partitions
-                                                        |
-                                 export --> accepted training JSONL
+reviewed taxonomy + live retrieval corpus + managed persona assets
+                              |
+             query generation (`synthesize`)
+                              |
+                     rich raw seed JSONL
+                              |
+       conversation seed preparation (`prepare`)
+                              |
+                  Data Designer seed JSONL
+                              |
+          conversation generation (`generate`)
+              user <--> assistant <--> tools
+                       hidden compaction
+                              |
+              append-only episode checkpoint
+                              |
+             evaluation (`evaluate`) --> status partitions
+                              |
+                   export (`export`) --> training JSONL
 ```
+
+The module boundary is intentional:
+
+| Stage | Input | Output | Responsibility |
+|---|---|---|---|
+| Query generation | Taxonomy, managed personas, retriever, generator, judge | Rich raw seed JSONL | Create diverse, grounded information needs. |
+| Conversation generation | Raw seeds, role models, tools, retriever | Canonical multi-turn trajectories | Plan and simulate tool-using conversations. |
+| Evaluation | Canonical trajectories | Status partitions and reports | Apply deterministic and model quality gates. |
+
+`synthesize` is optional. Teams that already have reviewed queries can write the
+raw seed contract directly and begin with `prepare`. Conversely, query
+generation can run and publish seeds without loading the conversation planner,
+tool registry, compressor, or trajectory evaluator. Future domain, safety, or
+language evaluators should consume canonical records and write derived artifacts
+instead of mutating either generation checkpoint.
 
 An episode is the atomic unit. Each completed attempt is flushed and `fsync`'d
 to the checkpoint before the next seed begins. Compaction changes only the
@@ -80,6 +95,33 @@ Configuration paths are resolved relative to the YAML file containing them.
 Unknown YAML keys are rejected, so misspellings fail before generation.
 
 ## Running the pipeline
+
+Query synthesis uses its own complete configuration file and produces the
+`paths.seeds` consumed by conversation generation. First install the managed
+Nemotron persona assets required by the example locale mix:
+
+```bash
+uv run data-designer download personas \
+  --locale en_IN \
+  --locale hi_Deva_IN \
+  --locale hi_Latn_IN
+```
+
+Then synthesize the raw query seeds:
+
+```bash
+cp config/query_generation.example.yaml config/my-query-workload.yaml
+uv run long-context-sdg synthesize --config config/my-query-workload.yaml
+```
+
+Synthesis atomically publishes a seed file only when every scheduled query was
+accepted and the final batch has no detected near-duplicate pairs. To replace a
+different existing seed file deliberately, add `--force`. This does not erase
+checkpoints, reset attempts, bypass validation, or permit incompatible resume
+state.
+
+Point `config/my-workload.yaml` at the published raw seed JSONL. Conversation
+generation then begins with preparation:
 
 Prepare validates, enriches, and atomically replaces the enriched seed file:
 
@@ -120,6 +162,235 @@ uv run long-context-sdg export --config config/my-workload.yaml
 
 Data Designer is the only supported generation path. The package does not ship
 a separate standalone model runner.
+
+## Query generation
+
+Query generation is a standalone module configured by
+`config/query_generation.example.yaml`. It needs only two model aliases
+(`assistant` and `judge`), a retriever, a reviewed taxonomy, and Data Designer's
+managed persona assets. Conversation-only settings such as turn planning,
+tools, compression, record limits, conversation retry flags, and trajectory
+judging are deliberately absent from this configuration. Its `run` section has
+only `mode: create` and the deterministic `seed`.
+
+### Why not retrieve random corpus chunks globally?
+
+The initial idea—retrieve random chunks and ask a model to invent a
+persona-conditioned question—is useful for variety but unsafe as the only
+sampling strategy. Large topics and prolific sources dominate; rare workflows
+vanish; unrelated chunks create contrived questions; boilerplate and obsolete
+content leak into the batch; and coverage becomes difficult to audit.
+
+This implementation keeps the useful randomness inside reviewed boundaries:
+
+1. A hierarchical taxonomy defines weighted leaf topics and reviewed retrieval
+   probes.
+2. Retrieval builds a bounded evidence pool for every leaf.
+3. Short, excluded, metadata-ineligible, duplicate-ID, and duplicate-content
+   chunks are removed.
+4. Sources are interleaved so one source does not dominate the pool.
+5. Exact candidate quotas are assigned to taxonomy leaves, query archetypes,
+   persona modes, and persona locales.
+6. Evidence bundles are randomly sampled only inside the scheduled leaf, with
+   per-source limits; comparison bundles require at least two sources.
+7. A model drafts the canonical and natural first-user query from a compact
+   managed persona projection and the evidence bundle.
+8. Deterministic leakage, language, length, and retrievability checks run before
+   an independent query judge.
+9. Only a complete, unique, accepted batch is atomically published.
+
+This still depends on taxonomy quality, retrieval recall, corpus freshness, and
+model competence. The fingerprint cannot detect an external corpus changing
+behind an unchanged retriever endpoint, so use new artifact paths when the
+indexed corpus changes materially.
+
+### Managed persona data
+
+Persona rows come from the same native mechanism used by the Data Designer
+tool-calling example:
+
+```python
+dd.SamplerColumnConfig(
+    name="persona",
+    drop=True,
+    sampler_type=dd.SamplerType.PERSON,
+    params=dd.PersonSamplerParams(
+        locale="en_IN",
+        with_synthetic_personas=True,
+    ),
+)
+```
+
+The pipeline creates one managed `PERSON` sampler column for every configured
+locale. It then schedules locale keys with exact largest-remainder quotas and
+uses only the scheduled locale's sampled row for each candidate. No custom
+Hugging Face loader, persona-network client, or persona mock exists in the
+production path.
+
+The example targets 50 English-India, 40 Hindi-Devanagari, and 10 Hindi-Latin
+queries in a batch of 100:
+
+```yaml
+persona_locales:
+  - locale: en_IN
+    language: en
+    weight: 0.50
+    asset_revision: replace-with-reviewed-ngc-version
+  - locale: hi_Deva_IN
+    language: hi-Deva
+    weight: 0.40
+    asset_revision: replace-with-reviewed-ngc-version
+  - locale: hi_Latn_IN
+    language: hi-Latn
+    weight: 0.10
+    asset_revision: replace-with-reviewed-ngc-version
+```
+
+`asset_revision` is recorded in seed provenance and included in the synthesis
+fingerprint. It does not tell `data-designer download personas` which version to
+download; the downloader resolves its managed asset. Set this field to the
+actual asset version reviewed for the run, and archive that version in the
+generation manifest. Do not leave the example placeholder in a production run.
+
+Persona knobs are:
+
+| Key | Constraint | Effect |
+|---|---|---|
+| `locale` | Unique, nonempty Data Designer locale | Selects the managed persona asset. |
+| `language` | Nonempty label | Controls query prompts, validation, and conversation-language instructions. |
+| `weight` | Greater than zero | Relative locale quota; counts are exact after integer allocation. |
+| `asset_revision` | Nonempty reviewed label | Audit provenance and fingerprint input; not a downloader selector. |
+| `narrative_fields` | Nonnegative weights with positive total | Chooses one available persona facet deterministically. Defaults to overview, professional, skills, and interests facets. |
+| `attribute_fields` | List of managed-row keys | Copies only selected, nonempty compact attributes into metadata. Names are not copied by default. |
+| `sex` | `Male`, `Female`, or omitted | Optional native sampler filter. |
+| `city` | String, list, or omitted | Optional native sampler city filter. |
+| `age_range` | Two increasing integers within 18–114; default `[18, 114]` | Optional native sampler age range. |
+| `select_field_values` | Mapping or omitted | Optional native sampler field-value filters. |
+
+The persona source ID is the managed row's `uuid` when present and otherwise a
+stable row hash. The prompt prohibits exposing names and source IDs in visible
+queries. Selected narratives, attributes, and source identifiers remain in
+metadata for auditability, so review the persona asset's license, privacy,
+bias, and suitability for the intended workload.
+
+### Taxonomy
+
+`config/taxonomy.example.yaml` shows the required hierarchy. Every node needs a
+globally unique nonempty `id` and `label`; every leaf needs at least one
+nonblank `seed_query`. Candidate allocation uses the product of all weights on
+the path from the top-level node to the leaf.
+
+| Field | Effect |
+|---|---|
+| `version` | Reviewed taxonomy version. |
+| `topics` / `children` | Hierarchical topic structure; only leaves receive candidates. |
+| `id` | Stable coverage and provenance key, unique across the tree. |
+| `label` / `description` | Human and model-readable topic scope. |
+| `weight` | Relative node weight; parent and child weights are multiplied. |
+| `seed_queries` | Reviewed probes used to build that leaf's evidence pool. |
+| `exclusions` | Case-insensitive substrings that disqualify matching chunks. |
+| `required_terms` | Generator guidance; currently not a deterministic gate. |
+| `metadata_filters` | Exact eligibility filters over normalized chunk metadata. |
+
+The raw taxonomy file bytes are hashed. Even formatting-only edits define a new
+synthesis fingerprint and therefore incompatible checkpoint state.
+
+### Exact diversity quotas
+
+Weights are converted to integer counts with largest-remainder allocation and
+then deterministically shuffled. Marginals are exact; cross-products are not.
+For example, exactly 40 Hindi-Devanagari and 10 comparison candidates do not
+guarantee exactly four Hindi-Devanagari comparisons.
+
+The default query archetypes produce these counts for 100 candidates:
+
+| Archetype | Weight / count | Intended behavior |
+|---|---:|---|
+| `research` | 0.65 / 65 | Substantive evidence-grounded information need. |
+| `applied_scenario` | 0.15 / 15 | Practical persona-situated decision or workflow. |
+| `comparison` | 0.10 / 10 | Requires evidence from at least two sources. |
+| `misconception` | 0.05 / 5 | Plausible premise that needs correction or qualification. |
+| `clarification` | 0.03 / 3 | Natural opening may omit one material detail while canonical query remains self-contained. |
+| `insufficient_evidence` | 0.02 / 2 | Relevant question whose essential answer is absent from the supplied bundle. |
+
+The default persona modes are 40% `general_interest`, 40% `situated_need`, and
+20% `domain_adjacent`. These labels guide generator and judge behavior; custom
+labels are allowed but require prompt and validation extensions if they imply
+structural rules.
+
+### Query-generation knobs
+
+| Key | Default / constraint | Effect |
+|---|---|---|
+| `num_queries` | `100`; at least 1 | Exact candidate count and required accepted publication count. |
+| `taxonomy_path` | Required | Reviewed taxonomy YAML, resolved relative to the config. |
+| `generator_alias` | `assistant` | Model that drafts structured queries. |
+| `judge_alias` | `judge` | Model that independently judges accepted drafts. |
+| `max_attempts` | `3`; 1–10 | Durable attempts allowed per deterministic candidate. |
+| `min_judge_score` | `4`; 1–5 | Minimum score on every required judge dimension. |
+| `min_query_chars` | `8`; at least 1 | Minimum length for canonical and naive queries. |
+| `max_query_chars` | `400`; at least minimum | Maximum length for canonical and naive queries. |
+| `archetype_weights` | Positive total | Exact archetype marginal. |
+| `persona_mode_weights` | Positive total | Exact persona-mode marginal. |
+| `persona_locales` | At least one unique locale | Native sampler setup and exact language marginal. |
+
+Evidence controls are:
+
+| Key | Default / constraint | Effect |
+|---|---|---|
+| `pool_size` | `32`; 4–100 | Maximum eligible evidence chunks retained per leaf. |
+| `bundle_min` | `2`; 1–8 | Minimum chunks supplied to one query candidate. |
+| `bundle_max` | `4`; 1–8 | Maximum chunks; must be at least the minimum and no larger than the pool. |
+| `max_per_source` | `2`; 1–8 | Maximum bundle chunks from one normalized source. |
+| `min_chunk_chars` | `160`; at least 1 | Removes short fragments before pool construction. |
+| `retrievability_top_k` | `8`; 1–100 | Results examined when checking whether the generated canonical query recovers an anchor. |
+| `max_lexical_overlap` | `0.35`; 0–1 | Maximum trigram-Jaccard overlap with an evidence chunk. |
+| `max_verbatim_tokens` | `12`; 4–50 | Rejects long contiguous evidence spans copied into a query. |
+| `duplicate_similarity` | `0.85`; 0–1 | Near-duplicate threshold within the same taxonomy leaf and language. |
+
+Query-generation `paths` are independent from conversation artifacts:
+
+| Path | Contents |
+|---|---|
+| `seeds` | Atomically published rich raw seeds; conversation `paths.seeds` points here. |
+| `evidence_manifest` | Fingerprinted per-leaf retrieval pools, including full chunk text. |
+| `candidates` | Deterministic scheduled candidates supplied to Data Designer. |
+| `checkpoint` | Append-only query attempts. Do not share with the conversation checkpoint. |
+| `report` | Coverage, status, attempt, rejection, and duplicate statistics. |
+
+### Query quality gates and resume
+
+The generator returns a self-contained canonical `query`, a natural
+`naive_query`, role, expertise, style, and optional seed instructions.
+Deterministic checks enforce length, basic script expectations, chunk-ID
+non-leakage, lexical and contiguous-copy limits, and retrieval of at least one
+original anchor. Comparison queries must recover anchors from at least two
+original sources.
+
+Only deterministic passes reach the query judge. The judge must score
+`topic_fit`, `persona_realism`, `language_quality`, `answerability`,
+`retrieval_quality`, and `non_leakage`; every dimension must meet
+`min_judge_score`, rating must be `success`, and its answerability label must
+match the candidate.
+
+Every attempt is appended and `fsync`'d as `accepted`, `rejected`, or
+`generation_failed`. Resume skips accepted candidates and candidates that have
+reached `max_attempts`; incomplete candidates continue at the next attempt.
+Fingerprint compatibility covers query configuration, raw taxonomy hash,
+retriever configuration, generator/judge model configuration, run seed, and
+prompt version. Query checkpoints are process-local single-writer artifacts.
+
+Finalization writes the report before publication and refuses to publish a
+partial batch, a seedless accepted record, or a batch with detected near
+duplicates. The published seed intentionally omits conversation `turn_budget`
+and `retrieval_depth`; `prepare` assigns those reproducibly from the independent
+conversation configuration while preserving persona and query provenance.
+
+Published provenance includes taxonomy ID, archetype, answerability, evidence
+chunk IDs, hashes and sources, persona source/version, model aliases, prompt
+version, and the synthesis fingerprint. The evidence bundle guides creation of
+the opening query; conversation generation later uses the configured live
+retriever normally and is not forced to retrieve the same chunks.
 
 ## Multilingual generation
 
@@ -560,7 +831,25 @@ attempt for each query to canonical and partition files. It writes:
 
 ## Adapting to another domain or language
 
-Create a complete workload config and change these layers deliberately:
+For a new domain, start in the query module: replace the example taxonomy,
+write leaf probes that reliably retrieve the domain corpus, add exclusions and
+metadata filters for obsolete or out-of-scope material, and audit a small
+evidence manifest before generating a full batch. Python changes are not needed
+when taxonomy, retrieval mapping, and prompts express the domain adequately.
+
+For another language, install a supported Data Designer persona locale, add its
+`persona_locales` entry and weight, select role models tested in that language,
+and add a real language-identification/native-fluency evaluator. The built-in
+deterministic language check is intentionally narrow: it has useful script
+checks for Devanagari-labelled and English-labelled records, but a language
+label is not proof of fluency.
+
+For another query archetype, add its weight, explain its semantics in the query
+prompts, implement any evidence-bundle and deterministic validation rules, and
+add report/test coverage. A new label by itself is only a model hint.
+
+Then create a complete conversation workload config and change these layers
+deliberately:
 
 1. **Seeds:** supply representative topics, personas, naive phrasings, and
    optional per-seed constraints. Preserve stable IDs across reruns.
@@ -712,6 +1001,8 @@ not index arrays. The resolved result container must be a list of objects.
 | File | Responsibility |
 |---|---|
 | `config/default.yaml` | Complete domain-neutral template with placeholders and all supported knobs. |
+| `config/query_generation.example.yaml` | Standalone query-generation template, managed persona locales, model/retrieval configuration, diversity weights, and artifact paths. |
+| `config/taxonomy.example.yaml` | Reviewed hierarchical topic contract and retrieval probes. |
 | `data/queries.jsonl` | Minimal raw and rich generic seed examples. |
 | `pyproject.toml` | Package metadata, dependencies, console command, Data Designer plugin entry point, and test/lint settings. |
 | `uv.lock` | Reproducible dependency resolution. |
@@ -720,10 +1011,12 @@ not index arrays. The resolved result container must be a list of objects.
 
 | File | Responsibility |
 |---|---|
-| `src/long_context_sdg/__main__.py` | `prepare`, `generate`, `evaluate`, and `export` CLI. |
+| `src/long_context_sdg/__main__.py` | `synthesize`, `prepare`, `generate`, `evaluate`, and `export` CLI. |
 | `src/long_context_sdg/checkpoint.py` | Checkpoint parsing, fingerprint verification, resume index, append/flush/fsync. |
 | `src/long_context_sdg/compression.py` | Compressor prompts, summary rendering, and source-provenance validation. |
 | `src/long_context_sdg/config.py` | Strict Pydantic configuration, constraints, path resolution, and fingerprints. |
+| `src/long_context_sdg/config_base.py` | Shared strict configuration base that rejects unknown keys. |
+| `src/long_context_sdg/conversation_generation.py` | Public conversation-stage façade for seed preparation and Data Designer generation. |
 | `src/long_context_sdg/evaluation.py` | Latest-attempt selection, deterministic revalidation, optional rejudging, partitions, and summary. |
 | `src/long_context_sdg/exporters.py` | Accepted-only messages, messages+tools, and rich JSONL export. |
 | `src/long_context_sdg/generator.py` | Data Designer column generator and episode checkpoint adapter. |
@@ -739,6 +1032,7 @@ not index arrays. The resolved result container must be a list of objects.
 | `src/long_context_sdg/runtime.py` | Episode state engine, tool loops, compaction, validation, judging, and canonical projection. |
 | `src/long_context_sdg/schemas.py` | Seed, plan, message, tool, compression, judgment, and canonical schemas. |
 | `src/long_context_sdg/seeds.py` | Stable IDs, deterministic enrichment, JSONL parsing, duplicate detection, and atomic preparation. |
+| `src/long_context_sdg/service_config.py` | Strict model-provider and retrieval contracts shared without coupling independent stages. |
 | `src/long_context_sdg/tokens.py` | Token estimation, active-context accounting, and compaction meter. |
 | `src/long_context_sdg/tool_registry.py` | Trusted executor imports, tool-call normalization, schema validation, and dispatch. |
 | `src/long_context_sdg/validation.py` | Replayable message/tool/retrieval/final-answer validation. |
@@ -747,6 +1041,24 @@ not index arrays. The resolved result container must be a list of objects.
 | `src/long_context_sdg/executors/memory.py` | Allowlisted episode-local memory. |
 | `src/long_context_sdg/executors/simulated.py` | Explicitly labeled model-simulated tool output. |
 
+### Query-generation modules
+
+| File | Responsibility |
+|---|---|
+| `src/long_context_sdg/query_generation/allocation.py` | Largest-remainder exact quotas and deterministic shuffled schedules. |
+| `src/long_context_sdg/query_generation/candidates.py` | Fingerprinting, evidence-cache reuse, marginal scheduling, evidence sampling, stable IDs, and atomic candidate publication. |
+| `src/long_context_sdg/query_generation/checkpoint.py` | Query attempt parsing, compatibility checks, durable append, and latest-attempt selection. |
+| `src/long_context_sdg/query_generation/config.py` | Standalone strict query, evidence, managed-persona, provider, model, retriever, and path contracts. |
+| `src/long_context_sdg/query_generation/evidence.py` | Per-leaf retrieval pools, eligibility filters, content deduplication, source diversity, and bounded bundle sampling. |
+| `src/long_context_sdg/query_generation/generator.py` | Data Designer cell generator, persona projection, drafting, deterministic gates, independent judging, retries, checkpointing, and seed conversion. |
+| `src/long_context_sdg/query_generation/generator_config.py` | `persona-query-generator` Data Designer column contract and required managed-persona columns. |
+| `src/long_context_sdg/query_generation/personas.py` | Stable locale keys, sampler-column names, compact narrative/attribute projection, and persona provenance. |
+| `src/long_context_sdg/query_generation/pipeline.py` | Native `PERSON` sampler setup, pending-candidate orchestration, resume, reports, deduplication, and atomic seed publication. |
+| `src/long_context_sdg/query_generation/prompts.py` | Query-draft and independent-judge prompts plus required quality dimensions. |
+| `src/long_context_sdg/query_generation/schemas.py` | Taxonomy, persona, candidate, draft, judgment, and checkpoint schemas. |
+| `src/long_context_sdg/query_generation/taxonomy.py` | Strict taxonomy loading, weighted leaf traversal, and raw-file hashing. |
+| `src/long_context_sdg/query_generation/validation.py` | Length/script, evidence leakage, anchor retrievability, comparison recovery, and lexical duplicate checks. |
+
 ### Tests
 
 | File | Responsibility |
@@ -754,6 +1066,7 @@ not index arrays. The resolved result container must be a list of objects.
 | `tests/fixtures.py` | Temporary configs, deterministic model doubles, retrieval double, and custom executor. |
 | `tests/test_config_seeds_planning.py` | Enrichment, variable budgets, planning, first-turn diversity, and prompt constraints. |
 | `tests/test_llm_retries.py` | Transport retries and robust structured JSON extraction. |
+| `tests/test_query_generation.py` | Exact quotas, taxonomy/evidence behavior, native managed-persona sampler configuration, persona projection, validation, query checkpoints, and atomic publication. |
 | `tests/test_retrieval_registry_memory.py` | Retrieval mapping, registry validation, memory policy, and simulated marking. |
 | `tests/test_runtime_e2e.py` | Full episodes, tool use, hidden compaction, and correction behavior. |
 | `tests/test_tokens_reasoning.py` | Token accounting, compaction spacing, and reasoning validation. |
