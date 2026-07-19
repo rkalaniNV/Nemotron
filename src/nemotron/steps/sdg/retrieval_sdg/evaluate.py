@@ -115,14 +115,15 @@ def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any
 
 
 def _judge_from_config(config_path):
-    """(model, endpoint, api_key_env) for the judge_model alias in pipeline.yaml."""
+    """(model, endpoint, api_key_env) for the judge_model alias in the config."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
     models = {m.get("alias"): m for m in cfg.get("models", [])}
     provs = {p.get("name"): p for p in cfg.get("providers", [])}
     jm = models.get("judge_model", {})
     prov = provs.get(jm.get("provider"), {})
-    return jm.get("model", ""), prov.get("endpoint", ""), prov.get("api_key", "NVIDIA_API_KEY")
+    return (jm.get("model", ""), prov.get("endpoint", ""),
+            prov.get("api_key_env") or prov.get("api_key", "NVIDIA_API_KEY"))
 
 
 def _make_judge(model: str, endpoint: str, api_key_env: str):
@@ -197,6 +198,16 @@ def _records(result) -> List[Dict[str, Any]]:
     return ds.to_dict("records") if hasattr(ds, "to_dict") else list(ds)
 
 
+def _for_sft(row: Dict[str, Any], *, keep_reasoning: bool) -> Dict[str, Any]:
+    """The row as written to the SFT set: drop the eval column. Assistant reasoning_content
+    is kept by default (the CoT is a training target); --strip-reasoning drops it."""
+    out = {k: v for k, v in row.items() if k != "eval"}
+    if not keep_reasoning and isinstance(out.get("messages"), list):
+        out["messages"] = [{k: v for k, v in m.items() if k != "reasoning_content"}
+                           if isinstance(m, dict) else m for m in out["messages"]]
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Judge raw trajectories (a DataDesigner pass) -> filtered SFT set.")
     ap.add_argument("--input", type=Path, default=None, help="raw jsonl (default: exp raw.jsonl from --config)")
@@ -204,9 +215,12 @@ def main() -> None:
     ap.add_argument("--judge", action="store_true", help="run the LLM defect gate (else objective-only)")
     ap.add_argument("--min-quality", type=int, default=3, help="soft quality floor (1-5)")
     ap.add_argument("--min-overlap", type=float, default=0.0,
-                    help="min answer<->evidence char-ngram overlap (0 = report only, don't gate)")
+                    help="min answer<->evidence char-ngram overlap (0 = report only; the metric is a weak "
+                         "exact-substring proxy — median ~0.11 — so gate low, ~0.02-0.03, and calibrate per corpus)")
+    ap.add_argument("--strip-reasoning", action="store_true",
+                    help="drop assistant reasoning_content from the SFT rows (default: keep — the CoT is a training target)")
     # judge model/endpoint: from --config's judge_model, or explicit flags (which win)
-    ap.add_argument("--config", type=Path, default=None, help="pipeline.yaml — resolves the judge_model")
+    ap.add_argument("--config", type=Path, default=None, help="pipeline.yaml — resolves the judge_model + exp paths")
     ap.add_argument("--model", default=None)
     ap.add_argument("--endpoint", default=None)
     ap.add_argument("--api-key-env", default=None)
@@ -281,7 +295,7 @@ def main() -> None:
                 and (not args.judge or _rubric_ok(ev.get("rubric"), args.min_quality)))
         scored.append({**r, "eval": {**ev, "kept": bool(keep)}})   # in-memory only (for the summary)
         if keep:
-            kept.append({k: v for k, v in r.items() if k != "eval"})
+            kept.append(_for_sft(r, keep_reasoning=not args.strip_reasoning))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
@@ -311,7 +325,7 @@ def _summary(scored: List[Dict[str, Any]], kept: List[Dict[str, Any]], args) -> 
     n = len(scored)
     out: Dict[str, Any] = {
         "total": n,
-        "objective_pass": sum(1 for r in scored if r["eval"]["objective_ok"]),
+        "objective_pass": sum(1 for r in scored if r["eval"].get("objective_ok")),
         "citation_fabrication_rows": sum(1 for r in scored if not r["eval"].get("citation_ok", True)),
         "cited_ids_total": sum(r["eval"].get("cited_ids", 0) for r in scored),
         "kept": len(kept),
@@ -325,7 +339,7 @@ def _summary(scored: List[Dict[str, Any]], kept: List[Dict[str, Any]], args) -> 
         out["top_flow_patterns"] = [{"pattern": p, "count": c}
                                     for p, c in Counter(_role_seq(r["messages"]) for r in kept).most_common(5)]
         out["context_length_tokens"] = _dist([_ctx_tokens(r["messages"]) for r in kept])
-    ov = sorted(r["eval"]["grounding_overlap"] for r in scored)
+    ov = sorted(r["eval"].get("grounding_overlap", 0.0) for r in scored)
     if ov:
         out["grounding_overlap"] = {"mean": round(sum(ov) / len(ov), 3),
                                     "median": ov[len(ov) // 2],
