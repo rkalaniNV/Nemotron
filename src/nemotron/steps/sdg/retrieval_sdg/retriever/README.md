@@ -34,11 +34,22 @@ prep scripts are env-driven and resumable (checkpoint + `.complete` marker).
 
 ## Requirements
 
-- Ubuntu, NVIDIA driver, Python 3.12
-- `nemo-retriever[local]==26.5.0`, vLLM, LanceDB (see `requirements.txt`)
+- Ubuntu, NVIDIA driver, **Python 3.12** (nemo-retriever[local] requires `>=3.12,<3.13`)
+- `nemo-retriever[local]==26.5.0`, vLLM, LanceDB — pinned in `requirements.txt`
 - A GPU for the embedding service and indexing
+- `torch`/`vllm` install from the PyTorch CUDA index pinned in `requirements.txt`
+  (`--extra-index-url .../cu128`); match the `cuXXX` tag to the host driver's CUDA and
+  ensure a torch 2.11.0 wheel exists for that Python/arch (linux x86_64 or aarch64).
 
 ## Quick start
+
+Install (Python 3.12 venv; torch/vllm come from the CUDA index in `requirements.txt`):
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python -c "import vllm._C, nemo_retriever, lancedb; print('deps OK')"   # sanity
+```
 
 Prepare a corpus:
 
@@ -80,6 +91,11 @@ query_gen:
 ```
 
 ## Reference deployment
+
+The values below and the `systemd/*.service` units are a concrete reference for one
+deployment — templates, not portable config. Adjust `User`/`Group`, `WorkingDirectory`,
+the host/IP, and the `Environment=` paths (`LANCEDB_URI`, `INPUT_JSONL`, `HF_HOME`) for
+your host before enabling them.
 
 | Setting | Value |
 |---|---|
