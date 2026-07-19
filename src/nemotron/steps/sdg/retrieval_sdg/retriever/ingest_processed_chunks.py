@@ -1,3 +1,17 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Step 3: embed chunks.jsonl and build the LanceDB index — NeMo Retriever, directly.
 
 Resumable bulk ingest: each row needs `text`; rows are embedded with the retriever's
@@ -22,8 +36,8 @@ from nemo_retriever.vdb.lancedb_bulk import LanceDBConfig, create_lancedb_index
 from nemo_retriever.vdb.lancedb_schema import build_lancedb_rows, lancedb_schema
 
 env = os.environ.get
-INPUT = Path(env("INPUT_JSONL", "/localhome/local-rkalani/hindi-legal-agent/data/processed/extraction/chunks.jsonl"))
-DB_URI = env("LANCEDB_URI", "/localhome/local-rkalani/nemo-retriever/lancedb-hindi-legal")
+INPUT = Path(env("INPUT_JSONL", "./data/chunks.jsonl"))
+DB_URI = env("LANCEDB_URI", "./lancedb")
 TABLE = env("TABLE_NAME", "hindi-legal-judgments")
 MODEL = env("MODEL_NAME", "nvidia/Nemotron-3-Embed-1B-BF16")
 EMBED_URL = env("EMBEDDING_ENDPOINT", "http://127.0.0.1:8001/v1/embeddings")

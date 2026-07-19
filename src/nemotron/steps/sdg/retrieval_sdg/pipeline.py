@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Orchestrator — query_prep -> conversation generation -> raw trajectories.
 
     Stage A (query_prep, offline, MiniLM only):
@@ -55,7 +69,7 @@ def _build_model_clients(cfg: Dict[str, Any]) -> Dict[str, Any]:
     for m in cfg.get("models", []):
         p = prov.get(m.get("provider"), {})
         out[m["alias"]] = {"model": m["model"], "base_url": p.get("endpoint", ""),
-                           "api_key_env": p.get("api_key_env") or p.get("api_key", "NVIDIA_API_KEY"),
+                           "api_key_env": p.get("api_key", "NVIDIA_API_KEY"),
                            "params": dict(m.get("inference_parameters", {}))}
     return out
 

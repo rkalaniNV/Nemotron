@@ -31,8 +31,20 @@ top-level `exp_name`. Reusing a name overwrites; change it to keep runs side by 
   documented in [`retriever/README.md`](retriever/README.md))
 - API keys exposed through the environment variables named in the config
 
-The checked-in retrieval address is deployment-specific; replace it before running
-outside that network.
+Deployment-specific values in `config/pipeline.yaml` read from the environment (with
+local-friendly defaults), so no editing is needed to point at your own services — just
+export what applies:
+
+| Variable | Sets | Default |
+|---|---|---|
+| `RETRIEVAL_SDG_CHUNKS_PATH` | corpus JSONL for `query_gen` | `./data/chunks.jsonl` |
+| `EMBEDDING_ENDPOINT` / `EMBEDDING_API_KEY` | embedding service + key env-var | `http://localhost:8001/v2/embed` |
+| `ASSISTANT_ENDPOINT` / `ASSISTANT_API_KEY` | assistant/judge model server + key env-var | `http://localhost:8000/v1` |
+| `USER_MODEL_ENDPOINT` / `USER_MODEL_API_KEY` | user-simulator model server + key env-var | `http://localhost:8000/v1` |
+| `RETRIEVAL_ENDPOINT` | retrieval service | empty → retrieval is LLM-simulated (dry run) |
+
+The `*_API_KEY` variables name the env var that holds the key; set both that name and the
+key it points to.
 
 To start or rebuild the NeMo Retriever service currently used by the checked-in
 configuration, follow [`retriever/README.md`](retriever/README.md). That deployment

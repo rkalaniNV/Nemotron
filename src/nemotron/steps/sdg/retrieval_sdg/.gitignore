@@ -9,3 +9,6 @@ artifacts/
 # run outputs (per-experiment) and backups — data, not code
 experiments/
 backups/
+
+# local run override (real endpoints; never commit)
+config/pipeline.local.yaml

@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Judge/filter stage — a standalone DataDesigner pass over raw trajectories.
 
 Decoupled from generation: run on any raw jsonl to (re)score without regenerating.
@@ -70,22 +84,28 @@ def _evidence_overlap(row: Dict[str, Any], n: int = 12) -> float:
 _ID = re.compile(r"h[0-9a-f]{12}")
 
 
-def _ids(msgs: List[Dict[str, Any]], role_pred) -> set:
+def _ids(msgs: List[Dict[str, Any]], role_pred, field: str = "content") -> set:
     ids: set = set()
     for m in msgs:
         if role_pred(m):
-            ids |= set(_ID.findall(m.get("content", "") or ""))
+            ids |= set(_ID.findall(m.get(field, "") or ""))
     return ids
 
 
 def _citation_integrity(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Every chunk id the assistant CITES must have been RETRIEVED in this conversation."""
+    """Every chunk id CITED must have been RETRIEVED in this conversation — checked on
+    both the answer (assistant content) and, since it's a kept training target, the CoT
+    (assistant reasoning_content)."""
     msgs = row.get("messages", [])
-    cited = _ids(msgs, lambda m: m.get("role") == "assistant" and not m.get("tool_calls"))
     retrieved = _ids(msgs, lambda m: m.get("role") == "tool")
+    cited = _ids(msgs, lambda m: m.get("role") == "assistant" and not m.get("tool_calls"))
     fabricated = sorted(cited - retrieved)
+    r_cited = _ids(msgs, lambda m: m.get("role") == "assistant", field="reasoning_content")
+    r_fabricated = sorted(r_cited - retrieved)
     return {"cited_ids": len(cited), "fabricated_ids": len(fabricated),
-            "fabricated": fabricated[:10], "citation_ok": not fabricated}
+            "fabricated": fabricated[:10], "citation_ok": not fabricated,
+            "reasoning_cited_ids": len(r_cited), "reasoning_fabricated_ids": len(r_fabricated),
+            "reasoning_fabricated": r_fabricated[:10], "reasoning_citation_ok": not r_fabricated}
 
 
 def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any]:
@@ -122,8 +142,7 @@ def _judge_from_config(config_path):
     provs = {p.get("name"): p for p in cfg.get("providers", [])}
     jm = models.get("judge_model", {})
     prov = provs.get(jm.get("provider"), {})
-    return (jm.get("model", ""), prov.get("endpoint", ""),
-            prov.get("api_key_env") or prov.get("api_key", "NVIDIA_API_KEY"))
+    return jm.get("model", ""), prov.get("endpoint", ""), prov.get("api_key", "NVIDIA_API_KEY")
 
 
 def _make_judge(model: str, endpoint: str, api_key_env: str):
@@ -237,8 +256,10 @@ def main() -> None:
         if args.config and not (model and endpoint and key):
             cm, ce, ck = _judge_from_config(args.config)
             model, endpoint, key = model or cm, endpoint or ce, key or ck
-        _JUDGE = _make_judge(model or "nvidia/openai/gpt-oss-120b",
-                             endpoint or "https://inference-api.nvidia.com/v1", key or "NVIDIA_API_KEY")
+        if not (model and endpoint):
+            raise SystemExit("[eval] --judge needs a judge model + endpoint. Set a judge_model in "
+                             "--config, or pass --model/--endpoint. (No silent hosted fallback.)")
+        _JUDGE = _make_judge(model, endpoint, key or "NVIDIA_API_KEY")
 
     # paths from --config's exp_name (raw.jsonl -> sft.jsonl + summary.json), or explicit --input/--out
     input_path, out_path, summary_path, artifacts = args.input, args.out, None, None
@@ -292,6 +313,7 @@ def main() -> None:
         ev = by_id.get(i, {}).get("eval")
         ev = json.loads(ev) if isinstance(ev, str) else (ev or {})
         keep = (ev.get("objective_ok") and ev.get("grounding_overlap", 0.0) >= args.min_overlap
+                and (args.strip_reasoning or ev.get("reasoning_citation_ok", True))
                 and (not args.judge or _rubric_ok(ev.get("rubric"), args.min_quality)))
         scored.append({**r, "eval": {**ev, "kept": bool(keep)}})   # in-memory only (for the summary)
         if keep:
@@ -327,6 +349,7 @@ def _summary(scored: List[Dict[str, Any]], kept: List[Dict[str, Any]], args) -> 
         "total": n,
         "objective_pass": sum(1 for r in scored if r["eval"].get("objective_ok")),
         "citation_fabrication_rows": sum(1 for r in scored if not r["eval"].get("citation_ok", True)),
+        "reasoning_fabrication_rows": sum(1 for r in scored if not r["eval"].get("reasoning_citation_ok", True)),
         "cited_ids_total": sum(r["eval"].get("cited_ids", 0) for r in scored),
         "kept": len(kept),
         "keep_rate": round(len(kept) / n, 3) if n else None,
