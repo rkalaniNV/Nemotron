@@ -57,10 +57,10 @@ persona:
 providers:
   - name: lepton_gptoss
     endpoint: https://xtcr3jss-gpt-oss-120b-rapaul-gcp.xenon.lepton.run/v1
-    api_key: LEPTON_API_TOKEN
+    api_key_env: LEPTON_API_TOKEN               # env var HOLDING the key (not the key itself)
   - name: lepton_gemma
     endpoint: https://xtcr3jss-gemma-4-31b-it-vllm-ravirajj-az-32k.xenon.lepton.run/v1
-    api_key: LEPTON_API_KEY
+    api_key_env: LEPTON_API_KEY
 
 # gpt-oss-120b is a reasoning model (spends tokens before the answer) on a 64k-ctx
 # endpoint; Gemma is 32k-ctx. Size max_tokens so prompt + max_tokens fits the window.

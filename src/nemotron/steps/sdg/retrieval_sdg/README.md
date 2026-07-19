@@ -18,6 +18,9 @@ generation metadata.
 The implementation is domain-agnostic. Corpus access, tools, models, endpoints, and
 generation behavior are configured in `config/pipeline.yaml`.
 
+Everything for one run lives under `experiments/<exp_name>/output/`, keyed by the
+top-level `exp_name`. Reusing a name overwrites; change it to keep runs side by side.
+
 ## Requirements
 
 - Python 3.10+
@@ -42,21 +45,23 @@ Run from this directory:
 ```bash
 pip install -e .
 
-# Prepare seeds: normalize, deduplicate, embed, cluster, sample
+# Optional: synthesize seed queries from the corpus (writes queries.jsonl)
+python pipeline.py --config config/pipeline.yaml --stage query_gen
+
+# Prepare seeds: normalize, deduplicate, embed, cluster, sample (writes seeds.jsonl)
 python pipeline.py --config config/pipeline.yaml --stage query_prep
 
-# Generate a small smoke-test batch
+# Generate a small smoke-test batch (writes raw.jsonl)
 python pipeline.py --config config/pipeline.yaml --stage generate --limit 5
 
-# Validate and filter; --judge enables the LLM rubric
-python evaluate.py \
-  --input output/sdg/retrieval_sdg.raw.jsonl \
-  --out output/sdg/retrieval_sdg.jsonl \
-  --judge
+# Validate and filter; --config resolves the judge and the experiment paths
+python evaluate.py --config config/pipeline.yaml --judge
 ```
 
 `--stage all` runs query preparation and generation. `--limit N` caps sampled or
-generated rows.
+generated rows. Paths are derived from `exp_name`, so the commands above read and write
+`experiments/<exp_name>/output/`; pass `--input`/`--out` to `evaluate.py` to point at
+explicit files instead.
 
 ## Configure
 
@@ -64,9 +69,11 @@ Update `config/pipeline.yaml` before generation:
 
 | Section | Key settings |
 |---|---|
-| Top level | `input_path`, `seeds_path`, `output_path`, `metadata_fields` |
+| Top level | `exp_name`, `exp_root` (all outputs go to `experiments/<exp_name>/output/`) |
+| `query_gen` | optional corpus-grounded seed synthesis: source, chunks/lancedb, `n_queries`, embedding |
 | `query_prep` | dedup threshold, embedding model, clustering, target sample size |
-| `providers` | provider name, endpoint, API-key environment variable |
+| `persona` | DD-native Person sampler: enable, locale, synthetic personas |
+| `providers` | provider name, endpoint, `api_key_env` (the env-var **name**, not the key) |
 | `models` | four required aliases and inference parameters |
 | `retrieval` | endpoint, tool names, `top_k`, oversampling, timeout, headers, field map |
 | `tools` | OpenAI-format function schemas |
@@ -128,22 +135,42 @@ The deterministic gate requires:
 - no schema-invalid recorded tool calls;
 - at least one retrieval-shaped result;
 - a final tool-free assistant answer;
-- no cited chunk id that was never retrieved.
+- no cited chunk id that was never retrieved (citation integrity — the hard grounding
+  guarantee).
 
-Evaluation also reports answer/evidence character n-gram overlap. Set
-`--min-overlap` to make that metric a hard grounding gate.
+Because the objective gate requires a real retrieval call, degenerate zero-hop rows
+cannot reach the SFT set — so generation leaves `force_first_tool: false` (an A/B run
+showed the query, not the flag, drives first-turn tool use) and lets the gate enforce
+the guarantee.
+
+Evaluation also reports answer/evidence character n-gram overlap as a diagnostic. It is
+a weak exact-substring proxy (paraphrased answers score low; the observed median is
+~0.11), so it is **report-only by default**. If you gate on it, set `--min-overlap` low
+(~0.02–0.03, to catch only true zero-grounding) and calibrate per corpus — a larger
+value discards well-grounded rows.
 
 With `--judge`, an LLM adds a defect gate plus a 1-5 quality score. Any configured
 disqualifier rejects the row; clean rows must also meet `--min-quality`.
 
+The SFT rows keep assistant `reasoning_content` by default: the chain-of-thought is a
+training target — the whole point of the SDG — and the assistant model is a config knob,
+so the trace is the transferable asset. Pass `--strip-reasoning` if your training recipe
+trains only on the final answer and tool calls.
+
 ## Outputs
+
+All under `experiments/<exp_name>/output/`:
 
 | File | Contents |
 |---|---|
-| `retrieval_sdg.raw.jsonl` | Generated trajectories before decoupled evaluation |
-| `retrieval_sdg.jsonl` | Trajectories that passed enabled gates |
-| `retrieval_sdg.scored.jsonl` | Every evaluated row with objective and rubric results |
-| `retrieval_sdg.summary.json` | Keep rate and aggregate cluster, hop, and score metrics |
+| `queries.jsonl` | Synthesized seed queries (only when `query_gen` runs) |
+| `seeds.jsonl` | Deduplicated, clustered, sampled seeds fed to generation |
+| `raw.jsonl` | Generated trajectories before decoupled evaluation (keeps `reasoning_content`) |
+| `sft.jsonl` | Trajectories that passed enabled gates (keeps `reasoning_content` by default) |
+| `summary.json` | Keep rate and aggregate cluster, hop, grounding, and score metrics |
+
+Per-row eval detail (objective + rubric) is not written to disk; it lives only in the
+checkpointed DataDesigner artifacts and is aggregated into `summary.json`.
 
 Raw rows contain:
 

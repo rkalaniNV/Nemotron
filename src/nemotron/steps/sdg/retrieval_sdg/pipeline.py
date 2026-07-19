@@ -5,7 +5,7 @@
         queries.jsonl (query source) -> dedup -> cluster -> sample -> seeds.jsonl
     Stage B (generate, Data Designer):
         seeds.jsonl -> per-row multi-turn trajectory (HTTP retrieval + inline judge)
-                    -> output/sdg/*.raw.jsonl
+                    -> experiments/<exp_name>/output/raw.jsonl
 
 Judging/filtering into the final SFT set is a SEPARATE, re-runnable stage
 (``evaluate.py``) so you can re-judge without regenerating.
@@ -55,7 +55,7 @@ def _build_model_clients(cfg: Dict[str, Any]) -> Dict[str, Any]:
     for m in cfg.get("models", []):
         p = prov.get(m.get("provider"), {})
         out[m["alias"]] = {"model": m["model"], "base_url": p.get("endpoint", ""),
-                           "api_key_env": p.get("api_key", "NVIDIA_API_KEY"),
+                           "api_key_env": p.get("api_key_env") or p.get("api_key", "NVIDIA_API_KEY"),
                            "params": dict(m.get("inference_parameters", {}))}
     return out
 
