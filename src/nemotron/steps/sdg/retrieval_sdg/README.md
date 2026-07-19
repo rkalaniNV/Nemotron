@@ -70,10 +70,17 @@ python pipeline.py --config config/pipeline.yaml --stage generate --limit 5
 python evaluate.py --config config/pipeline.yaml --judge
 ```
 
-`--stage all` runs query preparation and generation. `--limit N` caps sampled or
-generated rows. Paths are derived from `exp_name`, so the commands above read and write
-`experiments/<exp_name>/output/`; pass `--input`/`--out` to `evaluate.py` to point at
-explicit files instead.
+`--stage all` runs `query_gen` first when a corpus source is configured, then query
+preparation and generation. Without a corpus source, it expects `queries.jsonl` in the
+experiment output. `--limit N` caps sampled or generated rows. Paths are derived from
+`exp_name`; pass `--input`/`--out` to `evaluate.py` to use explicit evaluation files.
+
+### Query generation flow
+
+Both source modes converge on the same clustering, generation, optional validation, and
+bounded top-up loop.
+
+![Query generation flow from JSONL or LanceDB through topical generation units, optional retrieval validation, bounded top-up rounds, and query preparation.](assets/query-generation-flow.png)
 
 ## Configure
 
