@@ -149,6 +149,8 @@ engine:
   metadata_fields: [cluster_id, hops_taken, conversation_status, trajectory_judgment, retrieval_log,
                     compression, persona]
 
+  max_parallel_workers: 8                          # trajectories generated in parallel (raise = faster, bounded by endpoint)
+
   # length: center-weighted, so 3-6 averages ~4-5 turns
   min_turns: 3
   max_turns: 6
