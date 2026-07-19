@@ -38,6 +38,17 @@ def _resolve(base: Path, p: str) -> Path:
     return pp if pp.is_absolute() else (base / pp).resolve()
 
 
+def exp_paths(cfg: Dict[str, Any], base: Path) -> Dict[str, Path]:
+    """Every run artifact lives under <exp_root>/<exp_name>/. Paths derive from exp_name
+    (no per-stage path config). The corpus (query_gen.chunks_path) stays external."""
+    root = _resolve(base, str(cfg.get("exp_root", "../experiments")))
+    exp = root / str(cfg.get("exp_name") or "default")
+    out = exp / "output"
+    return {"exp": exp, "output": out, "artifacts": exp / "artifacts",
+            "queries": out / "queries.jsonl", "seeds": out / "seeds.jsonl",
+            "raw": out / "raw.jsonl", "sft": out / "sft.jsonl", "summary": out / "summary.json"}
+
+
 def _build_model_clients(cfg: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     prov = {p["name"]: p for p in cfg.get("providers", [])}
@@ -58,7 +69,7 @@ def run_query_gen(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path
     if source == "lancedb" and not qg.get("lancedb", {}).get("uri"):
         raise SystemExit("[query_gen] source: lancedb needs query_gen.lancedb.uri + table.")
     chunks_path = str(_resolve(base, qg["chunks_path"])) if qg.get("chunks_path") else ""
-    out_path = _resolve(base, qg.get("output", cfg.get("input_path", "../data/queries.generated.jsonl")))   # query_gen's OWN output
+    out_path = exp_paths(cfg, base)["queries"]
     models = _build_model_clients(cfg)
 
     client = None
@@ -114,13 +125,14 @@ def run_query_gen(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path
 
 
 # ── Stage A: query_prep ───────────────────────────────────────────────────────
-def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int],
-                   queries_path: Optional[Path] = None) -> Path:
+def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path:
     qp = cfg.get("query_prep", {})
     field = qp.get("query_field", "query")
-    # read query_gen's output when it ran; otherwise query_prep.input (bring-your-own queries)
-    inp = queries_path or _resolve(base, qp.get("input", cfg.get("input_path")))
-    seeds_path = _resolve(base, qp.get("output", cfg.get("seeds_path")))
+    p = exp_paths(cfg, base)
+    inp, seeds_path = p["queries"], p["seeds"]           # reads query_gen's queries; missing => error
+    if not inp.exists():
+        raise SystemExit(f"[query_prep] queries not found: {inp}\n"
+                         "  run --stage query_gen first (or drop your queries there).")
 
     rows = [json.loads(l) for l in inp.open(encoding="utf-8") if l.strip()]
     rows = [r if isinstance(r, dict) else {field: r} for r in rows]
@@ -145,9 +157,7 @@ def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int],
     picked = sample(kept, n_target, seed=sm.get("seed", 7))
     print(f"[query_prep] sampled -> {len(picked)}")
 
-    # NOTE: persona is NOT attached here — it's sampled at generation time by DD's native
-    # Person sampler (one per row => constant per trajectory). See build_config_builder.
-    # trajectory shape is sampled per-row by the conversation planner (no classify pass).
+    # persona is sampled at generation time (DD Person sampler); trajectory shape by the planner.
     tools_json = json.dumps(cfg["tools"], ensure_ascii=False)
     seeds_path.parent.mkdir(parents=True, exist_ok=True)
     with seeds_path.open("w", encoding="utf-8") as f:
@@ -176,10 +186,8 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path):
     cb.with_seed_dataset(dd.LocalFileSeedSource(path=str(seed_path)),
                          sampling_strategy=dd.SamplingStrategy.SHUFFLE)
 
-    # one CONSTANT persona per row (=> per trajectory) via DD's native Person sampler,
-    # backed by the managed Nemotron-Personas dataset. Drives the user-sim voice on
-    # EVERY turn. Requires the locale downloaded once: `data-designer download personas
-    # --locale <locale>`. Disable with persona: {enabled: false}.
+    # one persona per row (constant per trajectory) via DD's native Person sampler.
+    # Locale must be downloaded once: `data-designer download personas --locale <locale>`.
     pcfg = cfg.get("persona", {})
     if pcfg.get("enabled", True):
         cb.add_column(dd.SamplerColumnConfig(
@@ -212,14 +220,11 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
     cb = build_config_builder(cfg, seed_path)
     providers = [dd.ModelProvider(**p) for p in cfg.get("providers", [])]
 
-    # Crash safety for long runs: DD checkpoints per row-group under a STABLE
-    # artifact_path + dataset_name and resumes from the last completed batch.
-    #   engine.resume: if_possible  (default 'never' — small runs regenerate fresh)
-    # IF_POSSIBLE resumes when the config fingerprint matches, else restarts cleanly.
-    # NOTE: on resume DD's buffer_size must match the original run — leave it default
-    # (unset) on both the first run and any resume so they line up.
+    # resume from DD's per-row-group checkpoint (stable artifact_path + dataset_name).
+    # if_possible: resume when the config matches, else restart. buffer_size left default
+    # on both runs so it lines up.
     resume = ResumeMode(str(eng.get("resume", "never")).lower())
-    artifact_path = _resolve(base, eng.get("artifact_path", "../output/sdg/dd_artifacts"))
+    artifact_path = exp_paths(cfg, base)["artifacts"] / "generate"
     artifact_path.mkdir(parents=True, exist_ok=True)
     client = DataDesigner(model_providers=providers, artifact_path=artifact_path) if providers \
         else DataDesigner(artifact_path=artifact_path)
@@ -227,12 +232,11 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
     n_seeds = sum(1 for l in seed_path.open(encoding="utf-8") if l.strip())
     n = min(limit, n_seeds) if limit else n_seeds
     if resume != ResumeMode.NEVER:
-        print(f"[generate] resume={resume.value} artifacts={artifact_path} "
-              f"(a crash mid-run can be resumed by re-running this stage)")
+        print(f"[generate] resume={resume.value} artifacts={artifact_path} (re-run this stage to resume)")
     result = client.create(cb, num_records=n, dataset_name="retrieval_sdg", resume=resume)
     records = _records(result)
 
-    out = _resolve(base, eng.get("output", cfg.get("output_path", "../output/sdg/retrieval_sdg.raw.jsonl")))
+    out = exp_paths(cfg, base)["raw"]
     out.parent.mkdir(parents=True, exist_ok=True)
     tools = cfg["tools"]
     meta = eng.get("metadata_fields", cfg.get("metadata_fields",
@@ -256,8 +260,7 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
             n_written += 1
     print(f"[generate] {len(records)} generated, {n_written} trajectories -> {out}")
     print("  next — judge & filter into the final SFT set:")
-    print(f"    python evaluate.py --config config/pipeline.yaml --input {out} "
-          f"--out output/sdg/retrieval_sdg.jsonl --judge")
+    print("    python evaluate.py --config config/pipeline.yaml --judge")
     return out
 
 
@@ -291,16 +294,23 @@ def main() -> None:
     if args.resume is not None:                         # CLI flag overrides engine.resume
         cfg.setdefault("engine", {})["resume"] = args.resume
 
-    # Stage 0 (query_gen) is opt-in: explicit --stage query_gen, or "all" WHEN a
-    # source is configured (lancedb uri or chunks_path). Otherwise the pipeline
-    # starts from an existing queries.jsonl.
+    # all outputs live under experiments/<exp_name>/. Warn if it already exists (reuse
+    # overwrites; change exp_name to keep both).
+    P = exp_paths(cfg, base)
+    if not args.dry_run:
+        if P["output"].exists() and any(P["output"].iterdir()):
+            print(f"[pipeline] ⚠️  experiment '{cfg.get('exp_name') or 'default'}' exists at {P['exp']} "
+                  "— outputs will be overwritten (change exp_name to keep both).")
+        P["output"].mkdir(parents=True, exist_ok=True)
+
+    # Stage 0 (query_gen) is opt-in: explicit --stage query_gen, or "all" when a corpus
+    # source (lancedb uri or chunks_path) is configured.
     _qg = cfg.get("query_gen", {})
     _has_source = _qg.get("lancedb", {}).get("uri") or _qg.get("chunks_path")
-    gen_out: Optional[Path] = None
     if args.stage == "query_gen" or (args.stage == "all" and _has_source):
         if args.dry_run:
             cfg.setdefault("query_gen", {})["_dry_run"] = True
-        gen_out = run_query_gen(cfg, base, args.limit)  # query_gen's OWN output path; --limit caps it under `all`
+        run_query_gen(cfg, base, args.limit)            # writes query_gen.output; --limit caps it under `all`
         if args.stage == "query_gen" or args.dry_run:   # dry-run is diagnostics-only; never fall into generate
             return
 
@@ -309,11 +319,9 @@ def main() -> None:
     if _has_source:
         cfg.setdefault("query_prep", {}).setdefault("sample", {})["n_target"] = int(_qg.get("n_queries", 400))
 
-    # engine.input is where `--stage generate` reads seeds; under `all`, query_prep's actual output wins
-    seeds_path = _resolve(base, cfg.get("engine", {}).get("input",
-                          cfg.get("query_prep", {}).get("output", cfg.get("seeds_path"))))
+    seeds_path = P["seeds"]                              # --stage generate reads seeds from the exp folder
     if args.stage in ("query_prep", "all"):
-        seeds_path = run_query_prep(cfg, base, args.limit, queries_path=gen_out)
+        seeds_path = run_query_prep(cfg, base, args.limit)
     if args.stage in ("generate", "all"):
         if not seeds_path.exists():
             raise SystemExit(f"[pipeline] no seeds at {seeds_path}; run --stage query_prep first.")

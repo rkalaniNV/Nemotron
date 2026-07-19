@@ -5,3 +5,7 @@ __pycache__/
 data/seeds.jsonl
 output/
 artifacts/
+
+# run outputs (per-experiment) and backups — data, not code
+experiments/
+backups/

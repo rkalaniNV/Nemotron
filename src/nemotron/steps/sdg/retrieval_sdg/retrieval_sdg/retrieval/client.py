@@ -62,9 +62,7 @@ class HttpRetrievalClient:
 
     # ── HTTP ──────────────────────────────────────────────────────────────────
     def _post(self, query: str, n: int) -> Any:
-        """POST with bounded retries so a transient endpoint blip (timeout / 5xx /
-        connection reset) self-heals instead of raising out of the trajectory. Raises
-        the last error only after all attempts are exhausted."""
+        """POST with bounded retries; raises the last error only after all attempts fail."""
         import time
         body = {self.fm["query_field"]: query, self.fm["top_k_field"]: n, **self.fm.get("extra_body", {})}
         post = self._post_fn
@@ -109,12 +107,8 @@ class HttpRetrievalClient:
 
     # ── the one method the generator calls ────────────────────────────────────
     def retrieve(self, query: str, k: int, *, rng) -> List[Chunk]:
-        """Oversample ``k * oversample_factor`` from the service, then randomly keep
-        ``k`` (deterministic given ``rng``). No dedup across hops.
-
-        If the service is still failing after all retries, return no chunks rather than
-        raising: the hop yields an empty result the assistant can search around, so one
-        flaky endpoint window costs depth on a row — not the whole row (or the run)."""
+        """Oversample ``k * oversample_factor``, then randomly keep ``k`` (deterministic
+        given ``rng``). On persistent failure return [] (empty hop) rather than raise."""
         try:
             payload = self._post(query, k * self.oversample_factor)
         except Exception:
