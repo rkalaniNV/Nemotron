@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Decoupled judge/filter stage: raw trajectories -> filtered SFT set + summary.
+"""Judge/filter stage — a standalone DataDesigner pass over raw trajectories.
 
-Fully decoupled from generation — re-judge as many times as you like (tweak the
-rubric / thresholds) without re-running the pipeline. Two-tier scoring:
+Decoupled from generation: run on any raw jsonl to (re)score without regenerating.
+The expensive per-trajectory eval runs as ONE DD custom column, so DataDesigner
+gives it concurrency + per-row-group checkpointing (crash-safe, resumable). Scoring:
 
   1. OBJECTIVE (deterministic): every tool call parses + validates against its
-     schema; the trajectory made at least one retrieval call; and it ends on a
-     grounded (tool-free) assistant answer.
-  2. DEFECT GATE (optional, --judge): an LLM screens for binary train-harmful
-     defects (unsupported claims / no real research / incoherent / request
-     unresolved / user out of character) and a soft 1-5 quality score.
+     schema; the trajectory made at least one retrieval call; it ends on a grounded
+     (tool-free) answer; and no citation is fabricated.
+  2. DEFECT GATE (optional, --judge): an LLM screens for binary train-harmful defects
+     (unsupported claims / no real research / incoherent / request unresolved / user
+     out of character) plus a soft 1-5 quality score.
   KEPT if it passes the objective gate and (when judging) NO defect fired and
-  quality >= --min-quality.
+  quality >= --min-quality. Thresholds are applied AFTER the DD pass, so re-thresholding
+  reuses the cached judgments (resume) instead of re-judging.
 
-    python evaluate.py --input output/sdg/retrieval_sdg.raw.jsonl --out output/sdg/retrieval_sdg.jsonl --judge
-    python evaluate.py --input raw.jsonl --out kept.jsonl              # objective-only, no LLM
+    python evaluate.py --config config/pipeline.yaml --judge        # exp raw.jsonl -> sft.jsonl + summary.json
+    python evaluate.py --input raw.jsonl --out sft.jsonl            # explicit paths, objective-only
 """
 
 from __future__ import annotations
@@ -50,10 +52,7 @@ def _char_ngrams(text: str, n: int = 12) -> set:
 
 
 def _evidence_overlap(row: Dict[str, Any], n: int = 12) -> float:
-    """Deterministic, language/domain-agnostic grounding proxy: fraction of each
-    answer's character n-grams that also appear in the RETRIEVED chunk text.
-    High => the answer is drawn from the evidence; low => it was written from the
-    model's own knowledge (drift/hallucination). No regex, no language assumptions."""
+    """Grounding proxy: fraction of each answer's char n-grams also in the retrieved text."""
     evidence = _char_ngrams(" ".join(m.get("content", "") for m in row.get("messages", [])
                                      if m.get("role") == "tool"), n)
     if not evidence:
@@ -68,32 +67,22 @@ def _evidence_overlap(row: Dict[str, Any], n: int = 12) -> float:
 
 
 # chunk-id token as emitted by the retrieval client's content-hash fallback (h + hex).
-# Domain/language-agnostic: it only matches the id SHAPE, never any word in the text.
 _ID = re.compile(r"h[0-9a-f]{12}")
 
 
-def _retrieved_ids(msgs: List[Dict[str, Any]]) -> set:
+def _ids(msgs: List[Dict[str, Any]], role_pred) -> set:
     ids: set = set()
     for m in msgs:
-        if m.get("role") == "tool":
-            ids |= set(_ID.findall(m.get("content", "") or ""))
-    return ids
-
-
-def _cited_ids(msgs: List[Dict[str, Any]]) -> set:
-    ids: set = set()
-    for m in msgs:
-        if m.get("role") == "assistant" and not m.get("tool_calls"):
+        if role_pred(m):
             ids |= set(_ID.findall(m.get("content", "") or ""))
     return ids
 
 
 def _citation_integrity(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Deterministic, exact grounding check the LLM judge cannot do reliably: every
-    chunk id the assistant CITES must have actually been RETRIEVED in this conversation.
-    Any cited-but-never-retrieved id is a fabricated citation (a hard reject)."""
+    """Every chunk id the assistant CITES must have been RETRIEVED in this conversation."""
     msgs = row.get("messages", [])
-    cited, retrieved = _cited_ids(msgs), _retrieved_ids(msgs)
+    cited = _ids(msgs, lambda m: m.get("role") == "assistant" and not m.get("tool_calls"))
+    retrieved = _ids(msgs, lambda m: m.get("role") == "tool")
     fabricated = sorted(cited - retrieved)
     return {"cited_ids": len(cited), "fabricated_ids": len(fabricated),
             "fabricated": fabricated[:10], "citation_ok": not fabricated}
@@ -114,7 +103,6 @@ def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any
             except (json.JSONDecodeError, TypeError):
                 ok = False
             invalid += int(not ok)
-    # a retrieval happened if any tool message carries a results payload
     for m in msgs:
         if m.get("role") == "tool" and '"results"' in (m.get("content") or ""):
             retrievals += 1
@@ -127,8 +115,7 @@ def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any
 
 
 def _judge_from_config(config_path):
-    """Resolve the judge caller from pipeline.yaml: the judge_model alias's model +
-    its provider's endpoint + the env-var name that holds the key."""
+    """(model, endpoint, api_key_env) for the judge_model alias in pipeline.yaml."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
     models = {m.get("alias"): m for m in cfg.get("models", [])}
@@ -178,69 +165,132 @@ def _rubric_ok(scores: Optional[Dict[str, Any]], min_quality: int) -> bool:
     return scores.get("quality", 0) >= min_quality
 
 
+# ── eval as a DataDesigner pass ────────────────────────────────────────────────
+# One custom column computes the (expensive) objective gate + judge per trajectory;
+# DataDesigner runs it concurrently and checkpoints it (crash-safe, resumable). The
+# keep/drop THRESHOLDS are applied afterwards in Python, so re-thresholding reuses the
+# cached judgments instead of re-judging.
+from data_designer.config import custom_column_generator   # noqa: E402
+
+_VERIFIER = ToolCallVerifier()
+_JUDGE = None                                    # set in main() when --judge
+
+
+def _as_list(v: Any) -> List[Any]:
+    return v if isinstance(v, list) else (json.loads(v) if isinstance(v, str) and v.strip() else [])
+
+
+@custom_column_generator(required_columns=["messages", "tools"])
+def _eval_column(row):
+    """Per-trajectory eval detail (objective gate + grounding overlap + judge verdict),
+    stored as a JSON string in the `eval` column."""
+    r = {"messages": _as_list(row["messages"]), "tools": _as_list(row.get("tools"))}
+    obj = _objective(r, _VERIFIER)
+    scores = _JUDGE(r) if (_JUDGE and obj["objective_ok"]) else None
+    row["eval"] = json.dumps({**obj, "grounding_overlap": _evidence_overlap(r), "rubric": scores},
+                             ensure_ascii=False, default=str)
+    return row
+
+
+def _records(result) -> List[Dict[str, Any]]:
+    ds = result.load_dataset()
+    return ds.to_dict("records") if hasattr(ds, "to_dict") else list(ds)
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Judge raw trajectories -> filtered SFT set.")
-    ap.add_argument("--input", type=Path, help="a single raw jsonl")
-    ap.add_argument("--raw-dir", type=Path, help="a dir of raw jsonls")
-    ap.add_argument("--out", type=Path, required=True, help="filtered training set to write")
-    ap.add_argument("--judge", action="store_true", help="also run the LLM defect gate (needs API key)")
-    ap.add_argument("--min-quality", type=int, default=3,
-                    help="soft quality floor (1-5); the gate is the defect flags, this just drops weak-but-clean rows")
+    ap = argparse.ArgumentParser(description="Judge raw trajectories (a DataDesigner pass) -> filtered SFT set.")
+    ap.add_argument("--input", type=Path, default=None, help="raw jsonl (default: exp raw.jsonl from --config)")
+    ap.add_argument("--out", type=Path, default=None, help="SFT set to write (default: exp sft.jsonl)")
+    ap.add_argument("--judge", action="store_true", help="run the LLM defect gate (else objective-only)")
+    ap.add_argument("--min-quality", type=int, default=3, help="soft quality floor (1-5)")
     ap.add_argument("--min-overlap", type=float, default=0.0,
-                    help="min deterministic answer<->evidence char-ngram overlap (0=report only, don't gate)")
-    # judge model/endpoint: taken from --config's judge_model by default (so it matches
-    # generation), or set explicitly. Explicit flags win; fall back to NVIDIA hosted.
-    ap.add_argument("--config", type=Path, default=None,
-                    help="pipeline.yaml — read the judge_model's model/endpoint/key from it")
-    ap.add_argument("--model", default=None)          # reliable structured JSON
+                    help="min answer<->evidence char-ngram overlap (0 = report only, don't gate)")
+    # judge model/endpoint: from --config's judge_model, or explicit flags (which win)
+    ap.add_argument("--config", type=Path, default=None, help="pipeline.yaml — resolves the judge_model")
+    ap.add_argument("--model", default=None)
     ap.add_argument("--endpoint", default=None)
     ap.add_argument("--api-key-env", default=None)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--workers", type=int, default=16, help="concurrent judge calls")
+    ap.add_argument("--resume", choices=["never", "if_possible", "always"], default="if_possible",
+                    help="reuse DD's judge checkpoint (crash recovery; re-thresholding reuses cache)")
     args = ap.parse_args()
 
-    model, endpoint, api_key_env = args.model, args.endpoint, args.api_key_env
-    if args.config and not (model and endpoint and api_key_env):
-        cfg_model, cfg_endpoint, cfg_key = _judge_from_config(args.config)   # judge_model + its provider
-        model = model or cfg_model
-        endpoint = endpoint or cfg_endpoint
-        api_key_env = api_key_env or cfg_key
-    model = model or "nvidia/openai/gpt-oss-120b"
-    endpoint = endpoint or "https://inference-api.nvidia.com/v1"
-    api_key_env = api_key_env or "NVIDIA_API_KEY"
+    # resolve the judge (explicit flags win; else --config's judge_model; else NVIDIA hosted)
+    global _JUDGE
+    if args.judge:
+        model, endpoint, key = args.model, args.endpoint, args.api_key_env
+        if args.config and not (model and endpoint and key):
+            cm, ce, ck = _judge_from_config(args.config)
+            model, endpoint, key = model or cm, endpoint or ce, key or ck
+        _JUDGE = _make_judge(model or "nvidia/openai/gpt-oss-120b",
+                             endpoint or "https://inference-api.nvidia.com/v1", key or "NVIDIA_API_KEY")
 
-    rows = _load(args.input, args.raw_dir)
+    # paths from --config's exp_name (raw.jsonl -> sft.jsonl + summary.json), or explicit --input/--out
+    input_path, out_path, summary_path, artifacts = args.input, args.out, None, None
+    if args.config:
+        from omegaconf import OmegaConf
+        from pipeline import exp_paths
+        P = exp_paths(OmegaConf.to_container(OmegaConf.load(args.config), resolve=True), args.config.resolve().parent)
+        input_path, out_path = input_path or P["raw"], out_path or P["sft"]
+        summary_path, artifacts = P["summary"], P["artifacts"] / "eval"
+    if not (input_path and out_path):
+        raise SystemExit("[eval] need --config (for exp paths) or explicit --input/--out")
+    summary_path = summary_path or out_path.with_suffix(".summary.json")
+    artifacts = artifacts or (out_path.parent / "eval_artifacts")
+
+    raw = _load(input_path, None)
     if args.limit:
-        rows = rows[: args.limit]
-    if not rows:
-        raise SystemExit("[judge] no trajectories found (check --input / --raw-dir).")
+        raw = raw[: args.limit]
+    if not raw:
+        raise SystemExit(f"[eval] no trajectories in {input_path}")
 
-    verifier = ToolCallVerifier()
-    judge = _make_judge(model, endpoint, api_key_env) if args.judge else None
+    # seed: stringify messages/tools (DD-safe) + row_id to merge back onto the pristine rows.
+    # Written to a temp dir (rebuilt every run) so it never pollutes the output folder.
+    import tempfile
+    seed_path = Path(tempfile.gettempdir()) / f"{out_path.stem}.eval_seed.jsonl"
+    with seed_path.open("w", encoding="utf-8") as f:
+        for i, r in enumerate(raw):
+            f.write(json.dumps({"row_id": i, "messages": json.dumps(r.get("messages", []), ensure_ascii=False),
+                                "tools": json.dumps(r.get("tools", []), ensure_ascii=False)},
+                               ensure_ascii=False) + "\n")
 
-    kept, scored_rows = [], []
-    for r in rows:
-        obj = _objective(r, verifier)
-        overlap = _evidence_overlap(r)                        # deterministic grounding proxy
-        scores = judge(r) if (judge and obj["objective_ok"]) else None
-        keep = (obj["objective_ok"] and (overlap >= args.min_overlap)
-                and (not args.judge or _rubric_ok(scores, args.min_quality)))
-        scored_rows.append({**r, "eval": {**obj, "grounding_overlap": overlap, "rubric": scores, "kept": keep}})
+    # the eval column, run + checkpointed by DataDesigner
+    import data_designer.config as dd
+    from data_designer.config.run_config import ResumeMode, RunConfig
+    from data_designer.interface import DataDesigner
+    cb = dd.DataDesignerConfigBuilder(model_configs=[])
+    cb.with_seed_dataset(dd.LocalFileSeedSource(path=str(seed_path)), sampling_strategy=dd.SamplingStrategy.SHUFFLE)
+    cb.add_column(dd.CustomColumnConfig(name="eval", generator_function=_eval_column))
+    client = DataDesigner(artifact_path=str(artifacts))
+    client.set_run_config(RunConfig(non_inference_max_parallel_workers=max(1, args.workers), otel_metrics_port=None))
+    print(f"[eval] {len(raw)} trajectories, judge={'on' if args.judge else 'off'}, workers={args.workers}")
+    try:
+        result = client.create(cb, num_records=len(raw), dataset_name="retrieval_sdg_eval",
+                               resume=ResumeMode(args.resume))
+        by_id = {int(rec["row_id"]): rec for rec in _records(result)}
+    finally:
+        seed_path.unlink(missing_ok=True)
+
+    # apply thresholds in Python (re-tunable without re-judging), then filter + score
+    kept, scored = [], []
+    for i, r in enumerate(raw):
+        ev = by_id.get(i, {}).get("eval")
+        ev = json.loads(ev) if isinstance(ev, str) else (ev or {})
+        keep = (ev.get("objective_ok") and ev.get("grounding_overlap", 0.0) >= args.min_overlap
+                and (not args.judge or _rubric_ok(ev.get("rubric"), args.min_quality)))
+        scored.append({**r, "eval": {**ev, "kept": bool(keep)}})   # in-memory only (for the summary)
         if keep:
             kept.append({k: v for k, v in r.items() if k != "eval"})
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("w", encoding="utf-8") as f:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
         for r in kept:
             f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
-    scored_path = args.out.with_suffix(".scored.jsonl")
-    with scored_path.open("w", encoding="utf-8") as f:
-        for r in scored_rows:
-            f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
-
-    summary = _summary(scored_rows, kept, args)
-    args.out.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+    summary = _summary(scored, kept, args)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-    print(f"\n[judge] kept {len(kept)}/{len(rows)} -> {args.out}")
+    print(f"\n[eval] kept {len(kept)}/{len(raw)} -> {out_path}")
 
 
 def _role_seq(msgs: List[Dict[str, Any]]) -> str:
