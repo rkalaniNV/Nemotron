@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from long_context_sdg.config import PipelineConfig, load_config
 from long_context_sdg.episode_control import build_episode_spec
-from long_context_sdg.pipeline import _dd_providers
+from long_context_sdg.pipeline import _dd_providers, _dd_run_config
 from long_context_sdg.prompts import (
     assistant_final_system,
     assistant_system,
@@ -127,8 +127,24 @@ def test_config_uses_data_designer_artifacts_instead_of_custom_checkpoint(tmp_pa
     cfg = make_config(tmp_path)
 
     assert "checkpoint" not in type(cfg.paths).model_fields
-    assert cfg.run.resume == "always"
+    assert cfg.run.resume == "if_possible"
     assert cfg.resolve(cfg.paths.artifacts).name == "artifacts"
+
+
+def test_data_designer_run_config_is_explicit_and_scales_like_retrieval_sdg(tmp_path):
+    cfg = make_config(tmp_path)
+    cfg.run.max_parallel_workers = 8
+    cfg.run.buffer_size = None
+    cfg.run.otel_metrics_port = 9471
+
+    run = _dd_run_config(cfg, 50)
+
+    assert run.non_inference_max_parallel_workers == 8
+    assert run.buffer_size == 8
+    assert run.otel_metrics_port == 9471
+
+    cfg.run.buffer_size = 5
+    assert _dd_run_config(cfg, 50).buffer_size == 5
 
 
 def test_provider_key_reference_is_resolved_and_allows_explicit_empty(monkeypatch):

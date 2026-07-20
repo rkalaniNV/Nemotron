@@ -13,7 +13,10 @@ run:
   seed: 7
   num_records: 0
   dataset_name: long_context_sdg
-  resume: always
+  resume: if_possible
+  max_parallel_workers: 8
+  buffer_size: null
+  otel_metrics_port: 9465
 
 instructions: >-
   Generate a realistic, coherent, long-context conversation in the requested

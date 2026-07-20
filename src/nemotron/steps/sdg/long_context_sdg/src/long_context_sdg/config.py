@@ -29,7 +29,10 @@ class RunConfig(StrictConfigModel):
     seed: int = 7
     num_records: int = Field(0, ge=0)
     dataset_name: str = "long_context_sdg"
-    resume: Literal["never", "always", "if_possible"] = "always"
+    resume: Literal["never", "always", "if_possible"] = "if_possible"
+    max_parallel_workers: int = Field(8, ge=1)
+    buffer_size: int | None = Field(None, ge=1)
+    otel_metrics_port: int | None = Field(9465, ge=1, le=65535)
 
     @model_validator(mode="after")
     def valid_dataset_name(self) -> RunConfig:

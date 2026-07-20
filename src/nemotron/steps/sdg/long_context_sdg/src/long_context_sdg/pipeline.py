@@ -37,6 +37,19 @@ def _dd_providers(cfg: PipelineConfig):
     ]
 
 
+def _dd_run_config(cfg: PipelineConfig, count: int):
+    """Mirror retrieval_sdg's explicit Data Designer scheduling setup."""
+    from data_designer.config.run_config import RunConfig as DataDesignerRunConfig
+
+    workers = cfg.run.max_parallel_workers
+    buffer_size = cfg.run.buffer_size or max(workers, count // 10)
+    return DataDesignerRunConfig(
+        non_inference_max_parallel_workers=workers,
+        buffer_size=buffer_size,
+        otel_metrics_port=cfg.run.otel_metrics_port,
+    )
+
+
 def _seed_order(cfg: PipelineConfig) -> list[str]:
     order = []
     for row in iter_jsonl(cfg.resolve(cfg.paths.enriched_seeds)):
@@ -91,6 +104,14 @@ def generate(cfg: PipelineConfig) -> int:
     designer = DataDesigner(
         artifact_path=cfg.resolve(cfg.paths.artifacts),
         model_providers=providers or None,
+    )
+    dd_run_config = _dd_run_config(cfg, count)
+    designer.set_run_config(dd_run_config)
+    print(
+        "[generate] "
+        f"workers={dd_run_config.non_inference_max_parallel_workers} "
+        f"buffer_size={dd_run_config.buffer_size} "
+        f"otel_metrics_port={dd_run_config.otel_metrics_port}"
     )
     if cfg.run.mode == "preview":
         designer.preview(builder, num_records=count)

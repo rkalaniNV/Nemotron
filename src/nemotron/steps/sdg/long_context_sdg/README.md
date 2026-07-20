@@ -343,6 +343,10 @@ a reviewed validator without changing the query/conversation boundary.
 
 | Knob | Default | Effect |
 |---|---:|---|
+| `run.resume` | `if_possible` | Resume compatible Data Designer row groups, or start clean when none exist. |
+| `run.max_parallel_workers` | `8` | Data Designer worker pool for concurrent episode rows. |
+| `run.buffer_size` | `null` | Row-group/checkpoint size. `null` uses `max(workers, num_records // 10)`, matching `retrieval_sdg`. |
+| `run.otel_metrics_port` | `9465` | Loopback OpenTelemetry metrics port; use a unique port per concurrent process or `null` to disable. |
 | `episode.turn_budget.min` | `6` | Minimum user/assistant turn pairs. |
 | `episode.turn_budget.max` | `40` | Maximum user/assistant turn pairs. |
 | `episode.honor_seed_turn_budget` | `false` | Use a valid seed budget when true; otherwise sample deterministically. |
@@ -473,6 +477,26 @@ Use a unique `run.dataset_name` and artifact directory for each workload. An
 interrupted in-flight row group may be recomputed. After completion, the package
 validates row IDs/order and atomically materializes query seeds or generated
 records.
+
+Conversation generation applies the `run.max_parallel_workers`,
+`run.buffer_size`, and `run.otel_metrics_port` values
+through Data Designer's native `RunConfig`. At startup it prints the effective
+values. This is the same scheduling pattern used by `retrieval_sdg`; there is no
+second checkpoint or progress subsystem.
+
+For frequent checkpoints, set `buffer_size` to a small value such as `5`. A
+larger value reduces artifact overhead but an interrupted in-flight row group
+must be recomputed. Native progress is written to the generation log, and the
+metrics endpoint can be inspected locally:
+
+```bash
+curl --silent http://127.0.0.1:9465/metrics \
+  | grep data_designer_dataset_progress
+```
+
+Two concurrent Data Designer processes cannot bind the same metrics port. Give
+each process a distinct `otel_metrics_port`; a port collision disables metrics
+for that process but does not stop generation.
 
 ## Outputs and evaluation
 
