@@ -36,7 +36,6 @@ def _seed(
         f"Write every visible user and assistant turn in {candidate.language}. "
         "Keep the synthetic reasoning.think field in English."
     )
-    instructions = "\n\n".join(value for value in (language_instruction, draft.seed_instructions.strip()) if value)
     return {
         "query_id": candidate.query_id,
         "query": draft.query.strip(),
@@ -53,18 +52,23 @@ def _seed(
             "source_split": persona.source_split,
             "attributes": persona.attributes,
         },
-        "instructions": instructions,
+        "instructions": language_instruction,
         "query_provenance": {
             "synthesis_fingerprint": candidate.synthesis_fingerprint,
             "taxonomy_id": candidate.taxonomy_id,
             "archetype": candidate.archetype,
             "answerability": candidate.answerability,
+            "task_shape": candidate.archetype,
+            "evidence_scope": candidate.evidence_scope,
+            "surface_form": candidate.surface_form,
+            "evidence_need_count": len(draft.evidence_needs),
+            "evidence_needs": [need.need for need in draft.evidence_needs],
             "evidence_chunk_ids": [chunk.chunk_id for chunk in candidate.evidence],
             "evidence_hashes": [content_hash(chunk) for chunk in candidate.evidence],
             "evidence_sources": [chunk.source for chunk in candidate.evidence],
             "generator_alias": cfg.query_generation.generator_alias,
             "judge_alias": cfg.query_generation.judge_alias,
-            "prompt_version": "query-synthesis-v1",
+            "prompt_version": "query-synthesis-v3",
         },
     }
 
@@ -148,6 +152,7 @@ class PersonaQueryGenerator(
                         archetype=candidate.archetype,
                         language=candidate.language,
                         persona_mode=candidate.persona_mode,
+                        surface_form=candidate.surface_form,
                         draft=draft,
                         judgment=judgment,
                         validation_errors=errors,
@@ -164,6 +169,7 @@ class PersonaQueryGenerator(
                         archetype=candidate.archetype,
                         language=candidate.language,
                         persona_mode=candidate.persona_mode,
+                        surface_form=candidate.surface_form,
                         validation_errors=[str(exc)],
                     )
                 if final_record.status == "accepted":

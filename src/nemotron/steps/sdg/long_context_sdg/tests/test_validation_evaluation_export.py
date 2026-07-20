@@ -15,7 +15,7 @@ from tests.fixtures import FakeRetriever, fake_models, make_config
 
 def _accepted(tmp_path):
     cfg = make_config(tmp_path)
-    seed = enrich_seed({"query": "q", "turn_budget": 15, "retrieval_depth": 1}, cfg)
+    seed = enrich_seed({"query": "q", "turn_budget": 15}, cfg)
     models = fake_models()
     registry = ToolRegistry(cfg.tools, ExecutionServices(retriever=FakeRetriever(), models=models))
     return cfg, EpisodeRunner(cfg).run(models, seed, registry, run_id="run-test")
@@ -29,7 +29,7 @@ def test_generated_records_are_atomically_written_and_parsed(tmp_path):
     assert load_records(path) == [record]
 
 
-def test_evaluation_partitions_reports_sparse_policy_events_and_exports(tmp_path):
+def test_evaluation_partitions_reports_observed_behavior_and_exports(tmp_path):
     cfg, record = _accepted(tmp_path)
     write_records(cfg.resolve(cfg.paths.generated), [record])
 
@@ -43,11 +43,11 @@ def test_evaluation_partitions_reports_sparse_policy_events_and_exports(tmp_path
         "mean": 15.0,
         "max": 15,
     }
-    assert summary["required_retrieval_summary"]["count"] == 1
     assert summary["successful_retrieval_summary"]["count"] == 1
+    assert summary["retrieval_call_summary"]["count"] == 1
+    assert summary["low_gain_retrieval_summary"]["count"] == 1
+    assert summary["rejected_redundant_retrieval_summary"]["count"] == 1
     assert summary["tool_call_summary"]["count"] == 1
-    assert summary["policy_event_summary"]["count"] == 1
-    assert sum(summary["policy_event_reasons"].values()) == len(record.policy_events)
     assert "intent_counts" not in summary
     canonical = cfg.resolve(cfg.paths.canonical)
     for output_format in ("messages", "messages_and_tools", "rich"):
@@ -93,3 +93,15 @@ def test_evaluation_rejects_incompatible_generated_fingerprint(tmp_path):
 
     with pytest.raises(ValueError, match="incompatible"):
         evaluate_generated(cfg)
+
+
+def test_visible_unknown_chunk_citation_is_rejected(tmp_path):
+    cfg, accepted = _accepted(tmp_path)
+    accepted.messages[-1]["content"] += " Unsupported citation: [[550e8400-e29b-41d4-a716-446655440000]]."
+    write_records(cfg.resolve(cfg.paths.generated), [accepted])
+
+    summary = evaluate_generated(cfg)
+
+    assert summary["counts"]["rejected"] == 1
+    rejected = load_records(cfg.resolve(cfg.paths.canonical))[0]
+    assert any("unknown retrieved chunk IDs" in error for error in rejected.validation["errors"])

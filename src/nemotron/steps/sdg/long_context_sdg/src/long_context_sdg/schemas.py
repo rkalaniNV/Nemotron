@@ -42,7 +42,12 @@ class QueryProvenance(BaseModel):
     evidence_sources: list[str] = Field(default_factory=list)
     generator_alias: str = ""
     judge_alias: str = ""
-    prompt_version: str = "query-synthesis-v1"
+    task_shape: str = "adaptive"
+    evidence_scope: Literal["conversational", "single_facet", "multi_facet", "adaptive"] = "adaptive"
+    surface_form: str = ""
+    evidence_need_count: int = Field(0, ge=0)
+    evidence_needs: list[str] = Field(default_factory=list)
+    prompt_version: str = "query-synthesis-v3"
 
 
 class EpisodeSeed(BaseModel):
@@ -52,7 +57,6 @@ class EpisodeSeed(BaseModel):
     persona: Persona = Field(default_factory=Persona)
     instructions: str = ""
     turn_budget: int = Field(18, ge=6, le=40)
-    retrieval_depth: int = Field(2, ge=1, le=3)
     memory_seed: dict[str, Any] = Field(default_factory=dict)
     query_provenance: QueryProvenance | None = None
 
@@ -60,24 +64,19 @@ class EpisodeSeed(BaseModel):
 class EpisodeSpec(BaseModel):
     query_id: str
     turn_budget: int = Field(ge=1)
-    required_retrieval_calls: int = Field(ge=0)
     max_retrieval_calls: int = Field(ge=0)
+    max_retrieval_calls_per_turn: int = Field(ge=0)
     max_tool_calls_per_turn: int = Field(ge=1)
     max_tool_calls_per_conversation: int = Field(ge=1)
+    query_lexical_similarity_threshold: float = Field(ge=0, le=1)
+    evidence_lexical_similarity_threshold: float = Field(ge=0, le=1)
+    min_new_chunk_fraction: float = Field(ge=0, le=1)
+    max_low_gain_chain: int = Field(ge=1)
+    low_gain_followup_similarity_threshold: float = Field(ge=0, le=1)
 
 
 class UserTurn(BaseModel):
     content: str = Field(min_length=1)
-
-
-class RetrievalPolicyEvent(BaseModel):
-    turn: int
-    reason: Literal["retrieval_deadline"] = "retrieval_deadline"
-    required_retrievals_this_turn: int = Field(ge=1)
-    successful_retrievals_before: int = Field(ge=0)
-    retrieval_attempts_before: int = Field(ge=0)
-    tool_calls_before: int = Field(ge=0)
-    turns_remaining: int = Field(ge=1)
 
 
 class RetrievalChunk(BaseModel):
@@ -141,13 +140,6 @@ class AssistantAction(BaseModel):
     reasoning: ReasoningContent = Field(default_factory=ReasoningContent)
     content: str = ""
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class AssistantRetrievalAction(BaseModel):
-    """One model-authored query that the runtime turns into a retrieve call."""
-
-    reasoning: ReasoningContent = Field(default_factory=ReasoningContent)
-    query: str = Field(min_length=1)
 
 
 class AssistantFinalAction(BaseModel):
@@ -221,7 +213,6 @@ class CanonicalRecord(BaseModel):
     messages: list[dict[str, Any]] = Field(default_factory=list)
     tools: list[dict[str, Any]] = Field(default_factory=list)
     episode_spec: dict[str, Any] = Field(default_factory=dict)
-    policy_events: list[dict[str, Any]] = Field(default_factory=list)
     tool_call_attempts: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     retrieval_transcript: list[dict[str, Any]] = Field(default_factory=list)

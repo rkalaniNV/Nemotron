@@ -9,7 +9,7 @@ from typing import Any
 
 from ..retrieval import RetrieverClient
 from ..schemas import RetrievalChunk
-from .config import QueryEvidenceConfig
+from .config import QueryArchetypeProfile, QueryEvidenceConfig
 from .schemas import QueryTaxonomy, TaxonomyNode
 
 
@@ -92,26 +92,54 @@ def sample_bundle(
     pool: list[RetrievalChunk],
     *,
     archetype: str,
+    profile: QueryArchetypeProfile,
     cfg: QueryEvidenceConfig,
     rng: random.Random,
 ) -> list[RetrievalChunk]:
-    count = rng.randint(cfg.bundle_min, min(cfg.bundle_max, len(pool)))
+    del archetype
+    minimum = max(profile.bundle_min, profile.min_sources)
+    count = rng.randint(minimum, min(profile.bundle_max, len(pool)))
     shuffled = list(pool)
     rng.shuffle(shuffled)
     selected: list[RetrievalChunk] = []
     per_source: Counter[str] = Counter()
-    for chunk in shuffled:
+
+    def similarity(left: str, right: str) -> float:
+        left_tokens = set(left.casefold().split())
+        right_tokens = set(right.casefold().split())
+        union = left_tokens | right_tokens
+        return len(left_tokens & right_tokens) / len(union) if union else 0.0
+
+    def add(chunk: RetrievalChunk) -> bool:
         source = chunk.source or chunk.chunk_id
         if per_source[source] >= cfg.max_per_source:
-            continue
+            return False
+        if any(similarity(chunk.content, prior.content) > cfg.max_pair_similarity for prior in selected):
+            return False
         selected.append(chunk)
         per_source[source] += 1
-        if len(selected) == count:
+        return True
+
+    source_order = list(dict.fromkeys(chunk.source or chunk.chunk_id for chunk in shuffled))
+    rng.shuffle(source_order)
+    for source in source_order:
+        if len(per_source) >= profile.min_sources:
             break
+        for chunk in shuffled:
+            if (chunk.source or chunk.chunk_id) == source and add(chunk):
+                break
     if len(selected) < count:
-        raise ValueError("evidence pool cannot satisfy the configured per-source limit")
-    if archetype == "comparison":
-        sources = {chunk.source or chunk.chunk_id for chunk in selected}
-        if len(sources) < 2:
-            raise ValueError("comparison query needs evidence from at least two sources")
+        for chunk in shuffled:
+            if chunk in selected:
+                continue
+            add(chunk)
+            if len(selected) == count:
+                break
+    if len(selected) < count:
+        raise ValueError("evidence pool cannot satisfy source and semantic-diversity constraints")
+    sources = {chunk.source or chunk.chunk_id for chunk in selected}
+    if len(sources) < profile.min_sources:
+        raise ValueError(
+            f"archetype needs evidence from at least {profile.min_sources} source(s); found {len(sources)}"
+        )
     return selected

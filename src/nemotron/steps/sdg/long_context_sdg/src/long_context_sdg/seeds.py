@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import random
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -18,28 +17,18 @@ def _stable_id(record: dict[str, Any]) -> str:
     return "q-" + hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def _rng(run_seed: int, query_id: str) -> random.Random:
-    digest = hashlib.sha256(f"{run_seed}|{query_id}".encode()).hexdigest()
-    return random.Random(int(digest[:16], 16))
-
-
-def _weighted_depth(rng: random.Random, weights: dict[int, float]) -> int:
-    depths = sorted(weights)
-    return rng.choices(depths, weights=[weights[d] for d in depths], k=1)[0]
-
-
 def enrich_seed(record: dict[str, Any], cfg: PipelineConfig) -> EpisodeSeed:
     query = str(record.get("query", "")).strip()
     if not query:
         raise ValueError("seed query must be a non-empty string")
     qid = str(record.get("query_id") or _stable_id(record))
-    rng = _rng(cfg.run.seed, qid)
     turn_budget = record.get("turn_budget") if cfg.episode.honor_seed_turn_budget else None
     if turn_budget is None:
+        import random
+
+        digest = hashlib.sha256(f"{cfg.run.seed}|{qid}".encode()).hexdigest()
+        rng = random.Random(int(digest[:16], 16))
         turn_budget = rng.randint(cfg.episode.turn_budget.min, cfg.episode.turn_budget.max)
-    depth = record.get("retrieval_depth")
-    if depth is None:
-        depth = _weighted_depth(rng, cfg.episode.retrieval_depth_weights)
     seed_instructions = str(record.get("instructions", "")).strip()
     instructions = "\n\n".join(x for x in (cfg.instructions.strip(), seed_instructions) if x)
     memory = dict(record.get("memory_seed") or {})
@@ -53,7 +42,6 @@ def enrich_seed(record: dict[str, Any], cfg: PipelineConfig) -> EpisodeSeed:
         persona=Persona.model_validate(record.get("persona") or {}),
         instructions=instructions,
         turn_budget=turn_budget,
-        retrieval_depth=depth,
         memory_seed=memory,
         query_provenance=record.get("query_provenance"),
     )

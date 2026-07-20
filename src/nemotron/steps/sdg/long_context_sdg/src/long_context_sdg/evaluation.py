@@ -11,7 +11,7 @@ from typing import Any
 from .config import PipelineConfig
 from .llm import call_structured
 from .records import load_records
-from .schemas import CanonicalRecord, EpisodeSpec, RetrievalPolicyEvent, TrajectoryJudgment
+from .schemas import CanonicalRecord, EpisodeSpec, TrajectoryJudgment
 from .validation import reconstruct_messages, validate_trajectory
 
 
@@ -48,11 +48,9 @@ def evaluate_record(
     if record.status == "generation_failed":
         return record
     spec = EpisodeSpec.model_validate(record.episode_spec)
-    policy_events = [RetrievalPolicyEvent.model_validate(item) for item in record.policy_events]
     report = validate_trajectory(
         reconstruct_messages(record.model_dump()),
         spec=spec,
-        policy_events=policy_events,
         retrieval_transcript=record.retrieval_transcript,
         tool_call_attempts=record.tool_call_attempts,
         tool_schemas=record.tools,
@@ -144,14 +142,8 @@ def evaluate_generated(
     for status in ("accepted", "rejected", "quarantine", "generation_failed"):
         _write_jsonl(output_dir / f"{status}.jsonl", (r for r in evaluated if r.status == status))
     counts = Counter(r.status for r in evaluated)
-    policy_events = [event for record in evaluated for event in record.policy_events]
     turn_budgets = [
         int(record.metadata["turn_budget"]) for record in evaluated if record.metadata.get("turn_budget") is not None
-    ]
-    required_retrievals = [
-        int(record.episode_spec["required_retrieval_calls"])
-        for record in evaluated
-        if record.episode_spec.get("required_retrieval_calls") is not None
     ]
     successful_retrievals = [
         int(record.metadata["successful_retrieval_calls"])
@@ -159,19 +151,31 @@ def evaluate_generated(
         if record.metadata.get("successful_retrieval_calls") is not None
     ]
     tool_calls = [len(record.tool_call_attempts) for record in evaluated if record.episode_spec]
-    event_counts = [len(record.policy_events) for record in evaluated if record.episode_spec]
+    retrieval_calls = [len(record.retrieval_transcript) for record in evaluated if record.episode_spec]
+    low_gain_calls = [
+        sum(bool(item.get("low_gain")) for item in record.retrieval_transcript)
+        for record in evaluated
+        if record.episode_spec
+    ]
+    rejected_redundant_calls = [
+        sum(
+            "lexically similar" in str(item.get("error", ""))
+            for item in record.metadata.get("rejected_tool_calls", [])
+        )
+        for record in evaluated
+        if record.episode_spec
+    ]
     summary = {
         "total": len(evaluated),
         "counts": dict(counts),
         "acceptance_rate": round(counts["accepted"] / len(evaluated), 4) if evaluated else 0.0,
-        "retrieval_depths": dict(Counter(str(r.metadata.get("retrieval_depth")) for r in evaluated)),
         "turn_budgets": dict(Counter(str(r.metadata.get("turn_budget")) for r in evaluated)),
         "turn_budget_summary": _numeric_summary(turn_budgets),
-        "required_retrieval_summary": _numeric_summary(required_retrievals),
         "successful_retrieval_summary": _numeric_summary(successful_retrievals),
+        "retrieval_call_summary": _numeric_summary(retrieval_calls),
+        "low_gain_retrieval_summary": _numeric_summary(low_gain_calls),
+        "rejected_redundant_retrieval_summary": _numeric_summary(rejected_redundant_calls),
         "tool_call_summary": _numeric_summary(tool_calls),
-        "policy_event_summary": _numeric_summary(event_counts),
-        "policy_event_reasons": dict(Counter(str(item.get("reason")) for item in policy_events if item.get("reason"))),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")

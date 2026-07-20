@@ -89,14 +89,14 @@ def _add_persona_samplers(builder, cfg: QueryGenerationPipelineConfig, dd) -> di
     return columns
 
 
-def _counter(records: list[QuerySynthesisRecord], field: str) -> dict[str, int]:
+def _counter(records: list[Any], field: str) -> dict[str, int]:
     return dict(Counter(str(getattr(record, field)) for record in records))
 
 
 def _duplicate_pairs(records: list[QuerySynthesisRecord], threshold: float) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str], list[QuerySynthesisRecord]] = defaultdict(list)
+    groups: dict[str, list[QuerySynthesisRecord]] = defaultdict(list)
     for record in records:
-        groups[(record.taxonomy_id, record.language)].append(record)
+        groups[record.language].append(record)
     duplicates = []
     for group in groups.values():
         for left_index, left in enumerate(group):
@@ -161,6 +161,21 @@ def _finalize(
         "archetype_counts": _counter(accepted, "archetype"),
         "language_counts": _counter(accepted, "language"),
         "persona_mode_counts": _counter(accepted, "persona_mode"),
+        "surface_form_counts": _counter(accepted, "surface_form"),
+        "target_counts": {
+            "taxonomy": _counter(candidates, "taxonomy_id"),
+            "archetype": _counter(candidates, "archetype"),
+            "language": _counter(candidates, "language"),
+            "persona_mode": _counter(candidates, "persona_mode"),
+            "surface_form": _counter(candidates, "surface_form"),
+        },
+        "realized_counts": {
+            "taxonomy": _counter(accepted, "taxonomy_id"),
+            "archetype": _counter(accepted, "archetype"),
+            "language": _counter(accepted, "language"),
+            "persona_mode": _counter(accepted, "persona_mode"),
+            "surface_form": _counter(accepted, "surface_form"),
+        },
         "duplicates": duplicates,
         "rejection_reasons": dict(
             Counter(error for record in terminal if record.status != "accepted" for error in record.validation_errors)

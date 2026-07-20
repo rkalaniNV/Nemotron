@@ -8,9 +8,7 @@ from collections.abc import Iterable
 from .schemas import (
     AssistantAction,
     AssistantFinalAction,
-    AssistantRetrievalAction,
     EpisodeSeed,
-    RetrievalPolicyEvent,
     UserTurn,
 )
 
@@ -19,16 +17,31 @@ def assistant_system(
     seed: EpisodeSeed,
     tools: list[dict],
     known_chunk_ids: Iterable[str] = (),
+    retrieval_history: Iterable[dict] = (),
 ) -> str:
     known = sorted(set(known_chunk_ids))
+    history = [
+        {
+            "turn": item.get("turn"),
+            "query": item.get("query"),
+            "low_gain": bool(item.get("low_gain")),
+            "chunk_ids": item.get("chunk_ids", []),
+        }
+        for item in retrieval_history
+    ]
     return (
         "You are the assistant in a synthetic but realistic long-running conversation. "
         "Use tools when evidence or saved preferences are needed. Never invent tool results or citations. "
         "Return one JSON object matching the AssistantAction schema. A tool action may contain tool_calls; "
         "a final answer must contain content and no tool_calls. Keep reasoning bounded and cite only chunk IDs "
-        "already returned by retrieve.\n\n"
+        "already returned by retrieve. When citing visible evidence, write the full ID as [[exact-chunk-id]]. "
+        "Decide naturally whether a tool would materially improve the response, "
+        "given the current user message and evidence already available. If retrieving again, pursue a genuinely "
+        "new unresolved question rather than paraphrasing an earlier search.\n\n"
         f"EFFECTIVE INSTRUCTIONS:\n{seed.instructions}\n\n"
         f"EXACT RETRIEVED CHUNK IDS ALLOWED IN CITATIONS:\n{json.dumps(known)}\n\n"
+        f"RETRIEVAL HISTORY (reuse evidence; do not repeat these searches):\n"
+        f"{json.dumps(history, ensure_ascii=False)}\n\n"
         f"TOOLS:\n{json.dumps(tools, ensure_ascii=False)}\n\n"
         f"ASSISTANT ACTION SCHEMA:\n{json.dumps(AssistantAction.model_json_schema(), ensure_ascii=False)}"
     )
@@ -39,11 +52,11 @@ def assistant_final_system(seed: EpisodeSeed, known_chunk_ids: Iterable[str] = (
     known = sorted(set(known_chunk_ids))
     return (
         "You are the assistant in a synthetic but realistic long-running conversation. "
-        "The required tool results are already present in the conversation. Synthesize the final answer now. "
+        "No further tool call is permitted in this turn. Synthesize the final answer from available evidence. "
         "Do not request, mention, or emit any tool call. Never invent citations or claims. "
-        "Support every factual domain claim with an inline citation using a full, exact retrieved chunk ID. "
+        "Support every factual domain claim with an inline citation formatted as [[full-exact-retrieved-ID]]. "
         "Never shorten, renumber, or invent an ID. If the available evidence does not support a claim, "
-        "explicitly say so. "
+        "explicitly say so rather than pretending another search occurred. "
         "Return one JSON object matching the AssistantFinalAction schema and cite only chunk IDs already "
         "returned by retrieve.\n\n"
         f"EFFECTIVE INSTRUCTIONS:\n{seed.instructions}\n\n"
@@ -53,41 +66,11 @@ def assistant_final_system(seed: EpisodeSeed, known_chunk_ids: Iterable[str] = (
     )
 
 
-def assistant_retrieval_system(seed: EpisodeSeed) -> str:
-    """Require a model-authored retrieval query without optional answer/tool fields."""
+def assistant_turn_directive(turn: int) -> str:
     return (
-        "You are preparing one required evidence lookup for a long-running conversation. "
-        "Write one specific retrieval query that advances the current user request. Do not answer the user "
-        "and do not emit a tool call; the runtime will execute your query as the retrieve tool. "
-        "When earlier queries are present, make this query meaningfully distinct. Return one JSON object "
-        "matching the AssistantRetrievalAction schema.\n\n"
-        f"EFFECTIVE INSTRUCTIONS:\n{seed.instructions}\n\n"
-        f"ASSISTANT RETRIEVAL ACTION SCHEMA:\n"
-        f"{json.dumps(AssistantRetrievalAction.model_json_schema(), ensure_ascii=False)}"
+        f"Turn {turn}. Respond naturally to the user's actual message. Decide whether a configured tool would "
+        "materially improve this response based on the unresolved need and the evidence already available."
     )
-
-
-def assistant_turn_directive(
-    turn: int,
-    policy_event: RetrievalPolicyEvent | None,
-    completed_retrievals: int,
-) -> str:
-    if policy_event and completed_retrievals < policy_event.required_retrievals_this_turn:
-        requirement = (
-            "The conversation is at its retrieval-budget deadline. Before answering, complete "
-            f"{policy_event.required_retrievals_this_turn} successful retrieval call(s) with distinct normalized "
-            f"queries. Completed so far: {completed_retrievals}."
-        )
-    elif policy_event:
-        requirement = (
-            "The retrieval deadline is satisfied. Synthesize a substantive final answer now without another tool call."
-        )
-    else:
-        requirement = (
-            "Respond naturally to the user's actual message. Retrieval is optional; use it only when new evidence "
-            "is needed, and reuse established evidence when it is sufficient."
-        )
-    return f"Turn {turn}. {requirement}"
 
 
 def user_system(seed: EpisodeSeed) -> str:

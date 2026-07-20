@@ -50,11 +50,17 @@ models:
 episode:
   turn_budget: {min: 6, max: 40}
   honor_seed_turn_budget: false
-  retrieval_depth_weights: {1: 0.65, 2: 0.25, 3: 0.10}
-  retrieval_calls: {min: 1, max: 12}
+  max_retrieval_calls: 6
+  max_retrieval_calls_per_turn: 1
+  retrieval_novelty:
+    query_lexical_similarity_threshold: 0.80
+    evidence_lexical_similarity_threshold: 0.85
+    min_new_chunk_fraction: 0.50
+    max_low_gain_chain: 1
+    low_gain_followup_similarity_threshold: 0.35
   max_steps_per_turn: 6
-  max_tool_calls_per_turn: 3
-  max_tool_calls_per_conversation: 32
+  max_tool_calls_per_turn: 2
+  max_tool_calls_per_conversation: 16
 
 context:
   compression_threshold: 32000

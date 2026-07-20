@@ -29,6 +29,17 @@ def lexical_similarity(left: str, right: str) -> float:
     return len(a & b) / len(a | b) if a and b else 0.0
 
 
+def unigram_similarity(left: str, right: str) -> float:
+    a, b = set(tokens(left)), set(tokens(right))
+    return len(a & b) / len(a | b) if a and b else 0.0
+
+
+def token_overlap_similarity(left: str, right: str) -> float:
+    """Order-independent overlap that catches containment and reordered queries."""
+    a, b = set(tokens(left)), set(tokens(right))
+    return len(a & b) / min(len(a), len(b)) if a and b else 0.0
+
+
 def _has_verbatim_span(query: str, evidence: str, width: int) -> bool:
     query_tokens = tokens(query)
     evidence_tokens = tokens(evidence)
@@ -62,6 +73,53 @@ def validate_draft(
     retriever: RetrieverClient,
 ) -> list[str]:
     errors: list[str] = []
+    anchor_ids = {item.chunk_id for item in candidate.evidence}
+    needs = draft.evidence_needs
+    if len(needs) < candidate.minimum_evidence_needs:
+        errors.append(
+            f"draft has {len(needs)} evidence need(s); archetype requires {candidate.minimum_evidence_needs}"
+        )
+    if candidate.evidence_scope == "single_facet" and len(needs) != 1:
+        errors.append("single-facet drafts must contain exactly one evidence need")
+    if candidate.evidence_scope == "conversational" and needs:
+        errors.append("conversational drafts must not manufacture evidence needs")
+    supported_sets: list[frozenset[str]] = []
+    probes: list[str] = []
+    for index, need in enumerate(needs):
+        ids = set(need.supporting_chunk_ids)
+        unknown = sorted(ids - anchor_ids)
+        if unknown:
+            errors.append(f"evidence_needs[{index}] references unknown chunk IDs: {unknown}")
+        if need.supported_by_bundle and not ids:
+            errors.append(f"evidence_needs[{index}] is marked supported but has no supporting chunk")
+        if not need.supported_by_bundle and ids:
+            errors.append(f"evidence_needs[{index}] is marked unsupported but lists supporting chunks")
+        if ids:
+            frozen = frozenset(ids)
+            if frozen in supported_sets:
+                errors.append("evidence needs reuse the same support set instead of representing distinct facets")
+            supported_sets.append(frozen)
+        probe = need.retrieval_probe.strip()
+        if _CHUNK_ID.search(probe) or any(chunk_id in probe for chunk_id in anchor_ids):
+            errors.append(f"evidence_needs[{index}].retrieval_probe leaks chunk identifiers")
+        language_error = _language_error(probe, candidate.language)
+        if language_error:
+            errors.append(f"evidence_needs[{index}].retrieval_probe: {language_error}")
+        probes.append(probe)
+    for index, current in enumerate(probes):
+        for previous in probes[:index]:
+            similarity = max(lexical_similarity(current, previous), unigram_similarity(current, previous))
+            if similarity >= cfg.evidence.max_probe_similarity:
+                errors.append(
+                    "evidence-need retrieval probes are too similar to demonstrate distinct facets: "
+                    f"{similarity:.2f} >= {cfg.evidence.max_probe_similarity:.2f}"
+                )
+                break
+    unsupported = [need for need in needs if not need.supported_by_bundle]
+    if candidate.answerability == "answerable" and unsupported:
+        errors.append("answerable draft contains an unsupported evidence need")
+    if candidate.answerability == "insufficient" and not unsupported:
+        errors.append("insufficient-evidence draft must contain an unsupported essential need")
     for name, text in (("query", draft.query), ("naive_query", draft.naive_query)):
         length = len(text.strip())
         if length < cfg.min_query_chars or length > cfg.max_query_chars:
@@ -84,24 +142,57 @@ def validate_draft(
                 break
 
     try:
-        retrieved = retriever.query(draft.query, top_k=cfg.evidence.retrievability_top_k)
+        canonical_retrieved = retriever.query(draft.query, top_k=cfg.evidence.retrievability_top_k)
+        naive_retrieved = retriever.query(draft.naive_query, top_k=cfg.evidence.retrievability_top_k)
     except Exception as exc:
         errors.append(f"retrievability check failed: {exc}")
         return errors
-    anchors = {chunk.chunk_id: chunk for chunk in candidate.evidence}
-    matched = [chunk for chunk in retrieved if chunk.chunk_id in anchors]
-    if not matched:
+    canonical_ids = {chunk.chunk_id for chunk in canonical_retrieved}
+    naive_ids = {chunk.chunk_id for chunk in naive_retrieved}
+    canonical_matched = canonical_ids & anchor_ids
+    naive_matched = naive_ids & anchor_ids
+    if not canonical_matched:
         errors.append("canonical query did not retrieve any evidence anchor")
-    if candidate.archetype == "comparison":
-        matched_sources = {anchors[chunk.chunk_id].source for chunk in matched}
-        matched_sources.discard("")
-        if len(matched_sources) < 2:
-            errors.append("comparison query did not recover two evidence sources")
+    profile = cfg.surface_form_profiles[candidate.surface_form]
+    canonical_recall = len(canonical_matched) / len(anchor_ids)
+    naive_recall = len(naive_matched) / len(anchor_ids)
+    recall_gap = canonical_recall - naive_recall
+    if recall_gap + 1e-9 < profile.minimum_anchor_recall_gap:
+        errors.append(
+            f"surface form `{candidate.surface_form}` improved anchor recall by {recall_gap:.2f}; "
+            f"requires at least {profile.minimum_anchor_recall_gap:.2f}"
+        )
+    if profile.require_noncanonical_form and draft.query.casefold().strip() == draft.naive_query.casefold().strip():
+        errors.append(f"surface form `{candidate.surface_form}` duplicates the canonical query")
+    if profile.require_topic_overlap and unigram_similarity(draft.query, draft.naive_query) <= 0:
+        errors.append("adjacent-intent naive query has no recoverable lexical connection to the canonical topic")
+
+    for index, need in enumerate(needs):
+        try:
+            probe_results = retriever.query(
+                need.retrieval_probe,
+                top_k=cfg.evidence.retrievability_top_k,
+            )
+        except Exception as exc:
+            errors.append(f"retrievability check for evidence need {index} failed: {exc}")
+            continue
+        probe_ids = {chunk.chunk_id for chunk in probe_results}
+        if need.supported_by_bundle and not (set(need.supporting_chunk_ids) & probe_ids):
+            errors.append(f"retrieval probe did not recover evidence for need {index}")
     return errors
 
 
 def query_similarity(left: QueryDraft, right: QueryDraft) -> float:
+    pairs = (
+        (left.query, right.query),
+        (left.naive_query, right.naive_query),
+    )
     return max(
-        lexical_similarity(left.query, right.query),
-        lexical_similarity(left.naive_query, right.naive_query),
+        score
+        for left_text, right_text in pairs
+        for score in (
+            lexical_similarity(left_text, right_text),
+            unigram_similarity(left_text, right_text),
+            token_overlap_similarity(left_text, right_text),
+        )
     )

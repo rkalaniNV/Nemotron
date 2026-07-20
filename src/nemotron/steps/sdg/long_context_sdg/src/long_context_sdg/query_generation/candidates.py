@@ -29,7 +29,7 @@ def synthesis_fingerprint(cfg: QueryGenerationPipelineConfig, taxonomy_hash: str
         "retriever": cfg.retriever.model_dump(mode="json"),
         "models": [model.model_dump(mode="json") for model in cfg.models if model.alias in aliases],
         "run_seed": cfg.run.seed,
-        "prompt_version": "query-synthesis-v1",
+        "prompt_version": "query-synthesis-v3",
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -120,6 +120,7 @@ def prepare_candidates(
     )
     archetypes = scheduled_labels(generation.num_queries, generation.archetype_weights, rng)
     persona_modes = scheduled_labels(generation.num_queries, generation.persona_mode_weights, rng)
+    surface_forms = scheduled_labels(generation.num_queries, generation.surface_form_weights, rng)
     scheduled_personas = scheduled_labels(
         generation.num_queries,
         persona_weights(generation.persona_locales),
@@ -132,9 +133,11 @@ def prepare_candidates(
     for index in range(generation.num_queries):
         node = leaf_by_id[topic_labels[index]]
         bundle_rng = random.Random(f"{fingerprint}|bundle|{index}")
+        profile = generation.archetype_profiles[archetypes[index]]
         bundle = sample_bundle(
             pools[node.id],
             archetype=archetypes[index],
+            profile=profile,
             cfg=generation.evidence,
             rng=bundle_rng,
         )
@@ -149,8 +152,11 @@ def prepare_candidates(
                 taxonomy_description=node.description,
                 taxonomy_required_terms=node.required_terms,
                 archetype=archetypes[index],
+                evidence_scope=profile.evidence_scope,
+                minimum_evidence_needs=profile.min_evidence_needs,
                 answerability=("insufficient" if archetypes[index] == "insufficient_evidence" else "answerable"),
                 persona_mode=persona_modes[index],
+                surface_form=surface_forms[index],
                 persona_key=scheduled_personas[index],
                 persona_locale=persona_configs[scheduled_personas[index]].locale,
                 language=persona_configs[scheduled_personas[index]].language,

@@ -105,12 +105,30 @@ class QueryCandidate(QueryGenerationModel):
     taxonomy_description: str = ""
     taxonomy_required_terms: list[str] = Field(default_factory=list)
     archetype: str
+    evidence_scope: Literal["conversational", "single_facet", "multi_facet"]
+    minimum_evidence_needs: int = Field(ge=0)
     answerability: Literal["answerable", "insufficient"]
     persona_mode: str
+    surface_form: Literal[
+        "well_formed",
+        "underspecified",
+        "retrieval_rewrite",
+        "noisy_language",
+        "keyword_fragment",
+        "overbroad",
+        "adjacent_intent",
+    ]
     persona_key: str
     persona_locale: str
     language: str
     evidence: list[RetrievalChunk] = Field(min_length=1)
+
+
+class EvidenceNeed(QueryGenerationModel):
+    need: str = Field(min_length=1)
+    retrieval_probe: str = Field(min_length=1)
+    supporting_chunk_ids: list[str] = Field(default_factory=list)
+    supported_by_bundle: bool = True
 
 
 class QueryDraft(QueryGenerationModel):
@@ -119,7 +137,7 @@ class QueryDraft(QueryGenerationModel):
     role: str = Field(min_length=1)
     expertise: str = Field(min_length=1)
     style: str = Field(min_length=1)
-    seed_instructions: str = ""
+    evidence_needs: list[EvidenceNeed] = Field(default_factory=list)
 
 
 class QuerySynthesisJudgment(QueryGenerationModel):
@@ -146,6 +164,7 @@ class QuerySynthesisRecord(QueryGenerationModel):
     archetype: str
     language: str
     persona_mode: str
+    surface_form: str
     draft: QueryDraft | None = None
     judgment: QuerySynthesisJudgment | None = None
     validation_errors: list[str] = Field(default_factory=list)

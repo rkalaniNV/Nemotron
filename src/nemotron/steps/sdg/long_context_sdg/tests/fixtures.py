@@ -14,8 +14,7 @@ from long_context_sdg.executors.base import (
 from long_context_sdg.schemas import RetrievalChunk, ToolCall, ToolResult
 
 
-def make_config(tmp_path, *, judge=False, depth_weights=None) -> PipelineConfig:
-    depth_weights = depth_weights or {1: 1.0, 2: 0.0, 3: 0.0}
+def make_config(tmp_path, *, judge=False) -> PipelineConfig:
     return PipelineConfig.model_validate(
         {
             "paths": {
@@ -36,10 +35,17 @@ def make_config(tmp_path, *, judge=False, depth_weights=None) -> PipelineConfig:
             ],
             "episode": {
                 "turn_budget": {"min": 15, "max": 22},
-                "retrieval_depth_weights": depth_weights,
-                "retrieval_calls": {"min": 1, "max": 3},
+                "max_retrieval_calls": 3,
+                "max_retrieval_calls_per_turn": 1,
+                "retrieval_novelty": {
+                    "query_lexical_similarity_threshold": 0.80,
+                    "evidence_lexical_similarity_threshold": 0.85,
+                    "min_new_chunk_fraction": 0.50,
+                    "max_low_gain_chain": 1,
+                    "low_gain_followup_similarity_threshold": 0.35,
+                },
                 "max_steps_per_turn": 6,
-                "max_tool_calls_per_turn": 3,
+                "max_tool_calls_per_turn": 2,
                 "max_tool_calls_per_conversation": 12,
             },
             "context": {
@@ -141,7 +147,7 @@ class FakeRetriever:
         return [
             RetrievalChunk(
                 chunk_id=f"chunk-{suffix}",
-                content=f"Authoritative evidence for {text}. " + "evidence " * 30,
+                content=(f"Authoritative evidence facet {suffix}. " + f"{suffix} " * 30),
                 title="Domain document",
                 source="domain-corpus",
                 score=1.0,
@@ -157,51 +163,18 @@ def _text(message: Any) -> str:
 
 class FakeAssistant:
     def completion(self, messages, **kwargs):
-        system = _text(messages[0])
         directive = _text(messages[-1])
         turn_match = re.search(r"Turn (\d+)", directive)
         turn = int(turn_match.group(1)) if turn_match else 1
-        completed_match = re.search(r"Completed so far: (\d+)", directive)
-        completed = int(completed_match.group(1)) if completed_match else 0
-        required_match = re.search(r"complete (\d+) successful", directive)
-        required = int(required_match.group(1)) if required_match else 0
-        if "Do not answer yet" in directive:
-            remaining_match = re.search(r"Complete (\d+) additional", directive)
-            required = completed + (int(remaining_match.group(1)) if remaining_match else 1)
-        if "ASSISTANT RETRIEVAL ACTION SCHEMA" in system:
-            value = {
-                "reasoning": {
-                    "think": "I need evidence.",
-                    "task_understanding": "retrieve",
-                    "answer_plan": ["inspect"],
-                },
-                "query": f"turn {turn} query version {completed + 1}",
-            }
-        elif completed < required:
-            value = {
-                "reasoning": {
-                    "think": "I need evidence.",
-                    "task_understanding": "retrieve",
-                    "answer_plan": ["inspect"],
-                },
-                "content": "",
-                "tool_calls": [
-                    {
-                        "name": "retrieve",
-                        "arguments": {"query": f"turn {turn} query version {completed + 1}"},
-                    }
-                ],
-            }
-        else:
-            value = {
-                "reasoning": {
-                    "think": "I can answer from evidence.",
-                    "task_understanding": "answer",
-                    "answer_plan": ["answer"],
-                },
-                "content": f"Grounded final answer for turn {turn}.",
-                "tool_calls": [],
-            }
+        value = {
+            "reasoning": {
+                "think": "I can respond to this conversational turn.",
+                "task_understanding": "answer",
+                "answer_plan": ["answer"],
+            },
+            "content": f"Natural final answer for turn {turn}.",
+            "tool_calls": [],
+        }
         return SimpleNamespace(message=SimpleNamespace(content=json.dumps(value), role="assistant"))
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections import Counter
 from collections.abc import Iterable
@@ -10,21 +11,45 @@ from typing import Any
 
 from jsonschema import ValidationError, validate
 
-from .schemas import EpisodeSpec, Message, RetrievalPolicyEvent, ValidationReport
+from .schemas import EpisodeSpec, Message, ValidationReport
 
 _QUERY_WS = re.compile(r"\s+")
 _QUERY_PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
+_VISIBLE_CHUNK_ID = re.compile(r"\b(?:h-[0-9a-f]{12,}|chunk-[A-Za-z0-9_-]+)\b", re.IGNORECASE)
+_EXPLICIT_CITATION = re.compile(r"\[\[([^\[\]\r\n]+)\]\]")
 
 
 def normalize_query(value: str) -> str:
     return _QUERY_WS.sub(" ", _QUERY_PUNCT.sub(" ", value.casefold())).strip()
 
 
+def text_similarity(left: str, right: str) -> float:
+    """Bag-of-token cosine similarity that also catches reordered paraphrases."""
+    left_counts = Counter(normalize_query(left).split())
+    right_counts = Counter(normalize_query(right).split())
+    if not left_counts or not right_counts:
+        return 0.0
+    dot = sum(count * right_counts.get(token, 0) for token, count in left_counts.items())
+    norm = math.sqrt(
+        sum(count * count for count in left_counts.values())
+        * sum(count * count for count in right_counts.values())
+    )
+    return dot / norm if norm else 0.0
+
+
+def query_similarity(left: str, right: str) -> float:
+    """Lexical similarity only; observed evidence gain is checked separately."""
+    left_tokens = set(normalize_query(left).split())
+    right_tokens = set(normalize_query(right).split())
+    union = left_tokens | right_tokens
+    jaccard = len(left_tokens & right_tokens) / len(union) if union else 0.0
+    return max(jaccard, text_similarity(left, right))
+
+
 def validate_trajectory(
     messages: list[Message],
     *,
     spec: EpisodeSpec,
-    policy_events: list[RetrievalPolicyEvent],
     retrieval_transcript: list[dict[str, Any]],
     tool_call_attempts: list[dict[str, Any]],
     tool_schemas: Iterable[dict[str, Any]],
@@ -38,6 +63,12 @@ def validate_trajectory(
     last_turn = 0
     users_by_turn: set[int] = set()
     final_by_turn: set[int] = set()
+    known_chunk_ids = {
+        str(chunk_id)
+        for row in retrieval_transcript
+        if row.get("success")
+        for chunk_id in (row.get("chunk_ids") or [])
+    }
 
     for index, msg in enumerate(messages):
         if msg.turn is not None:
@@ -47,6 +78,13 @@ def validate_trajectory(
         if msg.role == "user" and msg.turn:
             users_by_turn.add(msg.turn)
         if msg.role == "assistant":
+            visible_ids = set(_VISIBLE_CHUNK_ID.findall(msg.content or ""))
+            visible_ids.update(value.strip() for value in _EXPLICIT_CITATION.findall(msg.content or ""))
+            unknown_visible_ids = sorted(visible_ids - known_chunk_ids)
+            if unknown_visible_ids:
+                errors.append(
+                    f"message[{index}] cites unknown retrieved chunk IDs: {unknown_visible_ids}"
+                )
             if not msg.tool_calls and (msg.content or "").strip() and msg.turn:
                 final_by_turn.add(msg.turn)
             for tool_call in msg.tool_calls or []:
@@ -97,43 +135,43 @@ def validate_trajectory(
         if final_turns != expected_turns:
             errors.append(f"final-answer turns are {final_turns}; expected {expected_turns}")
 
-    event_turns = [event.turn for event in policy_events]
-    if event_turns != sorted(set(event_turns)):
-        errors.append(f"retrieval policy event turns must be unique and ordered: {event_turns}")
-    for event in policy_events:
-        if event.turn not in expected_turns:
-            errors.append(f"retrieval policy event references out-of-range turn {event.turn}")
+    successful_retrievals = [
+        row for row in retrieval_transcript if row.get("success") and row.get("chunk_ids")
+    ]
+    for index, current in enumerate(successful_retrievals):
+        for previous in successful_retrievals[:index]:
+            similarity = query_similarity(str(previous.get("query", "")), str(current.get("query", "")))
+            if similarity >= spec.query_lexical_similarity_threshold:
+                errors.append(
+                    "redundant retrieval queries exceed lexical similarity threshold: "
+                    f"{similarity:.3f} >= {spec.query_lexical_similarity_threshold:.3f}"
+                )
+                break
+    low_gain_chain = 0
+    previous_low_gain_query = ""
+    for row in successful_retrievals:
+        if not row.get("low_gain"):
+            low_gain_chain = 0
+            previous_low_gain_query = ""
             continue
-        successes = [
-            row
-            for row in retrieval_transcript
-            if row.get("turn") == event.turn and row.get("success") and row.get("chunk_ids")
-        ]
-        distinct = {normalize_query(str(row.get("query", ""))) for row in successes}
-        distinct.discard("")
-        required = event.required_retrievals_this_turn
-        if len(successes) < required:
-            errors.append(
-                f"retrieval deadline at turn {event.turn} completed {len(successes)} successful retrieval(s); "
-                f"required {required}"
-            )
-        if len(distinct) < required:
-            errors.append(
-                f"retrieval deadline at turn {event.turn} used {len(distinct)} distinct query/queries; "
-                f"required {required}"
-            )
-
-    distinct_global = {
-        normalize_query(str(row.get("query", "")))
-        for row in retrieval_transcript
-        if row.get("success") and row.get("chunk_ids")
-    }
-    distinct_global.discard("")
-    if len(distinct_global) < spec.required_retrieval_calls:
-        errors.append(
-            f"conversation completed {len(distinct_global)} distinct successful retrieval(s); "
-            f"required {spec.required_retrieval_calls}"
+        current_query = str(row.get("query", ""))
+        low_gain_chain += 1
+        related = bool(previous_low_gain_query) and (
+            query_similarity(current_query, previous_low_gain_query)
+            >= spec.low_gain_followup_similarity_threshold
         )
+        previous_low_gain_query = current_query
+        if low_gain_chain > spec.max_low_gain_chain + 1:
+            errors.append(
+                f"consecutive observed low-gain retrieval chain reached {low_gain_chain}; hard maximum is "
+                f"{spec.max_low_gain_chain + 1}"
+            )
+            break
+        if low_gain_chain > spec.max_low_gain_chain and related:
+            errors.append(
+                "a related retrieval executed after the configured low-gain chain allowance"
+            )
+            break
 
     if len(tool_call_attempts) > spec.max_tool_calls_per_conversation:
         errors.append(
@@ -144,11 +182,22 @@ def validate_trajectory(
     for turn, count in sorted(attempts_by_turn.items()):
         if count > spec.max_tool_calls_per_turn:
             errors.append(f"turn {turn} attempted {count} tool call(s); maximum is {spec.max_tool_calls_per_turn}")
-    retrieval_attempts = sum(attempt.get("name") == "retrieve" for attempt in tool_call_attempts)
-    if retrieval_attempts > spec.max_retrieval_calls:
+    successful_retrieval_count = len(successful_retrievals)
+    if successful_retrieval_count > spec.max_retrieval_calls:
         errors.append(
-            f"conversation attempted {retrieval_attempts} retrieval call(s); maximum is {spec.max_retrieval_calls}"
+            f"conversation completed {successful_retrieval_count} retrieval call(s); maximum is "
+            f"{spec.max_retrieval_calls}"
         )
+    retrievals_by_turn = Counter(
+        int(row.get("turn", 0))
+        for row in successful_retrievals
+    )
+    for turn, count in sorted(retrievals_by_turn.items()):
+        if count > spec.max_retrieval_calls_per_turn:
+            errors.append(
+                f"turn {turn} completed {count} retrieval call(s); maximum is "
+                f"{spec.max_retrieval_calls_per_turn}"
+            )
     emitted_call_ids = set(open_calls)
     successful_attempt_ids = {
         str(attempt.get("tool_call_id") or "") for attempt in tool_call_attempts if attempt.get("success")

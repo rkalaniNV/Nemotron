@@ -7,15 +7,11 @@ from typing import Any
 
 from .compression import generate_compression, render_summary
 from .config import PipelineConfig
-from .episode_control import (
-    build_episode_spec,
-    retrieval_deadline_event,
-)
+from .episode_control import build_episode_spec
 from .executors.base import ConversationState
 from .llm import call_structured
 from .prompts import (
     assistant_final_system,
-    assistant_retrieval_system,
     assistant_system,
     assistant_turn_directive,
     user_system,
@@ -25,13 +21,11 @@ from .reasoning import validate_reasoning
 from .schemas import (
     AssistantAction,
     AssistantFinalAction,
-    AssistantRetrievalAction,
     CanonicalRecord,
     CompressionEvent,
     EpisodeSeed,
     EpisodeSpec,
     Message,
-    RetrievalPolicyEvent,
     ToolCall,
     ToolResult,
     TrajectoryJudgment,
@@ -39,7 +33,7 @@ from .schemas import (
 )
 from .tokens import ContextMeter
 from .tool_registry import ToolRegistry, normalize_tool_call
-from .validation import normalize_query, validate_trajectory
+from .validation import query_similarity, text_similarity, validate_trajectory
 
 
 class EpisodeGenerationError(RuntimeError):
@@ -47,6 +41,14 @@ class EpisodeGenerationError(RuntimeError):
 
 
 class ToolBudgetExceededError(EpisodeGenerationError):
+    pass
+
+
+class RedundantRetrievalError(EpisodeGenerationError):
+    pass
+
+
+class LowGainRetrievalLimitError(EpisodeGenerationError):
     pass
 
 
@@ -63,7 +65,6 @@ class EpisodeRunner:
         run_id: str,
     ) -> CanonicalRecord:
         spec = build_episode_spec(seed, self.config.episode, self.config.run.seed)
-        policy_events: list[RetrievalPolicyEvent] = []
         state = ConversationState(
             conversation_id=seed.query_id,
             memory=dict(seed.memory_seed),
@@ -73,7 +74,6 @@ class EpisodeRunner:
                 models,
                 seed,
                 spec,
-                policy_events,
                 state,
                 registry,
                 run_id=run_id,
@@ -86,7 +86,6 @@ class EpisodeRunner:
                 status="generation_failed",
                 tools=registry.schemas,
                 episode_spec=spec.model_dump(),
-                policy_events=[event.model_dump() for event in policy_events],
                 tool_call_attempts=state.tool_call_attempts,
                 metadata={
                     "query": seed.query,
@@ -94,8 +93,7 @@ class EpisodeRunner:
                     "query_provenance": seed.query_provenance.model_dump() if seed.query_provenance else None,
                     "instructions": seed.instructions,
                     "turn_budget": seed.turn_budget,
-                    "retrieval_depth": seed.retrieval_depth,
-                    "required_retrieval_calls": spec.required_retrieval_calls,
+                    "max_retrieval_calls": spec.max_retrieval_calls,
                 },
                 retrieval_transcript=state.retrieval_transcript,
                 memory_events=state.memory_events,
@@ -107,7 +105,6 @@ class EpisodeRunner:
         models: dict[str, Any],
         seed: EpisodeSeed,
         spec: EpisodeSpec,
-        policy_events: list[RetrievalPolicyEvent],
         state: ConversationState,
         registry: ToolRegistry,
         *,
@@ -127,9 +124,6 @@ class EpisodeRunner:
         for turn in range(1, spec.turn_budget + 1):
             state.turn = turn
             before = len(messages)
-            successful_retrievals = self._completed_retrievals(state.retrieval_transcript)
-            retrieval_attempts = self._retrieval_attempt_count(state)
-            tool_calls = len(state.tool_call_attempts)
             if turn == 1:
                 user_text = seed.naive_query
             else:
@@ -141,16 +135,6 @@ class EpisodeRunner:
                     spec=spec,
                 )
                 user_text = proposal.content
-            policy_event = retrieval_deadline_event(
-                spec,
-                seed,
-                turn=turn,
-                successful_retrievals=successful_retrievals,
-                retrieval_attempts=retrieval_attempts,
-                tool_calls=tool_calls,
-            )
-            if policy_event is not None:
-                policy_events.append(policy_event)
             if not user_text.strip():
                 raise EpisodeGenerationError(f"user model returned an empty message at turn {turn}")
             messages.append(Message(role="user", content=user_text.strip(), turn=turn))
@@ -158,7 +142,6 @@ class EpisodeRunner:
                 models,
                 seed,
                 spec,
-                policy_event,
                 messages,
                 prior_summary,
                 registry,
@@ -198,7 +181,6 @@ class EpisodeRunner:
         report = validate_trajectory(
             messages,
             spec=spec,
-            policy_events=policy_events,
             retrieval_transcript=state.retrieval_transcript,
             tool_call_attempts=state.tool_call_attempts,
             tool_schemas=registry.schemas,
@@ -242,7 +224,6 @@ class EpisodeRunner:
             messages=projected,
             tools=registry.schemas,
             episode_spec=spec.model_dump(),
-            policy_events=[event.model_dump() for event in policy_events],
             tool_call_attempts=state.tool_call_attempts,
             metadata={
                 "query": seed.query,
@@ -250,9 +231,10 @@ class EpisodeRunner:
                 "query_provenance": seed.query_provenance.model_dump() if seed.query_provenance else None,
                 "instructions": seed.instructions,
                 "turn_budget": seed.turn_budget,
-                "retrieval_depth": seed.retrieval_depth,
-                "required_retrieval_calls": spec.required_retrieval_calls,
                 "successful_retrieval_calls": self._completed_retrievals(state.retrieval_transcript),
+                "low_gain_retrieval_calls": sum(
+                    bool(row.get("low_gain")) for row in state.retrieval_transcript
+                ),
                 "tool_call_count": len(state.tool_call_attempts),
                 "n_messages": len(messages),
                 "n_retrieved_chunks": len(state.retrieved),
@@ -272,7 +254,6 @@ class EpisodeRunner:
         models,
         seed,
         spec,
-        policy_event,
         messages,
         prior_summary,
         registry,
@@ -282,88 +263,18 @@ class EpisodeRunner:
     ) -> None:
         correction = ""
         force_final = False
+        budget_correction_used = False
         turn = state.turn
-        required_depth = policy_event.required_retrievals_this_turn if policy_event else 0
         for step in range(self.config.episode.max_steps_per_turn):
-            completed = self._completed_retrievals(state.retrieval_transcript, turn)
             view = self._view(messages, prior_summary, self.config.context.recent_raw_turns)
-            directive = assistant_turn_directive(turn, policy_event, completed)
+            directive = assistant_turn_directive(turn)
             if correction:
                 directive += "\n" + correction
-            needs_retrieval = completed < required_depth
             has_tool_capacity = (
                 self._tool_calls_this_turn(state, turn) < spec.max_tool_calls_per_turn
                 and len(state.tool_call_attempts) < spec.max_tool_calls_per_conversation
             )
-            final_only = (
-                force_final
-                or (policy_event is not None and completed >= required_depth)
-                or (not needs_retrieval and not has_tool_capacity)
-            )
-            if needs_retrieval:
-                if not self._has_retrieval_capacity(spec, state, turn):
-                    raise EpisodeGenerationError(
-                        f"turn {turn} cannot satisfy its retrieval deadline within the remaining tool budgets"
-                    )
-                retrieval = call_structured(
-                    models,
-                    "assistant",
-                    [
-                        {
-                            "role": "system",
-                            "content": assistant_retrieval_system(seed),
-                        },
-                        *view,
-                        {"role": "user", "content": directive},
-                    ],
-                    AssistantRetrievalAction,
-                )
-                reasoning_report = validate_reasoning(
-                    retrieval.reasoning,
-                    state.retrieved,
-                    max_tokens=self.config.context.max_reasoning_tokens,
-                )
-                reasoning_errors.extend(f"turn {turn}: {x}" for x in reasoning_report.errors)
-                warnings.extend(f"turn {turn}: {x}" for x in reasoning_report.warnings)
-                raw = {
-                    "name": "retrieve",
-                    "arguments": {"query": retrieval.query.strip()},
-                }
-                try:
-                    call = normalize_tool_call(raw, f"call-{turn}-{step}-0")
-                    result = self._execute_tool(call, registry, state, seed, spec, step=step)
-                except ToolBudgetExceededError:
-                    raise
-                except Exception as exc:
-                    state.rejected_tool_calls.append(
-                        {
-                            "turn": turn,
-                            "step": step,
-                            "raw": raw,
-                            "error": str(exc),
-                        }
-                    )
-                    correction = "The prior retrieval query failed. Return a different, valid, nonempty query."
-                    continue
-                messages.append(
-                    Message(
-                        role="assistant",
-                        content="",
-                        reasoning_content=retrieval.reasoning.think or None,
-                        tool_calls=[call.to_openai()],
-                        turn=turn,
-                    )
-                )
-                messages.append(Message.model_validate(result.to_message() | {"turn": turn}))
-                completed = self._completed_retrievals(state.retrieval_transcript, turn)
-                correction = (
-                    f"Complete {required_depth - completed} additional "
-                    "successful retrieve call(s) with distinct rewritten queries "
-                    "before answering."
-                    if completed < required_depth
-                    else "The required evidence is available. Synthesize the final answer."
-                )
-                continue
+            final_only = force_final or not has_tool_capacity
             if final_only:
                 final = call_structured(
                     models,
@@ -393,7 +304,12 @@ class EpisodeRunner:
                 [
                     {
                         "role": "system",
-                        "content": assistant_system(seed, registry.schemas, state.retrieved.keys()),
+                        "content": assistant_system(
+                            seed,
+                            registry.schemas,
+                            state.retrieved.keys(),
+                            state.retrieval_transcript,
+                        ),
                     },
                     *view,
                     {"role": "user", "content": directive},
@@ -419,6 +335,8 @@ class EpisodeRunner:
 
             calls = []
             results = []
+            execution_errors = []
+            budget_errors = []
             for index, raw in enumerate(action.tool_calls):
                 try:
                     call = normalize_tool_call(raw, f"call-{turn}-{step}-{index}")
@@ -432,11 +350,9 @@ class EpisodeRunner:
                             "error": str(exc),
                         }
                     )
-                    force_final = True
-                    correction = (
-                        "The tool budget is exhausted. Provide a substantive answer now without another tool call."
-                    )
-                    break
+                    execution_errors.append(str(exc))
+                    budget_errors.append(str(exc))
+                    continue
                 except Exception as exc:
                     state.rejected_tool_calls.append(
                         {
@@ -446,6 +362,7 @@ class EpisodeRunner:
                             "error": str(exc),
                         }
                     )
+                    execution_errors.append(str(exc))
                     continue
                 calls.append(call.to_openai())
                 results.append(result)
@@ -460,27 +377,23 @@ class EpisodeRunner:
                     )
                 )
                 messages.extend(Message.model_validate(result.to_message() | {"turn": turn}) for result in results)
-                completed = self._completed_retrievals(state.retrieval_transcript, turn)
-                if completed < required_depth:
-                    correction = (
-                        f"Complete {required_depth - completed} additional "
-                        "successful retrieve call(s) with distinct rewritten queries "
-                        "before answering."
-                    )
-                else:
-                    force_final = True
-                    correction = (
-                        "Tool results are now available. Synthesize a substantive "
-                        "final answer without another tool call."
-                    )
+                correction = (
+                    "Tool results are now available. Answer if the current evidence is sufficient. If it is not, "
+                    "use another configured tool only when it materially advances this user request; respect any "
+                    "per-turn retrieval limit reported above."
+                )
                 continue
 
-            completed = self._completed_retrievals(state.retrieval_transcript, turn)
-            if completed < required_depth:
+            if execution_errors:
+                if budget_errors:
+                    if budget_correction_used:
+                        force_final = True
+                    budget_correction_used = True
                 correction = (
-                    f"Do not answer yet. Complete "
-                    f"{required_depth - completed} additional successful "
-                    "retrieve call(s) using distinct rewritten queries."
+                    "The proposed tool request was rejected: "
+                    + "; ".join(execution_errors)
+                    + ". Answer from existing evidence, or use a different configured tool only if it is still "
+                    "available and materially needed."
                 )
                 continue
             if action.content.strip():
@@ -497,9 +410,7 @@ class EpisodeRunner:
         turn_rejections = [item for item in state.rejected_tool_calls if item.get("turn") == turn]
         raise EpisodeGenerationError(
             f"turn {turn} did not produce a valid final answer within "
-            f"{self.config.episode.max_steps_per_turn} steps; completed retrievals="
-            f"{self._completed_retrievals(state.retrieval_transcript, turn)}/"
-            f"{required_depth}; rejected calls="
+            f"{self.config.episode.max_steps_per_turn} steps; rejected calls="
             f"{json.dumps(turn_rejections, ensure_ascii=False)}"
         )
 
@@ -562,15 +473,60 @@ class EpisodeRunner:
             raise ToolBudgetExceededError(
                 f"conversation reached max_tool_calls_per_conversation={spec.max_tool_calls_per_conversation}"
             )
-        if call.name == "retrieve" and self._retrieval_attempt_count(state) >= spec.max_retrieval_calls:
+        if (
+            call.name == "retrieve"
+            and self._completed_retrievals(state.retrieval_transcript) >= spec.max_retrieval_calls
+        ):
             raise ToolBudgetExceededError(f"conversation reached max_retrieval_calls={spec.max_retrieval_calls}")
-        remaining_required = max(
-            0,
-            spec.required_retrieval_calls - self._completed_retrievals(state.retrieval_transcript),
-        )
-        remaining_after_call = spec.max_tool_calls_per_conversation - len(state.tool_call_attempts) - 1
-        if call.name != "retrieve" and remaining_after_call < remaining_required:
-            raise ToolBudgetExceededError("tool-call slot is reserved for the remaining retrieval target")
+        if (
+            call.name == "retrieve"
+            and self._completed_retrievals(state.retrieval_transcript, state.turn)
+            >= spec.max_retrieval_calls_per_turn
+        ):
+            raise ToolBudgetExceededError(
+                f"turn {state.turn} reached max_retrieval_calls_per_turn={spec.max_retrieval_calls_per_turn}"
+            )
+        best_query_similarity = 0.0
+        if call.name == "retrieve":
+            query = str(call.arguments.get("query", "")).strip()
+            for row in state.retrieval_transcript:
+                if not row.get("success") or not row.get("chunk_ids"):
+                    continue
+                best_query_similarity = max(
+                    best_query_similarity,
+                    query_similarity(query, str(row.get("query", ""))),
+                )
+            if best_query_similarity >= spec.query_lexical_similarity_threshold:
+                raise RedundantRetrievalError(
+                    "retrieval query is too lexically similar to an earlier successful search "
+                    f"({best_query_similarity:.3f} >= {spec.query_lexical_similarity_threshold:.3f})"
+                )
+            consecutive_low_gain = 0
+            latest_low_gain_query = ""
+            for row in reversed(state.retrieval_transcript):
+                if not row.get("success") or not row.get("chunk_ids"):
+                    continue
+                if not row.get("low_gain"):
+                    break
+                if not latest_low_gain_query:
+                    latest_low_gain_query = str(row.get("query", ""))
+                consecutive_low_gain += 1
+            if consecutive_low_gain > spec.max_low_gain_chain:
+                raise LowGainRetrievalLimitError(
+                    "retrieval is paused after repeated observed low-gain results; answer from existing "
+                    "evidence without another retrieval in this episode"
+                )
+            if consecutive_low_gain >= spec.max_low_gain_chain and latest_low_gain_query:
+                followup_similarity = query_similarity(query, latest_low_gain_query)
+                if followup_similarity >= spec.low_gain_followup_similarity_threshold:
+                    raise LowGainRetrievalLimitError(
+                        "retrieval would continue a low-gain search chain "
+                        f"({followup_similarity:.3f} >= "
+                        f"{spec.low_gain_followup_similarity_threshold:.3f}); reuse evidence or pursue a "
+                        "genuinely different unresolved facet"
+                    )
+        prior_chunks = dict(state.retrieved)
+        transcript_size = len(state.retrieval_transcript)
         attempt = {
             "turn": state.turn,
             "step": step,
@@ -585,6 +541,44 @@ class EpisodeRunner:
             attempt["error"] = str(exc)
             raise
         attempt["success"] = True
+        if call.name == "retrieve" and len(state.retrieval_transcript) > transcript_size:
+            row = state.retrieval_transcript[-1]
+            chunk_ids = set(row.get("chunk_ids") or [])
+            new_chunk_fraction = len(chunk_ids - set(prior_chunks)) / len(chunk_ids) if chunk_ids else 0.0
+            payload = result.payload if isinstance(result.payload, list) else []
+            returned_texts = [
+                str(item.get("content") or item.get("text") or "")
+                for item in payload
+                if isinstance(item, dict)
+            ]
+            prior_texts = [chunk.content for chunk in prior_chunks.values() if chunk.content]
+            similarities = [
+                max((text_similarity(text, previous) for previous in prior_texts), default=0.0)
+                for text in returned_texts
+                if text
+            ]
+            evidence_similarity = sum(similarities) / len(similarities) if similarities else 0.0
+            low_gain = bool(prior_chunks) and (
+                new_chunk_fraction < spec.min_new_chunk_fraction
+                or evidence_similarity >= spec.evidence_lexical_similarity_threshold
+            )
+            prior_low_gain_chain = 0
+            if low_gain:
+                for previous in reversed(state.retrieval_transcript[:-1]):
+                    if not previous.get("success") or not previous.get("chunk_ids"):
+                        continue
+                    if not previous.get("low_gain"):
+                        break
+                    prior_low_gain_chain += 1
+            quality = {
+                "max_prior_query_similarity": round(best_query_similarity, 6),
+                "new_chunk_fraction": round(new_chunk_fraction, 6),
+                "evidence_similarity": round(evidence_similarity, 6),
+                "low_gain": low_gain,
+                "consecutive_low_gain": prior_low_gain_chain + 1 if low_gain else 0,
+            }
+            row.update(quality)
+            attempt["retrieval_quality"] = quality
         return result
 
     def _judge(self, models, seed, messages, tools) -> TrajectoryJudgment:
@@ -613,28 +607,15 @@ class EpisodeRunner:
 
     @staticmethod
     def _completed_retrievals(transcript: list[dict[str, Any]], turn: int | None = None) -> int:
-        queries = {
-            normalize_query(str(row.get("query", "")))
+        return sum(
+            bool(row.get("success") and row.get("chunk_ids"))
             for row in transcript
-            if (turn is None or row.get("turn") == turn) and row.get("success") and row.get("chunk_ids")
-        }
-        queries.discard("")
-        return len(queries)
-
-    @staticmethod
-    def _retrieval_attempt_count(state: ConversationState) -> int:
-        return sum(attempt.get("name") == "retrieve" for attempt in state.tool_call_attempts)
+            if turn is None or row.get("turn") == turn
+        )
 
     @staticmethod
     def _tool_calls_this_turn(state: ConversationState, turn: int) -> int:
         return sum(attempt.get("turn") == turn for attempt in state.tool_call_attempts)
-
-    def _has_retrieval_capacity(self, spec: EpisodeSpec, state: ConversationState, turn: int) -> bool:
-        return (
-            self._tool_calls_this_turn(state, turn) < spec.max_tool_calls_per_turn
-            and len(state.tool_call_attempts) < spec.max_tool_calls_per_conversation
-            and self._retrieval_attempt_count(state) < spec.max_retrieval_calls
-        )
 
     @staticmethod
     def _recent(messages: list[Message], n_turns: int) -> list[Message]:

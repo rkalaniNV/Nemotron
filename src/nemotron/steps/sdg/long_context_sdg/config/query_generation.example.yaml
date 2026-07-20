@@ -62,20 +62,53 @@ query_generation:
   min_query_chars: 8
   max_query_chars: 400
 
-  # Exact largest-remainder quotas are used. For 100 queries, these defaults
-  # yield 65/15/10/5/3/2 before model generation.
+  # Exact largest-remainder quotas select task shapes. These induce natural
+  # evidence demand; they are not conversation-level retrieval quotas.
   archetype_weights:
-    research: 0.65
-    applied_scenario: 0.15
-    comparison: 0.10
-    misconception: 0.05
-    clarification: 0.03
-    insufficient_evidence: 0.02
+    single_lookup: 0.25
+    comparison: 0.20
+    timeline: 0.15
+    multi_constraint: 0.20
+    conflict_resolution: 0.10
+    clarification: 0.05
+    insufficient_evidence: 0.05
+
+  archetype_profiles:
+    single_lookup: {evidence_scope: single_facet, bundle_min: 1, bundle_max: 1, min_sources: 1, min_evidence_needs: 1}
+    comparison: {evidence_scope: multi_facet, bundle_min: 2, bundle_max: 3, min_sources: 2, min_evidence_needs: 2}
+    timeline: {evidence_scope: multi_facet, bundle_min: 2, bundle_max: 4, min_sources: 1, min_evidence_needs: 2}
+    multi_constraint: {evidence_scope: multi_facet, bundle_min: 3, bundle_max: 4, min_sources: 2, min_evidence_needs: 3}
+    conflict_resolution: {evidence_scope: multi_facet, bundle_min: 2, bundle_max: 4, min_sources: 2, min_evidence_needs: 2}
+    clarification: {evidence_scope: conversational, bundle_min: 1, bundle_max: 2, min_sources: 1, min_evidence_needs: 0}
+    insufficient_evidence: {evidence_scope: multi_facet, bundle_min: 2, bundle_max: 3, min_sources: 1, min_evidence_needs: 2}
 
   persona_mode_weights:
     general_interest: 0.40
     situated_need: 0.40
     domain_adjacent: 0.20
+
+  # Exact dataset-level quotas for the visible first user utterance. The
+  # canonical query remains well-formed and is used only for hidden validation
+  # and topic continuity; these labels never enter the assistant prompt.
+  surface_form_weights:
+    well_formed: 0.20
+    underspecified: 0.20
+    retrieval_rewrite: 0.20
+    noisy_language: 0.10
+    keyword_fragment: 0.10
+    overbroad: 0.10
+    adjacent_intent: 0.10
+
+  # minimum_anchor_recall_gap verifies that rewriting the visible query into
+  # the canonical query improves retrieval against the sampled anchor bundle.
+  surface_form_profiles:
+    well_formed: {minimum_anchor_recall_gap: 0.0, require_noncanonical_form: false, require_topic_overlap: false}
+    underspecified: {minimum_anchor_recall_gap: 0.20, require_noncanonical_form: true, require_topic_overlap: false}
+    retrieval_rewrite: {minimum_anchor_recall_gap: 0.20, require_noncanonical_form: true, require_topic_overlap: false}
+    noisy_language: {minimum_anchor_recall_gap: 0.10, require_noncanonical_form: true, require_topic_overlap: false}
+    keyword_fragment: {minimum_anchor_recall_gap: 0.10, require_noncanonical_form: true, require_topic_overlap: false}
+    overbroad: {minimum_anchor_recall_gap: 0.10, require_noncanonical_form: true, require_topic_overlap: false}
+    adjacent_intent: {minimum_anchor_recall_gap: 0.20, require_noncanonical_form: true, require_topic_overlap: true}
 
   # These are Data Designer managed Nemotron-Personas locales. Download them
   # before generation and record the reviewed NGC asset revision here.
@@ -116,11 +149,13 @@ query_generation:
 
   evidence:
     pool_size: 32
-    bundle_min: 2
+    bundle_min: 1
     bundle_max: 4
     max_per_source: 2
+    max_pair_similarity: 0.75
     min_chunk_chars: 160
     retrievability_top_k: 8
     max_lexical_overlap: 0.35
     max_verbatim_tokens: 12
-    duplicate_similarity: 0.85
+    duplicate_similarity: 0.72
+    max_probe_similarity: 0.80

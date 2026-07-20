@@ -49,41 +49,77 @@ class TurnRange(StrictConfigModel):
         return self
 
 
-class RetrievalCallRange(StrictConfigModel):
-    min: int = Field(1, ge=0, le=120)
-    max: int = Field(12, ge=0, le=120)
+class RetrievalNoveltyConfig(StrictConfigModel):
+    """Deterministic lexical and observed-evidence retrieval guards."""
 
-    @model_validator(mode="after")
-    def ordered(self) -> RetrievalCallRange:
-        if self.max < self.min:
-            raise ValueError("retrieval_calls.max must be >= retrieval_calls.min")
-        return self
+    query_lexical_similarity_threshold: float = Field(0.80, ge=0, le=1)
+    evidence_lexical_similarity_threshold: float = Field(0.85, ge=0, le=1)
+    min_new_chunk_fraction: float = Field(0.50, ge=0, le=1)
+    max_low_gain_chain: int = Field(1, ge=1, le=20)
+    low_gain_followup_similarity_threshold: float = Field(0.35, ge=0, le=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_names(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if "query_similarity_threshold" in data:
+            data.setdefault(
+                "query_lexical_similarity_threshold",
+                data.pop("query_similarity_threshold"),
+            )
+        if "evidence_similarity_threshold" in data:
+            data.setdefault(
+                "evidence_lexical_similarity_threshold",
+                data.pop("evidence_similarity_threshold"),
+            )
+        if "max_low_gain_calls" in data:
+            legacy = int(data.pop("max_low_gain_calls"))
+            data.setdefault("max_low_gain_chain", max(1, legacy))
+        return data
 
 
 class EpisodePolicyConfig(StrictConfigModel):
     turn_budget: TurnRange = Field(default_factory=TurnRange)
     honor_seed_turn_budget: bool = True
-    retrieval_depth_weights: dict[int, float] = Field(default_factory=lambda: {1: 0.25, 2: 0.5, 3: 0.25})
-    retrieval_calls: RetrievalCallRange = Field(default_factory=RetrievalCallRange)
+    max_retrieval_calls: int = Field(6, ge=0, le=120)
+    max_retrieval_calls_per_turn: int = Field(1, ge=0, le=12)
+    retrieval_novelty: RetrievalNoveltyConfig = Field(default_factory=RetrievalNoveltyConfig)
     max_steps_per_turn: int = Field(6, ge=2, le=12)
-    max_tool_calls_per_turn: int = Field(3, ge=1, le=12)
-    max_tool_calls_per_conversation: int = Field(32, ge=1, le=200)
+    max_tool_calls_per_turn: int = Field(2, ge=1, le=12)
+    max_tool_calls_per_conversation: int = Field(16, ge=1, le=200)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_retrieval_policy(cls, value: Any) -> Any:
+        """Accept optional-only legacy ranges while rejecting forced floors."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        legacy = data.pop("retrieval_calls", None)
+        if data.pop("retrieval_depth_weights", None) is not None:
+            raise ValueError(
+                "episode.retrieval_depth_weights is no longer supported; task/evidence diversity belongs "
+                "in query generation"
+            )
+        if legacy is not None:
+            minimum = int((legacy or {}).get("min", 0))
+            if minimum:
+                raise ValueError(
+                    "episode.retrieval_calls.min is no longer supported; remove the forced floor or set it to 0"
+                )
+            data.setdefault("max_retrieval_calls", int((legacy or {}).get("max", 6)))
+        return data
 
     @model_validator(mode="after")
     def valid_policy(self) -> EpisodePolicyConfig:
-        if set(self.retrieval_depth_weights) - {1, 2, 3}:
-            raise ValueError("retrieval_depth_weights keys must be in 1..3")
-        if not self.retrieval_depth_weights or sum(self.retrieval_depth_weights.values()) <= 0:
-            raise ValueError("retrieval_depth_weights must contain positive total weight")
-        if any(weight < 0 for weight in self.retrieval_depth_weights.values()):
-            raise ValueError("retrieval_depth_weights must be nonnegative")
-        maximum_depth = max(depth for depth, weight in self.retrieval_depth_weights.items() if weight > 0)
-        if self.max_steps_per_turn <= maximum_depth:
-            raise ValueError("max_steps_per_turn must allow every enabled retrieval depth plus one final-answer step")
         if self.max_tool_calls_per_turn > self.max_tool_calls_per_conversation:
             raise ValueError("max_tool_calls_per_turn cannot exceed max_tool_calls_per_conversation")
-        if self.retrieval_calls.max > self.max_tool_calls_per_conversation:
-            raise ValueError("retrieval_calls.max cannot exceed max_tool_calls_per_conversation")
+        if self.max_retrieval_calls > self.max_tool_calls_per_conversation:
+            raise ValueError("max_retrieval_calls cannot exceed max_tool_calls_per_conversation")
+        if self.max_retrieval_calls_per_turn > self.max_tool_calls_per_turn:
+            raise ValueError("max_retrieval_calls_per_turn cannot exceed max_tool_calls_per_turn")
         return self
 
 
