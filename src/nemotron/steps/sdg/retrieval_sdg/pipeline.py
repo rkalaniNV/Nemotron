@@ -45,7 +45,7 @@ from retrieval_sdg.query_prep import cluster_queries, dedup, sample  # noqa: E40
 
 # engine-block keys that are I/O, not ConversationSimulatorConfig knobs (popped before splat)
 _ENGINE_IO = {"input", "output", "column_name", "metadata_fields", "resume", "artifact_path",
-              "max_parallel_workers"}   # read directly in run_generate; not a ConversationSimulatorConfig field
+              "max_parallel_workers", "buffer_size"}   # read directly in run_generate; not config knobs
 
 
 def _resolve(base: Path, p: str) -> Path:
@@ -244,15 +244,17 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
     client = DataDesigner(model_providers=providers, artifact_path=artifact_path) if providers \
         else DataDesigner(artifact_path=artifact_path)
 
-    # generate trajectories in parallel (the speed lever; bounded by the endpoint)
-    from data_designer.config.run_config import RunConfig
-    workers = int(eng.get("max_parallel_workers", 4))
-    if workers != 4:
-        client.set_run_config(RunConfig(non_inference_max_parallel_workers=workers))
-        print(f"[generate] max_parallel_workers={workers}")
-
     n_seeds = sum(1 for l in seed_path.open(encoding="utf-8") if l.strip())
     n = min(limit, n_seeds) if limit else n_seeds
+
+    # parallel trajectories + row-group size. buffer_size default = num_records/10
+    # (incremental checkpoints), floored at workers so the pool doesn't starve.
+    from data_designer.config.run_config import RunConfig
+    workers = int(eng.get("max_parallel_workers", 4))
+    buffer_size = int(eng.get("buffer_size") or max(workers, n // 10))
+    client.set_run_config(RunConfig(non_inference_max_parallel_workers=workers, buffer_size=buffer_size))
+    print(f"[generate] workers={workers} buffer_size={buffer_size} ({n} records)")
+
     if resume != ResumeMode.NEVER:
         print(f"[generate] resume={resume.value} artifacts={artifact_path} (re-run this stage to resume)")
     result = client.create(cb, num_records=n, dataset_name="retrieval_sdg", resume=resume)

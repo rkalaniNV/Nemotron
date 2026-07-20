@@ -150,6 +150,7 @@ engine:
                     compression, persona]
 
   max_parallel_workers: 8                          # trajectories generated in parallel (raise = faster, bounded by endpoint)
+  # buffer_size: 50                                # optional; default = max(max_parallel_workers, num_records//10)
 
   # length: center-weighted, so 3-6 averages ~4-5 turns
   min_turns: 3
