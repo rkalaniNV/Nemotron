@@ -8,16 +8,14 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from .checkpoint import load_records, verify_fingerprint
 from .config import PipelineConfig
 from .llm import call_structured
-from .schemas import CanonicalRecord, EpisodePlan, TrajectoryJudgment
+from .records import load_records
+from .schemas import CanonicalRecord, EpisodeSpec, RetrievalPolicyEvent, TrajectoryJudgment
 from .validation import reconstruct_messages, validate_trajectory
 
 
-def _judge_record(
-    record: CanonicalRecord, cfg: PipelineConfig, models: dict[str, Any]
-) -> TrajectoryJudgment:
+def _judge_record(record: CanonicalRecord, cfg: PipelineConfig, models: dict[str, Any]) -> TrajectoryJudgment:
     prompt = (
         "Rejudge this synthetic trajectory. Return JSON only. Score every requested dimension 1-5.\n"
         f"Effective instructions: {record.metadata.get('instructions', '')}\n"
@@ -49,11 +47,14 @@ def evaluate_record(
 ) -> CanonicalRecord:
     if record.status == "generation_failed":
         return record
-    plan = EpisodePlan.model_validate(record.episode_plan)
+    spec = EpisodeSpec.model_validate(record.episode_spec)
+    policy_events = [RetrievalPolicyEvent.model_validate(item) for item in record.policy_events]
     report = validate_trajectory(
         reconstruct_messages(record.model_dump()),
-        plan=plan,
+        spec=spec,
+        policy_events=policy_events,
         retrieval_transcript=record.retrieval_transcript,
+        tool_call_attempts=record.tool_call_attempts,
         tool_schemas=record.tools,
         require_final_answer_each_turn=cfg.validation.require_final_answer_each_turn,
     )
@@ -67,9 +68,7 @@ def evaluate_record(
         updated.judgment = {"enabled": False, "skipped": True}
         return updated
 
-    needs_judge = (
-        rejudge or record.status == "quarantine" or record.judgment.get("pending")
-    )
+    needs_judge = rejudge or record.status == "quarantine" or record.judgment.get("pending")
     if needs_judge:
         if judge_models is None:
             updated.status = "quarantine"
@@ -88,15 +87,9 @@ def evaluate_record(
         updated.judgment = verdict.model_dump()
     scores = updated.judgment.get("scores") or {}
     missing = sorted(set(cfg.judge.dimensions) - set(scores))
-    below = {
-        k: scores.get(k, 0)
-        for k in cfg.judge.dimensions
-        if scores.get(k, 0) < cfg.judge.min_score
-    }
+    below = {k: scores.get(k, 0) for k in cfg.judge.dimensions if scores.get(k, 0) < cfg.judge.min_score}
     rating = updated.judgment.get("rating")
-    updated.status = (
-        "accepted" if not missing and not below and rating == "success" else "rejected"
-    )
+    updated.status = "accepted" if not missing and not below and rating == "success" else "rejected"
     if updated.status == "rejected":
         updated.judgment["gate_errors"] = {
             "missing_dimensions": missing,
@@ -114,49 +107,72 @@ def _write_jsonl(path: Path, records: Iterable[CanonicalRecord]) -> None:
     temporary.replace(path)
 
 
-def evaluate_checkpoint(
+def _numeric_summary(values: Iterable[int]) -> dict[str, float | int]:
+    ordered = sorted(values)
+    if not ordered:
+        return {"count": 0, "min": 0, "median": 0, "mean": 0.0, "max": 0}
+    midpoint = len(ordered) // 2
+    median = ordered[midpoint] if len(ordered) % 2 else (ordered[midpoint - 1] + ordered[midpoint]) / 2
+    return {
+        "count": len(ordered),
+        "min": ordered[0],
+        "median": median,
+        "mean": round(sum(ordered) / len(ordered), 4),
+        "max": ordered[-1],
+    }
+
+
+def evaluate_generated(
     cfg: PipelineConfig,
     *,
     judge_models: dict[str, Any] | None = None,
     rejudge: bool = False,
 ) -> dict[str, Any]:
-    records = load_records(cfg.resolve(cfg.paths.checkpoint))
-    verify_fingerprint(records, cfg.fingerprint())
-    # The checkpoint is an append-only attempt log. A retried query supersedes its
-    # earlier attempt in canonical/evaluated outputs while history remains durable.
-    last_index = {record.query_id: index for index, record in enumerate(records)}
-    records = [
-        record
-        for index, record in enumerate(records)
-        if last_index[record.query_id] == index
-    ]
-    evaluated = [
-        evaluate_record(r, cfg, judge_models=judge_models, rejudge=rejudge)
-        for r in records
-    ]
+    records = load_records(cfg.resolve(cfg.paths.generated))
+    incompatible = sorted(
+        {record.config_fingerprint for record in records if record.config_fingerprint != cfg.fingerprint()}
+    )
+    if incompatible:
+        raise ValueError("generated records use incompatible configuration fingerprint(s): " + ", ".join(incompatible))
+    query_ids = [record.query_id for record in records]
+    if len(query_ids) != len(set(query_ids)):
+        raise ValueError("generated records contain duplicate query IDs")
+    evaluated = [evaluate_record(r, cfg, judge_models=judge_models, rejudge=rejudge) for r in records]
     canonical = cfg.resolve(cfg.paths.canonical)
     output_dir = cfg.resolve(cfg.paths.output_dir)
     _write_jsonl(canonical, evaluated)
     for status in ("accepted", "rejected", "quarantine", "generation_failed"):
-        _write_jsonl(
-            output_dir / f"{status}.jsonl", (r for r in evaluated if r.status == status)
-        )
+        _write_jsonl(output_dir / f"{status}.jsonl", (r for r in evaluated if r.status == status))
     counts = Counter(r.status for r in evaluated)
+    policy_events = [event for record in evaluated for event in record.policy_events]
+    turn_budgets = [
+        int(record.metadata["turn_budget"]) for record in evaluated if record.metadata.get("turn_budget") is not None
+    ]
+    required_retrievals = [
+        int(record.episode_spec["required_retrieval_calls"])
+        for record in evaluated
+        if record.episode_spec.get("required_retrieval_calls") is not None
+    ]
+    successful_retrievals = [
+        int(record.metadata["successful_retrieval_calls"])
+        for record in evaluated
+        if record.metadata.get("successful_retrieval_calls") is not None
+    ]
+    tool_calls = [len(record.tool_call_attempts) for record in evaluated if record.episode_spec]
+    event_counts = [len(record.policy_events) for record in evaluated if record.episode_spec]
     summary = {
         "total": len(evaluated),
         "counts": dict(counts),
-        "acceptance_rate": round(counts["accepted"] / len(evaluated), 4)
-        if evaluated
-        else 0.0,
-        "retrieval_depths": dict(
-            Counter(str(r.metadata.get("retrieval_depth")) for r in evaluated)
-        ),
-        "turn_budgets": dict(
-            Counter(str(r.metadata.get("turn_budget")) for r in evaluated)
-        ),
+        "acceptance_rate": round(counts["accepted"] / len(evaluated), 4) if evaluated else 0.0,
+        "retrieval_depths": dict(Counter(str(r.metadata.get("retrieval_depth")) for r in evaluated)),
+        "turn_budgets": dict(Counter(str(r.metadata.get("turn_budget")) for r in evaluated)),
+        "turn_budget_summary": _numeric_summary(turn_budgets),
+        "required_retrieval_summary": _numeric_summary(required_retrievals),
+        "successful_retrieval_summary": _numeric_summary(successful_retrievals),
+        "tool_call_summary": _numeric_summary(tool_calls),
+        "policy_event_summary": _numeric_summary(event_counts),
+        "policy_event_reasons": dict(Counter(str(item.get("reason")) for item in policy_events if item.get("reason"))),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "summary.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     return summary

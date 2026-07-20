@@ -21,6 +21,7 @@ class ConversationState:
     retrieval_transcript: list[dict[str, Any]] = field(default_factory=list)
     memory_events: list[dict[str, Any]] = field(default_factory=list)
     rejected_tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    tool_call_attempts: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

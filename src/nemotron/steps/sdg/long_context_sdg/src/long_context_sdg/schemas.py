@@ -57,16 +57,27 @@ class EpisodeSeed(BaseModel):
     query_provenance: QueryProvenance | None = None
 
 
-class TurnPlan(BaseModel):
-    turn: int
-    intent: str
-    retrieval_required: bool = False
-    retrieval_depth: int = 0
-
-
-class EpisodePlan(BaseModel):
+class EpisodeSpec(BaseModel):
     query_id: str
-    turns: list[TurnPlan]
+    turn_budget: int = Field(ge=1)
+    required_retrieval_calls: int = Field(ge=0)
+    max_retrieval_calls: int = Field(ge=0)
+    max_tool_calls_per_turn: int = Field(ge=1)
+    max_tool_calls_per_conversation: int = Field(ge=1)
+
+
+class UserTurn(BaseModel):
+    content: str = Field(min_length=1)
+
+
+class RetrievalPolicyEvent(BaseModel):
+    turn: int
+    reason: Literal["retrieval_deadline"] = "retrieval_deadline"
+    required_retrievals_this_turn: int = Field(ge=1)
+    successful_retrievals_before: int = Field(ge=0)
+    retrieval_attempts_before: int = Field(ge=0)
+    tool_calls_before: int = Field(ge=0)
+    turns_remaining: int = Field(ge=1)
 
 
 class RetrievalChunk(BaseModel):
@@ -209,7 +220,9 @@ class CanonicalRecord(BaseModel):
     status: Literal["accepted", "rejected", "quarantine", "generation_failed"]
     messages: list[dict[str, Any]] = Field(default_factory=list)
     tools: list[dict[str, Any]] = Field(default_factory=list)
-    episode_plan: dict[str, Any] = Field(default_factory=dict)
+    episode_spec: dict[str, Any] = Field(default_factory=dict)
+    policy_events: list[dict[str, Any]] = Field(default_factory=list)
+    tool_call_attempts: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     retrieval_transcript: list[dict[str, Any]] = Field(default_factory=list)
     memory_events: list[dict[str, Any]] = Field(default_factory=list)

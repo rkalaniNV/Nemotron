@@ -27,18 +27,12 @@ def _get_path(value: Any, path: str, default: Any = None) -> Any:
 
 
 def _stable_chunk_id(item: dict[str, Any], text: str) -> str:
-    raw = (
-        json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
-        if item
-        else text
-    )
+    raw = json.dumps(item, sort_keys=True, ensure_ascii=False, default=str) if item else text
     return "h-" + hashlib.sha256(raw.encode()).hexdigest()[:20]
 
 
 class RetrieverClient:
-    def __init__(
-        self, config: RetrieverConfig, *, transport: httpx.BaseTransport | None = None
-    ):
+    def __init__(self, config: RetrieverConfig, *, transport: httpx.BaseTransport | None = None):
         self.config = config
         self._client = httpx.Client(
             transport=transport,
@@ -62,9 +56,7 @@ class RetrieverClient:
         payload = self._request(body)
         raw_items = _get_path(payload, self.config.results_path, [])
         if not isinstance(raw_items, list):
-            raise ValueError(
-                f"retrieval results_path `{self.config.results_path}` is not a list"
-            )
+            raise ValueError(f"retrieval results_path `{self.config.results_path}` is not a list")
         chunks = [self._chunk(item) for item in raw_items if isinstance(item, dict)]
         chunks = [c for c in chunks if c.content]
         return self._select(chunks, k, query)
@@ -83,9 +75,7 @@ class RetrieverClient:
                 last_error = exc
                 if attempt + 1 < self.config.retries and self.config.backoff_seconds:
                     time.sleep(min(self.config.backoff_seconds * (2**attempt), 15))
-        raise RuntimeError(
-            f"retriever unavailable after {self.config.retries} attempt(s): {last_error}"
-        )
+        raise RuntimeError(f"retriever unavailable after {self.config.retries} attempt(s): {last_error}")
 
     def _chunk(self, item: dict[str, Any]) -> RetrievalChunk:
         f = self.config.fields
@@ -108,9 +98,7 @@ class RetrieverClient:
             metadata={k: v for k, v in item.items() if k not in consumed},
         )
 
-    def _select(
-        self, chunks: list[RetrievalChunk], k: int, query: str
-    ) -> list[RetrievalChunk]:
+    def _select(self, chunks: list[RetrievalChunk], k: int, query: str) -> list[RetrievalChunk]:
         if len(chunks) <= k:
             return chunks
         if self.config.selection == "sampled":

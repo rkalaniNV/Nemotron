@@ -1,72 +1,86 @@
 # Long-Context Synthetic Data Generation
 
-`long_context_sdg` generates realistic long-context training data through
-independent query-synthesis, conversation-generation, and evaluation stages.
-The pipeline is domain- and language-neutral: behavior comes from reviewed
-taxonomy YAML, managed persona locales, seed records, instructions, model
-choices, retrieval mappings, tool schemas, and executor implementations.
+`long_context_sdg` is a domain- and language-neutral pipeline for producing
+grounded, multi-turn training conversations. It is split into independent
+query-synthesis, conversation-generation, evaluation, and export stages so a
+team can replace or extend one stage without coupling it to the others.
 
 The package provides:
 
 - taxonomy-stratified, persona-conditioned synthetic query generation;
-- exact query quotas across topics, archetypes, persona modes, and languages;
-- deterministic episode planning with 6–40-turn conversations;
-- a separate opening-intent distribution so the first assistant response does
-  not always retrieve;
-- required retrieval depths of one, two, or three distinct queries on planned
-  research turns;
-- optional retrieval, memory, custom real tools, and explicitly marked
-  simulated tools;
-- hidden, source-linked context compaction without altering exported messages;
-- deterministic validation followed by an optional model judge;
-- append-only, episode-level checkpoints and safe resume;
-- canonical, partitioned, and trainer-oriented JSONL outputs;
-- Data Designer orchestration with `synthesize`, `prepare`, `generate`,
-  `evaluate`, and `export` commands.
+- exact query quotas across topics, query archetypes, persona modes, and
+  languages;
+- 6–40-turn conversations with independently sampled length and retrieval
+  targets;
+- natural user turns without per-turn intent labels or a scripted semantic
+  episode plan;
+- sparse retrieval-deadline intervention only when the sampled retrieval target
+  would otherwise become infeasible;
+- per-turn and per-conversation tool budgets;
+- retrieval, memory, reviewed custom tools, and explicitly marked simulated
+  tools;
+- hidden, source-linked context compression without altering exported messages;
+- deterministic validation and optional model judging;
+- Data Designer model providers, orchestration, artifact storage, and native
+  row-group resume;
+- canonical, status-partitioned, and trainer-oriented JSONL artifacts.
 
 ## Architecture
 
 ```text
-reviewed taxonomy + live retrieval corpus + managed persona assets
+reviewed taxonomy + retrieval corpus + Data Designer persona assets
                               |
-             query generation (`synthesize`)
+                     synthesize queries
                               |
-                     rich raw seed JSONL
+                       raw seed JSONL
                               |
-       conversation seed preparation (`prepare`)
+                    prepare conversation seeds
                               |
-                  Data Designer seed JSONL
+                Data Designer conversation dataset
+           user <--> assistant <--> tools + compression
                               |
-          conversation generation (`generate`)
-              user <--> assistant <--> tools
-                       hidden compaction
+                    generated record JSONL
                               |
-              append-only episode checkpoint
+                 validate + optional rejudge
                               |
-             evaluation (`evaluate`) --> status partitions
+               canonical/status-partitioned JSONL
                               |
-                   export (`export`) --> training JSONL
+                    trainer-oriented export
 ```
 
-The module boundary is intentional:
-
-| Stage | Input | Output | Responsibility |
+| Stage | Command | Input | Output |
 |---|---|---|---|
-| Query generation | Taxonomy, managed personas, retriever, generator, judge | Rich raw seed JSONL | Create diverse, grounded information needs. |
-| Conversation generation | Raw seeds, role models, tools, retriever | Canonical multi-turn trajectories | Plan and simulate tool-using conversations. |
-| Evaluation | Canonical trajectories | Status partitions and reports | Apply deterministic and model quality gates. |
+| Query synthesis | `synthesize` | Taxonomy, managed personas, retriever, generator, judge | Raw query seed JSONL |
+| Seed preparation | `prepare` | Raw seed JSONL | Validated and enriched Data Designer seed JSONL |
+| Conversation generation | `generate` | Enriched seeds, role models, tools | Data Designer dataset plus finalized generated JSONL |
+| Evaluation | `evaluate` | Finalized generated JSONL | Canonical JSONL, status partitions, summary |
+| Export | `export` | Canonical JSONL | Accepted trainer-oriented JSONL |
 
-`synthesize` is optional. Teams that already have reviewed queries can write the
-raw seed contract directly and begin with `prepare`. Conversely, query
-generation can run and publish seeds without loading the conversation planner,
-tool registry, compressor, or trajectory evaluator. Future domain, safety, or
-language evaluators should consume canonical records and write derived artifacts
-instead of mutating either generation checkpoint.
+`synthesize` is optional. Existing reviewed queries can be written directly in
+the seed format and passed to `prepare`. Query synthesis can also be used alone.
+Future evaluation modules should consume canonical records and write derived
+artifacts rather than changing generation state.
 
-An episode is the atomic unit. Each completed attempt is flushed and `fsync`'d
-to the checkpoint before the next seed begins. Compaction changes only the
-model-facing active view; the canonical trajectory retains the full original
-messages and records compaction events separately.
+## Model providers
+
+Generation uses Data Designer's model-provider system. The YAML `providers` and
+`models` entries are converted to `data_designer.config.ModelProvider` and
+`data_designer.config.ModelConfig` objects. Custom Data Designer column
+generators resolve role aliases with `self.get_model(alias)`:
+
+- query synthesis resolves `query_generation.generator_alias` and
+  `query_generation.judge_alias`;
+- conversation generation resolves `assistant`, `user`, `compressor`, and
+  `judge`.
+
+There is no separate direct model runner in the generation path. The retriever
+is a tool service and therefore has its own HTTP adapter. `evaluate --rejudge`
+is a post-generation operation and uses the configured judge endpoint directly;
+it does not create a Data Designer dataset.
+
+`providers[].api_key_env` names an environment variable. Keep credentials out
+of YAML. An empty variable value is valid when an OpenAI-compatible endpoint is
+intentionally unauthenticated.
 
 ## Installation
 
@@ -77,28 +91,20 @@ cd src/nemotron/steps/sdg/long_context_sdg
 uv sync --extra dev
 ```
 
-Copy the complete example instead of editing it in place:
+Create workload-specific configuration files instead of editing the examples:
 
 ```bash
-cp config/default.yaml config/my-workload.yaml
+cp config/default.yaml config/my-conversations.yaml
+cp config/query_generation.example.yaml config/my-queries.yaml
 ```
 
-Replace the example model endpoint, model names, credential-variable name, and
-retrieval API contract. Do not place credentials directly in YAML.
+The loader reads one complete YAML file and does not merge overlays. Relative
+paths are resolved from the configuration file. Unknown keys are rejected.
 
-```bash
-export MODEL_API_KEY='...'
-```
+## End-to-end run
 
-The loader accepts one complete YAML file; it does not merge overlays.
-Configuration paths are resolved relative to the YAML file containing them.
-Unknown YAML keys are rejected, so misspellings fail before generation.
-
-## Running the pipeline
-
-Query synthesis uses its own complete configuration file and produces the
-`paths.seeds` consumed by conversation generation. First install the managed
-Nemotron persona assets required by the example locale mix:
+If query synthesis uses managed persona locales, install those Data Designer
+assets first:
 
 ```bash
 uv run data-designer download personas \
@@ -107,980 +113,550 @@ uv run data-designer download personas \
   --locale hi_Latn_IN
 ```
 
-Then synthesize the raw query seeds:
+Set the credential named by `providers[].api_key_env`, configure the model and
+retrieval endpoints, then run:
 
 ```bash
-cp config/query_generation.example.yaml config/my-query-workload.yaml
-uv run long-context-sdg synthesize --config config/my-query-workload.yaml
+uv run long-context-sdg synthesize --config config/my-queries.yaml
+uv run long-context-sdg prepare --config config/my-conversations.yaml
+uv run long-context-sdg generate --config config/my-conversations.yaml
+uv run long-context-sdg evaluate --config config/my-conversations.yaml
+uv run long-context-sdg export --config config/my-conversations.yaml
 ```
 
-Synthesis atomically publishes a seed file only when every scheduled query was
-accepted and the final batch has no detected near-duplicate pairs. To replace a
-different existing seed file deliberately, add `--force`. This does not erase
-checkpoints, reset attempts, bypass validation, or permit incompatible resume
-state.
-
-Point `config/my-workload.yaml` at the published raw seed JSONL. Conversation
-generation then begins with preparation:
-
-Prepare validates, enriches, and atomically replaces the enriched seed file:
+Useful variants:
 
 ```bash
-uv run long-context-sdg prepare --config config/my-workload.yaml
+# Replace a different existing synthesized seed file after all checks pass.
+uv run long-context-sdg synthesize --config config/my-queries.yaml --force
+
+# Re-run model judging for every structurally valid generated record.
+uv run long-context-sdg evaluate --config config/my-conversations.yaml --rejudge
+
+# Apply deterministic evaluation only. Unjudged records remain quarantined.
+uv run long-context-sdg evaluate --config config/my-conversations.yaml --no-network
 ```
 
-Generate pending episodes:
+`run.mode: preview` previews conversation generation and does not materialize
+`paths.generated`. Query synthesis supports create mode only.
 
-```bash
-uv run long-context-sdg generate --config config/my-workload.yaml
-```
+## Data Designer resume behavior
 
-Evaluate the latest attempt for every query and write canonical partitions:
+The pipeline does not implement a second checkpoint layer. Data Designer owns
+dataset progress and resume inside `paths.artifacts`.
 
-```bash
-uv run long-context-sdg evaluate --config config/my-workload.yaml
-```
-
-Re-run the model judge for every structurally valid canonical candidate:
-
-```bash
-uv run long-context-sdg evaluate --config config/my-workload.yaml --rejudge
-```
-
-Evaluate without contacting the judge model. Records still needing a judgment
-remain quarantined:
-
-```bash
-uv run long-context-sdg evaluate --config config/my-workload.yaml --no-network
-```
-
-Export accepted records in `export.format`:
-
-```bash
-uv run long-context-sdg export --config config/my-workload.yaml
-```
-
-Data Designer is the only supported generation path. The package does not ship
-a separate standalone model runner.
-
-## Query generation
-
-Query generation is a standalone module configured by
-`config/query_generation.example.yaml`. It needs only two model aliases
-(`assistant` and `judge`), a retriever, a reviewed taxonomy, and Data Designer's
-managed persona assets. Conversation-only settings such as turn planning,
-tools, compression, record limits, conversation retry flags, and trajectory
-judging are deliberately absent from this configuration. Its `run` section has
-only `mode: create` and the deterministic `seed`.
-
-### Why not retrieve random corpus chunks globally?
-
-The initial idea—retrieve random chunks and ask a model to invent a
-persona-conditioned question—is useful for variety but unsafe as the only
-sampling strategy. Large topics and prolific sources dominate; rare workflows
-vanish; unrelated chunks create contrived questions; boilerplate and obsolete
-content leak into the batch; and coverage becomes difficult to audit.
-
-This implementation keeps the useful randomness inside reviewed boundaries:
-
-1. A hierarchical taxonomy defines weighted leaf topics and reviewed retrieval
-   probes.
-2. Retrieval builds a bounded evidence pool for every leaf.
-3. Short, excluded, metadata-ineligible, duplicate-ID, and duplicate-content
-   chunks are removed.
-4. Sources are interleaved so one source does not dominate the pool.
-5. Exact candidate quotas are assigned to taxonomy leaves, query archetypes,
-   persona modes, and persona locales.
-6. Evidence bundles are randomly sampled only inside the scheduled leaf, with
-   per-source limits; comparison bundles require at least two sources.
-7. A model drafts the canonical and natural first-user query from a compact
-   managed persona projection and the evidence bundle.
-8. Deterministic leakage, language, length, and retrievability checks run before
-   an independent query judge.
-9. Only a complete, unique, accepted batch is atomically published.
-
-This still depends on taxonomy quality, retrieval recall, corpus freshness, and
-model competence. The fingerprint cannot detect an external corpus changing
-behind an unchanged retriever endpoint, so use new artifact paths when the
-indexed corpus changes materially.
-
-### Managed persona data
-
-Persona rows come from the same native mechanism used by the Data Designer
-tool-calling example:
-
-```python
-dd.SamplerColumnConfig(
-    name="persona",
-    drop=True,
-    sampler_type=dd.SamplerType.PERSON,
-    params=dd.PersonSamplerParams(
-        locale="en_IN",
-        with_synthetic_personas=True,
-    ),
-)
-```
-
-The pipeline creates one managed `PERSON` sampler column for every configured
-locale. It then schedules locale keys with exact largest-remainder quotas and
-uses only the scheduled locale's sampled row for each candidate. No custom
-Hugging Face loader, persona-network client, or persona mock exists in the
-production path.
-
-The example targets 50 English-India, 40 Hindi-Devanagari, and 10 Hindi-Latin
-queries in a batch of 100:
-
-```yaml
-persona_locales:
-  - locale: en_IN
-    language: en
-    weight: 0.50
-    asset_revision: replace-with-reviewed-ngc-version
-  - locale: hi_Deva_IN
-    language: hi-Deva
-    weight: 0.40
-    asset_revision: replace-with-reviewed-ngc-version
-  - locale: hi_Latn_IN
-    language: hi-Latn
-    weight: 0.10
-    asset_revision: replace-with-reviewed-ngc-version
-```
-
-`asset_revision` is recorded in seed provenance and included in the synthesis
-fingerprint. It does not tell `data-designer download personas` which version to
-download; the downloader resolves its managed asset. Set this field to the
-actual asset version reviewed for the run, and archive that version in the
-generation manifest. Do not leave the example placeholder in a production run.
-
-Persona knobs are:
-
-| Key | Constraint | Effect |
-|---|---|---|
-| `locale` | Unique, nonempty Data Designer locale | Selects the managed persona asset. |
-| `language` | Nonempty label | Controls query prompts, validation, and conversation-language instructions. |
-| `weight` | Greater than zero | Relative locale quota; counts are exact after integer allocation. |
-| `asset_revision` | Nonempty reviewed label | Audit provenance and fingerprint input; not a downloader selector. |
-| `narrative_fields` | Nonnegative weights with positive total | Chooses one available persona facet deterministically. Defaults to overview, professional, skills, and interests facets. |
-| `attribute_fields` | List of managed-row keys | Copies only selected, nonempty compact attributes into metadata. Names are not copied by default. |
-| `sex` | `Male`, `Female`, or omitted | Optional native sampler filter. |
-| `city` | String, list, or omitted | Optional native sampler city filter. |
-| `age_range` | Two increasing integers within 18–114; default `[18, 114]` | Optional native sampler age range. |
-| `select_field_values` | Mapping or omitted | Optional native sampler field-value filters. |
-
-The persona source ID is the managed row's `uuid` when present and otherwise a
-stable row hash. The prompt prohibits exposing names and source IDs in visible
-queries. Selected narratives, attributes, and source identifiers remain in
-metadata for auditability, so review the persona asset's license, privacy,
-bias, and suitability for the intended workload.
-
-### Taxonomy
-
-`config/taxonomy.example.yaml` shows the required hierarchy. Every node needs a
-globally unique nonempty `id` and `label`; every leaf needs at least one
-nonblank `seed_query`. Candidate allocation uses the product of all weights on
-the path from the top-level node to the leaf.
-
-| Field | Effect |
+| `run.resume` | Behavior |
 |---|---|
-| `version` | Reviewed taxonomy version. |
-| `topics` / `children` | Hierarchical topic structure; only leaves receive candidates. |
-| `id` | Stable coverage and provenance key, unique across the tree. |
-| `label` / `description` | Human and model-readable topic scope. |
-| `weight` | Relative node weight; parent and child weights are multiplied. |
-| `seed_queries` | Reviewed probes used to build that leaf's evidence pool. |
-| `exclusions` | Case-insensitive substrings that disqualify matching chunks. |
-| `required_terms` | Generator guidance; currently not a deterministic gate. |
-| `metadata_filters` | Exact eligibility filters over normalized chunk metadata. |
+| `never` | Start a new dataset creation; do not resume prior progress. |
+| `always` | Resume a compatible run from its last completed row group; restart from the beginning when no row group completed; raise on incompatible stored config. |
+| `if_possible` | Resume compatible state when available; otherwise create a new run. |
 
-The raw taxonomy file bytes are hashed. Even formatting-only edits define a new
-synthesis fingerprint and therefore incompatible checkpoint state.
+Data Designer checks dataset-configuration compatibility. Completed row groups
+are reused; an interrupted in-flight row group may be recomputed. Configure a
+unique `run.dataset_name` and artifact directory for each independently managed
+workload.
 
-### Exact diversity quotas
+After Data Designer completes, the pipeline validates IDs and ordering and
+atomically materializes:
 
-Weights are converted to integer counts with largest-remainder allocation and
-then deterministically shuffled. Marginals are exact; cross-products are not.
-For example, exactly 40 Hindi-Devanagari and 10 comparison candidates do not
-guarantee exactly four Hindi-Devanagari comparisons.
+- conversation records at `paths.generated`;
+- synthesized query seeds at query-generation `paths.seeds`.
 
-The default query archetypes produce these counts for 100 candidates:
+Evaluation and export consume these finalized artifacts, not internal Data
+Designer storage. If generation is interrupted before final materialization,
+rerun the same command and configuration with resume enabled.
 
-| Archetype | Weight / count | Intended behavior |
-|---|---:|---|
-| `research` | 0.65 / 65 | Substantive evidence-grounded information need. |
-| `applied_scenario` | 0.15 / 15 | Practical persona-situated decision or workflow. |
-| `comparison` | 0.10 / 10 | Requires evidence from at least two sources. |
-| `misconception` | 0.05 / 5 | Plausible premise that needs correction or qualification. |
-| `clarification` | 0.03 / 3 | Natural opening may omit one material detail while canonical query remains self-contained. |
-| `insufficient_evidence` | 0.02 / 2 | Relevant question whose essential answer is absent from the supplied bundle. |
+## Query synthesis
 
-The default persona modes are 40% `general_interest`, 40% `situated_need`, and
-20% `domain_adjacent`. These labels guide generator and judge behavior; custom
-labels are allowed but require prompt and validation extensions if they imply
-structural rules.
+The query module deliberately separates topic selection from conversation
+generation. Its sequence is:
+
+1. Load and validate the reviewed taxonomy.
+2. Allocate exact largest-remainder quotas for taxonomy leaves, archetypes,
+   persona modes, and locales.
+3. Retrieve an evidence pool for each scheduled taxonomy leaf.
+4. Filter short chunks, normalize duplicates, and cap chunks per source.
+5. Sample a bounded evidence bundle within that leaf.
+6. Ask Data Designer's managed `PERSON` sampler for the scheduled locale.
+7. Project only selected persona details into the model prompt.
+8. Ask the generator model for a natural information need conditioned on the
+   topic, persona, archetype, language, and evidence.
+9. Apply deterministic leakage, length, script, grounding, and retrievability
+   checks.
+10. Ask the independent judge model to score the query.
+11. Retry the row up to `max_attempts` when a draft fails.
+12. Reject publication unless every scheduled candidate is accepted and the
+   final batch has no near-duplicate pair.
+
+### Critical view of evidence-first query generation
+
+Starting with random corpus chunks is useful because it grounds queries in the
+available corpus and exposes long-tail material. Used globally, however, it can
+overrepresent repetitive documents, produce context-shaped trivia, leak answer
+phrasing, and destroy topic or language quotas.
+
+This implementation samples evidence only after scheduling a reviewed taxonomy
+leaf and persona/archetype/locale quota. Evidence is a grounding constraint, not
+the sole source of diversity. Independent judging, overlap limits,
+retrievability checks, source caps, and final duplicate detection reduce the
+remaining failure modes.
 
 ### Query-generation knobs
 
-| Key | Default / constraint | Effect |
-|---|---|---|
-| `num_queries` | `100`; at least 1 | Exact candidate count and required accepted publication count. |
-| `taxonomy_path` | Required | Reviewed taxonomy YAML, resolved relative to the config. |
-| `generator_alias` | `assistant` | Model that drafts structured queries. |
-| `judge_alias` | `judge` | Model that independently judges accepted drafts. |
-| `max_attempts` | `3`; 1–10 | Durable attempts allowed per deterministic candidate. |
-| `min_judge_score` | `4`; 1–5 | Minimum score on every required judge dimension. |
-| `min_query_chars` | `8`; at least 1 | Minimum length for canonical and naive queries. |
-| `max_query_chars` | `400`; at least minimum | Maximum length for canonical and naive queries. |
-| `archetype_weights` | Positive total | Exact archetype marginal. |
-| `persona_mode_weights` | Positive total | Exact persona-mode marginal. |
-| `persona_locales` | At least one unique locale | Native sampler setup and exact language marginal. |
+| Knob | Default | Effect |
+|---|---:|---|
+| `query_generation.num_queries` | `100` | Exact number that must be accepted for publication. |
+| `taxonomy_path` | required | Reviewed hierarchical topic YAML. |
+| `generator_alias` | `assistant` | Data Designer model alias used to draft queries. |
+| `judge_alias` | `judge` | Independent model alias used to judge drafts. |
+| `max_attempts` | `3` | Draft/check/judge attempts within one Data Designer row. |
+| `min_judge_score` | `4` | Minimum accepted score on the 1–5 scale. |
+| `min_query_chars` / `max_query_chars` | `8` / `400` | Query-length bounds. |
+| `archetype_weights` | see YAML | Exact marginal for research, scenarios, comparisons, misconceptions, clarification, and insufficient-evidence needs. |
+| `persona_mode_weights` | see YAML | Exact marginal for general-interest, situated-need, and domain-adjacent personas. |
+| `persona_locales` | required | Exact language/locale marginal and native persona filters. |
+| `evidence.pool_size` | `32` | Retrieved candidates retained per taxonomy leaf. |
+| `evidence.bundle_min` / `bundle_max` | `2` / `4` | Evidence chunks shown for one draft. |
+| `evidence.max_per_source` | `2` | Source-diversity cap in one bundle. |
+| `evidence.min_chunk_chars` | `160` | Discard fragments below this size. |
+| `evidence.retrievability_top_k` | `8` | Retrieval depth used by the anchor check. |
+| `evidence.max_lexical_overlap` | `0.35` | Maximum normalized query/evidence overlap. |
+| `evidence.max_verbatim_tokens` | `12` | Longest permitted copied phrase. |
+| `evidence.duplicate_similarity` | `0.85` | Final same-topic/language duplicate threshold. |
 
-Evidence controls are:
+Each `persona_locales` item supports:
 
-| Key | Default / constraint | Effect |
-|---|---|---|
-| `pool_size` | `32`; 4–100 | Maximum eligible evidence chunks retained per leaf. |
-| `bundle_min` | `2`; 1–8 | Minimum chunks supplied to one query candidate. |
-| `bundle_max` | `4`; 1–8 | Maximum chunks; must be at least the minimum and no larger than the pool. |
-| `max_per_source` | `2`; 1–8 | Maximum bundle chunks from one normalized source. |
-| `min_chunk_chars` | `160`; at least 1 | Removes short fragments before pool construction. |
-| `retrievability_top_k` | `8`; 1–100 | Results examined when checking whether the generated canonical query recovers an anchor. |
-| `max_lexical_overlap` | `0.35`; 0–1 | Maximum trigram-Jaccard overlap with an evidence chunk. |
-| `max_verbatim_tokens` | `12`; 4–50 | Rejects long contiguous evidence spans copied into a query. |
-| `duplicate_similarity` | `0.85`; 0–1 | Near-duplicate threshold within the same taxonomy leaf and language. |
+| Field | Effect |
+|---|---|
+| `locale` | Data Designer managed persona asset locale. |
+| `language` | Expected output language/script label. |
+| `weight` | Exact locale marginal. |
+| `asset_revision` | Auditable reviewed persona-asset version. |
+| `narrative_fields` | Weighted persona narratives available for projection. |
+| `attribute_fields` | Structured attributes allowed in prompts. |
+| `sex`, `city`, `age_range`, `select_field_values` | Optional native `PERSON` sampler filters. |
 
-Query-generation `paths` are independent from conversation artifacts:
+### Query-generation paths
 
 | Path | Contents |
 |---|---|
-| `seeds` | Atomically published rich raw seeds; conversation `paths.seeds` points here. |
-| `evidence_manifest` | Fingerprinted per-leaf retrieval pools, including full chunk text. |
-| `candidates` | Deterministic scheduled candidates supplied to Data Designer. |
-| `checkpoint` | Append-only query attempts. Do not share with the conversation checkpoint. |
-| `report` | Coverage, status, attempt, rejection, and duplicate statistics. |
-
-### Query quality gates and resume
-
-The generator returns a self-contained canonical `query`, a natural
-`naive_query`, role, expertise, style, and optional seed instructions.
-Deterministic checks enforce length, basic script expectations, chunk-ID
-non-leakage, lexical and contiguous-copy limits, and retrieval of at least one
-original anchor. Comparison queries must recover anchors from at least two
-original sources.
-
-Only deterministic passes reach the query judge. The judge must score
-`topic_fit`, `persona_realism`, `language_quality`, `answerability`,
-`retrieval_quality`, and `non_leakage`; every dimension must meet
-`min_judge_score`, rating must be `success`, and its answerability label must
-match the candidate.
-
-Every attempt is appended and `fsync`'d as `accepted`, `rejected`, or
-`generation_failed`. Resume skips accepted candidates and candidates that have
-reached `max_attempts`; incomplete candidates continue at the next attempt.
-Fingerprint compatibility covers query configuration, raw taxonomy hash,
-retriever configuration, generator/judge model configuration, run seed, and
-prompt version. Query checkpoints are process-local single-writer artifacts.
-
-Finalization writes the report before publication and refuses to publish a
-partial batch, a seedless accepted record, or a batch with detected near
-duplicates. The published seed intentionally omits conversation `turn_budget`
-and `retrieval_depth`; `prepare` assigns those reproducibly from the independent
-conversation configuration while preserving persona and query provenance.
-
-Published provenance includes taxonomy ID, archetype, answerability, evidence
-chunk IDs, hashes and sources, persona source/version, model aliases, prompt
-version, and the synthesis fingerprint. The evidence bundle guides creation of
-the opening query; conversation generation later uses the configured live
-retriever normally and is not forced to retrieve the same chunks.
-
-## Multilingual generation
-
-The target language is controlled by the global and per-seed `instructions`;
-there is no English-only runtime restriction. For example:
-
-```yaml
-instructions: >-
-  Write every visible user and assistant turn in natural Hindi. Keep exact
-  retrieved chunk identifiers unchanged. Translate explanations, but preserve
-  source-language quotations and standard technical terms when translation
-  would reduce precision. Write the synthetic reasoning.think field in English.
-```
-
-The retrieval corpus and generated conversation may use different languages.
-Cross-language retrieval quality depends on the embedding model and index, not
-this pipeline. Before a large run, probe representative target-language queries
-and inspect whether the returned chunks are relevant, authoritative, and current.
-An English source corpus can still ground a Hindi conversation when retrieval
-and the role models are sufficiently multilingual.
-
-`reasoning.think` is a model-generated, bounded field retained as
-`reasoning_content`; it is not an observation of the serving model's hidden
-chain of thought. Its language is not guaranteed unless requested and validated.
-If downstream training requires English reasoning with target-language visible
-turns, state both requirements explicitly and add a language check to dataset
-quality control.
+| `seeds` | Atomically published raw seeds consumed by conversation preparation. |
+| `evidence_manifest` | Reusable normalized evidence pools and provenance. |
+| `candidates` | Deterministically scheduled candidate rows. |
+| `artifacts` | Data Designer dataset artifacts and native resume state. |
+| `report` | Status, attempts, coverage, rejection, and duplicate statistics. |
 
 ## Seed format
 
-The raw seed file is JSONL: one JSON object per line. The only required field is
-`query`.
+Minimal seed:
 
 ```json
-{"query":"Explain the feature and its limitations."}
+{"query_id":"q-001","naive_query":"Explain the main trade-offs in this topic."}
 ```
 
-A rich seed can customize one episode:
+Rich seed fields may include:
 
-```json
-{
-  "query_id": "topic-001",
-  "query": "Compare the available options.",
-  "naive_query": "Which option should I choose?",
-  "persona": {
-    "role": "application user",
-    "expertise": "novice",
-    "style": "concise and curious"
-  },
-  "instructions": "Answer in French and define specialized terms.",
-  "turn_budget": 18,
-  "retrieval_depth": 2,
-  "memory_seed": {"verbosity": "concise"}
-}
-```
+| Field | Purpose |
+|---|---|
+| `query_id` | Stable unique identity. Generated deterministically when omitted. |
+| `naive_query` | Opening user request. |
+| `language` | Language or script label used by prompts and analysis. |
+| `domain` | Domain label for metadata and instructions. |
+| `persona` | Compact persona description. |
+| `persona_provenance` | Locale, asset revision, sampler identity, and projected fields. |
+| `topic`, `taxonomy_id` | Topic metadata and reviewed taxonomy leaf. |
+| `query_archetype`, `persona_mode` | Query-diversity labels. |
+| `instructions` | Sample-specific behavior layered over global instructions. |
+| `turn_budget` | Optional requested length when `honor_seed_turn_budget` is true. |
+| `memory` | Initial allowlisted memory state. |
+| `metadata` | Additional non-control provenance. |
 
-| Field | Default or constraint | Effect |
-|---|---|---|
-| `query` | Required, nonempty string | Episode topic and user-simulator anchor. |
-| `query_id` | Stable SHA-256-derived ID | Resume key. Explicit IDs should be unique and stable across runs. |
-| `naive_query` | `query` | Exact first user message. |
-| `persona.role` | `user` | User identity or relationship to the task. |
-| `persona.expertise` | `intermediate` | Expected knowledge level. |
-| `persona.style` | `natural and curious` | User-message tone and interaction style. |
-| `instructions` | Empty | Appended to global `instructions` for this seed. |
-| `turn_budget` | Schema default `18`; 6–40 | Used only when `planning.honor_seed_turn_budget` is true. |
-| `retrieval_depth` | Sampled if omitted; 1–3 | Number of distinct successful retrieval queries required on each planned research/rewrite turn. |
-| `memory_seed` | `{}` | Initial allowlisted preference memory. |
+`prepare` validates JSONL, rejects duplicate IDs, deterministically enriches the
+records, and atomically writes `paths.enriched_seeds`.
 
-Allowed memory keys are `preferred_language`, `verbosity`, `expertise_level`,
-`response_format`, `preferred_units`, `focus_area`, and `citation_style`.
-Unknown keys are rejected. Values written during an episode must be JSON scalars.
+## Conversation control
 
-Preparation rejects duplicate `query_id` values and never curates, translates,
-or rewrites the source questions. Its output stores each validated `EpisodeSeed`
-as a JSON string under `episode_input`, which is the Data Designer seed contract.
+Conversation generation does not create an intent trace or prescribe a
+semantic purpose for every turn. The user model receives the trajectory and is
+asked for a natural follow-up. This permits clarification, demographics,
+preferences, corrections, scope changes, brief acknowledgements, and new
+evidence needs in any plausible order.
 
-## Planning conversations
+Each episode samples only stable constraints:
 
-Planning is deterministic for `(run.seed, query_id)`. Repeating those inputs with
-the same generation configuration produces the same turn budget, retrieval
-depth, and intent sequence; model sampling can still vary the text.
+- exact conversation length;
+- required successful retrieval count;
+- maximum retrieval attempts;
+- maximum tool calls per turn and per conversation.
 
-### Opening diversity
+Before each assistant turn, the controller checks remaining capacity. Usually it
+adds no directive. If deferring retrieval would make the sampled retrieval floor
+impossible, it emits a sparse `retrieval_deadline` policy event specifying only
+the minimum retrievals required on that turn. This guarantees accepted-data
+constraints without teaching a labeled turn-by-turn intent state machine.
 
-`first_turn_intents` is sampled only for turn 1. `intents` is sampled for turns
-2 through the end. This separation prevents every opening from following the
-same pattern.
+### Conversation knobs
 
-The first user message itself is always `naive_query`. The opening intent guides
-the first assistant response. For example:
+| Knob | Default | Effect |
+|---|---:|---|
+| `episode.turn_budget.min` | `6` | Minimum exact user/assistant turn pairs; allowed range 6–40. |
+| `episode.turn_budget.max` | `40` | Maximum exact user/assistant turn pairs; allowed range 6–40. |
+| `episode.honor_seed_turn_budget` | `false` | Use a valid seed-specific budget instead of sampling when true. |
+| `episode.retrieval_depth_weights` | `{1: .65, 2: .25, 3: .10}` | Distribution for retrieval depth when retrieval is required. |
+| `episode.retrieval_calls.min` | `1` | Minimum sampled successful retrieval floor. Set to 0 for episodes that may never retrieve. |
+| `episode.retrieval_calls.max` | `12` | Maximum sampled floor and maximum retrieval attempts. |
+| `episode.max_steps_per_turn` | `6` | Assistant action-loop steps, including the final-answer step. Must exceed enabled retrieval depth. |
+| `episode.max_tool_calls_per_turn` | `3` | Hard cap across all tools during one assistant turn. |
+| `episode.max_tool_calls_per_conversation` | `32` | Hard cap across all tools during the episode. |
 
-- `clarify` can elicit missing task details;
-- `user_context` can ask about relevant preferences or circumstances;
-- `scope` can establish boundaries;
-- `orientation` can provide a high-level map;
-- `direct_answer` can answer from established information;
-- `misconception_check` can test a premise;
-- `example_first` can begin with a concrete illustration;
-- `research` and `rewrite` require retrieval.
+The sampled retrieval floor is clipped to feasible capacity. A successful
+retrieval call—not a failed attempt—counts toward the floor. Every attempted tool
+call counts against tool budgets. Set `retrieval_calls.max` no higher than the
+conversation tool cap. Per-turn retrieval depth can never exceed both the
+per-turn tool cap and the remaining assistant-step capacity.
 
-The intent label is included in the model directive. Clear, descriptive custom
-labels are allowed, but only the exact labels `research` and `rewrite` activate
-mandatory retrieval in the current planner.
+Examples:
 
-Weights are relative, need not sum to 1, must be nonnegative, and must have a
-positive total. Set a weight to zero to disable an intent.
+- Broad diversity: `turn_budget: {min: 6, max: 40}`.
+- Retrieval-optional data: `retrieval_calls: {min: 0, max: 8}`.
+- Retrieval-heavy conversations: raise the retrieval floor and the global tool
+  cap together.
+- Mostly single-search turns: weight depth 1 heavily.
+- Multi-hop evidence: increase weights for depth 2 or 3 and ensure
+  `max_steps_per_turn` and per-turn tool capacity are sufficient.
 
-### Planning knobs
+Do not add an intent label merely to control retrieval timing. If a use case
+needs a new hard invariant, represent the invariant directly and intervene only
+when remaining capacity requires it.
 
-| Key | Schema default / bounds | Effect |
-|---|---|---|
-| `planning.turn_budget.min` | `6`; 6–40 | Smallest sampled conversation length. |
-| `planning.turn_budget.max` | `40`; 6–40 and ≥ `min` | Largest sampled conversation length. |
-| `planning.honor_seed_turn_budget` | `true` | When false, ignore seed budgets and sample the configured range. The example sets this to false. |
-| `planning.retrieval_depth_weights` | `{1: .25, 2: .5, 3: .25}` | Relative distribution for seeds without `retrieval_depth`. Only keys 1–3 are valid. |
-| `planning.max_steps_per_turn` | `6`; 2–12 | Maximum assistant action attempts in one turn. Must exceed every enabled retrieval depth so a final-answer step remains. |
-| `planning.ensure_retrieval_turn` | `true` | If no research/rewrite intent was sampled, replace one non-opening intent with `research`. Never forces turn 1. |
-| `planning.first_turn_intents` | See YAML | Opening assistant-behavior distribution. |
-| `planning.intents` | See YAML | Later user/assistant intent distribution. |
-
-With the example configuration, turn budgets vary uniformly from 6 through 40,
-seed-level budgets are ignored, and retrieval depth is sampled 65%/25%/10% for
-depths 1/2/3.
-
-### Tool-call counts and limits
-
-Let:
-
-- `B` be the selected turn budget;
-- `R` be the number of turns whose intent is `research` or `rewrite`;
-- `D` be the episode retrieval depth;
-- `S` be `max_steps_per_turn`.
-
-The planned mandatory retrieval count is `R × D`.
-
-- With `ensure_retrieval_turn: true`, `R >= 1`, so the mandatory minimum is
-  `D` retrieval calls per conversation.
-- With it false, the mandatory minimum is zero.
-- The theoretical planned maximum is `B × D`, which is 120 at the schema limits
-  of 40 turns and depth 3.
-- On a required turn, the runtime requests one retrieval per action step until
-  `D` distinct successful queries are complete, then reserves a step for the
-  final answer. The configuration validator therefore requires `S > D`.
-- Failed or empty required retrievals consume steps. At most `S - 1` retrieval
-  attempts can precede a successful final answer on that turn.
-- On a non-required turn, retrieval is optional. A general assistant action can
-  contain multiple tool calls and the runtime then forces a tool-free final
-  answer on the next step.
-
-There is no configurable `max_tool_calls_per_action`,
-`max_tool_calls_per_turn`, or `max_tool_calls_per_conversation` in version
-`0.1.0`. Consequently, the mandatory retrieval count is bounded, but optional
-multi-call actions do not have a hard numeric quota. `max_steps_per_turn` is an
-action-attempt limit, not a complete cost cap. Enforce an external budget or add
-explicit quotas before using untrusted model/tool combinations with strict cost
-requirements.
-
-## Complete configuration reference
+## Complete conversation configuration reference
 
 ### `paths`
 
-All paths may be absolute or relative to the config file.
-
-| Key | Purpose |
+| Field | Contents |
 |---|---|
-| `seeds` | Raw input JSONL. |
-| `enriched_seeds` | Atomically prepared Data Designer seed JSONL. |
-| `checkpoint` | Append-only attempt log. |
-| `canonical` | Latest evaluated attempt for each query. |
-| `output_dir` | Status partitions and `summary.json`. |
+| `seeds` | Raw seed JSONL. |
+| `enriched_seeds` | Prepared Data Designer seed JSONL. |
+| `artifacts` | Data Designer generation artifacts and native resume state. |
+| `generated` | Atomically materialized canonical generation records. |
+| `canonical` | Evaluation output containing all terminal records. |
+| `output_dir` | Status partitions and evaluation summary. |
 | `export` | Accepted trainer-oriented JSONL. |
-
-Do not reuse one checkpoint path across different generation configurations.
 
 ### `run`
 
-| Key | Default / values | Effect |
-|---|---|---|
-| `mode` | `preview`; `preview` or `create` | Selects the Data Designer execution mode. |
-| `seed` | `7` | Deterministic seed enrichment and episode planning. Included in the checkpoint fingerprint. |
-| `num_records` | `0`; ≥0 | Zero means all seeds. A positive value limits the ordered input prefix. |
-| `retry_failed` | `false` | Regenerate queries whose latest checkpoint attempt is `generation_failed`. |
-| `retry_quarantine` | `false` | Regenerate queries whose latest attempt is `quarantine`. Consider `evaluate --rejudge` first when only judging failed. |
+| Field | Default | Effect |
+|---|---:|---|
+| `mode` | `preview` in the schema; `create` in the example | Preview or create a Data Designer dataset. |
+| `seed` | `7` | Deterministic preparation and per-sample constraint sampling. |
+| `num_records` | `0` | First N prepared seeds; 0 means all. |
+| `dataset_name` | `long_context_sdg` | Data Designer dataset identity used for artifacts/resume. |
+| `resume` | `always` | Data Designer `never`, `always`, or `if_possible` policy. |
 
-Retries append a new attempt; they never rewrite checkpoint history. Evaluation
-keeps only the latest attempt for each `query_id` in canonical outputs.
+### `providers` and `models`
 
-### `instructions`
-
-Global generation policy. State the target language, domain boundaries,
-grounding expectations, desired tone, citation rules, safety constraints, and
-what the assistant should do when evidence is insufficient. Seed instructions
-are appended after the global instructions.
-
-### `providers`
-
-| Key | Effect |
+| Field | Effect |
 |---|---|
-| `name` | Unique provider identifier referenced by models. |
-| `endpoint` | Model provider endpoint passed to Data Designer and used for offline rejudging. |
-| `api_key_env` | Name of the environment variable containing the provider credential. |
+| `providers[].name` | Provider name referenced by model configs. |
+| `providers[].endpoint` | OpenAI-compatible base endpoint. |
+| `providers[].api_key_env` | Environment-variable name holding the API key. |
+| `models[].alias` | Runtime role alias. Conversation generation requires `assistant`, `user`, `compressor`, and `judge`. |
+| `models[].model` | Served model identifier. |
+| `models[].provider` | Data Designer provider name. |
+| `models[].skip_health_check` | Skip provider/model health validation when explicitly needed. |
+| `models[].inference_parameters` | Data Designer chat-completion parameters such as temperature and max tokens. |
 
-Provider names must be unique. Data Designer may additionally support providers
-configured by its own installation.
-
-### `models`
-
-Exactly four aliases are required; additional unique aliases are allowed.
-
-| Alias | Responsibility | Suggested characteristics |
-|---|---|---|
-| `assistant` | Answers, writes retrieval queries, and chooses optional tools. | Strong instruction following and structured JSON. |
-| `user` | Produces turns 2 onward in persona. | Diverse, natural conversational behavior. |
-| `compressor` | Creates source-linked summaries of completed context. | Faithful summarization with conservative temperature. |
-| `judge` | Scores full trajectories. | Reliable structured evaluation and sufficient context length. |
-
-Each model has:
-
-| Key | Effect |
-|---|---|
-| `alias` | Runtime role name; aliases must be unique. |
-| `model` | Provider-specific model identifier. |
-| `provider` | Provider name. |
-| `skip_health_check` | Passed to Data Designer. |
-| `inference_parameters` | Provider-supported chat parameters such as `temperature` and `max_tokens`. |
-
-Data Designer supplies the configured role models during generation. The
-offline rejudge client sends the judge's inference parameters to
-`/chat/completions`, except transport-only `timeout` and
-`max_parallel_requests`. Runtime model calls are retried up to eight times with
-exponential backoff, and structured responses receive up to three
-schema-correction attempts. These retry counts are implementation constants,
-not YAML knobs in this version.
+The four conversation aliases may point to the same endpoint/model or different
+ones. Temperature is typically higher for the user simulator and lower for the
+compressor and judge.
 
 ### `context`
 
-| Key | Default / bounds | Effect |
-|---|---|---|
-| `compression_threshold` | `32000`; ≥256 and below model limit | Approximate active-token count that makes compaction eligible. |
-| `model_token_limit` | `65536`; ≥512 | Episode fails if compression fails at or above this boundary. It is not a universal request preflight limit. |
-| `recent_raw_turns` | `4`; 1–20 | Full recent turns retained beside the latest summary. |
-| `min_turns_between_compression` | `3`; ≥1 | Minimum spacing between successful compactions. |
-| `compression_token_budget` | `500`; ≥100 | Requested summary budget included in the compressor prompt. |
-| `max_reasoning_tokens` | `400`; ≥32 | Hard validation limit for `reasoning.think`. |
+| Field | Default | Effect |
+|---|---:|---|
+| `compression_threshold` | `32000` | Estimated active tokens that trigger hidden compression. |
+| `model_token_limit` | `65536` | Fail-safe active-context boundary. |
+| `recent_raw_turns` | `4` | Recent turns retained verbatim after compression. |
+| `min_turns_between_compression` | `3` | Compression-event spacing. |
+| `compression_token_budget` | `500` | Structured summary budget. |
+| `max_reasoning_tokens` | `400` | Maximum retained reasoning tokens when supplied by a model. |
 
-Token counting uses `cl100k_base` when available and a deterministic estimate as
-a fallback. Calibrate thresholds against the chosen models and target language;
-token density varies across scripts and tokenizers.
-
-The compressor must identify the covered turn range, source message IDs, user
-facts, key facts and their chunk IDs, constraints, and open questions. Unknown
-message or chunk references reject the compaction. A failed compaction becomes a
-warning below `model_token_limit`; at or above the limit it fails the episode.
+Compression changes only the model-facing active view. Exported messages retain
+the original trajectory; `compaction_events` records summaries and provenance.
 
 ### `retriever`
 
-The built-in adapter supports GET and POST JSON APIs.
-
-| Key | Default / bounds | Effect |
-|---|---|---|
-| `endpoint` | Required | Query API URL. |
-| `method` | `POST`; `GET` or `POST` | Sends the request as JSON or query parameters. |
-| `query_field` | `query` | Request key for the model-authored query. |
-| `top_k_field` | `top_k` | Request key for requested result count. |
-| `top_k` | `4`; 1–100 | Default chunks requested when the tool call omits it. |
-| `results_path` | `chunks` | Dot-separated path from response root to the result list. Empty means the root. |
-| `fields.id` | `id` | Dot-separated chunk-ID mapping. Missing IDs receive stable hashes. |
-| `fields.text` | `text` | Required content mapping; empty content is discarded. |
-| `fields.title/source/score/url/date` | Same-named fields | Optional normalized metadata mappings. |
-| `selection` | `ranked` | `ranked`, deterministic `sampled`, or source-oriented `diverse`. |
-| `timeout_seconds` | `45`; >0 | Per-request timeout. |
-| `retries` | `4`; 1–20 | HTTP attempts. |
-| `backoff_seconds` | `1.0`; ≥0 | Exponential retry base, capped at 15 seconds. |
-| `headers` | `{}` | Static request headers. Keep secrets out of committed YAML. |
-| `extra_body` | `{}` | Constant request/query fields merged before query and `top_k`. |
-
-Normalized chunks contain `chunk_id`, `content`, `title`, `source`, `score`,
-`url`, `date`, and unmapped top-level `metadata`. The client is persistent for
-connection reuse and is closed by both orchestration paths.
+| Field | Effect |
+|---|---|
+| `endpoint`, `method` | Retrieval service request target and GET/POST method. |
+| `query_field`, `top_k_field` | Request-key mapping. |
+| `top_k` | Default requested result count. |
+| `results_path` | Dot path to the response list. |
+| `fields.*` | Dot-path mapping for ID, text, title, source, score, URL, and date. |
+| `selection` | `ranked`, seeded `sampled`, or source-oriented `diverse`. |
+| `timeout_seconds` | Request timeout. |
+| `retries`, `backoff_seconds` | Bounded transport retries and backoff. |
+| `headers`, `extra_body` | Static service-specific request additions. Do not store secrets here. |
 
 ### `tools`
 
-Each tool definition contains:
+Each tool entry contains an OpenAI function `schema`, a trusted Python
+`executor` import path, and optional `executor_kwargs`. The registry validates
+names, arguments, budgets, and execution results.
 
-| Key | Effect |
+To add a real tool:
+
+1. Implement the executor protocol under `executors/` or another reviewed
+   package.
+2. Keep side effects idempotent because model/transport retries can repeat
+   requests.
+3. Add its JSON schema and executor path to YAML.
+4. Add deterministic validation and tests for its claims and side effects.
+5. Increase tool budgets only if the new behavior requires it.
+
+To add a simulated tool, use the simulated executor and retain the explicit
+synthetic marker in its output. Never represent model-invented output as a real
+external observation.
+
+### `validation`, `judge`, and `export`
+
+| Field | Effect |
 |---|---|
-| `schema` | OpenAI function-tool schema presented to the assistant and used for argument validation. |
-| `executor` | Trusted `module:Class` import path. Configuration files are executable trust boundaries. |
-| `executor_kwargs` | Optional constructor keyword arguments. |
-
-The schema must contain a unique `function.name`. The built-in `retrieve` tool
-is required because the planner and validator use it for evidence-depth
-requirements. Every model-authored call is normalized and JSON-Schema validated
-before execution. Unknown tools, invalid arguments, and executor failures are
-recorded as rejected calls.
-
-Built-in executors:
-
-- `RetrievalExecutor` calls the configured retrieval client and records query,
-  turn, call ID, returned chunk IDs, and success.
-- `MemoryExecutor` reads/writes only allowlisted preferences and records memory
-  events. Memory is episode-local; no cross-episode storage is provided.
-- `SimulatedExecutor` asks the configured simulator model for a JSON value and
-  wraps the result with `_sdg_simulated: true` so synthetic results cannot be
-  mistaken for real observations.
-
-#### Adding a real tool
-
-1. Implement a class whose constructor accepts `services=` and optional keyword
-   arguments.
-2. Implement `execute(call, state, context) -> ToolResult`.
-3. Put the class in a trusted importable module.
-4. Add a precise JSON schema and the `module:Class` path to YAML.
-5. Add the required service client to `ExecutionServices` if the standard
-   `models` and `retriever` fields are insufficient.
-6. Add deterministic unit tests for validation, state changes, failures, and
-   serialization.
-
-Minimal executor:
-
-```python
-from long_context_sdg.schemas import ToolResult
-
-
-class CatalogExecutor:
-    def __init__(self, *, services, namespace="default"):
-        self.client = services.catalog
-        self.namespace = namespace
-
-    def execute(self, call, state, context):
-        payload = self.client.lookup(
-            namespace=self.namespace,
-            item_id=call.arguments["item_id"],
-        )
-        return ToolResult(
-            tool_call_id=call.id,
-            name=call.name,
-            payload=payload,
-        )
-```
-
-If a service is added to `ExecutionServices`, update both orchestration paths
-that construct it.
-
-#### Adding a simulated tool
-
-Use the simulated executor only when synthetic observations are acceptable:
-
-```yaml
-- schema:
-    type: function
-    function:
-      name: catalog_lookup
-      description: Look up an item in the catalog.
-      parameters:
-        type: object
-        properties:
-          item_id: {type: string}
-        required: [item_id]
-  executor: long_context_sdg.executors.simulated:SimulatedExecutor
-```
-
-Do not use simulated output to claim grounding in an external source. Filter or
-separate simulated trajectories if the downstream task expects real tool
-observations.
-
-### `validation`
-
-`require_final_answer_each_turn` defaults to true. When enabled, every planned
-turn must contain a user message and a nonempty, tool-free assistant answer.
-
-Deterministic validation also checks:
-
-- monotonic turn ordering;
-- unique call IDs and matching tool results;
-- schema-valid arguments and known tool names;
-- no leaked internal compaction tool;
-- required retrieval count, nonempty chunk IDs, and distinct normalized queries;
-- a final tool-free assistant message;
-- bounded reasoning and valid cited chunk IDs.
-
-Structural failure produces `rejected`; an exception that prevents completing
-the episode produces `generation_failed`.
-
-### `judge`
-
-| Key | Default / bounds | Effect |
-|---|---|---|
-| `enabled` | `true` | Run the judge after deterministic validation. |
-| `min_score` | `3`; 1–5 | Required score on every configured dimension. |
-| `dimensions` | `[]` in schema | Names the judge must score. The example supplies eight quality dimensions. |
-
-Acceptance requires every requested dimension, every score at or above the
-threshold, and `rating: success`. A judge exception produces `quarantine`, which
-preserves a structurally valid trajectory for later rejudging.
-
-### `export`
-
-`format` supports:
-
-- `messages`: `{messages}` only;
-- `messages_and_tools`: `{messages, tools}`;
-- `rich`: the complete canonical record.
+| `validation.require_final_answer_each_turn` | Require each user turn to end with an assistant answer. |
+| `judge.enabled` | Run model judging during generation/evaluation. |
+| `judge.min_score` | Minimum per-dimension score for acceptance. |
+| `judge.dimensions` | Named quality dimensions included in the structured rubric. |
+| `export.format` | `messages`, `messages_and_tools`, or `rich`. |
 
 Only `accepted` canonical records are exported.
 
-## Checkpoint and resume behavior
+## Multilingual and domain adaptation
 
-The checkpoint is append-only JSONL and records terminal episode attempts:
-`accepted`, `rejected`, `quarantine`, or `generation_failed`.
+To adapt this package:
 
-Before generation, the pipeline:
+1. Replace the taxonomy with reviewed domain leaves and retrieval probes.
+2. Point both configs at the domain retrieval service and map its response.
+3. Choose persona locales and language quotas supported by installed Data
+   Designer assets.
+4. Update global/sample instructions for domain style and citation rules.
+5. Select role models that reliably follow the target language and structured
+   schemas.
+6. Adjust query archetypes, evidence gates, length, retrieval targets, and tool
+   budgets.
+7. Add domain tools through reviewed executors.
+8. Extend deterministic validation and judge dimensions for domain risks.
+9. Run a bounded sample, manually inspect every record, then scale.
 
-1. parses every checkpoint line;
-2. rejects mixed configuration fingerprints;
-3. derives completed query IDs according to retry policy;
-4. writes an ordered pending seed file for Data Designer.
+Models may internally reason in a different language; this pipeline validates
+observable messages, tool calls, evidence use, and configured script/language
+constraints. Do not infer hidden reasoning language from output language.
 
-The fingerprint covers generation-affecting configuration and `run.seed`. It
-excludes paths plus orchestration-only `mode`, record count, and retry flags.
+## Output record anatomy
 
-Checkpoint granularity is one full episode, not one turn. If execution stops
-during an episode, that episode starts again; every earlier completed episode is
-durable. Do not run multiple writers against the same checkpoint: the in-process
-lock does not coordinate separate processes.
+| Field | Contents |
+|---|---|
+| `run_id` | Generation identifier derived from the configuration fingerprint. |
+| `config_fingerprint` | Hash of generation-affecting configuration. |
+| `query_id` | Seed identity. |
+| `status` | `accepted`, `rejected`, `quarantine`, or `generation_failed`. |
+| `messages` | Full OpenAI-style trajectory; hidden compression is not inserted. |
+| `tools` | Tool schemas exposed during generation. |
+| `episode_spec` | Stable length, retrieval target, and hard tool budgets. |
+| `policy_events` | Sparse retrieval-deadline interventions; normally far fewer than turns. |
+| `tool_call_attempts` | Every execution attempt with turn, call ID, tool name, success, and error. |
+| `metadata` | Seed, counts, budgets, turn mapping, context history, and rejected calls. |
+| `retrieval_transcript` | Queries and returned chunk IDs by turn. |
+| `memory_events` | Allowed memory reads and writes. |
+| `compaction_events` | Hidden summaries and source provenance. |
+| `validation` | Deterministic errors and warnings. |
+| `judgment` | Scores, rating, explanation, and gate errors. |
 
-Evaluation treats the checkpoint as attempt history and writes only the latest
-attempt for each query to canonical and partition files. It writes:
+`reasoning_content` is retained when a model supplies it. Confirm trainer support
+or transform the export before training.
 
-- `canonical` with every latest evaluated attempt;
+## Evaluation artifacts
+
+`evaluate` reads `paths.generated`, verifies fingerprint and query uniqueness,
+replays deterministic validation, optionally judges, and writes:
+
+- `paths.canonical` with every terminal record;
 - `output_dir/accepted.jsonl`;
 - `output_dir/rejected.jsonl`;
 - `output_dir/quarantine.jsonl`;
 - `output_dir/generation_failed.jsonl`;
-- `output_dir/summary.json` with counts, acceptance rate, retrieval depths, and
-  turn budgets.
+- `output_dir/summary.json` with status, length, tool, retrieval, language,
+  domain, compaction, and sparse policy-event statistics.
 
-## Adapting to another domain or language
-
-For a new domain, start in the query module: replace the example taxonomy,
-write leaf probes that reliably retrieve the domain corpus, add exclusions and
-metadata filters for obsolete or out-of-scope material, and audit a small
-evidence manifest before generating a full batch. Python changes are not needed
-when taxonomy, retrieval mapping, and prompts express the domain adequately.
-
-For another language, install a supported Data Designer persona locale, add its
-`persona_locales` entry and weight, select role models tested in that language,
-and add a real language-identification/native-fluency evaluator. The built-in
-deterministic language check is intentionally narrow: it has useful script
-checks for Devanagari-labelled and English-labelled records, but a language
-label is not proof of fluency.
-
-For another query archetype, add its weight, explain its semantics in the query
-prompts, implement any evidence-bundle and deterministic validation rules, and
-add report/test coverage. A new label by itself is only a model hint.
-
-Then create a complete conversation workload config and change these layers
-deliberately:
-
-1. **Seeds:** supply representative topics, personas, naive phrasings, and
-   optional per-seed constraints. Preserve stable IDs across reruns.
-2. **Global instructions:** name the target language, terminology policy,
-   audience, grounding boundary, desired style, and insufficient-evidence
-   behavior.
-3. **Models:** choose role-appropriate context length, structured-output
-   reliability, language capability, token limits, and temperatures.
-4. **Retrieval mapping:** map the exact request keys, result path, and response
-   fields. Verify that stable chunk IDs and useful source metadata are returned.
-5. **Tool descriptions:** describe domain semantics precisely; the assistant
-   uses descriptions to decide whether an optional call is appropriate.
-6. **Intent distributions:** emphasize clarification, context gathering,
-   comparison, application, or research to match the downstream product.
-7. **Context thresholds:** calibrate against observed token counts in the target
-   language and the smallest context window among active roles.
-8. **Judge dimensions:** add domain-relevant quality criteria and test that the
-   judge returns every requested score consistently.
-9. **Small validation run:** inspect retrieval queries, tool payloads, citations,
-   opening diversity, compaction continuity, and rejection reasons before a
-   large run.
-
-Example language policy:
-
-```yaml
-instructions: >-
-  Write every user and assistant message in the target language. Define
-  specialized terms on first use. Preserve product names exactly. Base factual
-  claims only on retrieved evidence, and state when evidence is insufficient.
-```
-
-Temperature is a useful diversity control: the user role usually benefits from
-more variation than the compressor and judge. Do not rely on temperature alone;
-seed personas and intent weights create more controllable diversity.
-
-## Output record anatomy
-
-A rich `CanonicalRecord` contains:
-
-| Field | Contents |
-|---|---|
-| `run_id` | Orchestration identifier derived from the fingerprint. |
-| `config_fingerprint` | Resume-compatibility hash. |
-| `query_id` | Seed identity. |
-| `status` | Terminal quality state. |
-| `messages` | Full OpenAI-style trajectory; compaction is not inserted. |
-| `tools` | Tool schemas used during generation. |
-| `episode_plan` | Turn intents and retrieval requirements. |
-| `metadata` | Query, instructions, budgets, counts, message-turn mapping, context history, and rejected calls. |
-| `retrieval_transcript` | Retrieval queries and returned chunk IDs by turn. |
-| `memory_events` | Reads and writes without hidden internal state. |
-| `compaction_events` | Validated hidden summaries and provenance. |
-| `validation` | Deterministic errors and warnings. |
-| `judgment` | Model scores, rating, explanation, and gate errors. |
-
-Reasoning is retained as `reasoning_content` when the model supplies it. Confirm
-that the intended trainer supports this field, or transform the export before
-training.
+Evaluation is repeatable and does not mutate Data Designer artifacts.
 
 ## Production operation
 
-- Version and review every config used to generate a dataset.
+- Review and version every taxonomy, prompt, config, and executor.
+- Use a separate Data Designer artifact directory and dataset name per workload.
 - Store credentials in environment variables or a secret manager.
-- Use a unique output tree per fingerprint and workload.
-- Run `prepare` before Data Designer generation.
-- Start with a small record limit and inspect outputs manually.
-- Monitor checkpoint line count and status summary, not export count alone.
-- Budget for multiple model calls per turn, retrieval retries, structured-output
-  corrections, compression, and judging.
-- Keep retrieval and custom-tool APIs idempotent because retries can repeat
-  requests.
-- Keep executor import paths restricted to reviewed modules.
-- Preserve checkpoints until canonical evaluation and export are verified.
-- Do not train directly from the append-only checkpoint; retries may create
-  multiple attempts for one query.
+- Keep retrieval and custom-tool APIs idempotent.
+- Start with a small `num_records` and inspect rich output manually.
+- Monitor Data Designer row-group progress and final status statistics.
+- Budget for multiple model calls per turn, structured corrections, retrieval
+  retries, compression, and judging.
+- Preserve Data Designer artifacts until final materialization and evaluation
+  have been verified.
+- Train only from reviewed accepted exports.
 
 ## Testing
 
-The test suite uses deterministic doubles confined to `tests/`; production
-scripts do not monkeypatch models or retrieval.
+Tests use deterministic doubles confined to `tests/`; production generation does
+not monkeypatch models or retrieval.
 
 ```bash
 uv run ruff check .
 uv run pytest -q
+uv lock --check
+uv build
 ```
 
-Important coverage includes seed reproducibility, opening diversity, retrieval
-fallback placement, structured JSON recovery, transport retries, tool argument
-validation, retrieval normalization, memory allowlists, simulated-result
-marking, full runtime trajectories, compression, checkpoint durability,
-validation, evaluation, and export.
-
 Before releasing a workload, also run a real bounded integration against the
-chosen services and inspect the resulting rich records.
+configured model and retrieval services and inspect the resulting rich records.
 
 ## Troubleshooting
 
-**Configuration fails with an extra-field error**
+**Configuration reports an extra field**
 
-The YAML contains an unknown or obsolete key. Compare it with
-`config/default.yaml`; unknown keys are intentionally not ignored.
+The YAML contains an obsolete or misspelled key. Compare it with the complete
+example; unknown fields are intentionally rejected.
 
-**Checkpoint fingerprint mismatch**
+**Data Designer refuses to resume**
 
-A generation-affecting knob changed. Restore the original config or choose a
-new checkpoint/output tree. Do not combine incompatible attempts.
+The stored dataset configuration is incompatible or the requested resume mode
+requires state that is unavailable. Restore the original generation config, use
+the matching dataset name/artifact directory, or deliberately start a new
+dataset identity. Do not edit internal artifacts.
+
+**Generation finished but `generated.jsonl` is absent**
+
+Final materialization happens only after `create` completes and result IDs are
+validated. Rerun the same command with native resume enabled.
 
 **No records are generated**
 
-All selected query IDs are already completed under current retry policy, or
-`run.num_records` selected an empty input. Check the checkpoint and seed IDs.
+Check that prepared seeds exist, `run.num_records` is not greater than the seed
+count, and the Data Designer seed file contains `episode_input`.
 
-**Research turn exhausts its step budget**
+**A retrieval deadline cannot be satisfied**
 
-The API returned empty results, repeated normalized queries, invalid structured
-output, or executor errors. Inspect `rejected_tool_calls` and the retrieval
-transcript. Ensure `max_steps_per_turn` is greater than every enabled depth.
+The configured floor exceeds remaining step/tool capacity or retrieval attempts
+failed. Inspect `tool_call_attempts`, `rejected_tool_calls`, and
+`retrieval_transcript`; align retrieval and tool caps.
 
 **Trajectory is quarantined**
 
-Deterministic validation passed but the judge was unavailable or invalid. Fix
+Deterministic validation passed but judgment was unavailable or invalid. Fix
 judge access and use `evaluate --rejudge`; regeneration is usually unnecessary.
 
 **Trajectory is rejected**
 
-Inspect `validation.errors` first, then `judgment.gate_errors`. Rejection is a
-quality result, not an orchestration exception.
+Inspect `validation.errors`, then `judgment.gate_errors`. Rejection is a quality
+outcome, not orchestration failure.
 
-**Compaction repeatedly fails**
+**Compaction fails**
 
-Check compressor structured-output reliability, context length, provenance IDs,
-and token budgets. Lower the compression threshold only after confirming the
-compressor can summarize the earlier prefix accurately.
+Check compressor structured-output reliability, context length, source IDs, and
+token budgets. The active context may not exceed `model_token_limit`.
 
-**Offline judge call is unauthorized**
+**Retriever response fields are missing**
 
-Confirm `providers[].api_key_env` names an exported variable. An empty value is
-valid only for a judge endpoint intentionally configured without authentication.
-
-**Expected response fields are missing**
-
-Adjust `results_path` and `fields.*`. Dot paths traverse nested objects; they do
+Adjust `results_path` and `fields.*`. Dot paths traverse nested objects but do
 not index arrays. The resolved result container must be a list of objects.
 
 ## File guide
 
-### Configuration, data, and entry points
+### Configuration and entry points
 
 | File | Responsibility |
 |---|---|
-| `config/default.yaml` | Complete domain-neutral template with placeholders and all supported knobs. |
-| `config/query_generation.example.yaml` | Standalone query-generation template, managed persona locales, model/retrieval configuration, diversity weights, and artifact paths. |
-| `config/taxonomy.example.yaml` | Reviewed hierarchical topic contract and retrieval probes. |
-| `data/queries.jsonl` | Minimal raw and rich generic seed examples. |
-| `pyproject.toml` | Package metadata, dependencies, console command, Data Designer plugin entry point, and test/lint settings. |
+| `config/default.yaml` | Complete conversation-generation example and supported knobs. |
+| `config/query_generation.example.yaml` | Independent query-synthesis example. |
+| `config/taxonomy.example.yaml` | Reviewed hierarchical topic and retrieval-probe contract. |
+| `data/queries.jsonl` | Minimal generic raw-seed examples. |
+| `pyproject.toml` | Dependencies, CLI, Data Designer plugin registration, lint/test settings. |
 | `uv.lock` | Reproducible dependency resolution. |
 
-### Package modules
+### Conversation package
 
 | File | Responsibility |
 |---|---|
-| `src/long_context_sdg/__main__.py` | `synthesize`, `prepare`, `generate`, `evaluate`, and `export` CLI. |
-| `src/long_context_sdg/checkpoint.py` | Checkpoint parsing, fingerprint verification, resume index, append/flush/fsync. |
-| `src/long_context_sdg/compression.py` | Compressor prompts, summary rendering, and source-provenance validation. |
-| `src/long_context_sdg/config.py` | Strict Pydantic configuration, constraints, path resolution, and fingerprints. |
-| `src/long_context_sdg/config_base.py` | Shared strict configuration base that rejects unknown keys. |
-| `src/long_context_sdg/conversation_generation.py` | Public conversation-stage façade for seed preparation and Data Designer generation. |
-| `src/long_context_sdg/evaluation.py` | Latest-attempt selection, deterministic revalidation, optional rejudging, partitions, and summary. |
-| `src/long_context_sdg/exporters.py` | Accepted-only messages, messages+tools, and rich JSONL export. |
-| `src/long_context_sdg/generator.py` | Data Designer column generator and episode checkpoint adapter. |
-| `src/long_context_sdg/generator_config.py` | Data Designer column and side-effect-column contract. |
-| `src/long_context_sdg/llm.py` | Sync/async facade normalization, retries, JSON extraction, and structured validation. |
-| `src/long_context_sdg/models.py` | Offline rejudge client and provider credential resolution. |
-| `src/long_context_sdg/pipeline.py` | Data Designer models/providers, pending-seed construction, and orchestration. |
-| `src/long_context_sdg/planning.py` | Seeded intent planning and non-opening retrieval fallback. |
-| `src/long_context_sdg/plugin.py` | Data Designer plugin registration. |
-| `src/long_context_sdg/prompts.py` | Assistant, retrieval-only, final-only, and user prompt builders. |
-| `src/long_context_sdg/reasoning.py` | Reasoning token and chunk-citation validation. |
-| `src/long_context_sdg/retrieval.py` | Persistent retrying HTTP adapter, response mapping, stable IDs, and selection. |
-| `src/long_context_sdg/runtime.py` | Episode state engine, tool loops, compaction, validation, judging, and canonical projection. |
-| `src/long_context_sdg/schemas.py` | Seed, plan, message, tool, compression, judgment, and canonical schemas. |
-| `src/long_context_sdg/seeds.py` | Stable IDs, deterministic enrichment, JSONL parsing, duplicate detection, and atomic preparation. |
-| `src/long_context_sdg/service_config.py` | Strict model-provider and retrieval contracts shared without coupling independent stages. |
-| `src/long_context_sdg/tokens.py` | Token estimation, active-context accounting, and compaction meter. |
-| `src/long_context_sdg/tool_registry.py` | Trusted executor imports, tool-call normalization, schema validation, and dispatch. |
-| `src/long_context_sdg/validation.py` | Replayable message/tool/retrieval/final-answer validation. |
-| `src/long_context_sdg/executors/base.py` | Shared state, services, context, error, and executor protocol. |
-| `src/long_context_sdg/executors/retrieval.py` | Retrieval execution and transcript capture. |
-| `src/long_context_sdg/executors/memory.py` | Allowlisted episode-local memory. |
-| `src/long_context_sdg/executors/simulated.py` | Explicitly labeled model-simulated tool output. |
+| `__main__.py` | `synthesize`, `prepare`, `generate`, `evaluate`, and `export` CLI. |
+| `config.py` | Strict configuration, cross-field constraints, path resolution, fingerprinting. |
+| `config_base.py` | Shared unknown-field-rejecting Pydantic base. |
+| `service_config.py` | Independent Data Designer model/provider and retriever contracts. |
+| `conversation_generation.py` | Public façade for preparation and generation. |
+| `pipeline.py` | Data Designer providers/models, seed source, native resume, result materialization. |
+| `generator_config.py` | Data Designer custom-column and side-effect-column contract. |
+| `generator.py` | Custom Data Designer column generator that runs one episode. |
+| `records.py` | Validated canonical JSONL loading and atomic final-artifact writing. |
+| `episode_control.py` | Stable episode constraints and sparse retrieval-deadline calculation. |
+| `runtime.py` | User/assistant/tool loop, context management, validation, judging, projection. |
+| `prompts.py` | Natural user, assistant action, retrieval deadline, final answer, and judge prompts. |
+| `schemas.py` | Seeds, messages, episode specs, policy events, tools, judgments, canonical records. |
+| `llm.py` | Data Designer facade normalization, transport retries, JSON extraction, schema recovery. |
+| `retrieval.py` | Persistent retrying retrieval adapter, field mapping, stable IDs, selection. |
+| `tool_registry.py` | Trusted executor loading, JSON-schema argument validation, dispatch. |
+| `executors/base.py` | Shared executor protocol, services, state, and errors. |
+| `executors/retrieval.py` | Retrieval execution and transcript capture. |
+| `executors/memory.py` | Allowlisted episode-local memory. |
+| `executors/simulated.py` | Explicitly marked synthetic tool output. |
+| `compression.py` | Structured context summaries and provenance validation. |
+| `tokens.py` | Token estimation and active-context accounting. |
+| `reasoning.py` | Reasoning-length and retrieved-chunk citation checks. |
+| `validation.py` | Replayable conversation, policy-event, tool, retrieval, and answer checks. |
+| `evaluation.py` | Revalidation, optional rejudging, partitions, summary. |
+| `models.py` | Direct judge facade used only by offline evaluation. |
+| `exporters.py` | Accepted-only `messages`, `messages_and_tools`, and `rich` exports. |
+| `seeds.py` | Stable IDs, deterministic enrichment, duplicate detection, atomic preparation. |
+| `plugin.py` | Data Designer custom-column registration. |
 
-### Query-generation modules
+### Query-generation package
 
 | File | Responsibility |
 |---|---|
-| `src/long_context_sdg/query_generation/allocation.py` | Largest-remainder exact quotas and deterministic shuffled schedules. |
-| `src/long_context_sdg/query_generation/candidates.py` | Fingerprinting, evidence-cache reuse, marginal scheduling, evidence sampling, stable IDs, and atomic candidate publication. |
-| `src/long_context_sdg/query_generation/checkpoint.py` | Query attempt parsing, compatibility checks, durable append, and latest-attempt selection. |
-| `src/long_context_sdg/query_generation/config.py` | Standalone strict query, evidence, managed-persona, provider, model, retriever, and path contracts. |
-| `src/long_context_sdg/query_generation/evidence.py` | Per-leaf retrieval pools, eligibility filters, content deduplication, source diversity, and bounded bundle sampling. |
-| `src/long_context_sdg/query_generation/generator.py` | Data Designer cell generator, persona projection, drafting, deterministic gates, independent judging, retries, checkpointing, and seed conversion. |
-| `src/long_context_sdg/query_generation/generator_config.py` | `persona-query-generator` Data Designer column contract and required managed-persona columns. |
-| `src/long_context_sdg/query_generation/personas.py` | Stable locale keys, sampler-column names, compact narrative/attribute projection, and persona provenance. |
-| `src/long_context_sdg/query_generation/pipeline.py` | Native `PERSON` sampler setup, pending-candidate orchestration, resume, reports, deduplication, and atomic seed publication. |
-| `src/long_context_sdg/query_generation/prompts.py` | Query-draft and independent-judge prompts plus required quality dimensions. |
-| `src/long_context_sdg/query_generation/schemas.py` | Taxonomy, persona, candidate, draft, judgment, and checkpoint schemas. |
-| `src/long_context_sdg/query_generation/taxonomy.py` | Strict taxonomy loading, weighted leaf traversal, and raw-file hashing. |
-| `src/long_context_sdg/query_generation/validation.py` | Length/script, evidence leakage, anchor retrievability, comparison recovery, and lexical duplicate checks. |
+| `query_generation/config.py` | Strict standalone query, persona, evidence, provider, model, retriever, and path config. |
+| `query_generation/taxonomy.py` | Taxonomy loading, weighted leaf traversal, raw-file hashing. |
+| `query_generation/allocation.py` | Largest-remainder exact quotas and deterministic scheduling. |
+| `query_generation/evidence.py` | Retrieval pools, eligibility, deduplication, source diversity, bundle sampling. |
+| `query_generation/candidates.py` | Evidence-cache reuse, marginal scheduling, fingerprints, stable candidates. |
+| `query_generation/personas.py` | Locale keys, managed sampler columns, compact persona projection/provenance. |
+| `query_generation/prompts.py` | Draft and independent-judge prompts. |
+| `query_generation/validation.py` | Length/script, leakage, retrievability, comparison, duplicate checks. |
+| `query_generation/schemas.py` | Taxonomy, candidate, persona, draft, judgment, record schemas. |
+| `query_generation/generator_config.py` | Data Designer persona-query custom-column contract. |
+| `query_generation/generator.py` | Per-row persona projection, draft/check/judge retry loop, seed conversion. |
+| `query_generation/pipeline.py` | Managed persona samplers, Data Designer native resume, reporting, publication. |
 
 ### Tests
 
 | File | Responsibility |
 |---|---|
-| `tests/fixtures.py` | Temporary configs, deterministic model doubles, retrieval double, and custom executor. |
-| `tests/test_config_seeds_planning.py` | Enrichment, variable budgets, planning, first-turn diversity, and prompt constraints. |
-| `tests/test_llm_retries.py` | Transport retries and robust structured JSON extraction. |
-| `tests/test_query_generation.py` | Exact quotas, taxonomy/evidence behavior, native managed-persona sampler configuration, persona projection, validation, query checkpoints, and atomic publication. |
-| `tests/test_retrieval_registry_memory.py` | Retrieval mapping, registry validation, memory policy, and simulated marking. |
-| `tests/test_runtime_e2e.py` | Full episodes, tool use, hidden compaction, and correction behavior. |
-| `tests/test_tokens_reasoning.py` | Token accounting, compaction spacing, and reasoning validation. |
-| `tests/test_validation_checkpoint_export.py` | Validation, durable checkpointing, fingerprint enforcement, evaluation, and export. |
+| `tests/fixtures.py` | Temporary configs and deterministic model/retrieval/executor doubles. |
+| `tests/test_config_seeds_episode.py` | Config, enrichment, variable constraints, sparse deadline policy, prompts. |
+| `tests/test_llm_retries.py` | Transport retries and structured JSON extraction/recovery. |
+| `tests/test_query_generation.py` | Quotas, evidence, personas, validation, Data Designer record finalization. |
+| `tests/test_retrieval_registry_memory.py` | Retrieval mapping, registry, memory policy, simulated marking. |
+| `tests/test_runtime_e2e.py` | Full episodes, tool use, natural turns, sparse policy events, compression. |
+| `tests/test_tokens_reasoning.py` | Token accounting, compaction spacing, reasoning validation. |
+| `tests/test_validation_evaluation_export.py` | Validation, atomic records, fingerprint checks, evaluation, export. |
 
 ## Known constraints
 
-- Checkpoints are episode-level and single-writer.
-- Optional tool calls have no hard per-action, per-turn, or per-conversation cap.
-- Only `research` and `rewrite` intent labels make retrieval mandatory.
-- Model retry and structured-correction counts are not configurable in
-  YAML.
-- Token counts are estimates and may differ from the serving model tokenizer.
-- `model_token_limit` is a compression-failure boundary, not a universal hard
-  limit on every request.
-- Simulated tool output is synthetic even though it is explicitly marked.
-- Custom executor paths execute trusted Python and require code review.
+- Data Designer resume is row-group-level; an interrupted in-flight group can be
+  recomputed.
+- Exact conversation length is sampled before generation, not decided by an
+  intent plan.
+- Sparse policy events enforce retrieval feasibility but do not assign turn
+  semantics.
+- Model retry and structured-correction counts are internal rather than YAML
+  knobs.
+- Token counts are estimates and can differ from the serving tokenizer.
+- `model_token_limit` is a compression-failure boundary, not a universal server
+  context limit.
+- Simulated tool output remains synthetic even when explicitly marked.
+- Custom executor import paths run trusted Python and require code review.

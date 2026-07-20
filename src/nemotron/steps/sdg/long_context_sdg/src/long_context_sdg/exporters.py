@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from .checkpoint import load_records
+from .records import load_records
 
 
 def export_records(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -14,6 +14,14 @@ from ..service_config import ModelConfig, ProviderConfig, RetrieverConfig
 class QueryGenerationRunConfig(StrictConfigModel):
     mode: Literal["create"] = "create"
     seed: int = 7
+    dataset_name: str = "long_context_query_synthesis"
+    resume: Literal["never", "always", "if_possible"] = "always"
+
+    @model_validator(mode="after")
+    def valid_dataset_name(self) -> QueryGenerationRunConfig:
+        if not self.dataset_name.strip():
+            raise ValueError("run.dataset_name must be non-empty")
+        return self
 
 
 class PersonaLocaleConfig(StrictConfigModel):
@@ -83,7 +91,7 @@ class QueryGenerationPaths(StrictConfigModel):
     seeds: str
     evidence_manifest: str = "../output/query_generation/evidence_manifest.json"
     candidates: str = "../output/query_generation/candidates.jsonl"
-    checkpoint: str = "../output/query_generation/checkpoint.jsonl"
+    artifacts: str = "../output/query_generation/data_designer"
     report: str = "../output/query_generation/report.json"
 
 
@@ -173,6 +181,18 @@ class QueryGenerationPipelineConfig(StrictConfigModel):
     def resolve(self, value: str) -> Path:
         path = Path(value)
         return path if path.is_absolute() else (self.config_dir / path).resolve()
+
+    def generation_payload(self) -> dict[str, Any]:
+        """Return runtime config without Data Designer orchestration identity."""
+        payload = self.model_dump(mode="json", exclude={"config_dir"})
+        payload["paths"] = {name: "." for name in type(self.paths).model_fields}
+        payload["run"] = {
+            "mode": "create",
+            "seed": self.run.seed,
+            "dataset_name": "embedded",
+            "resume": "never",
+        }
+        return payload
 
 
 def load_query_generation_config(

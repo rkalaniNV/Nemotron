@@ -20,9 +20,7 @@ class RetrievalExecutor:
             raise ValueError("RetrievalExecutor requires a retriever service")
         self.retriever = services.retriever
 
-    def execute(
-        self, call: ToolCall, state: ConversationState, context: ExecutionContext
-    ) -> ToolResult:
+    def execute(self, call: ToolCall, state: ConversationState, context: ExecutionContext) -> ToolResult:
         query = call.arguments.get("query")
         if not isinstance(query, str) or not query.strip():
             raise ToolExecutionError("retrieve requires a non-empty query")

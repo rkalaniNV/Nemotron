@@ -42,11 +42,7 @@ def message_tokens(message: Any) -> int:
     for key in ("content", "reasoning_content", "tool_calls", "name"):
         value = m.get(key)
         if value:
-            total += count_tokens(
-                value
-                if isinstance(value, str)
-                else json.dumps(value, ensure_ascii=False)
-            )
+            total += count_tokens(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
     return total
 
 
@@ -66,10 +62,7 @@ class ContextMeter:
         self.active_tokens += context_tokens(messages)
 
     def should_compress(self, turn: int) -> bool:
-        return (
-            self.active_tokens >= self.threshold
-            and turn - self.last_compression_turn >= self.min_turns_between
-        )
+        return self.active_tokens >= self.threshold and turn - self.last_compression_turn >= self.min_turns_between
 
     def reset(self, turn: int, summary: str, recent_messages: Iterable[Any]) -> None:
         self.history.append({"turn": turn, "tokens_before": self.active_tokens})

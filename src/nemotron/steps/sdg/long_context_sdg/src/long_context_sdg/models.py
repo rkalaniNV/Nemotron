@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
 
 from .config import PipelineConfig
+from .service_config import resolve_api_key
 
 
 class JudgeChatFacade:
@@ -25,9 +25,7 @@ class JudgeChatFacade:
         self.model = model
         self.endpoint = endpoint.rstrip("/")
         self.parameters = {
-            key: value
-            for key, value in parameters.items()
-            if key not in {"timeout", "max_parallel_requests"}
+            key: value for key, value in parameters.items() if key not in {"timeout", "max_parallel_requests"}
         }
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -80,20 +78,12 @@ def evaluation_judge_models(cfg: PipelineConfig) -> dict[str, Any]:
     model = next(item for item in cfg.models if item.alias == "judge")
     provider = providers.get(model.provider)
     if provider is None:
-        raise ValueError(
-            f"model `{model.alias}` refers to unknown provider `{model.provider}`"
-        )
-    key_ref = provider.api_key_env.strip()
-    api_key = os.environ.get(key_ref, "").strip() if key_ref else ""
-    if key_ref and not api_key:
-        raise ValueError(
-            f"model provider `{provider.name}` needs environment variable `{key_ref}`"
-        )
+        raise ValueError(f"model `{model.alias}` refers to unknown provider `{model.provider}`")
     return {
         "judge": JudgeChatFacade(
             model=model.model,
             endpoint=provider.endpoint,
-            api_key=api_key,
+            api_key=resolve_api_key(provider),
             parameters=model.inference_parameters,
         )
     }

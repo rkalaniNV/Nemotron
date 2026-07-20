@@ -21,7 +21,8 @@ def make_config(tmp_path, *, judge=False, depth_weights=None) -> PipelineConfig:
             "paths": {
                 "seeds": str(tmp_path / "queries.jsonl"),
                 "enriched_seeds": str(tmp_path / "enriched.jsonl"),
-                "checkpoint": str(tmp_path / "checkpoint.jsonl"),
+                "artifacts": str(tmp_path / "artifacts"),
+                "generated": str(tmp_path / "generated.jsonl"),
                 "canonical": str(tmp_path / "canonical.jsonl"),
                 "output_dir": str(tmp_path / "evaluated"),
                 "export": str(tmp_path / "sft.jsonl"),
@@ -33,36 +34,13 @@ def make_config(tmp_path, *, judge=False, depth_weights=None) -> PipelineConfig:
                 {"alias": alias, "model": "fake", "provider": "nvidia"}
                 for alias in ("assistant", "user", "compressor", "judge")
             ],
-            "planning": {
+            "episode": {
                 "turn_budget": {"min": 15, "max": 22},
                 "retrieval_depth_weights": depth_weights,
+                "retrieval_calls": {"min": 1, "max": 3},
                 "max_steps_per_turn": 6,
-                "ensure_retrieval_turn": True,
-                "first_turn_intents": {
-                    "research": 0.12,
-                    "rewrite": 0.04,
-                    "clarify": 0.18,
-                    "user_context": 0.16,
-                    "scope": 0.14,
-                    "orientation": 0.12,
-                    "direct_answer": 0.10,
-                    "misconception_check": 0.08,
-                    "example_first": 0.06,
-                },
-                "intents": {
-                    "research": 0.13,
-                    "rewrite": 0.10,
-                    "clarify": 0.09,
-                    "deepen": 0.12,
-                    "compare": 0.09,
-                    "synthesize": 0.10,
-                    "recall": 0.06,
-                    "user_context": 0.06,
-                    "apply_scenario": 0.08,
-                    "challenge_assumption": 0.07,
-                    "summarize": 0.05,
-                    "misconception_check": 0.05,
-                },
+                "max_tool_calls_per_turn": 3,
+                "max_tool_calls_per_conversation": 12,
             },
             "context": {
                 "compression_threshold": 300,
@@ -189,9 +167,7 @@ class FakeAssistant:
         required = int(required_match.group(1)) if required_match else 0
         if "Do not answer yet" in directive:
             remaining_match = re.search(r"Complete (\d+) additional", directive)
-            required = completed + (
-                int(remaining_match.group(1)) if remaining_match else 1
-            )
+            required = completed + (int(remaining_match.group(1)) if remaining_match else 1)
         if "ASSISTANT RETRIEVAL ACTION SCHEMA" in system:
             value = {
                 "reasoning": {
@@ -212,9 +188,7 @@ class FakeAssistant:
                 "tool_calls": [
                     {
                         "name": "retrieve",
-                        "arguments": {
-                            "query": f"turn {turn} query version {completed + 1}"
-                        },
+                        "arguments": {"query": f"turn {turn} query version {completed + 1}"},
                     }
                 ],
             }
@@ -228,16 +202,15 @@ class FakeAssistant:
                 "content": f"Grounded final answer for turn {turn}.",
                 "tool_calls": [],
             }
-        return SimpleNamespace(
-            message=SimpleNamespace(content=json.dumps(value), role="assistant")
-        )
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps(value), role="assistant"))
 
 
 class FakeUser:
     def completion(self, messages, **kwargs):
         return SimpleNamespace(
             message=SimpleNamespace(
-                content="Could you explain the next related point?", role="assistant"
+                content=json.dumps({"content": "Could you explain how that applies in another realistic case?"}),
+                role="assistant",
             )
         )
 
@@ -254,9 +227,7 @@ class FakeCompressor:
             "source_message_ids": [],
             "no_new_claims": True,
         }
-        return SimpleNamespace(
-            message=SimpleNamespace(content=json.dumps(value), role="assistant")
-        )
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps(value), role="assistant"))
 
 
 class FakeJudge:
@@ -276,9 +247,7 @@ class FakeJudge:
             "rating": "success",
             "explanation": "valid",
         }
-        return SimpleNamespace(
-            message=SimpleNamespace(content=json.dumps(value), role="assistant")
-        )
+        return SimpleNamespace(message=SimpleNamespace(content=json.dumps(value), role="assistant"))
 
 
 def fake_models(*, judge=True):
@@ -299,9 +268,5 @@ class CustomExecutor:
     def __init__(self, *, services: ExecutionServices, prefix="custom"):
         self.prefix = prefix
 
-    def execute(
-        self, call: ToolCall, state: ConversationState, context: ExecutionContext
-    ) -> ToolResult:
-        return ToolResult(
-            tool_call_id=call.id, name=call.name, payload={"value": self.prefix}
-        )
+    def execute(self, call: ToolCall, state: ConversationState, context: ExecutionContext) -> ToolResult:
+        return ToolResult(tool_call_id=call.id, name=call.name, payload={"value": self.prefix})

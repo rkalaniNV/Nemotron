@@ -1,14 +1,11 @@
-"""Data Designer preparation and generation orchestration."""
+"""Data Designer preparation, native resume, and generation orchestration."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-from .checkpoint import completed_query_ids, load_records, verify_fingerprint
 from .config import PipelineConfig
 from .generator_config import LongContextEpisodeConfig
-from .schemas import EpisodeSeed
+from .records import write_records
+from .schemas import CanonicalRecord, EpisodeSeed
 from .seeds import iter_jsonl
 
 
@@ -21,9 +18,7 @@ def _dd_models(cfg: PipelineConfig):
             model=model.model,
             provider=model.provider,
             skip_health_check=model.skip_health_check,
-            inference_parameters=dd.ChatCompletionInferenceParams(
-                **model.inference_parameters
-            ),
+            inference_parameters=dd.ChatCompletionInferenceParams(**model.inference_parameters),
         )
         for model in cfg.models
     ]
@@ -33,64 +28,79 @@ def _dd_providers(cfg: PipelineConfig):
     import data_designer.config as dd
 
     return [
-        dd.ModelProvider(name=p.name, endpoint=p.endpoint, api_key=p.api_key_env)
-        for p in cfg.providers
+        dd.ModelProvider(
+            name=provider.name,
+            endpoint=provider.endpoint,
+            api_key=provider.api_key_env,
+        )
+        for provider in cfg.providers
     ]
 
 
-def _pending_seed_file(cfg: PipelineConfig) -> tuple[Path, int]:
-    checkpoint = cfg.resolve(cfg.paths.checkpoint)
-    records = load_records(checkpoint)
-    verify_fingerprint(records, cfg.fingerprint())
-    completed = completed_query_ids(
-        records,
-        retry_failed=cfg.run.retry_failed,
-        retry_quarantine=cfg.run.retry_quarantine,
-    )
-    pending = []
+def _seed_order(cfg: PipelineConfig) -> list[str]:
+    order = []
     for row in iter_jsonl(cfg.resolve(cfg.paths.enriched_seeds)):
         seed = EpisodeSeed.model_validate_json(row["episode_input"])
-        if seed.query_id not in completed:
-            pending.append(row)
-    if cfg.run.num_records:
-        pending = pending[: cfg.run.num_records]
-    path = checkpoint.parent / f"_pending_{cfg.fingerprint()[:12]}.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for row in pending:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return path, len(pending)
+        order.append(seed.query_id)
+    if len(order) != len(set(order)):
+        raise ValueError("enriched seed file contains duplicate query IDs")
+    return order
+
+
+def _materialize_generated(results, cfg: PipelineConfig, expected_order: list[str]) -> None:
+    frame = results.load_dataset()
+    if "canonical_record" not in frame:
+        raise ValueError("Data Designer result does not contain canonical_record")
+    records = [CanonicalRecord.model_validate_json(value) for value in frame["canonical_record"]]
+    by_query = {record.query_id: record for record in records}
+    if len(by_query) != len(records):
+        raise ValueError("Data Designer result contains duplicate canonical query IDs")
+    missing = [query_id for query_id in expected_order if query_id not in by_query]
+    unexpected = sorted(set(by_query) - set(expected_order))
+    if missing or unexpected:
+        raise ValueError(f"Data Designer result/query mismatch: missing={missing}, unexpected={unexpected}")
+    write_records(cfg.resolve(cfg.paths.generated), (by_query[query_id] for query_id in expected_order))
 
 
 def generate(cfg: PipelineConfig) -> int:
     import data_designer.config as dd
     from data_designer.interface import DataDesigner
 
-    seed_path, count = _pending_seed_file(cfg)
+    order = _seed_order(cfg)
+    count = cfg.run.num_records or len(order)
+    if count > len(order):
+        raise ValueError(f"run.num_records={count} exceeds the {len(order)} prepared seeds")
+    order = order[:count]
     if count == 0:
         return 0
+
     builder = dd.DataDesignerConfigBuilder(model_configs=_dd_models(cfg))
     builder.with_seed_dataset(
-        dd.LocalFileSeedSource(path=str(seed_path)),
+        dd.LocalFileSeedSource(path=str(cfg.resolve(cfg.paths.enriched_seeds))),
         sampling_strategy=dd.SamplingStrategy.ORDERED,
     )
-    pipeline_payload = cfg.model_dump(mode="json", exclude={"config_dir"})
     builder.add_column(
         LongContextEpisodeConfig(
             name="conversation",
             episode_input_column="episode_input",
-            pipeline=pipeline_payload,
-            checkpoint_path=str(cfg.resolve(cfg.paths.checkpoint)),
+            pipeline=cfg.generation_payload(),
             run_id=f"run-{cfg.fingerprint()[:12]}",
         )
     )
-    designer = (
-        DataDesigner(model_providers=_dd_providers(cfg))
-        if cfg.providers
-        else DataDesigner()
+    providers = _dd_providers(cfg)
+    designer = DataDesigner(
+        artifact_path=cfg.resolve(cfg.paths.artifacts),
+        model_providers=providers or None,
     )
     if cfg.run.mode == "preview":
         designer.preview(builder, num_records=count)
-    else:
-        designer.create(builder, num_records=count)
+        return count
+
+    results = designer.create(
+        builder,
+        num_records=count,
+        dataset_name=cfg.run.dataset_name,
+        resume=dd.ResumeMode(cfg.run.resume),
+    )
+    _materialize_generated(results, cfg, order)
     return count

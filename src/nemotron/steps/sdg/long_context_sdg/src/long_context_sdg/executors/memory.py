@@ -20,9 +20,7 @@ class MemoryExecutor:
     def __init__(self, *, services: ExecutionServices, **_: Any):
         del services
 
-    def execute(
-        self, call: ToolCall, state: ConversationState, context: ExecutionContext
-    ) -> ToolResult:
+    def execute(self, call: ToolCall, state: ConversationState, context: ExecutionContext) -> ToolResult:
         if call.name == "memory_read":
             return self._read(call, state)
         if call.name == "memory_write":
@@ -36,9 +34,7 @@ class MemoryExecutor:
         keys = call.arguments.get("keys")
         if keys is not None and not isinstance(keys, list):
             raise ToolExecutionError("memory_read keys must be an array")
-        selected = (
-            ALLOWED_MEMORY_KEYS if keys is None else set(keys) & ALLOWED_MEMORY_KEYS
-        )
+        selected = ALLOWED_MEMORY_KEYS if keys is None else set(keys) & ALLOWED_MEMORY_KEYS
         payload = {k: state.memory[k] for k in selected if k in state.memory}
         state.memory_events.append(
             {
@@ -72,6 +68,4 @@ class MemoryExecutor:
                 "reason": str(args["reason"]),
             }
         )
-        return ToolResult(
-            tool_call_id=call.id, name=call.name, payload={"saved": True, "key": key}
-        )
+        return ToolResult(tool_call_id=call.id, name=call.name, payload={"saved": True, "key": key})

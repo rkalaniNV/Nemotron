@@ -21,9 +21,7 @@ def _global_loop() -> asyncio.AbstractEventLoop:
     with _LOOP_LOCK:
         if _LOOP is None:
             loop = asyncio.new_event_loop()
-            threading.Thread(
-                target=loop.run_forever, daemon=True, name="long-context-sdg-llm"
-            ).start()
+            threading.Thread(target=loop.run_forever, daemon=True, name="long-context-sdg-llm").start()
             _LOOP = loop
     return _LOOP
 
@@ -59,9 +57,7 @@ def _completion(facade: Any, messages, **kwargs):
     except Exception as exc:
         if not callable(getattr(facade, "acompletion", None)):
             raise
-        future = asyncio.run_coroutine_threadsafe(
-            facade.acompletion(messages, **kwargs), _global_loop()
-        )
+        future = asyncio.run_coroutine_threadsafe(facade.acompletion(messages, **kwargs), _global_loop())
         try:
             return future.result()
         except Exception:
@@ -81,16 +77,12 @@ def _as_dict(response: Any) -> dict[str, Any]:
         return _as_dict(response.message)
     content = getattr(response, "content", "") or ""
     out = {"role": getattr(response, "role", "assistant"), "content": content}
-    reasoning = getattr(response, "reasoning_content", None) or getattr(
-        response, "reasoning", None
-    )
+    reasoning = getattr(response, "reasoning_content", None) or getattr(response, "reasoning", None)
     if reasoning:
         out["reasoning_content"] = reasoning
     tool_calls = getattr(response, "tool_calls", None)
     if tool_calls:
-        out["tool_calls"] = [
-            tc if isinstance(tc, dict) else tc.model_dump() for tc in tool_calls
-        ]
+        out["tool_calls"] = [tc if isinstance(tc, dict) else tc.model_dump() for tc in tool_calls]
     return out
 
 
@@ -113,9 +105,7 @@ def call_llm(
             last_error = exc
             if attempt + 1 < retries:
                 time.sleep(min(2**attempt, 5))
-    raise RuntimeError(
-        f"model `{alias}` failed after {retries} attempt(s): {last_error}"
-    )
+    raise RuntimeError(f"model `{alias}` failed after {retries} attempt(s): {last_error}")
 
 
 def _extract_json(text: str) -> Any:
@@ -155,6 +145,4 @@ def call_structured(
                     + json.dumps(schema.model_json_schema(), ensure_ascii=False),
                 }
             ]
-    raise ValueError(
-        f"model `{alias}` did not produce valid {schema.__name__}: {last_error}"
-    )
+    raise ValueError(f"model `{alias}` did not produce valid {schema.__name__}: {last_error}")

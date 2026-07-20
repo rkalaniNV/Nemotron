@@ -10,19 +10,13 @@ from .schemas import CompressionEvent, Message, ValidationReport
 
 
 def render_summary(event: CompressionEvent) -> str:
-    lines = [
-        f"[Compacted turns {event.covers_turns[0]}-{event.covers_turns[1]}: {event.summary_id}]"
-    ]
+    lines = [f"[Compacted turns {event.covers_turns[0]}-{event.covers_turns[1]}: {event.summary_id}]"]
     if event.user_facts:
         lines.append("User facts: " + "; ".join(x.fact for x in event.user_facts))
     if event.key_facts:
         lines.append("Established facts:")
         for fact in event.key_facts:
-            citations = (
-                f" [{', '.join(fact.supporting_chunk_ids)}]"
-                if fact.supporting_chunk_ids
-                else ""
-            )
+            citations = f" [{', '.join(fact.supporting_chunk_ids)}]" if fact.supporting_chunk_ids else ""
             lines.append(f"- {fact.fact}{citations}")
     if event.constraints:
         lines.append("Constraints: " + "; ".join(event.constraints))

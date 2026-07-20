@@ -21,9 +21,7 @@ def test_retriever_maps_fields_and_hashes_missing_id(tmp_path):
     def handler(request):
         assert request.method == "POST"
         assert request.read()
-        return httpx.Response(
-            200, json={"chunks": [{"text": "passage", "source": "doc"}]}
-        )
+        return httpx.Response(200, json={"chunks": [{"text": "passage", "source": "doc"}]})
 
     client = RetrieverClient(cfg.retriever, transport=httpx.MockTransport(handler))
     try:

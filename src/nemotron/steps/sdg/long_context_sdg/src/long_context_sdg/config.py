@@ -17,7 +17,8 @@ from .service_config import ModelConfig, ProviderConfig, RetrieverConfig
 class PathsConfig(StrictConfigModel):
     seeds: str
     enriched_seeds: str
-    checkpoint: str
+    artifacts: str
+    generated: str
     canonical: str
     output_dir: str
     export: str
@@ -27,8 +28,14 @@ class RunConfig(StrictConfigModel):
     mode: Literal["preview", "create"] = "preview"
     seed: int = 7
     num_records: int = Field(0, ge=0)
-    retry_failed: bool = False
-    retry_quarantine: bool = False
+    dataset_name: str = "long_context_sdg"
+    resume: Literal["never", "always", "if_possible"] = "always"
+
+    @model_validator(mode="after")
+    def valid_dataset_name(self) -> RunConfig:
+        if not self.dataset_name.strip():
+            raise ValueError("run.dataset_name must be non-empty")
+        return self
 
 
 class TurnRange(StrictConfigModel):
@@ -42,75 +49,41 @@ class TurnRange(StrictConfigModel):
         return self
 
 
-class PlanningConfig(StrictConfigModel):
-    turn_budget: TurnRange = Field(default_factory=TurnRange)
-    honor_seed_turn_budget: bool = True
-    retrieval_depth_weights: dict[int, float] = Field(
-        default_factory=lambda: {1: 0.25, 2: 0.5, 3: 0.25}
-    )
-    max_steps_per_turn: int = Field(6, ge=2, le=12)
-    ensure_retrieval_turn: bool = True
-    first_turn_intents: dict[str, float] = Field(
-        default_factory=lambda: {
-            "research": 0.12,
-            "rewrite": 0.04,
-            "clarify": 0.18,
-            "user_context": 0.16,
-            "scope": 0.14,
-            "orientation": 0.12,
-            "direct_answer": 0.10,
-            "misconception_check": 0.08,
-            "example_first": 0.06,
-        }
-    )
-    intents: dict[str, float] = Field(
-        default_factory=lambda: {
-            "research": 0.13,
-            "rewrite": 0.10,
-            "clarify": 0.09,
-            "deepen": 0.12,
-            "compare": 0.09,
-            "synthesize": 0.10,
-            "recall": 0.06,
-            "user_context": 0.06,
-            "apply_scenario": 0.08,
-            "challenge_assumption": 0.07,
-            "summarize": 0.05,
-            "misconception_check": 0.05,
-        }
-    )
+class RetrievalCallRange(StrictConfigModel):
+    min: int = Field(1, ge=0, le=120)
+    max: int = Field(12, ge=0, le=120)
 
     @model_validator(mode="after")
-    def valid_distributions(self) -> PlanningConfig:
+    def ordered(self) -> RetrievalCallRange:
+        if self.max < self.min:
+            raise ValueError("retrieval_calls.max must be >= retrieval_calls.min")
+        return self
+
+
+class EpisodePolicyConfig(StrictConfigModel):
+    turn_budget: TurnRange = Field(default_factory=TurnRange)
+    honor_seed_turn_budget: bool = True
+    retrieval_depth_weights: dict[int, float] = Field(default_factory=lambda: {1: 0.25, 2: 0.5, 3: 0.25})
+    retrieval_calls: RetrievalCallRange = Field(default_factory=RetrievalCallRange)
+    max_steps_per_turn: int = Field(6, ge=2, le=12)
+    max_tool_calls_per_turn: int = Field(3, ge=1, le=12)
+    max_tool_calls_per_conversation: int = Field(32, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def valid_policy(self) -> EpisodePolicyConfig:
         if set(self.retrieval_depth_weights) - {1, 2, 3}:
             raise ValueError("retrieval_depth_weights keys must be in 1..3")
-        if (
-            not self.retrieval_depth_weights
-            or sum(self.retrieval_depth_weights.values()) <= 0
-        ):
-            raise ValueError(
-                "retrieval_depth_weights must contain positive total weight"
-            )
+        if not self.retrieval_depth_weights or sum(self.retrieval_depth_weights.values()) <= 0:
+            raise ValueError("retrieval_depth_weights must contain positive total weight")
         if any(weight < 0 for weight in self.retrieval_depth_weights.values()):
             raise ValueError("retrieval_depth_weights must be nonnegative")
-        maximum_depth = max(
-            depth
-            for depth, weight in self.retrieval_depth_weights.items()
-            if weight > 0
-        )
+        maximum_depth = max(depth for depth, weight in self.retrieval_depth_weights.items() if weight > 0)
         if self.max_steps_per_turn <= maximum_depth:
-            raise ValueError(
-                "max_steps_per_turn must allow every enabled retrieval depth "
-                "plus one final-answer step"
-            )
-        for name, distribution in (
-            ("first_turn_intents", self.first_turn_intents),
-            ("intents", self.intents),
-        ):
-            if not distribution or sum(distribution.values()) <= 0:
-                raise ValueError(f"planning.{name} must contain positive total weight")
-            if any(weight < 0 for weight in distribution.values()):
-                raise ValueError(f"planning.{name} weights must be nonnegative")
+            raise ValueError("max_steps_per_turn must allow every enabled retrieval depth plus one final-answer step")
+        if self.max_tool_calls_per_turn > self.max_tool_calls_per_conversation:
+            raise ValueError("max_tool_calls_per_turn cannot exceed max_tool_calls_per_conversation")
+        if self.retrieval_calls.max > self.max_tool_calls_per_conversation:
+            raise ValueError("retrieval_calls.max cannot exceed max_tool_calls_per_conversation")
         return self
 
 
@@ -161,7 +134,7 @@ class PipelineConfig(StrictConfigModel):
     instructions: str = ""
     providers: list[ProviderConfig] = Field(default_factory=list)
     models: list[ModelConfig]
-    planning: PlanningConfig = Field(default_factory=PlanningConfig)
+    episode: EpisodePolicyConfig = Field(default_factory=EpisodePolicyConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
     retriever: RetrieverConfig
     tools: list[ToolConfig]
@@ -196,13 +169,24 @@ class PipelineConfig(StrictConfigModel):
 
     def fingerprint(self) -> str:
         payload = self.model_dump(exclude={"paths", "run"}, mode="json")
-        # The seed changes generated plans, while the other run fields only control
-        # orchestration and retry policy.
+        # The seed changes generated specifications; other run fields only control
+        # Data Designer orchestration and native resume behavior.
         payload["run_seed"] = self.run.seed
-        raw = json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        )
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(raw.encode()).hexdigest()
+
+    def generation_payload(self) -> dict[str, Any]:
+        """Return runtime config without Data Designer orchestration identity."""
+        payload = self.model_dump(mode="json", exclude={"config_dir"})
+        payload["paths"] = {name: "." for name in type(self.paths).model_fields}
+        payload["run"] = {
+            "mode": "create",
+            "seed": self.run.seed,
+            "num_records": 0,
+            "dataset_name": "embedded",
+            "resume": "never",
+        }
+        return payload
 
 
 def load_config(path: str | Path) -> PipelineConfig:

@@ -13,8 +13,6 @@ class SyntheticQueryConfig(SingleColumnConfig):
     candidate_input_column: str = "candidate_input"
     persona_columns: dict[str, str]
     pipeline: dict[str, Any]
-    checkpoint_path: str
-    run_id: str
 
     @property
     def required_columns(self) -> list[str]:
@@ -22,4 +20,4 @@ class SyntheticQueryConfig(SingleColumnConfig):
 
     @property
     def side_effect_columns(self) -> list[str]:
-        return ["synthetic_seed", "query_status", "query_validation"]
+        return ["synthetic_seed", "query_record", "query_status", "query_validation"]

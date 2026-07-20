@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from .candidates import prepare_candidates
-from .checkpoint import latest_by_query, load_records, verify_fingerprint
 from .config import QueryGenerationPipelineConfig
 from .generator_config import SyntheticQueryConfig
 from .personas import persona_column_name, persona_key
@@ -49,7 +48,11 @@ def _dd_providers(cfg: QueryGenerationPipelineConfig):
         }
     }
     return [
-        dd.ModelProvider(name=provider.name, endpoint=provider.endpoint, api_key=provider.api_key_env)
+        dd.ModelProvider(
+            name=provider.name,
+            endpoint=provider.endpoint,
+            api_key=provider.api_key_env,
+        )
         for provider in cfg.providers
         if provider.name in needed
     ]
@@ -84,41 +87,6 @@ def _add_persona_samplers(builder, cfg: QueryGenerationPipelineConfig, dd) -> di
             )
         )
     return columns
-
-
-def _pending_file(
-    cfg: QueryGenerationPipelineConfig,
-    candidates: list[QueryCandidate],
-    records: list[QuerySynthesisRecord],
-) -> tuple[Path, int]:
-    generation = cfg.query_generation
-    latest = latest_by_query(records)
-    pending = [
-        candidate
-        for candidate in candidates
-        if not (
-            candidate.query_id in latest
-            and (
-                latest[candidate.query_id].status == "accepted"
-                or latest[candidate.query_id].attempt >= generation.max_attempts
-            )
-        )
-    ]
-    checkpoint = cfg.resolve(cfg.paths.checkpoint)
-    path = checkpoint.parent / f"_pending_queries_{candidates[0].synthesis_fingerprint[:12]}.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    with temporary.open("w", encoding="utf-8") as handle:
-        for candidate in pending:
-            handle.write(
-                json.dumps(
-                    {"candidate_input": candidate.model_dump_json()},
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    temporary.replace(path)
-    return path, len(pending)
 
 
 def _counter(records: list[QuerySynthesisRecord], field: str) -> dict[str, int]:
@@ -163,15 +131,20 @@ def _finalize(
     cfg: QueryGenerationPipelineConfig,
     candidates: list[QueryCandidate],
     fingerprint: str,
+    records: list[QuerySynthesisRecord],
     *,
     force: bool,
 ) -> dict[str, Any]:
     generation = cfg.query_generation
-    checkpoint = cfg.resolve(cfg.paths.checkpoint)
-    records = load_records(checkpoint)
-    verify_fingerprint(records, fingerprint)
-    latest = latest_by_query(records)
-    terminal = [latest[item.query_id] for item in candidates if item.query_id in latest]
+    incompatible = sorted(
+        {record.synthesis_fingerprint for record in records if record.synthesis_fingerprint != fingerprint}
+    )
+    if incompatible:
+        raise ValueError("query records use incompatible synthesis fingerprint(s): " + ", ".join(incompatible))
+    by_query = {record.query_id: record for record in records}
+    if len(by_query) != len(records):
+        raise ValueError("Data Designer query results contain duplicate query IDs")
+    terminal = [by_query[item.query_id] for item in candidates if item.query_id in by_query]
     accepted = sorted(
         (record for record in terminal if record.status == "accepted"),
         key=lambda record: record.candidate_index,
@@ -204,7 +177,7 @@ def _finalize(
             f"query synthesis found {len(duplicates)} near-duplicate pair(s); see {cfg.resolve(cfg.paths.report)}"
         )
     if any(record.seed is None for record in accepted):
-        raise RuntimeError("accepted query checkpoint record is missing its seed")
+        raise RuntimeError("accepted query record is missing its seed")
     content = "".join(json.dumps(record.seed, ensure_ascii=False) + "\n" for record in accepted)
     destination = cfg.resolve(cfg.paths.seeds)
     if destination.exists():
@@ -224,32 +197,37 @@ def synthesize_queries(cfg: QueryGenerationPipelineConfig, *, force: bool = Fals
     if cfg.run.mode != "create":
         raise ValueError("query synthesis requires run.mode: create")
     candidates, fingerprint = prepare_candidates(cfg)
-    checkpoint = cfg.resolve(cfg.paths.checkpoint)
-    records = load_records(checkpoint)
-    verify_fingerprint(records, fingerprint)
-    pending_path, pending_count = _pending_file(cfg, candidates, records)
-    if pending_count:
-        import data_designer.config as dd
-        from data_designer.interface import DataDesigner
+    import data_designer.config as dd
+    from data_designer.interface import DataDesigner
 
-        builder = dd.DataDesignerConfigBuilder(model_configs=_dd_models(cfg))
-        builder.with_seed_dataset(
-            dd.LocalFileSeedSource(path=str(pending_path)),
-            sampling_strategy=dd.SamplingStrategy.ORDERED,
+    builder = dd.DataDesignerConfigBuilder(model_configs=_dd_models(cfg))
+    builder.with_seed_dataset(
+        dd.LocalFileSeedSource(path=str(cfg.resolve(cfg.paths.candidates))),
+        sampling_strategy=dd.SamplingStrategy.ORDERED,
+    )
+    persona_columns = _add_persona_samplers(builder, cfg, dd)
+    builder.add_column(
+        SyntheticQueryConfig(
+            name="synthetic_query",
+            model_alias=cfg.query_generation.generator_alias,
+            candidate_input_column="candidate_input",
+            persona_columns=persona_columns,
+            pipeline=cfg.generation_payload(),
         )
-        persona_columns = _add_persona_samplers(builder, cfg, dd)
-        builder.add_column(
-            SyntheticQueryConfig(
-                name="synthetic_query",
-                model_alias=cfg.query_generation.generator_alias,
-                candidate_input_column="candidate_input",
-                persona_columns=persona_columns,
-                pipeline=cfg.model_dump(mode="json", exclude={"config_dir"}),
-                checkpoint_path=str(checkpoint),
-                run_id=f"query-{fingerprint[:12]}",
-            )
-        )
-        providers = _dd_providers(cfg)
-        designer = DataDesigner(model_providers=providers) if providers else DataDesigner()
-        designer.create(builder, num_records=pending_count)
-    return _finalize(cfg, candidates, fingerprint, force=force)
+    )
+    providers = _dd_providers(cfg)
+    designer = DataDesigner(
+        artifact_path=cfg.resolve(cfg.paths.artifacts),
+        model_providers=providers or None,
+    )
+    results = designer.create(
+        builder,
+        num_records=len(candidates),
+        dataset_name=cfg.run.dataset_name,
+        resume=dd.ResumeMode(cfg.run.resume),
+    )
+    frame = results.load_dataset()
+    if "query_record" not in frame:
+        raise ValueError("Data Designer query result does not contain query_record")
+    records = [QuerySynthesisRecord.model_validate_json(value) for value in frame["query_record"]]
+    return _finalize(cfg, candidates, fingerprint, records, force=force)

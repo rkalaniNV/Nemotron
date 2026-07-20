@@ -37,16 +37,12 @@ def normalize_tool_call(raw: dict[str, Any], fallback_id: str) -> ToolCall:
         try:
             arguments = json.loads(arguments) if arguments.strip() else {}
         except json.JSONDecodeError as exc:
-            raise ToolExecutionError(
-                f"tool arguments are not valid JSON: {exc}"
-            ) from exc
+            raise ToolExecutionError(f"tool arguments are not valid JSON: {exc}") from exc
     if not isinstance(arguments, dict):
         raise ToolExecutionError("tool arguments must be an object")
     if not isinstance(name, str) or not name:
         raise ToolExecutionError("tool call has no name")
-    return ToolCall(
-        id=str(raw.get("id") or fallback_id), name=name, arguments=arguments
-    )
+    return ToolCall(id=str(raw.get("id") or fallback_id), name=name, arguments=arguments)
 
 
 class ToolRegistry:
@@ -59,9 +55,7 @@ class ToolRegistry:
             cls = _import_class(definition.executor)
             executor = cls(services=services, **definition.executor_kwargs)
             if not callable(getattr(executor, "execute", None)):
-                raise TypeError(
-                    f"executor `{definition.executor}` has no callable execute method"
-                )
+                raise TypeError(f"executor `{definition.executor}` has no callable execute method")
             self._configs[definition.name] = definition
             self._executors[definition.name] = executor
 
@@ -78,15 +72,11 @@ class ToolRegistry:
         definition = self._configs.get(call.name)
         if definition is None:
             raise ToolExecutionError(f"unknown tool `{call.name}`")
-        parameters = (definition.tool_schema.get("function") or {}).get(
-            "parameters"
-        ) or {"type": "object"}
+        parameters = (definition.tool_schema.get("function") or {}).get("parameters") or {"type": "object"}
         try:
             validate(instance=call.arguments, schema=parameters)
         except ValidationError as exc:
-            raise ToolExecutionError(
-                f"tool `{call.name}` arguments fail schema: {exc.message}"
-            ) from exc
+            raise ToolExecutionError(f"tool `{call.name}` arguments fail schema: {exc.message}") from exc
         context = ExecutionContext(
             tool_name=call.name,
             tool_schema=definition.tool_schema,
@@ -103,6 +93,4 @@ def _import_class(path: str):
     try:
         return getattr(module, class_name)
     except AttributeError as exc:
-        raise ImportError(
-            f"executor class `{class_name}` not found in `{module_name}`"
-        ) from exc
+        raise ImportError(f"executor class `{class_name}` not found in `{module_name}`") from exc

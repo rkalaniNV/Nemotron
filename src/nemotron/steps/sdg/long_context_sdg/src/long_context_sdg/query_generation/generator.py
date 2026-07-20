@@ -1,9 +1,8 @@
-"""Data Designer generator for one independently checkpointed query candidate."""
+"""Data Designer generator for one independently retryable query candidate."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from data_designer.engine.column_generators.generators.base import (
     ColumnGeneratorCellByCell,
@@ -12,7 +11,6 @@ from data_designer.engine.column_generators.generators.base import (
 
 from ..llm import call_structured
 from ..retrieval import RetrieverClient
-from .checkpoint import append_record, latest_by_query, load_records
 from .config import QueryGenerationPipelineConfig
 from .evidence import content_hash
 from .generator_config import SyntheticQueryConfig
@@ -107,26 +105,16 @@ class PersonaQueryGenerator(
         candidate = (
             QueryCandidate.model_validate_json(raw) if isinstance(raw, str) else QueryCandidate.model_validate(raw)
         )
-        checkpoint_path = Path(self.config.checkpoint_path)
-        latest = latest_by_query(load_records(checkpoint_path)).get(candidate.query_id)
-        start_attempt = latest.attempt + 1 if latest else 1
-        if latest and latest.status == "accepted":
-            data["synthetic_seed"] = json.dumps(latest.seed, ensure_ascii=False)
-            data["query_status"] = "accepted"
-            data["query_validation"] = "[]"
-            data[self.config.name] = data["synthetic_seed"]
-            return data
-
         models = {
             generation.generator_alias: self.get_model(generation.generator_alias),
             generation.judge_alias: self.get_model(generation.judge_alias),
         }
         retriever = RetrieverClient(cfg.retriever)
-        final_record = latest
-        previous_errors = list(latest.validation_errors) if latest else []
+        final_record = None
+        previous_errors: list[str] = []
         persona_configs = persona_config_by_key(generation.persona_locales)
         try:
-            for attempt in range(start_attempt, generation.max_attempts + 1):
+            for attempt in range(1, generation.max_attempts + 1):
                 try:
                     persona = project_persona(
                         data[self.config.persona_columns[candidate.persona_key]],
@@ -178,7 +166,6 @@ class PersonaQueryGenerator(
                         persona_mode=candidate.persona_mode,
                         validation_errors=[str(exc)],
                     )
-                append_record(checkpoint_path, final_record)
                 if final_record.status == "accepted":
                     break
                 previous_errors = list(final_record.validation_errors)
@@ -188,6 +175,7 @@ class PersonaQueryGenerator(
         if final_record is None:
             raise RuntimeError("query candidate had no available synthesis attempts")
         data["synthetic_seed"] = json.dumps(final_record.seed, ensure_ascii=False) if final_record.seed else ""
+        data["query_record"] = final_record.model_dump_json()
         data["query_status"] = final_record.status
         data["query_validation"] = json.dumps(final_record.validation_errors, ensure_ascii=False)
         data[self.config.name] = data["synthetic_seed"]

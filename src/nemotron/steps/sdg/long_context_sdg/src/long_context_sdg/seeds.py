@@ -34,20 +34,14 @@ def enrich_seed(record: dict[str, Any], cfg: PipelineConfig) -> EpisodeSeed:
         raise ValueError("seed query must be a non-empty string")
     qid = str(record.get("query_id") or _stable_id(record))
     rng = _rng(cfg.run.seed, qid)
-    turn_budget = (
-        record.get("turn_budget") if cfg.planning.honor_seed_turn_budget else None
-    )
+    turn_budget = record.get("turn_budget") if cfg.episode.honor_seed_turn_budget else None
     if turn_budget is None:
-        turn_budget = rng.randint(
-            cfg.planning.turn_budget.min, cfg.planning.turn_budget.max
-        )
+        turn_budget = rng.randint(cfg.episode.turn_budget.min, cfg.episode.turn_budget.max)
     depth = record.get("retrieval_depth")
     if depth is None:
-        depth = _weighted_depth(rng, cfg.planning.retrieval_depth_weights)
+        depth = _weighted_depth(rng, cfg.episode.retrieval_depth_weights)
     seed_instructions = str(record.get("instructions", "")).strip()
-    instructions = "\n\n".join(
-        x for x in (cfg.instructions.strip(), seed_instructions) if x
-    )
+    instructions = "\n\n".join(x for x in (cfg.instructions.strip(), seed_instructions) if x)
     memory = dict(record.get("memory_seed") or {})
     invalid = sorted(set(memory) - ALLOWED_MEMORY_KEYS)
     if invalid:
@@ -90,12 +84,7 @@ def prepare_seed_file(cfg: PipelineConfig) -> int:
                 if seed.query_id in query_ids:
                     raise ValueError(f"duplicate query_id `{seed.query_id}`")
                 query_ids.add(seed.query_id)
-                out.write(
-                    json.dumps(
-                        {"episode_input": seed.model_dump_json()}, ensure_ascii=False
-                    )
-                    + "\n"
-                )
+                out.write(json.dumps({"episode_input": seed.model_dump_json()}, ensure_ascii=False) + "\n")
                 count += 1
         temporary.replace(dst)
     except Exception:

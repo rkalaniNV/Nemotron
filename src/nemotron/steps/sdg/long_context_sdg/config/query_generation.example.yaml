@@ -4,12 +4,14 @@ paths:
   seeds: ../data/generated_queries.jsonl
   evidence_manifest: ../output/query_generation/evidence_manifest.json
   candidates: ../output/query_generation/candidates.jsonl
-  checkpoint: ../output/query_generation/checkpoint.jsonl
+  artifacts: ../output/query_generation/data_designer
   report: ../output/query_generation/report.json
 
 run:
   mode: create
   seed: 7
+  dataset_name: long_context_query_synthesis
+  resume: always
 
 providers:
   - name: primary

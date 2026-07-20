@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal
 
 from pydantic import Field
@@ -49,9 +50,20 @@ class RetrieverConfig(StrictConfigModel):
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
+def resolve_api_key(provider: ProviderConfig) -> str:
+    """Resolve a provider key reference, preserving an explicit empty value."""
+    reference = provider.api_key_env.strip()
+    if not reference:
+        return ""
+    if reference not in os.environ:
+        raise ValueError(f"model provider `{provider.name}` needs environment variable `{reference}`")
+    return os.environ[reference]
+
+
 __all__ = [
     "ModelConfig",
     "ProviderConfig",
     "RetrieverConfig",
     "RetrieverFields",
+    "resolve_api_key",
 ]

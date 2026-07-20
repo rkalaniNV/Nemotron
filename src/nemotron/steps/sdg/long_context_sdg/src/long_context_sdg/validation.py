@@ -1,15 +1,16 @@
-"""Deterministic structural, grounding, and replayability validation."""
+"""Deterministic structural, grounding, budget, and replayability validation."""
 
 from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
 from jsonschema import ValidationError, validate
 
-from .schemas import EpisodePlan, Message, ValidationReport
+from .schemas import EpisodeSpec, Message, RetrievalPolicyEvent, ValidationReport
 
 _QUERY_WS = re.compile(r"\s+")
 _QUERY_PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
@@ -22,22 +23,21 @@ def normalize_query(value: str) -> str:
 def validate_trajectory(
     messages: list[Message],
     *,
-    plan: EpisodePlan,
+    spec: EpisodeSpec,
+    policy_events: list[RetrievalPolicyEvent],
     retrieval_transcript: list[dict[str, Any]],
+    tool_call_attempts: list[dict[str, Any]],
     tool_schemas: Iterable[dict[str, Any]],
     require_final_answer_each_turn: bool = True,
 ) -> ValidationReport:
     errors: list[str] = []
     warnings: list[str] = []
-    schema_by_name = {
-        str((schema.get("function") or {}).get("name")): schema
-        for schema in tool_schemas
-    }
+    schema_by_name = {str((schema.get("function") or {}).get("name")): schema for schema in tool_schemas}
     open_calls: dict[str, str] = {}
-    satisfied = set()
+    satisfied: set[str] = set()
     last_turn = 0
-    users_by_turn = set()
-    final_by_turn = set()
+    users_by_turn: set[int] = set()
+    final_by_turn: set[int] = set()
 
     for index, msg in enumerate(messages):
         if msg.turn is not None:
@@ -49,16 +49,16 @@ def validate_trajectory(
         if msg.role == "assistant":
             if not msg.tool_calls and (msg.content or "").strip() and msg.turn:
                 final_by_turn.add(msg.turn)
-            for tc in msg.tool_calls or []:
-                tcid = str(tc.get("id") or "")
-                fn = tc.get("function") or {}
-                name = str(fn.get("name") or "")
-                if not tcid:
+            for tool_call in msg.tool_calls or []:
+                tool_call_id = str(tool_call.get("id") or "")
+                function = tool_call.get("function") or {}
+                name = str(function.get("name") or "")
+                if not tool_call_id:
                     errors.append(f"message[{index}] has a tool call with no id")
                     continue
-                if tcid in open_calls:
-                    errors.append(f"duplicate tool call id `{tcid}`")
-                open_calls[tcid] = name
+                if tool_call_id in open_calls:
+                    errors.append(f"duplicate tool call id `{tool_call_id}`")
+                open_calls[tool_call_id] = name
                 if name == "context.compress":
                     errors.append("context.compress leaked into emitted messages")
                 schema = schema_by_name.get(name)
@@ -66,68 +66,102 @@ def validate_trajectory(
                     errors.append(f"message[{index}] calls unknown tool `{name}`")
                     continue
                 try:
-                    args = fn.get("arguments", {})
-                    args = json.loads(args) if isinstance(args, str) else args
+                    arguments = function.get("arguments", {})
+                    arguments = json.loads(arguments) if isinstance(arguments, str) else arguments
                     validate(
-                        args,
-                        (schema.get("function") or {}).get("parameters")
-                        or {"type": "object"},
+                        arguments,
+                        (schema.get("function") or {}).get("parameters") or {"type": "object"},
                     )
                 except (json.JSONDecodeError, ValidationError, TypeError) as exc:
-                    errors.append(
-                        f"message[{index}] tool `{name}` has invalid arguments: {exc}"
-                    )
+                    errors.append(f"message[{index}] tool `{name}` has invalid arguments: {exc}")
         elif msg.role == "tool":
-            tcid = msg.tool_call_id or ""
-            if tcid not in open_calls:
-                errors.append(
-                    f"message[{index}] tool result `{tcid}` has no matching call"
-                )
+            tool_call_id = msg.tool_call_id or ""
+            if tool_call_id not in open_calls:
+                errors.append(f"message[{index}] tool result `{tool_call_id}` has no matching call")
             else:
-                satisfied.add(tcid)
-                expected = open_calls[tcid]
+                satisfied.add(tool_call_id)
+                expected = open_calls[tool_call_id]
                 if msg.name and msg.name != expected:
-                    errors.append(
-                        f"message[{index}] tool name `{msg.name}` does not match `{expected}`"
-                    )
+                    errors.append(f"message[{index}] tool name `{msg.name}` does not match `{expected}`")
 
     dangling = sorted(set(open_calls) - satisfied)
     if dangling:
         errors.append(f"tool calls without results: {dangling}")
 
-    for turn in plan.turns:
-        if turn.turn not in users_by_turn:
-            errors.append(f"turn {turn.turn} has no user message")
-        if require_final_answer_each_turn and turn.turn not in final_by_turn:
-            errors.append(f"turn {turn.turn} has no final assistant answer")
-        if turn.retrieval_required:
-            successes = [
-                row
-                for row in retrieval_transcript
-                if row.get("turn") == turn.turn
-                and row.get("success")
-                and row.get("chunk_ids")
-            ]
-            distinct = {normalize_query(str(row.get("query", ""))) for row in successes}
-            distinct.discard("")
-            if len(successes) < turn.retrieval_depth:
-                errors.append(
-                    f"turn {turn.turn} completed {len(successes)} successful retrieval(s); "
-                    f"required {turn.retrieval_depth}"
-                )
-            if len(distinct) < turn.retrieval_depth:
-                errors.append(
-                    f"turn {turn.turn} used {len(distinct)} distinct retrieval query/queries; "
-                    f"required {turn.retrieval_depth}"
-                )
+    expected_turns = list(range(1, spec.turn_budget + 1))
+    user_turns = sorted(users_by_turn)
+    if user_turns != expected_turns:
+        errors.append(f"user-message turns are {user_turns}; expected {expected_turns}")
+    if require_final_answer_each_turn:
+        final_turns = sorted(final_by_turn)
+        if final_turns != expected_turns:
+            errors.append(f"final-answer turns are {final_turns}; expected {expected_turns}")
+
+    event_turns = [event.turn for event in policy_events]
+    if event_turns != sorted(set(event_turns)):
+        errors.append(f"retrieval policy event turns must be unique and ordered: {event_turns}")
+    for event in policy_events:
+        if event.turn not in expected_turns:
+            errors.append(f"retrieval policy event references out-of-range turn {event.turn}")
+            continue
+        successes = [
+            row
+            for row in retrieval_transcript
+            if row.get("turn") == event.turn and row.get("success") and row.get("chunk_ids")
+        ]
+        distinct = {normalize_query(str(row.get("query", ""))) for row in successes}
+        distinct.discard("")
+        required = event.required_retrievals_this_turn
+        if len(successes) < required:
+            errors.append(
+                f"retrieval deadline at turn {event.turn} completed {len(successes)} successful retrieval(s); "
+                f"required {required}"
+            )
+        if len(distinct) < required:
+            errors.append(
+                f"retrieval deadline at turn {event.turn} used {len(distinct)} distinct query/queries; "
+                f"required {required}"
+            )
+
+    distinct_global = {
+        normalize_query(str(row.get("query", "")))
+        for row in retrieval_transcript
+        if row.get("success") and row.get("chunk_ids")
+    }
+    distinct_global.discard("")
+    if len(distinct_global) < spec.required_retrieval_calls:
+        errors.append(
+            f"conversation completed {len(distinct_global)} distinct successful retrieval(s); "
+            f"required {spec.required_retrieval_calls}"
+        )
+
+    if len(tool_call_attempts) > spec.max_tool_calls_per_conversation:
+        errors.append(
+            f"conversation attempted {len(tool_call_attempts)} tool call(s); maximum is "
+            f"{spec.max_tool_calls_per_conversation}"
+        )
+    attempts_by_turn = Counter(int(attempt.get("turn", 0)) for attempt in tool_call_attempts)
+    for turn, count in sorted(attempts_by_turn.items()):
+        if count > spec.max_tool_calls_per_turn:
+            errors.append(f"turn {turn} attempted {count} tool call(s); maximum is {spec.max_tool_calls_per_turn}")
+    retrieval_attempts = sum(attempt.get("name") == "retrieve" for attempt in tool_call_attempts)
+    if retrieval_attempts > spec.max_retrieval_calls:
+        errors.append(
+            f"conversation attempted {retrieval_attempts} retrieval call(s); maximum is {spec.max_retrieval_calls}"
+        )
+    emitted_call_ids = set(open_calls)
+    successful_attempt_ids = {
+        str(attempt.get("tool_call_id") or "") for attempt in tool_call_attempts if attempt.get("success")
+    }
+    if emitted_call_ids != successful_attempt_ids:
+        errors.append(
+            "emitted tool-call IDs do not match successful execution attempts: "
+            f"emitted={sorted(emitted_call_ids)}, successful={sorted(successful_attempt_ids)}"
+        )
 
     if messages:
         final = messages[-1]
-        if (
-            final.role != "assistant"
-            or final.tool_calls
-            or not (final.content or "").strip()
-        ):
+        if final.role != "assistant" or final.tool_calls or not (final.content or "").strip():
             errors.append("trajectory does not end on a tool-free assistant answer")
     else:
         errors.append("trajectory is empty")
@@ -136,10 +170,10 @@ def validate_trajectory(
 
 def reconstruct_messages(record: dict[str, Any]) -> list[Message]:
     turns = (record.get("metadata") or {}).get("message_turns") or []
-    out = []
+    output = []
     for index, raw in enumerate(record.get("messages") or []):
         value = dict(raw)
         if index < len(turns):
             value["turn"] = turns[index]
-        out.append(Message.model_validate(value))
-    return out
+        output.append(Message.model_validate(value))
+    return output

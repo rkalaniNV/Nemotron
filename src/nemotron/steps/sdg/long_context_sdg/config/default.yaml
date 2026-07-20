@@ -2,7 +2,8 @@
 paths:
   seeds: ../data/queries.jsonl
   enriched_seeds: ../data/enriched_seeds.jsonl
-  checkpoint: ../output/checkpoint.jsonl
+  artifacts: ../output/data_designer
+  generated: ../output/generated.jsonl
   canonical: ../output/canonical.jsonl
   output_dir: ../output/evaluated
   export: ../output/sft.jsonl
@@ -11,8 +12,8 @@ run:
   mode: create
   seed: 7
   num_records: 0
-  retry_failed: false
-  retry_quarantine: false
+  dataset_name: long_context_sdg
+  resume: always
 
 instructions: >-
   Generate a realistic, coherent, long-context conversation in the requested
@@ -46,35 +47,14 @@ models:
     skip_health_check: false
     inference_parameters: {temperature: 0.1, max_tokens: 2048}
 
-planning:
+episode:
   turn_budget: {min: 6, max: 40}
   honor_seed_turn_budget: false
   retrieval_depth_weights: {1: 0.65, 2: 0.25, 3: 0.10}
+  retrieval_calls: {min: 1, max: 12}
   max_steps_per_turn: 6
-  ensure_retrieval_turn: true
-  first_turn_intents:
-    research: 0.12
-    rewrite: 0.04
-    clarify: 0.18
-    user_context: 0.16
-    scope: 0.14
-    orientation: 0.12
-    direct_answer: 0.10
-    misconception_check: 0.08
-    example_first: 0.06
-  intents:
-    research: 0.13
-    rewrite: 0.10
-    clarify: 0.09
-    deepen: 0.12
-    compare: 0.09
-    synthesize: 0.10
-    recall: 0.06
-    user_context: 0.06
-    apply_scenario: 0.08
-    challenge_assumption: 0.07
-    summarize: 0.05
-    misconception_check: 0.05
+  max_tool_calls_per_turn: 3
+  max_tool_calls_per_conversation: 32
 
 context:
   compression_threshold: 32000

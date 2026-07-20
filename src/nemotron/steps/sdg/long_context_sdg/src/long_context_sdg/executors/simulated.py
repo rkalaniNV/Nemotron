@@ -15,9 +15,7 @@ class SimulatedExecutor:
     def __init__(self, *, services: ExecutionServices, **_: Any):
         self.services = services
 
-    def execute(
-        self, call: ToolCall, state: ConversationState, context: ExecutionContext
-    ) -> ToolResult:
+    def execute(self, call: ToolCall, state: ConversationState, context: ExecutionContext) -> ToolResult:
         prompt = (
             "Simulate the external tool response. Return only a JSON value.\n"
             f"Instructions: {context.instructions}\n"
@@ -40,6 +38,4 @@ class SimulatedExecutor:
             payload = json.loads(text)
         except (json.JSONDecodeError, TypeError):
             payload = {"result": text}
-        return ToolResult(
-            tool_call_id=call.id, name=call.name, payload=payload, simulated=True
-        )
+        return ToolResult(tool_call_id=call.id, name=call.name, payload=payload, simulated=True)

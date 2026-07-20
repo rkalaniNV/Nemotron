@@ -7,12 +7,6 @@ from collections import Counter
 import pytest
 from long_context_sdg.query_generation.allocation import largest_remainder
 from long_context_sdg.query_generation.candidates import prepare_candidates
-from long_context_sdg.query_generation.checkpoint import (
-    append_record,
-    latest_by_query,
-    load_records,
-    verify_fingerprint,
-)
 from long_context_sdg.query_generation.config import (
     PersonaLocaleConfig,
     QueryEvidenceConfig,
@@ -81,7 +75,7 @@ def make_query_config(tmp_path, *, count: int = 100) -> QueryGenerationPipelineC
                 "seeds": str(tmp_path / "queries.jsonl"),
                 "evidence_manifest": str(tmp_path / "evidence.json"),
                 "candidates": str(tmp_path / "candidates.jsonl"),
-                "checkpoint": str(tmp_path / "checkpoint.jsonl"),
+                "artifacts": str(tmp_path / "artifacts"),
                 "report": str(tmp_path / "report.json"),
             },
             "run": {"mode": "create", "seed": 19},
@@ -184,10 +178,17 @@ def _candidate(
 def test_query_config_is_independent_of_conversation_configuration(tmp_path):
     cfg = make_query_config(tmp_path)
     assert {model.alias for model in cfg.models} == {"assistant", "judge"}
-    assert not hasattr(cfg, "planning")
+    assert not hasattr(cfg, "episode")
     assert not hasattr(cfg, "tools")
     assert not hasattr(cfg, "context")
-    assert set(type(cfg.run).model_fields) == {"mode", "seed"}
+    assert set(type(cfg.run).model_fields) == {"mode", "seed", "dataset_name", "resume"}
+    assert cfg.generation_payload()["run"] == {
+        "mode": "create",
+        "seed": cfg.run.seed,
+        "dataset_name": "embedded",
+        "resume": "never",
+    }
+    assert set(cfg.generation_payload()["paths"].values()) == {"."}
 
 
 def test_exact_archetype_allocation_for_one_hundred_queries():
@@ -393,7 +394,7 @@ def test_deterministic_validation_checks_language_leakage_and_retrievability(tmp
     assert any("expected Devanagari" in error for error in errors)
 
 
-def test_judge_gate_seed_provenance_and_checkpoint_resume(tmp_path):
+def test_judge_gate_seed_provenance_and_record_round_trip(tmp_path):
     cfg = make_query_config(tmp_path, count=1)
     candidate = _candidate()
     draft = QueryDraft(
@@ -435,23 +436,13 @@ def test_judge_gate_seed_provenance_and_checkpoint_resume(tmp_path):
         judgment=judgment,
         seed=seed,
     )
-    checkpoint = cfg.resolve(cfg.paths.checkpoint)
-    append_record(checkpoint, record)
-    append_record(
-        checkpoint,
-        record.model_copy(update={"attempt": 2, "status": "rejected", "seed": None}),
-    )
-    loaded = load_records(checkpoint)
-    verify_fingerprint(loaded, "fingerprint")
-    assert latest_by_query(loaded)[candidate.query_id].attempt == 2
-    with pytest.raises(ValueError, match="incompatible"):
-        verify_fingerprint(loaded, "different")
+    assert QuerySynthesisRecord.model_validate_json(record.model_dump_json()) == record
 
 
 def test_finalization_publishes_only_complete_unique_seed_set(tmp_path):
     cfg = make_query_config(tmp_path, count=2)
     candidates = [_candidate(0), _candidate(1)]
-    checkpoint = cfg.resolve(cfg.paths.checkpoint)
+    records = []
     for candidate in candidates:
         draft = QueryDraft(
             query=f"How should scenario {candidate.candidate_index} be evaluated?",
@@ -460,8 +451,7 @@ def test_finalization_publishes_only_complete_unique_seed_set(tmp_path):
             expertise="intermediate",
             style="natural",
         )
-        append_record(
-            checkpoint,
+        records.append(
             QuerySynthesisRecord(
                 query_id=candidate.query_id,
                 synthesis_fingerprint="fingerprint",
@@ -477,7 +467,7 @@ def test_finalization_publishes_only_complete_unique_seed_set(tmp_path):
             ),
         )
 
-    report = _finalize(cfg, candidates, "fingerprint", force=False)
+    report = _finalize(cfg, candidates, "fingerprint", records, force=False)
     rows = [json.loads(line) for line in cfg.resolve(cfg.paths.seeds).read_text().splitlines()]
     assert report["accepted"] == 2
     assert [row["query_id"] for row in rows] == ["query-0", "query-1"]

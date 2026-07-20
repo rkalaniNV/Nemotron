@@ -10,7 +10,7 @@ from .conversation_generation import (
     generate_conversations,
     prepare_conversation_seeds,
 )
-from .evaluation import evaluate_checkpoint
+from .evaluation import evaluate_generated
 from .exporters import export_records
 from .models import evaluation_judge_models
 
@@ -62,7 +62,7 @@ def main() -> None:
         try:
             print(
                 json.dumps(
-                    evaluate_checkpoint(cfg, judge_models=models, rejudge=args.rejudge),
+                    evaluate_generated(cfg, judge_models=models, rejudge=args.rejudge),
                     indent=2,
                 )
             )
@@ -73,9 +73,7 @@ def main() -> None:
                     close()
     else:
         source = cfg.resolve(cfg.paths.canonical)
-        count = export_records(
-            source, cfg.resolve(cfg.paths.export), output_format=cfg.export.format
-        )
+        count = export_records(source, cfg.resolve(cfg.paths.export), output_format=cfg.export.format)
         print(json.dumps({"exported": count, "format": cfg.export.format}))
 
 

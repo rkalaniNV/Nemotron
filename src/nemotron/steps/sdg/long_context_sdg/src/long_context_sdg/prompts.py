@@ -10,27 +10,9 @@ from .schemas import (
     AssistantFinalAction,
     AssistantRetrievalAction,
     EpisodeSeed,
-    TurnPlan,
+    RetrievalPolicyEvent,
+    UserTurn,
 )
-
-INTENT_GUIDANCE = {
-    "research": "Gather new evidence before answering.",
-    "rewrite": "Reformulate the information need and retrieve better evidence before answering.",
-    "clarify": "Ask a focused clarification when a missing detail would materially change the answer.",
-    "user_context": "Elicit only relevant, non-sensitive user context or preferences before proceeding.",
-    "scope": "Establish the task boundaries, constraints, or desired level of detail.",
-    "orientation": "Give a concise high-level map before going deeper.",
-    "direct_answer": "Answer directly from established information when additional tools are unnecessary.",
-    "misconception_check": "Check and gently correct a premise before building on it.",
-    "example_first": "Start with a concrete example, then connect it to the general explanation.",
-    "deepen": "Explore a previously introduced point in greater depth.",
-    "compare": "Contrast relevant alternatives using consistent criteria.",
-    "synthesize": "Combine established evidence and prior discussion into a coherent conclusion.",
-    "recall": "Use relevant details already established earlier in the conversation.",
-    "apply_scenario": "Apply established information to the user's scenario.",
-    "challenge_assumption": "Test an assumption constructively and explain its consequences.",
-    "summarize": "Summarize the established discussion without introducing unsupported claims.",
-}
 
 
 def assistant_system(
@@ -52,9 +34,7 @@ def assistant_system(
     )
 
 
-def assistant_final_system(
-    seed: EpisodeSeed, known_chunk_ids: Iterable[str] = ()
-) -> str:
+def assistant_final_system(seed: EpisodeSeed, known_chunk_ids: Iterable[str] = ()) -> str:
     """Constrain the post-tool pass to an answer that cannot request more tools."""
     known = sorted(set(known_chunk_ids))
     return (
@@ -76,7 +56,7 @@ def assistant_final_system(
 def assistant_retrieval_system(seed: EpisodeSeed) -> str:
     """Require a model-authored retrieval query without optional answer/tool fields."""
     return (
-        "You are planning one required evidence lookup for a long-running conversation. "
+        "You are preparing one required evidence lookup for a long-running conversation. "
         "Write one specific retrieval query that advances the current user request. Do not answer the user "
         "and do not emit a tool call; the runtime will execute your query as the retrieve tool. "
         "When earlier queries are present, make this query meaningfully distinct. Return one JSON object "
@@ -87,26 +67,27 @@ def assistant_retrieval_system(seed: EpisodeSeed) -> str:
     )
 
 
-def assistant_turn_directive(plan: TurnPlan, completed_retrievals: int) -> str:
-    if plan.retrieval_required and completed_retrievals < plan.retrieval_depth:
+def assistant_turn_directive(
+    turn: int,
+    policy_event: RetrievalPolicyEvent | None,
+    completed_retrievals: int,
+) -> str:
+    if policy_event and completed_retrievals < policy_event.required_retrievals_this_turn:
         requirement = (
-            f"This is a research/rewrite turn. Before answering, complete {plan.retrieval_depth} successful "
-            f"retrieval call(s) with distinct normalized queries. Completed so far: {completed_retrievals}."
+            "The conversation is at its retrieval-budget deadline. Before answering, complete "
+            f"{policy_event.required_retrievals_this_turn} successful retrieval call(s) with distinct normalized "
+            f"queries. Completed so far: {completed_retrievals}."
         )
-    elif plan.retrieval_required:
+    elif policy_event:
         requirement = (
-            "The required retrieval depth is satisfied. Synthesize a substantive final answer now without "
-            "another tool call."
+            "The retrieval deadline is satisfied. Synthesize a substantive final answer now without another tool call."
         )
     else:
-        requirement = "Retrieval is optional on this turn; use established evidence when sufficient."
-    guidance = INTENT_GUIDANCE.get(
-        plan.intent, f"Follow the semantic intent expressed by `{plan.intent}`."
-    )
-    return (
-        f"Turn {plan.turn} intent: {plan.intent}. Intent guidance: {guidance} "
-        f"{requirement}"
-    )
+        requirement = (
+            "Respond naturally to the user's actual message. Retrieval is optional; use it only when new evidence "
+            "is needed, and reuse established evidence when it is sufficient."
+        )
+    return f"Turn {turn}. {requirement}"
 
 
 def user_system(seed: EpisodeSeed) -> str:
@@ -118,4 +99,16 @@ def user_system(seed: EpisodeSeed) -> str:
         f"Persona description: {persona.description or 'not specified'}.\n"
         f"Target language: {persona.language or 'follow the effective instructions'}.\n"
         f"Topic: {seed.query}\nEffective instructions: {seed.instructions}"
+    )
+
+
+def user_turn_prompt(*, turn: int, turns_remaining: int) -> str:
+    return (
+        f"Write the user's next natural message for turn {turn}; {turns_remaining} turn(s), including this one, "
+        "remain in the requested episode length. Continue from what was actually said and stay in persona. "
+        "Ask a plausible follow-up, clarification, challenge, application, or closing question only when it follows "
+        "from the conversation. Do not manufacture a topic shift for diversity, repeat a resolved request, or ask "
+        "for tool use merely because tools exist. Preserve the target language. "
+        "Return JSON only.\n\n"
+        f"OUTPUT SCHEMA:\n{json.dumps(UserTurn.model_json_schema(), ensure_ascii=False)}"
     )
