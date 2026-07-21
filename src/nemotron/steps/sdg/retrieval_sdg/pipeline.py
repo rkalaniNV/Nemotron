@@ -172,15 +172,27 @@ def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Pat
     picked = sample(kept, n_target, seed=sm.get("seed", 7))
     print(f"[query_prep] sampled -> {len(picked)}")
 
-    # persona is sampled at generation time (DD Person sampler); trajectory shape by the planner.
+    # Build seed rows. When persona.hf_dataset / local_path is set, attach one
+    # persona per seed here (generator reads the "persona" column). Otherwise the
+    # DD Person sampler may fill it at generate time.
     tools_json = json.dumps(cfg["tools"], ensure_ascii=False)
+    seeds: List[Dict[str, Any]] = [
+        {"query": str(r.get(field, "")), "cluster_id": r.get("cluster_id", ""),
+         "kind": r.get("kind", ""),   # -> planner opening kind (vague => clarify)
+         "tools": tools_json}
+        for r in picked
+    ]
+    pcfg = cfg.get("persona", {}) or {}
+    if pcfg.get("enabled", True):
+        from retrieval_sdg.core.persona_loader import attach_personas_to_seeds, persona_source_is_external
+        if persona_source_is_external(pcfg):
+            seeds = attach_personas_to_seeds(seeds, pcfg, base=base)
+
     seeds_path.parent.mkdir(parents=True, exist_ok=True)
     with seeds_path.open("w", encoding="utf-8") as f:
-        for r in picked:
-            f.write(json.dumps({"query": str(r.get(field, "")), "cluster_id": r.get("cluster_id", ""),
-                                "kind": r.get("kind", ""),   # -> planner opening kind (vague => clarify)
-                                "tools": tools_json}, ensure_ascii=False) + "\n")
-    print(f"[query_prep] wrote {len(picked)} seeds -> {seeds_path}")
+        for row in seeds:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(f"[query_prep] wrote {len(seeds)} seeds -> {seeds_path}")
     return seeds_path
 
 
@@ -188,6 +200,7 @@ def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Pat
 def build_config_builder(cfg: Dict[str, Any], seed_path: Path):
     import data_designer.config as dd
     from retrieval_sdg.conversation.config import ConversationSimulatorConfig
+    from retrieval_sdg.core.persona_loader import persona_source_is_external
 
     model_configs = [
         dd.ModelConfig(alias=m["alias"], model=m["model"], provider=m.get("provider", "nvidia"),
@@ -201,17 +214,20 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path):
     cb.with_seed_dataset(dd.LocalFileSeedSource(path=str(seed_path)),
                          sampling_strategy=dd.SamplingStrategy.SHUFFLE)
 
-    # one persona per row (constant per trajectory) via DD's native Person sampler.
-    # Locale must be downloaded once: `data-designer download personas --locale <locale>`.
-    pcfg = cfg.get("persona", {})
-    if pcfg.get("enabled", True):
+    # Persona source priority:
+    #   1) persona.hf_dataset / local_path — already on seeds from query_prep; skip DD sampler
+    #   2) DD Person sampler (NGC-managed locales) when enabled and no external source
+    pcfg = cfg.get("persona", {}) or {}
+    if pcfg.get("enabled", True) and not persona_source_is_external(pcfg):
+        # Locale must be downloaded once: `data-designer download personas --locale <locale>`.
         cb.add_column(dd.SamplerColumnConfig(
             name="persona",                              # matches ConversationSimulatorConfig.persona_column
             sampler_type=dd.SamplerType.PERSON,
             params=dd.PersonSamplerParams(
                 locale=pcfg.get("locale", "en_IN"),
                 with_synthetic_personas=bool(pcfg.get("with_synthetic_personas", True)))))
-
+    elif persona_source_is_external(pcfg):
+        print("[generate] using personas from seeds (hf_dataset/local_path); DD Person sampler off")
     r = cfg.get("retrieval", {})
     eng = cfg.get("engine", {})
     knobs: Dict[str, Any] = {k: v for k, v in eng.items() if k not in _ENGINE_IO}   # I/O keys aren't config knobs
