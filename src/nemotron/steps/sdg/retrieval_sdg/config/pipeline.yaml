@@ -60,12 +60,22 @@ query_prep:
     n_target: null                                # null => keep all (query_gen.n_queries is the count when it runs)
     seed: 7
 
-# ── persona — DD-native Person sampler (one constant persona per trajectory) ───
-# Backed by managed Nemotron-Personas. Setup: data-designer download personas --locale en_IN
+# ── persona — one constant persona per trajectory ─────────────────────────────
+# Two sources (pick one):
+#   A) Hugging Face / local file — set hf_dataset (repo id OR full HF URL) and/or
+#      local_path. Personas are attached to seeds at query_prep; DD sampler is off.
+#      Example: hf_dataset: nvidia/Nemotron-Personas-Vietnam
+#               hf_dataset: https://huggingface.co/datasets/nvidia/Nemotron-Personas-Vietnam
+#   B) DD-native Person sampler — leave hf_dataset unset; needs NGC:
+#      `data-designer download personas --locale en_IN`
 persona:
   enabled: true
-  locale: en_IN                                   # en_US | en_IN | en_SG | fr_FR | hi_Deva_IN | hi_Latn_IN | ja_JP | ko_KR | pt_BR
-  with_synthetic_personas: true
+  # hf_dataset: nvidia/Nemotron-Personas-Vietnam   # HF repo id or full dataset URL
+  # hf_split: train
+  # local_path: ./personas.parquet                 # optional; skips HF download
+  # seed: 7                                        # persona sampling seed (query_prep)
+  locale: en_IN                                   # DD sampler only: en_US | en_IN | en_SG | fr_FR | hi_Deva_IN | hi_Latn_IN | ja_JP | ko_KR | pt_BR
+  with_synthetic_personas: true                   # DD sampler only
 
 # ── models & providers ────────────────────────────────────────────────────────
 providers:

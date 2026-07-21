@@ -91,7 +91,7 @@ Update `config/pipeline.yaml` before generation:
 | Top level | `exp_name`, `exp_root` (all outputs go to `experiments/<exp_name>/output/`) |
 | `query_gen` | optional corpus-grounded seed synthesis: source, chunks/lancedb, `n_queries`, embedding |
 | `query_prep` | dedup threshold, embedding model, clustering, target sample size |
-| `persona` | DD-native Person sampler: enable, locale, synthetic personas |
+| `persona` | enable; `hf_dataset` (HF repo id/URL) or `local_path` to load personas into seeds; else DD Person sampler (`locale`) |
 | `providers` | provider name, endpoint, `api_key_env` (the env-var **name**, not the key) |
 | `models` | four required aliases and inference parameters |
 | `retrieval` | endpoint, tool names, `top_k`, oversampling, timeout, headers, field map |
@@ -110,6 +110,19 @@ The required model aliases are:
 Tool names listed in `retrieval.tools` are routed to the HTTP client. Every other tool
 is simulated by `aux_response_model`. The default config provides `search`,
 `memory_read`, and `memory_write`.
+
+### Persona sources
+
+`persona` supports two mutually exclusive sources:
+
+1. **Hugging Face / local file** — set `persona.hf_dataset` to a repo id
+   (`nvidia/Nemotron-Personas-Vietnam`) or a full dataset URL
+   (`https://huggingface.co/datasets/nvidia/Nemotron-Personas-Vietnam`).
+   Optionally set `persona.local_path` to a downloaded parquet/jsonl to skip the
+   download. Personas are sampled and written into `seeds.jsonl` during
+   `query_prep`; the Data Designer Person sampler is skipped at `generate`.
+2. **DD Person sampler** — leave `hf_dataset` / `local_path` unset and use
+   `locale` (requires `data-designer download personas --locale <locale>`).
 
 ### Retrieval API mapping
 
@@ -221,7 +234,7 @@ retrieval_sdg/
 │   ├── query_prep/            embedding, deduplication, clustering, sampling
 │   ├── conversation/          planning, generation, tools, context, judges, prompts
 │   ├── retrieval/client.py    retrieval HTTP adapter
-│   └── core/                  model clients and message helpers
+│   └── core/                  model clients, persona formatting/loader, message helpers
 └── tests/                     focused unit tests
 ```
 
