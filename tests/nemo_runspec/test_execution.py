@@ -36,6 +36,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from nemo_runspec.execution import (
+    _cloud_job_name,
     _derive_cloud_workspace,
     _get_env,
     _git_mount_commands,
@@ -88,6 +89,23 @@ class TestGetEnv:
 
     def test_none_config(self):
         assert _get_env(None, "key", "default") == "default"
+
+
+class TestCloudJobName:
+    def test_default_uses_step_path(self):
+        path = "src/nemotron/steps/pretrain/megatron_bridge/step.py"
+
+        assert _cloud_job_name(path, {}) == "pretrain-megatron-bridge-step"
+
+    def test_explicit_override_is_sanitized(self):
+        env = {"job_name": "VI_CPT_16 MBS2.Selective"}
+
+        assert _cloud_job_name("ignored.py", env) == "vi-cpt-16-mbs2-selective"
+
+    def test_explicit_override_is_limited_to_lepton_length(self):
+        env = {"job_name": "runtime-" + "x" * 40}
+
+        assert _cloud_job_name("ignored.py", env) == ("runtime-" + "x" * 26)
 
 
 # ---------------------------------------------------------------------------

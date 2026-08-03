@@ -36,6 +36,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -1269,6 +1270,29 @@ def _pwd_symlink_cmd(nemotron_home: str, pod_src_root: str) -> str:
     )
 
 
+def _cloud_job_name(script_path: str, env: Any) -> str:
+    """Return a short RFC-1123 job name, honoring an explicit env override."""
+    configured_name = _get_env(env, "job_name")
+    if configured_name:
+        job_name = str(configured_name)
+    else:
+        # Strip the local repo prefix so absolute paths never leak into job names.
+        path_tail = script_path
+        for marker in ("src/nemotron/recipes/", "src/nemotron/steps/"):
+            if marker in path_tail:
+                path_tail = path_tail.split(marker, 1)[1]
+                break
+        job_name = path_tail.replace("/", "-").removesuffix(".py")
+
+    # Lepton's JobAPI requires lowercase RFC-1123 names. Keep this below
+    # nemo-run's 34-character truncation limit and preserve a valid final char.
+    job_name = job_name.replace("_", "-").replace(".", "-").lower()
+    job_name = re.sub(r"[^a-z0-9-]+", "-", job_name)
+    if len(job_name) > 34:
+        job_name = job_name[:34].rstrip("-")
+    return job_name.strip("-") or "nemotron-job"
+
+
 def execute_cloud(
     script_path: str,
     train_path: Path,
@@ -1410,28 +1434,9 @@ def execute_cloud(
 
     # ── 7. Submit ────────────────────────────────────────────────────
     script_task = run.Script(inline=" && ".join(parts))
-    # Derive a short, RFC-1123-friendly job name from the script's tail.
-    # Strip whichever marker prefix the script lives under (recipes/ for
-    # recipe scripts or steps/ for generic step scripts) so the absolute
-    # repo path doesn't leak into the slug.
-    _path_tail = script_path
-    for _marker in ("src/nemotron/recipes/", "src/nemotron/steps/"):
-        if _marker in _path_tail:
-            _path_tail = _path_tail.split(_marker, 1)[1]
-            break
-    recipe_name = _path_tail.replace("/", "-").removesuffix(".py")
-    # Lepton's JobAPI requires RFC-1123 subdomain names (lowercase alnum + -/.,
-    # must start/end with alphanumeric). nemo-run's LeptonExecutor.launch
-    # sanitizes ``_``/``.`` and truncates to 34 chars but does NOT strip a
-    # trailing ``-``, which the API rejects. Pre-truncate/strip here so the
-    # name that reaches nemo-run is already short enough to survive its
-    # truncation without losing its trailing alphanumeric.
-    recipe_name = recipe_name.replace("_", "-").replace(".", "-").lower()
-    if len(recipe_name) > 34:
-        recipe_name = recipe_name[:34].rstrip("-.")
-    recipe_name = recipe_name.strip("-.") or "nemotron-job"
-    with run.Experiment(recipe_name) as exp:
-        exp.add(script_task, executor=executor, name=recipe_name)
+    job_name = _cloud_job_name(script_path, env)
+    with run.Experiment(job_name) as exp:
+        exp.add(script_task, executor=executor, name=job_name)
         exp.run(detach=not attached)
 
 

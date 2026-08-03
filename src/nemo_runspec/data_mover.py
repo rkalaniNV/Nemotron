@@ -262,6 +262,7 @@ def plan_for(
         patch_cloud_data_mover_skip_configs,
         patch_dgxcloud_accept_legacy_kwargs,
         patch_dgxcloud_strip_source_chunks_from_exports,
+        patch_lepton_log_stream_incremental_decode,
     )
 
     patch_cloud_data_mover_skip_configs()
@@ -273,6 +274,9 @@ def plan_for(
     # fiddle's error-message formatter emits on every status poll when it
     # re-hydrates cached DGXCloudExecutor Configs with legacy kwargs.
     patch_dgxcloud_accept_legacy_kwargs()
+    # Lepton's log client decodes each HTTP chunk in isolation, so a multi-byte
+    # character split across a chunk boundary kills the attached log thread.
+    patch_lepton_log_stream_incremental_decode()
 
     root = Path(repo_root or Path(__file__).resolve().parents[2])
     common = {"repo_root": str(root), "script_path": script_path}

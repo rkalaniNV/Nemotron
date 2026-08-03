@@ -237,6 +237,57 @@ def patch_nemo_run_rsync_accept_new_host_keys() -> None:
         pass
 
 
+def patch_lepton_log_stream_incremental_decode() -> None:
+    """Keep Lepton log tailing alive across chunk-split UTF-8 characters.
+
+    ``leptonai``'s ``JobAPI.get_log`` calls ``chunk.decode("utf8")`` on each
+    HTTP chunk independently. A multi-byte character straddling a chunk
+    boundary therefore raises ``UnicodeDecodeError``, which kills nemo-run's
+    log thread while the remote job keeps running. Our pipeline stats tables
+    (box-drawing glyphs) and Vietnamese corpus text are all multi-byte, so this
+    fires within minutes of attaching.
+
+    An incremental decoder carries the partial character over to the next
+    chunk instead of failing on it.
+    """
+    import codecs
+
+    try:
+        from leptonai.api.v1.job import JobAPI
+    except Exception:
+        return
+
+    if getattr(JobAPI.get_log, "_nemotron_patched", False):
+        return
+
+    def get_log(self, id_or_job, replica, timeout=None):
+        replica_id = replica if isinstance(replica, str) else replica.metadata.id_
+        response = self._get(
+            f"/jobs/{self._to_id(id_or_job)}/replicas/{replica_id}/log",
+            stream=True,
+            timeout=timeout,
+        )
+        if not response.ok:
+            raise RuntimeError(
+                f"API call failed with status code {response.status_code}. Details:"
+                f" {response.text}"
+            )
+        # errors="replace" so a genuinely corrupt byte degrades to U+FFFD
+        # rather than tearing down the stream.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        for chunk in response.iter_content(chunk_size=None):
+            if chunk:
+                text = decoder.decode(chunk)
+                if text:
+                    yield text
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            yield tail
+
+    get_log._nemotron_patched = True  # type: ignore[attr-defined]
+    JobAPI.get_log = get_log  # type: ignore[assignment]
+
+
 def _make_configs_excluding_copy_fn(original_signature: str):
     """Build a ``copy_directory_data_command`` replacement that skips ``configs/``.
 

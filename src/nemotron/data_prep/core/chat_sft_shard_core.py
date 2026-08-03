@@ -317,6 +317,7 @@ def process_chat_sft_parquet_from_spool_core(
     algorithm: str,
     dtype: np.dtype,
     seed: int | None,
+    pad_seq_to_mult: int | None = None,
     parquet_row_group_size: int = 1000,
     parquet_compression: str = "zstd",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -368,12 +369,24 @@ def process_chat_sft_parquet_from_spool_core(
 
         lengths_i64 = lengths.astype(np.int64, copy=False)
         lengths_clamped = np.minimum(lengths_i64, int(pack_size))
+        if pad_seq_to_mult and pad_seq_to_mult > 1:
+            # Reserve the CP-aligned stored length (ceil to a multiple of
+            # pad_seq_to_mult, then +1) so bin capacity matches what
+            # materialize_bin_arrays actually writes. The +1 is required because
+            # Megatron-Bridge drops the last token of each sub-sequence when
+            # forming cu_seqlens (see _padded_seq_len).
+            lengths_for_pack = (
+                (lengths_clamped + pad_seq_to_mult - 1) // pad_seq_to_mult
+            ) * pad_seq_to_mult + 1
+            lengths_for_pack = np.minimum(lengths_for_pack, int(pack_size))
+        else:
+            lengths_for_pack = lengths_clamped
         num_truncated_to_pack_size = int((lengths_i64 > int(pack_size)).sum())
-        total_tokens = int(lengths_clamped.sum())
+        total_tokens = int(lengths_for_pack.sum())
 
         if num_sequences > 0:
             packer = get_packer(algorithm, pack_size, seed=seed)
-            bins, _ = packer.pack([int(x) for x in lengths_clamped.tolist()])
+            bins, _ = packer.pack([int(x) for x in lengths_for_pack.tolist()])
         else:
             bins = []
 
@@ -429,6 +442,7 @@ def process_chat_sft_parquet_from_spool_core(
                 pack_size=int(pack_size),
                 scratch_input_ids=scratch_input_ids,
                 scratch_loss_mask=scratch_loss_mask,
+                pad_seq_to_mult=pad_seq_to_mult,
             )
 
             writer.write_bin(
@@ -454,6 +468,7 @@ def process_chat_sft_parquet_from_spool_core(
                 "pack_size": int(pack_size),
                 "algorithm": str(algorithm),
                 "seed": seed,
+                "pad_seq_to_mult": int(pad_seq_to_mult) if pad_seq_to_mult else None,
                 "packing_factor": packing_factor,
                 "packing_efficiency": packing_efficiency,
                 "parquet_row_group_size": int(parquet_row_group_size),

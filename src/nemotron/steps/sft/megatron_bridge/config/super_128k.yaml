@@ -24,11 +24,6 @@ run:
   data: null
   env:
     container: nvcr.io/nvidia/nemo:26.02.nemotron_3_super
-    env_vars:
-      # Hopper supports CUDA Multicast. Keep overlap off in this matched control;
-      # enable it in the H100 sweep cases (22+), not here.
-      UB_SKIPMC: "1"
-      CUDA_DEVICE_MAX_CONNECTIONS: "1"
 
 # Base init priority: resume > pretrained_checkpoint > HF.
 # Default: load base weights from HuggingFace via AutoBridge (no Megatron base needed).
@@ -42,31 +37,30 @@ recipe:
   _target_: megatron.bridge.recipes.nemotronh.nemotron_3_super.nemotron_3_super_finetune_config
   peft: null
   packed_sequence: true
-  seq_length: 262144
+  seq_length: 131072
   tensor_model_parallel_size: 8
   pipeline_model_parallel_size: 1
-  context_parallelism: 16
+  context_parallelism: 8
   sequence_parallelism: true
-  expert_model_parallelism: 8
+  expert_model_parallelism: 64
   expert_tensor_parallelism: 1
   finetune_lr: 5.0e-6
   min_lr: 0.0
   lr_warmup_iters: 50
 
 dataset:
-  seq_length: 262144
+  seq_length: 131072
   # Fixed-length batches are required for packed SFT + CP>1 (Megatron-Bridge).
   dataset_kwargs:
     pad_to_max_length: true
   packed_sequence_specs:
-    packed_sequence_size: 262144
-    # Must match data_prep/sft_packing pad_seq_to_mult. With CP=16, TP=8, and
-    # sequence_parallel on: 2*CP*TP = 2*16*8 = 256. Shards must be packed with
-    # this value (see packed_256k_cp16); older cp32 / pad=32 data is incompatible.
-    pad_seq_to_mult: 256
-    packed_train_data_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_256k_cp16/splits/train
-    packed_val_data_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_256k_cp16/splits/train
-    packed_test_data_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_256k_cp16/splits/train
+    packed_sequence_size: 131072
+    # Must match packing pad_seq_to_mult. With CP=8, TP=8, sequence_parallel on:
+    # 2*CP*TP = 2*8*8 = 128. Repack to packed_128k_cp8 with that pad; cp32/pad=32 is wrong.
+    pad_seq_to_mult: 128
+    packed_train_data_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_128k_cp8/splits/train
+    packed_val_data_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_128k_cp8/splits/train
+    packed_test_data_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_128k_cp8/splits/train
 
 train:
   train_iters: 100
@@ -76,11 +70,11 @@ train:
   eval_iters: 1
 
 model:
-  seq_length: 262144
+  seq_length: 131072
   tensor_model_parallel_size: 8
   pipeline_model_parallel_size: 1
-  context_parallel_size: 16
-  expert_model_parallel_size: 8
+  context_parallel_size: 8
+  expert_model_parallel_size: 64
   expert_tensor_parallel_size: 1
   sequence_parallel: true
   calculate_per_token_loss: true
@@ -106,13 +100,13 @@ ddp:
 
 logger:
   log_interval: 1
-  wandb_project: Megatron-Bridge-SFT-Nemotron-3-Super
+  wandb_project: Megatron-Bridge-CPT-Nemotron-3-Nano-30B 
   wandb_entity: nvidia
-  wandb_exp_name: nemotron-3-super-120b-a12b-sft-256k-cp16
+  wandb_exp_name: nemotron-3-super-120b-a12b-sft-128k-cp8
 
 checkpoint:
   # Where checkpoints are written.
-  save: /mnt/lustre-shared/hvnguyen/checkpoints/ytl_super_sft_256k
+  save: /mnt/lustre-shared/hvnguyen/checkpoints/ytl_super_sft_128k
 
   # Base from a Megatron checkpoint instead of HF: uncomment to finetune from it.
   # When set it takes priority over the HF base above; if set but not a real

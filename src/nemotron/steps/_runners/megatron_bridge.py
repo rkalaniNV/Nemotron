@@ -231,6 +231,54 @@ def _maybe_patch_checkpointing(container: dict[str, Any]) -> None:
 
 
 # =============================================================================
+# Model controls
+# =============================================================================
+
+
+def _freeze_moe_router_weights(model: Any) -> list[Any]:
+    """Freeze router and shared-expert gate parameters before DDP wrapping."""
+    model_chunks = model if isinstance(model, list) else [model]
+    for model_chunk in model_chunks:
+        decoder = getattr(model_chunk, "decoder", None)
+        layers = getattr(decoder, "layers", None)
+        if layers is None:
+            continue
+        for layer in layers:
+            mlp = getattr(layer, "mlp", None)
+            if mlp is None:
+                continue
+            router = getattr(mlp, "router", None)
+            if router is not None:
+                _freeze_parameter_if_present(router, "weight")
+                _freeze_parameter_if_present(router, "bias")
+            shared_experts = getattr(mlp, "shared_experts", None)
+            if shared_experts is not None:
+                _freeze_parameter_if_present(shared_experts, "gate_weight")
+                _freeze_parameter_if_present(shared_experts, "gate_bias")
+    return model_chunks
+
+
+def _freeze_parameter_if_present(module: Any, name: str) -> None:
+    parameter = getattr(module, name, None)
+    if parameter is not None:
+        parameter.requires_grad = False
+
+
+def _maybe_add_model_controls(cfg: Any, container: dict[str, Any]) -> None:
+    controls = dict(container.get("model_control") or {})
+    if not controls.get("freeze_moe_router_weights", False):
+        return
+
+    hooks = getattr(cfg.model, "pre_wrap_hooks", None)
+    if hooks is None:
+        raise AttributeError(
+            "model_control.freeze_moe_router_weights requires a Megatron-Bridge "
+            "model provider with pre_wrap_hooks support"
+        )
+    hooks.append(_freeze_moe_router_weights)
+
+
+# =============================================================================
 # Dataset (SFT-style)
 # =============================================================================
 
@@ -255,18 +303,37 @@ def _maybe_build_dataset(cfg: Any, container: dict[str, Any]) -> None:
     if "packed_sequence_specs" in dataset_cfg:
         specs = dict(dataset_cfg["packed_sequence_specs"] or {})
         has_validation = bool(specs.get("packed_val_data_path"))
-        packed_specs = PackedSequenceSpecs(
+        # NOTE: pad_seq_to_mult MUST be forwarded. Megatron-Bridge's
+        # FinetuningDatasetBuilder reads packed_sequence_specs.pad_seq_to_mult and
+        # only computes cu_seqlens_unpadded (required by the THD context-parallel
+        # attention kernel) when it is > 1. Dropping it here silently defaults it
+        # to 1, so CP>1 packed SFT produces NaN grads regardless of how the data
+        # was packed.
+        packed_kwargs: dict[str, Any] = dict(
             packed_sequence_size=specs.get("packed_sequence_size", -1),
             packed_train_data_path=specs.get("packed_train_data_path"),
             packed_val_data_path=specs.get("packed_val_data_path"),
             packed_metadata_path=specs.get("packed_metadata_path"),
         )
+        if specs.get("pad_seq_to_mult") is not None:
+            packed_kwargs["pad_seq_to_mult"] = specs.get("pad_seq_to_mult")
+        if specs.get("pad_cu_seqlens") is not None:
+            packed_kwargs["pad_cu_seqlens"] = specs.get("pad_cu_seqlens")
+        packed_specs = PackedSequenceSpecs(**packed_kwargs)
+
+    # Megatron-Bridge requires pad_to_max_length for packed SFT (especially with
+    # CP>1) so every batch is padded to a fixed seq_length and cu_seqlens stay
+    # consistent across iterations. See MB sequence-packing skill docs.
+    dataset_kwargs = dict(dataset_cfg.get("dataset_kwargs") or {})
+    if packed_specs is not None and packed_specs.packed_sequence_size > 0:
+        dataset_kwargs.setdefault("pad_to_max_length", True)
 
     current = cfg.dataset
     cfg.dataset = FinetuningDatasetConfig(
         dataset_root=dataset_cfg.get("dataset_root", getattr(current, "dataset_root", None)),
         seq_length=dataset_cfg.get("seq_length", getattr(current, "seq_length", 4096)),
         packed_sequence_specs=packed_specs,
+        dataset_kwargs=dataset_kwargs or None,
         dataloader_type=dataset_cfg.get("dataloader_type", getattr(current, "dataloader_type", "batch")),
         do_validation=has_validation,
         do_test=False,
@@ -325,6 +392,7 @@ def run_megatron_bridge(
         _maybe_apply_peft(cfg, container)
 
     _maybe_patch_checkpointing(container)
+    _maybe_add_model_controls(cfg, container)
 
     if dataset_mode == "finetune":
         _maybe_build_dataset(cfg, container)

@@ -155,6 +155,7 @@ def main() -> None:
         dtype=cfg.get("dtype", "int32"),
         pack_size=cfg.get("pack_size", 4096),
         algorithm=cfg.get("algorithm", "first_fit_shuffle"),
+        pad_seq_to_mult=cfg.get("pad_seq_to_mult"),
         seed=cfg.get("seed"),
         chat_template=cfg.get("chat_template", "nano3"),
         messages_field_default=cfg.get("messages_field", "messages"),

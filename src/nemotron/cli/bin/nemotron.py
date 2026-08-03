@@ -120,6 +120,7 @@ def _register_groups() -> None:
         ("embed", "nemotron.cli.commands.embed", "embed_app"),
         ("rerank", "nemotron.cli.commands.rerank", "rerank_app"),
         ("steps", "nemotron.cli.commands.steps", "steps_app"),
+        ("experiment", "nemotron.cli.commands.experiment", "experiment_app"),
     )
 
     for name, module_path, attr in groups:

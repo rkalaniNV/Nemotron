@@ -109,6 +109,7 @@ class SftDatasetWorkItem:
     pack_size: int = 2048
     algorithm: str = "first_fit_shuffle"
     seed: int | None = None
+    pad_seq_to_mult: int | None = None
 
     # Packed Parquet output options (per packed-sft-impl-parquet-nemotron.md)
     parquet_row_group_size: int = 1000
@@ -143,6 +144,7 @@ class SftShardWorkItem:
     pack_size: int = 2048
     algorithm: str = "first_fit_shuffle"
     seed: int | None = None
+    pad_seq_to_mult: int | None = None
 
     # Packed Parquet output options
     parquet_row_group_size: int = 1000

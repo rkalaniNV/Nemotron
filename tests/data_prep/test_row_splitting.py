@@ -14,6 +14,9 @@
 
 """Tests for row-level splitting in shard assignment."""
 
+import io
+import os
+
 import pytest
 
 from nemotron.data_prep.config import FileInfo, ShardAssignment
@@ -203,3 +206,88 @@ class TestApplyRowFilter:
         records = [{"v": i} for i in range(6)]
         result = list(_apply_row_filter(iter(records), modulus=2, remainder=1))
         assert result == [{"v": 1}, {"v": 3}, {"v": 5}]
+
+
+class TestBinIdxCoreHonorsRowSplitting:
+    """Regression: pretrain binidx shard processing must honor row splitting.
+
+    When a dataset has fewer files than shards, a single file is assigned to
+    multiple shards via row_modulus/row_remainder. If the shard processor reads
+    the whole file for every shard, the data is duplicated (num_shards/num_files
+    times). These tests guard against that regression.
+    """
+
+    @staticmethod
+    def _run_shard(file_info, *, text_field="text"):
+        """Run the binidx core for one file_info, return the row ids processed."""
+        import numpy as np
+
+        from nemotron.data_prep.core import shard_processor as sp
+        from nemotron.data_prep.formats.indexed_dataset import IndexedDatasetBuilder
+        from nemotron.data_prep.utils.filesystem import get_filesystem
+
+        seen: list[int] = []
+
+        def fake_tokenize(texts):
+            out = []
+            for t in texts:
+                rid = int(str(t).split("_")[1])
+                seen.append(rid)
+                out.append([rid + 1])  # non-empty so docs are written
+            return out
+
+        input_fs, _ = get_filesystem(file_info.path)
+        bin_buf = io.BytesIO()
+        builder = IndexedDatasetBuilder(bin_buf, dtype=np.dtype("int32"))
+        stats = {"num_input_rows": 0, "num_filtered": 0, "num_truncated": 0, "num_errors": 0}
+        sp._process_file_core(
+            file_info=file_info,
+            builder=builder,
+            stats=stats,
+            input_fs=input_fs,
+            text_field=text_field,
+            min_doc_chars=None,
+            max_doc_tokens=None,
+            tokenize=fake_tokenize,
+            rows_processed=0,
+            max_rows=None,
+        )
+        return seen
+
+    def _check_no_duplication(self, tmp_path, suffix, writer):
+        path = str(tmp_path / f"data{suffix}")
+        n_rows = 100
+        num_shards = 8
+        writer(path, n_rows)
+        size = os.path.getsize(path)
+
+        files = [_make_file(path, size)]
+        assignments = create_size_balanced_assignments(files, num_shards)
+        assert len(assignments) == num_shards
+
+        all_seen: list[int] = []
+        for a in assignments:
+            for fi in a.files:
+                all_seen.extend(self._run_shard(fi))
+
+        # Every row processed exactly once across all shards (no duplication).
+        assert sorted(all_seen) == list(range(n_rows))
+
+    def test_parquet_no_duplication(self, tmp_path) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        def writer(path, n):
+            pq.write_table(pa.table({"text": [f"row_{i}" for i in range(n)]}), path)
+
+        self._check_no_duplication(tmp_path, ".parquet", writer)
+
+    def test_jsonl_no_duplication(self, tmp_path) -> None:
+        import json
+
+        def writer(path, n):
+            with open(path, "w") as f:
+                for i in range(n):
+                    f.write(json.dumps({"text": f"row_{i}"}) + "\n")
+
+        self._check_no_duplication(tmp_path, ".jsonl", writer)

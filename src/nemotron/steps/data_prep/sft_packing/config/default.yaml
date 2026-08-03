@@ -17,29 +17,35 @@
 # Remote executor profiles can export SFT_OUTPUT_DIR; local runs fall back below.
 
 run:
+  data: null
   env:
-    env_vars:
-      WANDB_NAME: ${oc.env:WANDB_NAME,data-prep-sft-packing}
+    container: nvcr.io/nvidia/nemo:26.02.nemotron_3_super
 
-blend_path: /path/to/data_blend.json
-output_dir: ${oc.env:SFT_OUTPUT_DIR,./output/packed-sft}
-num_shards: 128
+blend_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/blend.json
+# Named for the downstream SFT shape: pack_size=256k, CP=16 (see pad_seq_to_mult).
+# Repack into a new dir whenever CP/TP/SP or pack_size changes — do not reuse cp32 shards.
+output_dir: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_256k_cp16
+num_shards: 1
 
 tokenizer:
-  model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+  model: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
   add_bos: false
   add_eos: true
 
-pack_size: 4096
+pack_size: 262144
+# Pad each packed sub-sequence so (len - 1) is a multiple of this value.
+# Megatron THD + CP requires 2*CP, or 2*CP*TP when sequence_parallel is on.
+# Matches sft/megatron_bridge default: CP=16, TP=8, SP on → 2*16*8 = 256.
+pad_seq_to_mult: 256
 algorithm: first_fit_shuffle
 chat_template: nano3
 
 messages_field: messages
 tools_field: tools
 
-train_ratio: 0.98
-valid_ratio: 0.01
-test_ratio: 0.01
+train_ratio: 0.9
+valid_ratio: 0.05
+test_ratio: 0.05
 
 sample: null
 sample_seed: 42

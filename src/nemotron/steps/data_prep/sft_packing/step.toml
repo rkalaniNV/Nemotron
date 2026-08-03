@@ -81,6 +81,10 @@ when = "You are changing sequence length for training"
 then = "Keep pack_size identical to the downstream training seq_length to avoid wasted padding or incompatible batches."
 
 [[strategies]]
+when = "Downstream SFT uses context parallelism (CP>1) with packed sequences"
+then = "Set pad_seq_to_mult to 2*CP, or 2*CP*TP when sequence_parallel is on, and keep the same value in the Megatron-Bridge packed_sequence_specs. Repack if CP/TP/SP changes."
+
+[[strategies]]
 when = "You are iterating on a very small dataset or sample"
 then = "Reduce num_shards so each shard remains meaningfully sized and split generation stays balanced."
 
@@ -95,6 +99,10 @@ recovery = "Use the same tokenizer and chat template as the downstream model; re
 [[errors]]
 name = "seq_length_mismatch"
 recovery = "Match pack_size to the downstream seq_length and packed_sequence_size settings before training."
+
+[[errors]]
+name = "cp_pad_mismatch"
+recovery = "Align pad_seq_to_mult with 2*CP (or 2*CP*TP if sequence_parallel) on both packing and training configs, then repack into a new output_dir."
 
 [[errors]]
 name = "too_many_tiny_shards"

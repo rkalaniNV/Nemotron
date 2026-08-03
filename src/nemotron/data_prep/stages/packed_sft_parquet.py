@@ -182,6 +182,7 @@ class PackedSftParquetStage(pipelines_v1.Stage[SftShardWorkItem, SftShardWorkIte
             algorithm=str(task.algorithm),
             dtype=np.dtype(task.dtype),
             seed=task.seed,
+            pad_seq_to_mult=task.pad_seq_to_mult,
             parquet_row_group_size=int(task.parquet_row_group_size),
             parquet_compression=str(task.parquet_compression),
         )

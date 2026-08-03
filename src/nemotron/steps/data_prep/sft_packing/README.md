@@ -38,6 +38,8 @@ Related patterns:
 ## Config Nuances
 
 - `pack_size` must match Megatron Bridge `dataset.seq_length`, `packed_sequence_size`, and `model.seq_length`.
+- `pad_seq_to_mult` must match the downstream CP layout: use `2*CP` for packed THD, or `2*CP*TP` when `sequence_parallel` is on. The Super default (`CP=16`, `TP=8`, SP on) needs `256`. Keep the same value in `dataset.packed_sequence_specs.pad_seq_to_mult`.
+- Name `output_dir` after the `(pack_size, CP)` tuple (for example `packed_256k_cp16`) and repack into a new directory when CP/TP/SP or pack size changes.
 - Megatron Bridge configs should consume `splits/train/*.parquet`; AutoModel SFT/PEFT should consume JSONL instead.
 - Repack after tokenizer or chat-template changes, even if the source JSONL is unchanged.
 

@@ -42,6 +42,28 @@ from nemotron.data_prep.packing.bin_assignment import BinAssignment
 from nemotron.data_prep.packing.spool import SequenceSpoolReader
 
 
+def _padded_seq_len(seq_len: int, pad_seq_to_mult: int | None) -> int:
+    """Stored length of a sub-sequence so it is CP-aligned for Megatron-Bridge.
+
+    Megatron-Bridge's ``GPTSFTPackedDataset.collate_fn`` builds ``cu_seqlens`` with
+    ``length - 1`` per sub-sequence (the last token of each sub-sequence is dropped
+    to form the shifted labels). The THD context-parallel attention kernel requires
+    every ``cu_seqlens`` segment to be divisible by ``pad_seq_to_mult`` (which the
+    caller sets to ``2*CP`` or ``lcm(2*CP, CP*TP)`` when sequence-parallel is on).
+
+    To make ``stored_len - 1`` a multiple of ``pad_seq_to_mult`` we round the real
+    content up to the next multiple and then add one extra padding token, mirroring
+    ``pre_pad_dataset`` in megatron.bridge.data.datasets.packed_sequence. Without
+    this ``+1`` the segment becomes ``k*mult - 1`` (never divisible) and CP produces
+    NaN gradients.
+    """
+    if not pad_seq_to_mult or pad_seq_to_mult <= 1:
+        return seq_len
+    if seq_len <= 0:
+        return 0
+    return ((seq_len + pad_seq_to_mult - 1) // pad_seq_to_mult) * pad_seq_to_mult + 1
+
+
 def _align_loss_mask_for_labels(mask: list[int], seq_len: int) -> list[int]:
     """Align loss_mask for Megatron-Bridge label semantics (per-subsequence).
 
@@ -74,6 +96,7 @@ def materialize_packed_samples(
     spool_reader: SequenceSpoolReader,
     assignment: BinAssignment,
     pack_size: int,
+    pad_seq_to_mult: int | None = None,
 ) -> Iterator[dict]:
     """Yield packed items one bin at a time.
 
@@ -98,30 +121,51 @@ def materialize_packed_samples(
         for seq_index in seq_indices:
             input_ids_arr, loss_mask_arr = spool_reader.read_sequence(int(seq_index))
 
+            current_len = len(all_input_ids)
+            if current_len >= pack_size:
+                break
+
             # Truncate if needed (builder truncates per-seq to pack_size).
             if input_ids_arr.shape[0] > pack_size:
                 input_ids_arr = input_ids_arr[:pack_size]
                 loss_mask_arr = loss_mask_arr[:pack_size]
 
-            current_len = len(all_input_ids)
-            if current_len >= pack_size:
-                break
+            seq_len = int(input_ids_arr.shape[0])
+            padded_len = _padded_seq_len(seq_len, pad_seq_to_mult)
 
-            if current_len + int(input_ids_arr.shape[0]) > pack_size:
+            if current_len + padded_len > pack_size:
                 remaining = pack_size - current_len
-                input_ids_arr = input_ids_arr[:remaining]
-                loss_mask_arr = loss_mask_arr[:remaining]
+                if pad_seq_to_mult and pad_seq_to_mult > 1:
+                    # Largest CP-aligned content that fits, leaving room for the
+                    # +1 pad token that _padded_seq_len appends.
+                    max_content = ((remaining - 1) // pad_seq_to_mult) * pad_seq_to_mult
+                    if max_content <= 0:
+                        break
+                    seq_len = min(seq_len, max_content)
+                else:
+                    if remaining <= 0:
+                        break
+                    seq_len = min(seq_len, remaining)
+                padded_len = _padded_seq_len(seq_len, pad_seq_to_mult)
+                if seq_len <= 0 or current_len + padded_len > pack_size:
+                    break
+                input_ids_arr = input_ids_arr[:seq_len]
+                loss_mask_arr = loss_mask_arr[:seq_len]
 
-            if input_ids_arr.shape[0] == 0:
+            if seq_len <= 0:
                 continue
 
-            seq_len = int(input_ids_arr.shape[0])
             all_input_ids.extend([int(x) for x in input_ids_arr.tolist()])
             # Align loss_mask per-subsequence for Megatron-Bridge label semantics
             aligned_mask = _align_loss_mask_for_labels(
                 [int(x) for x in loss_mask_arr.tolist()], seq_len
             )
             all_loss_mask.extend(aligned_mask)
+
+            if padded_len > seq_len:
+                all_input_ids.extend([0] * (padded_len - seq_len))
+                all_loss_mask.extend([0] * (padded_len - seq_len))
+
             seq_start_ids.append(len(all_input_ids))
 
         yield {
@@ -139,6 +183,7 @@ def materialize_bin_arrays(
     pack_size: int,
     scratch_input_ids: np.ndarray,
     scratch_loss_mask: np.ndarray,
+    pad_seq_to_mult: int | None = None,
 ) -> tuple[int, np.ndarray]:
     """Materialize a single bin directly to numpy arrays.
 
@@ -182,13 +227,29 @@ def materialize_bin_arrays(
     for seq_index in seq_indices:
         input_ids_arr, loss_mask_arr = spool_reader.read_sequence(int(seq_index))
 
-        # Clamp per-seq length to pack_size first
-        seq_len = int(min(int(input_ids_arr.shape[0]), pack_size))
-        if pos + seq_len > pack_size:
-            seq_len = pack_size - pos
-
-        if seq_len <= 0:
+        if pos >= pack_size:
             break
+
+        # Clamp per-seq length to pack_size first
+        seq_len = int(min(int(input_ids_arr.shape[0]), pack_size - pos))
+        padded_len = _padded_seq_len(seq_len, pad_seq_to_mult)
+
+        if pos + padded_len > pack_size:
+            remaining = pack_size - pos
+            if pad_seq_to_mult and pad_seq_to_mult > 1:
+                # Largest CP-aligned content that fits, leaving room for the
+                # +1 pad token that _padded_seq_len appends.
+                max_content = ((remaining - 1) // pad_seq_to_mult) * pad_seq_to_mult
+                if max_content <= 0:
+                    break
+                seq_len = min(seq_len, max_content)
+            else:
+                if remaining <= 0:
+                    break
+                seq_len = min(seq_len, remaining)
+            padded_len = _padded_seq_len(seq_len, pad_seq_to_mult)
+            if seq_len <= 0 or pos + padded_len > pack_size:
+                break
 
         seq_start_ids.append(pos)
 
@@ -204,7 +265,8 @@ def materialize_bin_arrays(
             scratch_loss_mask[pos : pos + seq_len - 1] = loss_mask_arr[1:seq_len]
             scratch_loss_mask[pos + seq_len - 1] = 0
 
-        pos += seq_len
+        # CP padding tokens/masks are already zero from buffer initialization.
+        pos += padded_len
 
         if pos >= pack_size:
             break
@@ -212,4 +274,4 @@ def materialize_bin_arrays(
     return pos, np.asarray(seq_start_ids, dtype=np.int32)
 
 
-__all__ = ["materialize_packed_samples", "materialize_bin_arrays"]
+__all__ = ["materialize_packed_samples", "materialize_bin_arrays", "_padded_seq_len"]
