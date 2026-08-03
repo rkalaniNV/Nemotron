@@ -1,0 +1,24 @@
+defaults: ../baseline/vi_cpt_32_h100_gcp_hardware_baseline.yaml
+
+# Conditional TP=2 probe on the full-recompute DeepEP+TPO path.
+run:
+  env:
+    job_name: vi-h100-30-tp2-deepep-tpo
+
+model:
+  tensor_model_parallel_size: 2
+  moe_enable_deepep: true
+  moe_token_dispatcher_type: flex
+  moe_flex_dispatcher_backend: deepep
+  moe_shared_expert_overlap: false
+
+comm_overlap:
+  tp_comm_overlap: true
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-30-h100-tp2-mbs2-deepep-tp-overlap}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/30-h100-tp2-mbs2-deepep-tp-overlap/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/30-h100-tp2-mbs2-deepep-tp-overlap/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/30-h100-tp2-mbs2-deepep-tp-overlap

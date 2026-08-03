@@ -1,0 +1,19 @@
+defaults: ../baseline/vi_cpt_31_a100_hardware_baseline.yaml
+
+run:
+  env:
+    job_name: vi-a100-20-a2a-overlap
+
+model:
+  recompute_granularity: selective
+  recompute_method: null
+  recompute_num_layers: null
+  moe_shared_expert_overlap: true
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-20-mbs2-selective-alltoall-overlap}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/20-mbs2-selective-alltoall-overlap/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/20-mbs2-selective-alltoall-overlap/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/20-mbs2-selective-alltoall-overlap

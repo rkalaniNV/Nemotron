@@ -1,0 +1,21 @@
+defaults: ../baseline/vi_cpt_32_h100_gcp_hardware_baseline.yaml
+
+# Demoted. Selective recompute measured lower MODEL_TFLOP/s/GPU than the
+# vi_cpt_32 full-recompute origin on H100 GCP / nemo:26.02. Keep only as a
+# short confirmation; do not use as the H100 control.
+run:
+  env:
+    job_name: vi-h100-21-selective
+
+model:
+  recompute_granularity: selective
+  recompute_method: null
+  recompute_num_layers: null
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-21-h100-mbs2-selective-alltoall}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/21-h100-mbs2-selective-alltoall/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/21-h100-mbs2-selective-alltoall/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/21-h100-mbs2-selective-alltoall

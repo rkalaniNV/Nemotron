@@ -1,0 +1,13 @@
+defaults: ../baseline/vi_cpt_31_a100_hardware_baseline.yaml
+
+run:
+  env:
+    job_name: vi-a100-14-mbs2
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-14-mbs2}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/14-mbs2/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/14-mbs2/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/14-mbs2

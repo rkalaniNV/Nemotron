@@ -1,0 +1,24 @@
+defaults: ../baseline/vi_cpt_31_a100_hardware_baseline.yaml
+
+run:
+  env:
+    job_name: vi-a100-16-mbs2-selective
+
+model:
+  recompute_granularity: selective
+  recompute_method: null
+  recompute_num_layers: null
+
+# Retain stricter worker settings for this memory-sensitive selective-recompute
+# probe. The hardware baseline already supplies MBS=2 and mmap_bin_files=false.
+dataset:
+  num_workers: 0
+  persistent_workers: false
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-16-mbs2-recompute-selective}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/16-mbs2-recompute-selective/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/16-mbs2-recompute-selective/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/16-mbs2-recompute-selective

@@ -1,0 +1,88 @@
+run:
+  env:
+    container_image: nvcr.io/nvidia/nemo:26.02
+    job_name: vi-h100-32-gcp-baseline
+    env_vars:
+      # Hopper supports CUDA Multicast. Keep overlap off in this matched control;
+      # enable it in the H100 sweep cases (22+), not here.
+      UB_SKIPMC: "0"
+      CUDA_DEVICE_MAX_CONNECTIONS: "1"
+
+mode: cpt
+
+hf_model_path: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+load_hf_weights: true
+trust_remote_code: true
+
+recipe:
+  _target_: megatron.bridge.recipes.nemotronh.nemotron_3_nano.nemotron_3_nano_pretrain_config
+
+
+model:
+  moe_enable_deepep: false
+  seq_length: 8192
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  expert_model_parallel_size: 8
+  expert_tensor_parallel_size: 1
+  sequence_parallel: true
+  moe_token_dispatcher_type: alltoall
+  moe_per_layer_logging: true
+
+dataset:
+  per_split_data_args_path: ${oc.env:PRETRAIN_BLEND_PATH}
+  path_to_cache: /mnt/lustre-shared/hvnguyen/data/.cache
+
+tokenizer:
+  tokenizer_type: HuggingFaceTokenizer
+  tokenizer_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+
+train:
+  train_iters: 200
+  global_batch_size: 512
+  micro_batch_size: 2
+  eval_interval: 10
+
+optimizer:
+  lr: 3.0e-5
+  min_lr: 3.0e-6
+
+scheduler:
+  lr_warmup_iters: 10
+
+logger:
+  log_interval: 5
+  wandb_project: ${oc.select:run.wandb.project,${oc.env:WANDB_PROJECT,Nemotron-3-Nano-CPT-Ablation-Study}}
+  wandb_entity: ${oc.select:run.wandb.entity,${oc.env:WANDB_ENTITY,nvidia}}
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-32-h100-gcp-hardware-baseline}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-hardware-baseline/32-h100-gcp/wandb
+
+  # Native Megatron-Bridge performance reporting.
+  log_throughput: true
+  log_progress: true
+  log_throughput_to_tensorboard: true
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-hardware-baseline/32-h100-gcp/tensorboard
+  tensorboard_log_interval: 5
+  log_timers_to_tensorboard: true
+  log_world_size_to_tensorboard: true
+  timing_log_level: 1
+  timing_log_option: max
+  throughput_window_size: 20
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-hardware-baseline/32-h100-gcp
+  save_interval: 50
+  fully_parallel_save: true
+
+ddp:
+  check_for_nan_in_grad: false
+  average_in_collective: true
+
+comm_overlap:
+  # Matched A100 control: no Userbuffers TP overlap. Overlap + MC on this
+  # footprint OOMs at step 0 (Failed to CUDA calloc ~512MiB) after UB init.
+  tp_comm_overlap: false
+
+dist:
+  distributed_timeout_minutes: 120

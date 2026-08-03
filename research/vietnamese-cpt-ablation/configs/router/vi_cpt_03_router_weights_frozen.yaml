@@ -1,0 +1,16 @@
+defaults: ../baseline/vi_cpt_00_original.yaml
+
+run:
+  env:
+    job_name: vi-router-03-frozen
+
+model_control:
+  freeze_moe_router_weights: true
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-03-router-weights-frozen}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/03-router-weights-frozen/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/03-router-weights-frozen/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/03-router-weights-frozen

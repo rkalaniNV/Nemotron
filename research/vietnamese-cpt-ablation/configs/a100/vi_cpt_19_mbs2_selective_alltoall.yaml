@@ -1,0 +1,20 @@
+defaults: ../baseline/vi_cpt_31_a100_hardware_baseline.yaml
+
+# The parent already pins alltoall because DeepEP is unavailable on this A100
+# cluster. This case combines it with the optimized compute setup.
+run:
+  env:
+    job_name: vi-a100-19-mbs2-a2a
+
+model:
+  recompute_granularity: selective
+  recompute_method: null
+  recompute_num_layers: null
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-19-mbs2-selective-alltoall}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/19-mbs2-selective-alltoall/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/19-mbs2-selective-alltoall/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/19-mbs2-selective-alltoall

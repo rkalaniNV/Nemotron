@@ -1,0 +1,19 @@
+defaults: ../baseline/vi_cpt_31_a100_hardware_baseline.yaml
+
+run:
+  env:
+    job_name: vi-a100-15-selective
+
+model:
+  recompute_granularity: selective
+  # Selective ignores layer-uniform full recompute; clear the inherited values.
+  recompute_method: null
+  recompute_num_layers: null
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-15-recompute-selective}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/15-recompute-selective/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/15-recompute-selective/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/15-recompute-selective

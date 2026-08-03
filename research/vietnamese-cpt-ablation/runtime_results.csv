@@ -1,0 +1,12 @@
+priority,config,status,gpu_type,gpu_count,precision,seq_length,global_batch,micro_batch,tensor_parallel,recompute,context_parallel,dispatcher,tp_comm_overlap,shared_expert_overlap,tokens_per_second_per_gpu,model_tflops_per_gpu,mfu_percent,step_time_p50_s,step_time_p95_s,peak_memory_gib,gpu_hours,validation_loss,notes
+0,vi_cpt_32_h100_gcp_hardware_baseline,pending,h100-sxm-80gb,64,bf16,8192,512,2,4,full,1,alltoall,false,false,,,,,,,,,H100 origin (nemo:26.02); recipe full recompute
+1,vi_cpt_22_h100_mbs2_selective_alltoall_tp_overlap,pending,h100-sxm-80gb,64,bf16,8192,512,2,4,full,1,alltoall,true,false,,,,,,,,,Isolate Hopper TP overlap on full recompute
+2,vi_cpt_23_h100_mbs2_selective_deepep,pending,h100-sxm-80gb,64,bf16,8192,512,2,4,full,1,flex,false,false,,,,,,,,,Isolate DeepEP on full recompute
+3,vi_cpt_24_h100_mbs2_selective_deepep_tp_overlap,pending,h100-sxm-80gb,64,bf16,8192,512,2,4,full,1,flex,true,false,,,,,,,,,Combine DeepEP and TP overlap
+4,vi_cpt_28_h100_mbs2_selective_deepep_tp_overlap_shared,pending,h100-sxm-80gb,64,bf16,8192,512,2,4,full,1,alltoall,true,true,,,,,,,,,Shared-expert overlap on alltoall+TPO (flex+shared forbidden)
+5,vi_cpt_25_h100_mbs4_selective_deepep_tp_overlap,conditional,h100-sxm-80gb,64,bf16,8192,512,4,4,full,1,flex,true,false,,,,,,,,,Run if case 24 memory is safe
+6,vi_cpt_29_h100_mbs2_no_recompute_deepep_tp_overlap,conditional,h100-sxm-80gb,64,bf16,8192,512,2,4,none,1,flex,true,false,,,,,,,,,Run if case 24 has memory headroom
+7,vi_cpt_30_h100_tp2_mbs2_selective_deepep_tp_overlap,conditional,h100-sxm-80gb,64,bf16,8192,512,2,2,full,1,flex,true,false,,,,,,,,,TP2 probe on DeepEP+TPO
+8,vi_cpt_26_h100_mbs2_selective_deepep_tp_overlap_fp8,conditional,h100-sxm-80gb,64,fp8-current,8192,512,2,4,full,1,flex,true,false,,,,,,,,,Equal-token loss vs case 24
+9,vi_cpt_27_h100_mbs4_selective_deepep_tp_overlap_fp8,conditional,h100-sxm-80gb,64,fp8-current,8192,512,4,4,full,1,flex,true,false,,,,,,,,,Run only after case 26 is healthy
+10,vi_cpt_21_h100_mbs2_selective_alltoall,conditional,h100-sxm-80gb,64,bf16,8192,512,2,4,selective,1,alltoall,false,false,,,,,,,,,Demoted: selective lost TFLOPS vs origin

@@ -113,3 +113,12 @@ docs/_build/
 # Skill eval run outputs (generated; eval definitions like evals.json stay tracked)
 skills/*/evals/results/
 skills/*/evals/tier3-reports/
+
+# Local Lepton/W&B/HF credentials for the Vietnamese CPT ablation.
+research/vietnamese-cpt-ablation/README.md
+!research/vietnamese-cpt-ablation/configs/data/
+!research/vietnamese-cpt-ablation/configs/data/**
+research/vietnamese-cpt-ablation/envs/*.toml
+
+# Raw W&B chart export names; renamed copies are kept in docs/images.
+research/vietnamese-cpt-ablation/docs/images/W&B Chart*.png

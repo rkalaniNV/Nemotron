@@ -1,0 +1,16 @@
+defaults: ../baseline/vi_cpt_00_original.yaml
+
+run:
+  env:
+    job_name: vi-router-13-fp64
+
+model:
+  moe_router_dtype: fp64
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-13-router-fp64}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/13-router-fp64/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/13-router-fp64/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/13-router-fp64

@@ -1,0 +1,124 @@
+# Canonical parent for the Vietnamese CPT ablation.
+# All vi_cpt_* study cases inherit this file and override one variable.
+
+run:
+  env:
+    container_image: nvcr.io/nvidia/nemo:25.11.nemotron_3_nano
+    job_name: vi-cpt-00-original
+    env_vars:
+      UB_SKIPMC: "1"
+
+mode: cpt
+
+hf_model_path: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+load_hf_weights: true
+trust_remote_code: true
+
+recipe:
+  _target_: megatron.bridge.recipes.nemotronh.nemotron_3_nano.nemotron_3_nano_pretrain_config
+  # The blend must reach the dataset through the recipe. GPTDatasetConfig has no
+  # `data_paths` field, so setting it under `dataset:` is silently dropped and the
+  # builder falls back to MockGPTDataset (random tokens).
+  per_split_data_args_path: ${oc.env:PRETRAIN_BLEND_PATH}
+
+model:
+  # Loading HF weights rebuilds the provider, then the runner re-applies this
+  # block. Keep architecture, parallelism, and model features here only.
+  # Field is `moe_enable_deepep`; a bare `enable_deepep` here is not a provider
+  # attribute and is dropped without failing.
+  moe_enable_deepep: false
+  seq_length: 8192
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  expert_model_parallel_size: 8
+  expert_tensor_parallel_size: 1
+  sequence_parallel: true
+
+  # Explicit performance baseline for recomputation ablations.
+  recompute_granularity: full
+  recompute_method: uniform
+  recompute_num_layers: 1
+
+  # Auxiliary-loss-free routing baseline.
+  moe_router_dtype: fp32
+  moe_router_load_balancing_type: none
+  moe_aux_loss_coeff: 0.0
+  moe_router_enable_expert_bias: true
+  moe_router_bias_update_rate: 1.0e-3
+
+  # The `flex` + `deepep` pair aborts on this A100 cluster: DeepEP's prebuilt
+  # kernels in nemo:25.11 have no SM80 entry point, so the first token dispatch
+  # dies with "CUDA error layout.cu:128 'named symbol not found'".
+  # Megatron-Bridge's validate_flex_dispatcher_backend() admits compute
+  # capability 8.x, so this passes config validation and only fails at iteration
+  # 0. `alltoall` is the dispatcher the healthy long runs used.
+  moe_token_dispatcher_type: alltoall
+
+  # Required for the routing-health part of the ablation.
+  moe_per_layer_logging: true
+
+dataset:
+  path_to_cache: /mnt/lustre-shared/hvnguyen/data/.cache
+
+# Without this the run silently builds a NullTokenizer (vocab 32000 padded to
+# 131072) and every loss number is meaningless.
+tokenizer:
+  tokenizer_type: HuggingFaceTokenizer
+  tokenizer_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+
+train:
+  # A short performance screen. Override this for confirmation/final runs.
+  train_iters: 200
+  global_batch_size: 512
+  micro_batch_size: 2
+
+optimizer:
+  lr: 3.0e-5
+  min_lr: 3.0e-6
+
+scheduler:
+  lr_warmup_iters: 10
+
+logger:
+  log_interval: 5
+  wandb_project: ${oc.select:run.wandb.project,${oc.env:WANDB_PROJECT,Nemotron-3-Nano-CPT-Ablation-Study}}
+  wandb_entity: ${oc.select:run.wandb.entity,${oc.env:WANDB_ENTITY,nvidia}}
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-00-original}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/00-original/wandb
+
+  # Native Megatron-Bridge performance reporting.
+  log_throughput: true
+  log_progress: true
+  log_throughput_to_tensorboard: true
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/00-original/tensorboard
+  tensorboard_log_interval: 5
+  log_timers_to_tensorboard: true
+  log_world_size_to_tensorboard: true
+  timing_log_level: 1
+  timing_log_option: max
+  throughput_window_size: 20
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/00-original
+  # Every 50 iters so pipeline save/resume is exercised during the 200-iter screen.
+  # Watch host RAM around saves; torch_dist can spike RSS on 8 ranks/node.
+  save_interval: 50
+  fully_parallel_save: true
+
+# Mirrors lepton_opt.yaml so screened throughput reflects the production setup.
+ddp:
+  check_for_nan_in_grad: false
+  average_in_collective: true
+
+# bf16_mixed and grad_reduce_in_fp32=True inherit from the container recipe.
+
+comm_overlap:
+  # Userbuffers TP overlap needs Hopper CUDA Multicast. A100 falls back to the
+  # UB_SKIPMC=1 IPC path, which can corrupt TP GEMM outputs.
+  tp_comm_overlap: false
+
+dist:
+  # The first run over a new blend builds shuffle indices on rank 0, which can
+  # exceed the 10-minute default before the indices are cached.
+  distributed_timeout_minutes: 120

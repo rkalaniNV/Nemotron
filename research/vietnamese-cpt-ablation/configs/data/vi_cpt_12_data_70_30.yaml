@@ -1,0 +1,16 @@
+defaults: ../baseline/vi_cpt_00_original.yaml
+
+run:
+  env:
+    job_name: vi-data-12-mix70-30
+
+recipe:
+  per_split_data_args_path: ${oc.env:VI_CPT_BLEND_70_30}
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-12-data-70-30}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/12-data-70-30/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/12-data-70-30/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/12-data-70-30

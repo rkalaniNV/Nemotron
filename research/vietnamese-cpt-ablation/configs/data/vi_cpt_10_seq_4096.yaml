@@ -1,0 +1,19 @@
+defaults: ../baseline/vi_cpt_00_original.yaml
+
+run:
+  env:
+    job_name: vi-data-10-seq4096
+
+model:
+  seq_length: 4096
+
+dataset:
+  seq_length: 4096
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-10-seq-4096}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/10-seq-4096/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/10-seq-4096/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/10-seq-4096

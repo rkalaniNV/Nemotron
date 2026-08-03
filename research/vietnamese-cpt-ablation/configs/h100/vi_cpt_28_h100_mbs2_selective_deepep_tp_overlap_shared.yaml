@@ -1,0 +1,23 @@
+defaults: ../baseline/vi_cpt_32_h100_gcp_hardware_baseline.yaml
+
+# Isolates shared-expert overlap on alltoall + TP-overlap (full recompute).
+# flex + shared is forbidden on Megatron 26.02.
+run:
+  env:
+    job_name: vi-h100-28-a2a-tpo-shared
+
+model:
+  moe_enable_deepep: false
+  moe_token_dispatcher_type: alltoall
+  moe_shared_expert_overlap: true
+
+comm_overlap:
+  tp_comm_overlap: true
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-28-h100-mbs2-alltoall-tp-overlap-shared}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/28-h100-mbs2-alltoall-tp-overlap-shared/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/28-h100-mbs2-alltoall-tp-overlap-shared/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/28-h100-mbs2-alltoall-tp-overlap-shared

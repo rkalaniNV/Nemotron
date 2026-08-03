@@ -1,0 +1,18 @@
+defaults: ../baseline/vi_cpt_32_h100_gcp_hardware_baseline.yaml
+
+# Isolates Hopper TP userbuffer overlap on the full-recompute origin
+# (vi_cpt_32 / nemo:26.02). No recompute override — inherit recipe full.
+run:
+  env:
+    job_name: vi-h100-22-a2a-tpo
+
+comm_overlap:
+  tp_comm_overlap: true
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-22-h100-mbs2-alltoall-tp-overlap}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/22-h100-mbs2-alltoall-tp-overlap/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/22-h100-mbs2-alltoall-tp-overlap/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/22-h100-mbs2-alltoall-tp-overlap

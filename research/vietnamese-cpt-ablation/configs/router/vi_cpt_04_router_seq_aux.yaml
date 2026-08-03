@@ -1,0 +1,17 @@
+defaults: ../baseline/vi_cpt_00_original.yaml
+
+run:
+  env:
+    job_name: vi-router-04-seq-aux
+
+model:
+  moe_router_load_balancing_type: seq_aux_loss
+  moe_aux_loss_coeff: 1.0e-4
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-04-router-seq-aux}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/04-router-seq-aux/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/04-router-seq-aux/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/04-router-seq-aux

@@ -1,0 +1,20 @@
+defaults: ../baseline/vi_cpt_32_h100_gcp_hardware_baseline.yaml
+
+# Short, isolated rerun of the matched H100 / nemo:26.02 baseline. NCCL INFO
+# identifies the selected cross-node transport without changing training knobs.
+run:
+  env:
+    job_name: vi-h100-33-nccl-debug
+
+train:
+  train_iters: 30
+
+logger:
+  log_interval: 1
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-33-h100-nccl-diagnostic}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-diagnostics/33-h100-nccl/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-diagnostics/33-h100-nccl/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-diagnostics/33-h100-nccl
+  save_interval: 30

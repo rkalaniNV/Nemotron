@@ -1,0 +1,27 @@
+defaults: ../baseline/vi_cpt_32_h100_gcp_hardware_baseline.yaml
+
+# FP8 current-scaling probe on the full-recompute DeepEP+TPO path. Compare
+# equal-token loss against case 24 before promotion.
+run:
+  env:
+    job_name: vi-h100-26-fp8-deepep-tpo
+
+model:
+  moe_enable_deepep: true
+  moe_token_dispatcher_type: flex
+  moe_flex_dispatcher_backend: deepep
+  moe_shared_expert_overlap: false
+  moe_router_padding_for_fp8: true
+
+comm_overlap:
+  tp_comm_overlap: true
+
+mixed_precision: bf16_with_fp8_current_scaling_mixed
+
+logger:
+  wandb_exp_name: ${oc.env:WANDB_NAME,vi-cpt-26-h100-mbs2-deepep-tp-overlap-fp8}
+  wandb_save_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/26-h100-mbs2-deepep-tp-overlap-fp8/wandb
+  tensorboard_dir: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/26-h100-mbs2-deepep-tp-overlap-fp8/tensorboard
+
+checkpoint:
+  save: ${oc.env:PRETRAIN_OUTPUT_DIR}/vi-cpt-ablation/26-h100-mbs2-deepep-tp-overlap-fp8
