@@ -12,31 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# SFT data packing starter config.
+# SFT data packing for Nemotron-3 Super long-context (256k, CP=8 pad).
 # See full recipe: src/nemotron/recipes/nano3/stage1_sft/config/data_prep/default.yaml
-# Remote executor profiles can export SFT_OUTPUT_DIR; local runs fall back below.
+#
+# Required env: SFT_BLEND_PATH, SFT_PACKED_DIR
+# Example:
+#   nemotron steps run data_prep/sft_packing -c default --batch lepton_data_prep
 
 run:
   data: null
   env:
     container: nvcr.io/nvidia/nemo:26.02.nemotron_3_super
 
-blend_path: /mnt/lustre-shared/hvnguyen/projects/ytl/data/blend.json
-# Named for the downstream SFT shape: pack_size=256k, CP=16 (see pad_seq_to_mult).
-# Repack into a new dir whenever CP/TP/SP or pack_size changes — do not reuse cp32 shards.
-output_dir: /mnt/lustre-shared/hvnguyen/projects/ytl/data/super_npy/packed_256k_cp16
+blend_path: ${oc.env:SFT_BLEND_PATH}
+# Named for the downstream SFT shape: pack_size=256k, CP=8, PP=2 on 16×8 A100.
+# Repack into a new dir whenever CP/TP/SP or pack_size changes — do not reuse cp16 shards.
+output_dir: ${oc.env:SFT_PACKED_DIR}
 num_shards: 1
 
 tokenizer:
-  model: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+  model: ${oc.env:SFT_TOKENIZER_MODEL,nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16}
   add_bos: false
   add_eos: true
 
 pack_size: 262144
 # Pad each packed sub-sequence so (len - 1) is a multiple of this value.
 # Megatron THD + CP requires 2*CP, or 2*CP*TP when sequence_parallel is on.
-# Matches sft/megatron_bridge default: CP=16, TP=8, SP on → 2*16*8 = 256.
-pad_seq_to_mult: 256
+# Matches sft/megatron_bridge super_256k: CP=8, TP=8, SP on → 2*8*8 = 128.
+pad_seq_to_mult: 128
 algorithm: first_fit_shuffle
 chat_template: nano3
 

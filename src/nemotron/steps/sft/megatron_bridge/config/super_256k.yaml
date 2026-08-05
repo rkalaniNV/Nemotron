@@ -12,24 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Nemotron-3 Super 120B packed SFT at 128k context.
+# Nemotron-3 Super 120B packed SFT at 256k context.
+# Validated shape on 16×8 A100-80GB (128 GPUs): TP=8, PP=2, CP=8, EP=8, SP=true.
+# Same recipe as default.yaml.
 #
 # Required env (set in env.toml profile or shell):
 #   SFT_PACKED_DIR, SFT_OUTPUT_DIR, SFT_PRETRAINED_CHECKPOINT
 # Optional: SFT_TOKENIZER_MODEL, WANDB_PROJECT, WANDB_ENTITY, WANDB_NAME
 #
 # Example:
-#   nemotron steps run sft/megatron_bridge -c super_128k --batch lepton_super_sft
+#   nemotron steps run sft/megatron_bridge -c default --batch lepton_super_sft
+#   nemotron steps run sft/megatron_bridge -c super_256k --batch lepton_super_sft
 
 run:
   data: null
   env:
     container: nvcr.io/nvidia/nemo:26.02.nemotron_3_super
     env_vars:
+      # Hopper supports CUDA Multicast. Keep overlap off in this matched control;
+      # enable it in the H100 sweep cases (22+), not here.
       UB_SKIPMC: "1"
       CUDA_DEVICE_MAX_CONNECTIONS: "1"
+      # CE after iter 1 needed ~2 GiB with only ~1 GiB contiguous free while
+      # ~75 GiB was reserved. Expandable segments is the fragmentation fix.
       PYTORCH_ALLOC_CONF: "expandable_segments:True"
+      # Socket CP all-to-all for 256k is slow; avoid heartbeat kills mid-step.
       TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: "1800"
+      # Prefer Socket when fabric IB is broken (vendor err 129). Cluster profiles
+      # may also set these via startup_commands so they win over container init.
       NCCL_IB_DISABLE: "1"
       NCCL_NET: "Socket"
       NCCL_SOCKET_IFNAME: "eth0"
@@ -37,6 +47,8 @@ run:
       TORCH_FR_BUFFER_SIZE: "2048"
 
 # Base init priority: resume > pretrained_checkpoint > HF.
+# Default: load base weights from HuggingFace via AutoBridge (no Megatron base needed).
+# To start from a Megatron checkpoint instead, set SFT_PRETRAINED_CHECKPOINT (below).
 # hf_model_path: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
 # trust_remote_code: true
 # load_hf_weights: true
@@ -45,26 +57,31 @@ recipe:
   _target_: megatron.bridge.recipes.nemotronh.nemotron_3_super.nemotron_3_super_finetune_config
   peft: null
   packed_sequence: true
-  seq_length: 131072
+  seq_length: 262144
   tensor_model_parallel_size: 8
-  pipeline_model_parallel_size: 1
+  # TP8 × PP2 × CP8 = 128 ranks on 16×8 A100.
+  # PP1/CP16 still OOMs at DDP setup: ~57 GiB params + ~26 GiB BF16 grad
+  # buffer > 80 GiB even with grad_reduce_in_fp32=false. PP2 halves params so
+  # both fit; BF16 grad reduce (synced past bf16_mixed) frees the headroom
+  # that FP32 grads ate when CE needed ~2 GiB after iter 1.
+  pipeline_model_parallel_size: 2
   context_parallelism: 8
   sequence_parallelism: true
-  expert_model_parallelism: 64
+  expert_model_parallelism: 8
   expert_tensor_parallelism: 1
   finetune_lr: 5.0e-6
   min_lr: 0.0
   lr_warmup_iters: 50
 
 dataset:
-  seq_length: 131072
+  seq_length: 262144
   # Fixed-length batches are required for packed SFT + CP>1 (Megatron-Bridge).
   dataset_kwargs:
     pad_to_max_length: true
   packed_sequence_specs:
-    packed_sequence_size: 131072
-    # Must match packing pad_seq_to_mult. With CP=8, TP=8, sequence_parallel on:
-    # 2*CP*TP = 2*8*8 = 128. Repack to packed_128k_cp8 with that pad; cp32/pad=32 is wrong.
+    packed_sequence_size: 262144
+    # Must match data_prep/sft_packing pad_seq_to_mult. With CP=8, TP=8, SP on:
+    # 2*CP*TP = 2*8*8 = 128. Reuse packed_256k_cp8 (do not use cp16/pad=256).
     pad_seq_to_mult: 128
     packed_train_data_path: ${oc.env:SFT_PACKED_DIR}/splits/train
     packed_val_data_path: ${oc.env:SFT_PACKED_DIR}/splits/train
@@ -76,14 +93,16 @@ train:
   micro_batch_size: 1
   eval_interval: 10
   eval_iters: 1
+  # Release CUDA caching allocator between iters so reserved-but-free gaps
+  # can satisfy the ~2 GiB fused CE allocation on the last PP stage.
   empty_unused_memory_level: 2
 
 model:
-  seq_length: 131072
+  seq_length: 262144
   tensor_model_parallel_size: 8
-  pipeline_model_parallel_size: 1
+  pipeline_model_parallel_size: 2
   context_parallel_size: 8
-  expert_model_parallel_size: 64
+  expert_model_parallel_size: 8
   expert_tensor_parallel_size: 1
   sequence_parallel: true
   calculate_per_token_loss: true
@@ -101,7 +120,8 @@ tokenizer:
 
 ddp:
   check_for_nan_in_grad: false
-  # Prefer BF16 grad reduce for long-context Super SFT memory (runner syncs past bf16_mixed).
+  # Must stay false: bf16_mixed would force True (~26 GiB FP32 grads on PP2,
+  # ~52 GiB on PP1). Runner syncs this into MixedPrecisionConfig.
   grad_reduce_in_fp32: false
   overlap_grad_reduce: false
   overlap_param_gather: false
@@ -112,25 +132,29 @@ logger:
   log_interval: 1
   wandb_project: ${oc.select:run.wandb.project,${oc.env:WANDB_PROJECT,Megatron-Bridge-SFT-Nemotron-3-Super}}
   wandb_entity: ${oc.select:run.wandb.entity,${oc.env:WANDB_ENTITY,nvidia}}
-  wandb_exp_name: ${oc.env:WANDB_NAME,nemotron-3-super-120b-a12b-sft-128k-cp8}
-  wandb_save_dir: ${oc.env:SFT_OUTPUT_DIR}/sft-128k-cp8/wandb
+  wandb_exp_name: ${oc.env:WANDB_NAME,nemotron-3-super-120b-a12b-sft-256k-pp2-cp8}
+  wandb_save_dir: ${oc.env:SFT_OUTPUT_DIR}/sft-256k-pp2-cp8/wandb
 
 checkpoint:
   # Where checkpoints are written.
-  save: ${oc.env:SFT_OUTPUT_DIR}/sft-128k-cp8
+  save: ${oc.env:SFT_OUTPUT_DIR}/sft-256k-pp2-cp8
 
   # Base from a Megatron checkpoint instead of HF: set SFT_PRETRAINED_CHECKPOINT.
+  # When set it takes priority over the HF base above; if set but not a real
+  # checkpoint the run fails fast (it does not silently fall back to HF).
   pretrained_checkpoint: ${oc.env:SFT_PRETRAINED_CHECKPOINT}
 
   # Resume an interrupted run: point `load` at a checkpoint directory. It defaults
   # to `save`, so re-running with the same `save` already auto-resumes.
-  # load: ${oc.env:SFT_OUTPUT_DIR}/sft-128k-cp8
+  # load: ${oc.env:SFT_OUTPUT_DIR}/sft-256k-pp2-cp8
 
   # ckpt_step: 100
 
   save_interval: 10
   finetune: true
 
+# bf16_mixed defaults grad_reduce_in_fp32=True (authoritative over ddp:).
+# Runner syncs ddp.grad_reduce_in_fp32=false into this recipe at launch.
 mixed_precision: bf16_mixed
 
 rng:
@@ -142,4 +166,6 @@ dist:
   # default 10-minute NCCL timeout and triggers a watchdog ALLREDUCE timeout.
   # Indices are cached at dataset.path_to_cache, so this is a one-time cost.
   distributed_timeout_minutes: 120
+  # Skip Gloo full-mesh PGs (incl. group_with_cp_gloo). On 128 ranks CP=16 that
+  # mesh has aborted mid-init on Lepton; NCCL-only groups are enough for SFT.
   use_gloo_process_groups: false

@@ -278,6 +278,49 @@ def _maybe_add_model_controls(cfg: Any, container: dict[str, Any]) -> None:
     hooks.append(_freeze_moe_router_weights)
 
 
+def _sync_grad_reduce_into_mixed_precision(cfg: Any, container: dict[str, Any]) -> None:
+    """Keep ``ddp.grad_reduce_in_fp32`` from being overwritten by mixed precision.
+
+    Megatron-Bridge treats ``mixed_precision`` as authoritative: named recipes
+    like ``bf16_mixed`` force ``grad_reduce_in_fp32=True`` onto the DDP config
+    during ``runtime_config_update``, wiping a YAML ``ddp:`` override. On A100
+    Super SFT with DP=1 that allocates a ~52 GiB FP32 grad buffer and OOMs.
+    If the user set ``ddp.grad_reduce_in_fp32``, push that value into the
+    resolved ``MixedPrecisionConfig`` so it survives finalize.
+    """
+    ddp_overrides = container.get("ddp")
+    if not isinstance(ddp_overrides, dict) or "grad_reduce_in_fp32" not in ddp_overrides:
+        return
+
+    from megatron.bridge.training.mixed_precision import (
+        MixedPrecisionConfig,
+        get_mixed_precision_config,
+    )
+
+    desired = bool(ddp_overrides["grad_reduce_in_fp32"])
+    mp = getattr(cfg, "mixed_precision", None)
+    if mp is None:
+        return
+    if isinstance(mp, str):
+        mp = get_mixed_precision_config(mp)
+    elif isinstance(mp, MixedPrecisionConfig):
+        pass
+    else:
+        # Fall back to bf16 recipe then overlay any dict-form fields we understand.
+        base = get_mixed_precision_config("bf16_mixed")
+        if isinstance(mp, dict):
+            for key, value in mp.items():
+                if key in {"params_dtype", "pipeline_dtype", "autocast_dtype"}:
+                    continue
+                if hasattr(base, key):
+                    setattr(base, key, value)
+        mp = base
+    mp.grad_reduce_in_fp32 = desired
+    cfg.mixed_precision = mp
+    if getattr(cfg, "ddp", None) is not None and hasattr(cfg.ddp, "grad_reduce_in_fp32"):
+        cfg.ddp.grad_reduce_in_fp32 = desired
+
+
 # =============================================================================
 # Dataset (SFT-style)
 # =============================================================================
@@ -393,6 +436,9 @@ def run_megatron_bridge(
 
     _maybe_patch_checkpointing(container)
     _maybe_add_model_controls(cfg, container)
+    # Must run after section overrides: bf16_mixed would otherwise force
+    # grad_reduce_in_fp32=True and recreate the 52 GiB DDP buffer OOM.
+    _sync_grad_reduce_into_mixed_precision(cfg, container)
 
     if dataset_mode == "finetune":
         _maybe_build_dataset(cfg, container)
