@@ -1,0 +1,17 @@
+"""BFCL benchmark-family registration."""
+
+from __future__ import annotations
+
+from nemotron.steps.byob.runtime.benchmark_families.base import BenchmarkFamilySpec
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+    generate_bfcl,
+    prepare_bfcl,
+)
+
+SPEC = BenchmarkFamilySpec(
+    name="bfcl",
+    description="Function-calling benchmark generation from an executable oracle pack.",
+    prepare_data=prepare_bfcl,
+    generate=generate_bfcl,
+    translate=None,
+)

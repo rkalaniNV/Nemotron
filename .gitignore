@@ -96,6 +96,7 @@ src/nemotron/cli/commands/omni3/data/**/__pycache__/
 src/nemotron/cli/commands/lightning35/data/**/__pycache__/
 src/nemotron/cli/commands/data/**/__pycache__/
 src/nemotron/recipes/data/**/__pycache__/
+src/nemotron/steps/**/data/**/__pycache__/
 workspace/
 wandb/
 .nemotron/

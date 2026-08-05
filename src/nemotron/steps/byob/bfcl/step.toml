@@ -1,0 +1,134 @@
+[step]
+id = "byob/bfcl"
+name = "Bring Your Own Benchmark — BFCL"
+category = "byob"
+description = "Generate function-calling benchmark parquet artifacts from an executable oracle pack with process-worker isolation."
+tags = ["benchmark", "byob", "bfcl", "function-calling", "oracle-pack"]
+
+[[consumes]]
+type = "oracle_pack"
+description = "Allowlisted executable oracle pack (manifest + tools + backend/fixtures/templates/assertions/validation_cases)."
+
+[[produces]]
+type = "bfcl_benchmark_parquet"
+description = "Generated BFCL benchmark parquet with expected_tool_calls, messages, and provenance columns."
+
+[[produces]]
+type = "bfcl_run_manifest"
+description = "run_manifest.json recording lineage, oracle clock, generation mode, and a content hash per stage artifact."
+
+[[produces]]
+type = "bfcl_stage_cache"
+description = "One parquet per generation stage under stage_cache/ (task_instances, conversation_plans, rendered_conversations, expected_traces, schema_validated_traces, replay_validated_tasks), each keyed by task_id."
+
+[[parameters]]
+name = "family"
+description = "Benchmark family implementation to run."
+default = "bfcl"
+choices = ["bfcl"]
+
+[[parameters]]
+name = "stage"
+description = "BYOB pipeline stage to run."
+default = "generate"
+choices = ["prepare", "generate", "all"]
+
+[[parameters]]
+name = "config"
+description = "Path to a BFCL YAML config."
+
+[[strategies]]
+when = "You need a function-calling benchmark from an executable oracle pack"
+then = "Use family=bfcl: stage=prepare normalizes the pack and writes oracle_validation_report.json, stage=generate consumes a gold-eligible report and writes benchmark_raw.parquet, benchmark.parquet, and run_manifest.json. Start from config/default.yaml, point oracle_pack at your pack, and keep domain content out of runtime/benchmark_families/bfcl."
+skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[strategies]]
+when = "You need to validate an oracle pack without producing a publishable benchmark"
+then = "Run stage=prepare or `python -m nemotron.steps.byob.scripts.validate_oracle_pack --config <CONFIG>`. Configs that pin lineage.policy=smoke_no_publication record generation_mode=smoke_no_publication and are never publication-eligible."
+skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[strategies]]
+when = "You want a domain-sized run covering every supported conversation shape"
+then = "Run config/banking_vn.yaml with stage=all against data/banking_vn_oracle_pack: it budgets tasks_per_category across six categories and covers single_turn, missing_slot, confirmation, correction, multi_tool, dependent_call, negative_path, clarify_only, and irrelevant with a distractor tool on every template."
+skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[strategies]]
+when = "You want the smallest end-to-end function-calling run to check plumbing"
+then = "Run config/tiny.yaml with stage=all against data/tiny_oracle_pack: it covers single-turn, confirmation, parallel call_group, and irrelevant shapes with no model calls."
+skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[errors]]
+name = "missing_family_pin"
+recovery = "Every bfcl/config/*.yaml must set family: bfcl. Without it the shared dispatcher defaults to mcq."
+
+[[errors]]
+name = "pack_outside_allowlist"
+recovery = "Place the oracle pack under an oracle_runtime.allowed_roots entry (default: byob/data) or extend allowed_roots explicitly."
+
+[[errors]]
+name = "stage_resume_unavailable"
+recovery = "BFCL has no stage resume; drop skip_until and run stage=prepare followed by stage=generate."
+
+[[errors]]
+name = "non_gold_pack"
+recovery = "stage=generate refuses a pack whose oracle_validation_report.json is not gold_eligible. Fix the reported check failures, keep oracle_runtime.worker=process, then re-run stage=prepare."
+
+[[errors]]
+name = "category_budget_too_small"
+recovery = "task_generation.tasks_per_category budgets a whole category. Raise it to at least the number of templates in the largest category so no template loses its instances."
+
+[[errors]]
+name = "slot_correction_declaration_invalid"
+recovery = "A slot_updates entry needs turn_policy=correction, a slot the user already stated (visible_in_first_turn), a source of the same kind as the original, and a replacement value that differs from it."
+
+[[errors]]
+name = "superseded_slot_value_in_trace"
+recovery = "A call read a corrected slot while it still held the replaced value. Move the correction turn before the call that reads the slot, and re-confirm after it when the tool requires confirmation."
+
+[[errors]]
+name = "template_without_success_assertion"
+recovery = "Gold requires every template to declare at least one success_assertions entry, otherwise replay can only confirm the trace ran. Add an assertion to assertions.py describing what success means for that shape (a decline template can assert that no tool was called)."
+
+[[errors]]
+name = "confirmed_mutation_without_user_confirmation"
+recovery = "A call carrying confirm: true must sit in an assistant turn covered by a confirmation: put an ask_confirm plus its user_simulator_turns reply before the call, and re-confirm after any correction turn."
+
+[[errors]]
+name = "dependent_call_binding_failed"
+recovery = "A from_result argument must name an earlier tool_call id in a strictly lower call_group and a path resolving to a scalar in that call's result. A path that misses for one instance drops that instance with its reason in stage_cache/expected_traces.parquet; narrow the template's slot filter if too many drop."
+
+[[errors]]
+name = "slot_missing_visibility_flag"
+recovery = "Every template slot must declare visible_in_first_turn. The flag decides whether the value must appear in the opening request (must_preserve) or must stay out of it (must_omit), so a slot without it is guarded by neither rule."
+
+[[errors]]
+name = "unknown_turn_policy"
+recovery = "turn_policy must be one of single_turn, missing_slot, confirmation, correction, multi_tool, dependent_call, negative_path, clarify_only, irrelevant. A typo would silently skip the gates that policy activates."
+
+[[errors]]
+name = "primary_key_ambiguous"
+recovery = "A fixture collection carrying its own id plus a foreign key must declare manifest.primary_keys.<collection>; the convention only covers <singular>_id and id. Guessing would attribute a task to the record it merely references."
+
+[[errors]]
+name = "ask_for_slot_without_a_named_slot"
+recovery = "An assistant question using {slot_name} must name the slot it asks about (slot: <name> on the milestone) whenever the template withholds more than one slot."
+
+[[errors]]
+name = "no_replay_validated_rows"
+recovery = "Every task was dropped before export. Read stage_cache/replay_validated_tasks.parquet for nondeterministic_replay or assertion failures and stage_cache/rendered_conversations.parquet for guard violations."
+
+[[errors]]
+name = "missing_assistant_turn_templates"
+recovery = "Declare assistant_turn_templates for the non-tool milestones the templates use (ask_for_slot, ask_confirm, decline, final_answer) on the pack manifest or the template."
+
+[[errors]]
+name = "unsupported_config_feature"
+recovery = "stage=generate refuses a config that asks for work no stage performs (an enabled profile, paraphrase, or surface_judge role, model_paraphrase_enabled, surface_quality_validation, semantic_deduplication_config, an export, a paraphrase count, a judge drop authority, a lineage claim such as profile_influenced_surface or judge_advisory, or an unrecognized surface_generation key) instead of ignoring it. Disable or remove the listed settings to run the template-only path."
+
+[reference]
+skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+contract = "src/nemotron/steps/byob/references/STEP.md"
+script = "src/nemotron/steps/byob/bfcl/step.py"
+default_config = "src/nemotron/steps/byob/bfcl/config/default.yaml"
+tiny_config = "src/nemotron/steps/byob/bfcl/config/tiny.yaml"
+runtime = "src/nemotron/steps/byob/runtime/benchmark_families/bfcl/pipeline.py"
