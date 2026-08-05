@@ -15,6 +15,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import SURFACE_G
 
 if TYPE_CHECKING:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import LoadedPack
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 # trusted across runs. Validation results are instead remembered for the lifetime of
 # this process, keyed by the pack and config fingerprints they were computed from, so
 # `stage=all` does not pay for the same episodes twice.
-_VALIDATED_THIS_PROCESS: dict[tuple[str, str, str], dict] = {}
+_VALIDATED_THIS_PROCESS: dict[tuple[str, str, str, str], dict] = {}
 _FINAL_ARTIFACTS = (
     "run_manifest.json",
     "run_manifest.json.tmp",
@@ -107,7 +108,23 @@ def _validate_pack(config: BfclConfig) -> tuple[dict, Path]:
     pack = prepare_oracle_pack(config)
     report_path = stage_cache_dir(config) / "oracle_validation_report.json"
     fingerprint_before = pack_fingerprint(pack.paths)
-    key = (str(report_path), fingerprint_before, validation_config_fingerprint(config))
+    try:
+        endpoint_identity_key = _endpoint_metadata(config, pack)
+    except Exception as exc:  # noqa: BLE001 — validation records the endpoint failure
+        # Endpoint availability and identity are validation outcomes. Keep a stable
+        # cache key for the failed probe, then let oracle_validation write the
+        # actionable failure report instead of aborting prepare before it can do so.
+        endpoint_identity_key = f"error:{type(exc).__name__}:{exc}"
+    key = (
+        str(report_path),
+        fingerprint_before,
+        validation_config_fingerprint(config),
+        (
+            repr(sorted(endpoint_identity_key.items()))
+            if isinstance(endpoint_identity_key, dict)
+            else str(endpoint_identity_key or "")
+        ),
+    )
     remembered = _VALIDATED_THIS_PROCESS.get(key)
     if remembered is not None:
         return remembered, report_path
@@ -131,6 +148,34 @@ def _invalidate_final_outputs(config: BfclConfig) -> None:
     output_dir = Path(config.output_dir) / config.expt_name
     for name in _FINAL_ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
+
+
+def _endpoint_metadata(config: BfclConfig, pack: LoadedPack) -> dict[str, str] | None:
+    """Read and verify remote oracle identity through the normal process worker."""
+    endpoint_config = pack.endpoint_config
+    if endpoint_config is None:
+        return None
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
+
+    runtime = config.oracle_runtime
+    outputs = ProcessWorker(
+        default_timeout_s=runtime.episode_timeout_s,
+        worker=runtime.worker,
+    ).run_episode(
+        endpoint_config=endpoint_config,
+        fixtures=None,
+        clock_iso=runtime.clock,
+        seed=int(config.random_seed or 0),
+        task_id="endpoint-metadata",
+        steps=[{"op": "metadata"}],
+        import_timeout_s=runtime.import_timeout_s,
+        tool_timeout_s=runtime.tool_timeout_s,
+        episode_timeout_s=runtime.episode_timeout_s,
+    )
+    metadata = outputs[0]
+    if not isinstance(metadata, dict):
+        raise RuntimeError("endpoint metadata response was not an object")
+    return {str(key): str(value) for key, value in metadata.items()}
 
 
 def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
@@ -209,6 +254,12 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     run_reference_profile(config)
 
     pack = load_pack(config)
+    expected_endpoint_metadata = report.get("endpoint_metadata")
+    if _endpoint_metadata(config, pack) != expected_endpoint_metadata:
+        raise RuntimeError(
+            "endpoint metadata changed after validation; refusing to generate from "
+            "an oracle revision the gold report did not certify"
+        )
     templates_by_id = {str(template["template_id"]): template for template in pack.templates}
 
     tasks = run_expand(config, pack)
@@ -231,6 +282,11 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
         raise RuntimeError(
             "oracle pack changed after validation; refusing to publish artifacts derived "
             "from content that the gold report did not certify"
+        )
+    if _endpoint_metadata(config, pack) != expected_endpoint_metadata:
+        raise RuntimeError(
+            "endpoint metadata changed during generation; refusing to publish "
+            "artifacts from multiple oracle revisions"
         )
 
     # Each count reports its own stage, so a reader can tell a backend disagreement from

@@ -55,6 +55,7 @@ def replay_once(
 
     outputs = worker.run_episode(
         backend_path=pack.paths.backend_path,
+        endpoint_config=getattr(pack, "endpoint_config", None),
         fixtures=copy.deepcopy(pack.fixtures),
         clock_iso=runtime.clock,
         seed=int(task.get("seed") or 0),

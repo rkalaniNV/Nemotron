@@ -47,7 +47,7 @@ The `bfcl` family generates function-calling benchmarks from an executable oracl
 pack instead of source documents, so its flow differs from MCQ:
 
 ```text
-oracle pack (tools + backend + fixtures + templates + assertions + validation_cases)
+oracle pack (tools + backend or HTTPS endpoint + fixtures + templates + assertions + validation_cases)
   -> byob/bfcl stage=prepare
   -> stage_cache/ normalized artifacts + oracle_validation_report.json
   -> byob/bfcl stage=generate  (requires a gold-eligible report)
