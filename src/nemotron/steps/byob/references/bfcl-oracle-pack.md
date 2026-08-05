@@ -19,7 +19,8 @@ should use absolute `manifest_path` / `allowed_roots` values. Paths declared ins
 | --- | --- | --- |
 | `manifest.yaml` | yes | `pack_id`, `version`, optional `paths` overrides. |
 | `tools.json` | yes | OpenAI-style tool array plus pack-local `x-*` keys. |
-| `backend.py` | yes | Executable oracle. |
+| `backend.py` | one oracle required | Local executable oracle. Mutually exclusive with `endpoint_config.yaml`. |
+| `endpoint_config.yaml` | one oracle required | BFCL Oracle HTTP v1 endpoint, expected identity, TLS, and secret environment references. Mutually exclusive with `backend.py`. |
 | `fixtures.json` | no | Seed state passed to `reset`. |
 | `task_templates.yaml` | yes | Task templates with `slots` and `paraphrase`. |
 | `validation_cases.yaml` | yes | Declared probes proving tool behavior. |
@@ -41,9 +42,6 @@ A tool marked `x-requires-confirmation` must expose the confirmation parameter a
 must not mutate state when that parameter is `false`. `x-mutates` declares that a
 tool changes state; validation compares the claim against what the probes actually
 did and rejects a tool that changed state without declaring it.
-Endpoint-backed packs are not part of the current contract; declaring
-`endpoint_config.yaml` is rejected rather than advertised as executable.
-
 ### Manifest Keys
 
 | Key | Required | Purpose |
@@ -82,10 +80,70 @@ Only `code` is required — it is what scoring compares. `entity`, `id`, `field`
 `message` are optional detail for a reviewer, so a domain whose failures are not
 about one entity is not forced to pad the envelope with nulls.
 
+### HTTPS Endpoint Contract
+
+An endpoint-backed pack exposes the same oracle behavior through BFCL Oracle
+HTTP v1. `endpoint_config.yaml` declares:
+
+- `protocol_version: bfcl-oracle-http-v1`
+- an HTTPS `base_url`
+- expected `oracle_id`, `oracle_version`, and `sha256:` `content_digest`
+- optional bearer-token and custom-header environment-variable names
+- an optional allowlisted CA bundle plus request- and response-size limits
+
+The fixed routes are `GET /v1/metadata`, `GET /v1/tools`,
+`POST /v1/sessions`, `POST /v1/sessions/{id}/calls`,
+`GET /v1/sessions/{id}/state`, and `DELETE /v1/sessions/{id}`.
+Creating a session is the reset operation: the request carries the frozen
+`RunContext` fields and fixtures, and the response returns a unique session id
+plus the endpoint identity. Every replay gets a new session.
+
+`GET /v1/metadata` returns the identity object, and `GET /v1/tools` returns
+`{"tools": ["tool_name", ...]}`. Session creation uses:
+
+```json
+{
+  "context": {
+    "clock": "2026-03-02T09:00:00+07:00",
+    "seed": 7,
+    "timeout_s": 5.0,
+    "task_id": "pack__template__0001"
+  },
+  "fixtures": {}
+}
+```
+
+and returns:
+
+```json
+{
+  "session_id": "opaque-session-id",
+  "oracle": {
+    "protocol_version": "bfcl-oracle-http-v1",
+    "oracle_id": "example",
+    "oracle_version": "1.0.0",
+    "content_digest": "sha256:..."
+  }
+}
+```
+
+A call request is
+`{"name": "tool_name", "arguments": {}, "turn_index": 0}` and its response is
+the tool result itself. The state route returns a JSON object. Session ids are
+opaque and URL-escaped by the client. A successful session DELETE may return
+either an empty `204 No Content` response or a JSON object.
+
+Remote identity must match the config during prepare, session creation,
+generation, and publication. A changed version or digest aborts the run.
+Requests are not redirected and mutating requests are never retried. Secret
+values are resolved from the environment at runtime and are not included in
+fingerprints, reports, logs, or manifests.
+
 `assertions.py` functions must accept exactly the keyword arguments
 `(*, state, trace, task, ctx)` and raise `AssertionError` on failure. Export them
 through an `ASSERTIONS` dict or name them `assert_*`. Assertions run inside the
-same worker as the backend, so `state` is live and `trace` holds the calls the
+same process worker as the local backend or endpoint client. For endpoints,
+`state` is fetched from the active remote session; `trace` holds the calls the
 episode just made: `[{"tool": ..., "arguments": {...}, "result": {...}}]`.
 
 ## Template Surface Requirements

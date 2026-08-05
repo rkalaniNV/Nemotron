@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 # Bump whenever a check is added or tightened: a cached report was produced by the
 # older rules and must not stand in for the newer ones.
-VALIDATION_LOGIC_VERSION = 5
+VALIDATION_LOGIC_VERSION = 6
 
 _PROBES = Path(__file__).resolve().parent.parent / "probes"
 SLOW_BACKEND_PATH = _PROBES / "slow_backend.py"
@@ -66,11 +66,11 @@ def derive_pack_tier(report: dict[str, Any]) -> tuple[bool, str]:
         for check in checks
     )
     stats = report.get("stats") or {}
-    has_backend = bool(stats.get("has_backend"))
+    has_oracle = bool(stats.get("has_oracle", stats.get("has_backend")))
     has_templates = int(stats.get("n_templates") or 0) > 0
     has_assertions = int(stats.get("n_assertions") or 0) > 0
     has_tools = int(stats.get("n_tools") or 0) > 0
-    if all_pass and has_backend and has_templates and has_assertions:
+    if all_pass and has_oracle and has_templates and has_assertions:
         return True, "gold"
     if has_templates and has_tools:
         return False, "silver"
@@ -140,6 +140,9 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
     extras: list[dict[str, Any]] = []
     tool_names = _tool_names(pack.tools)
     backend_path = pack.paths.backend_path
+    endpoint_config = pack.endpoint_config
+    oracle_available = backend_path is not None or endpoint_config is not None
+    endpoint_metadata: dict[str, str] | None = None
     worker = ProcessWorker(
         default_timeout_s=config.oracle_runtime.episode_timeout_s,
         worker=config.oracle_runtime.worker,
@@ -154,10 +157,9 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
         steps: list[dict[str, Any]],
         fixtures_override: dict[str, Any] | None = None,
     ) -> list[Any]:
-        if backend_path is None:
-            raise RuntimeError("backend_path is required")
         return worker.run_episode(
             backend_path=backend_path,
+            endpoint_config=endpoint_config,
             fixtures=copy.deepcopy(pack.fixtures) if fixtures_override is None else fixtures_override,
             clock_iso=clock_iso,
             seed=seed,
@@ -345,7 +347,7 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
         }
     )
 
-    # --- Check 3: backend ↔ schema ---
+    # --- Check 3: executable oracle ↔ schema ---
     failures_3: list[dict[str, Any]] = []
     for tool in pack.tools:
         function = tool.get("function") or {}
@@ -353,15 +355,21 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
             failures_3.append(
                 {"tool": function.get("name"), **failure}
             )
-    if backend_path is None:
-        failures_3.append({"reason": "backend_missing"})
+    if not oracle_available:
+        failures_3.append({"reason": "oracle_missing"})
     else:
         try:
-            inspection, listed_tools = run_episode(
+            inspection_steps = [{"op": "inspect_backend"}, {"op": "list_tools"}]
+            if endpoint_config is not None:
+                inspection_steps.append({"op": "metadata"})
+            inspection_outputs = run_episode(
                 task_id="inspect-backend",
-                steps=[{"op": "inspect_backend"}, {"op": "list_tools"}],
+                steps=inspection_steps,
                 fixtures_override={},
             )
+            inspection, listed_tools = inspection_outputs[:2]
+            if endpoint_config is not None:
+                endpoint_metadata = inspection_outputs[2]
             implemented = set(listed_tools)
             for symbol, callable_value in inspection.items():
                 if not callable_value:
@@ -442,8 +450,8 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
     # Probing a backend that disagrees with tools.json would report noise, so the
     # check is recorded as skipped rather than passed — a skip is never gold.
     skipped_5: str | None = None
-    if backend_path is None:
-        skipped_5 = "pack declares no backend"
+    if not oracle_available:
+        skipped_5 = "pack declares no executable oracle"
     elif failures_3:
         skipped_5 = "backend_schema_alignment failed, so probe results cannot be trusted"
     if skipped_5 is None:
@@ -658,7 +666,7 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
 
     # --- Check 6: confirmation policy ---
     failures_6: list[dict[str, Any]] = []
-    if backend_path is not None:
+    if oracle_available:
         for tool in pack.tools:
             if not tool.get("x-requires-confirmation"):
                 continue
@@ -868,7 +876,7 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
 
     # --- Extra: D1 determinism ---
     failures_d1: list[dict[str, Any]] = []
-    if backend_path is not None:
+    if oracle_available:
         success_by_tool: dict[str, dict[str, Any]] = {}
         for case in pack.validation_cases:
             if str(case.get("id")) in successful_case_ids:
@@ -908,7 +916,7 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
     for case in pack.validation_cases:
         if str(case.get("id")) not in structured_error_case_ids:
             continue
-        if backend_path is None:
+        if not oracle_available:
             break
         try:
             result = replay_case_with_context(
@@ -1019,7 +1027,10 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
             "n_fixture_collections": len(fixtures),
             "n_validation_cases": len(pack.validation_cases),
             "has_backend": backend_path is not None,
+            "has_oracle": oracle_available,
+            "oracle_kind": "endpoint" if endpoint_config is not None else "python",
         },
+        "endpoint_metadata": endpoint_metadata,
     }
     gold_eligible, tier = derive_pack_tier(report)
     report.update(gold_eligible=gold_eligible, tier=tier)

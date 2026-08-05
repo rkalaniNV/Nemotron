@@ -1,0 +1,149 @@
+"""Contract coverage for conversation shapes supplied by the tiny oracle pack."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+PACK_ROOT = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "nemotron"
+    / "steps"
+    / "byob"
+    / "data"
+    / "tiny_oracle_pack"
+)
+BANKING_PACK_ROOT = PACK_ROOT.parent / "banking_vn_oracle_pack"
+
+
+def _templates() -> list[dict]:
+    return yaml.safe_load((PACK_ROOT / "task_templates.yaml").read_text(encoding="utf-8"))
+
+
+def test_tiny_pack_covers_parallel_calls_in_one_group() -> None:
+    template = next(item for item in _templates() if item["template_id"] == "lib_status_parallel")
+    calls = [
+        milestone
+        for milestone in template["assistant_milestones"]
+        if milestone["type"] == "tool_call"
+    ]
+    assert len(calls) >= 2
+    assert len({call["call_group"] for call in calls}) == 1
+
+
+def test_tiny_pack_covers_irrelevant_request_without_tools() -> None:
+    template = next(item for item in _templates() if item["turn_policy"] == "irrelevant")
+    assert template["required_tools"] == []
+    assert all(
+        milestone["type"] != "tool_call" for milestone in template["assistant_milestones"]
+    )
+    assert template["assistant_milestones"][-1]["type"] == "decline"
+
+
+def _banking_templates() -> list[dict]:
+    return yaml.safe_load((BANKING_PACK_ROOT / "task_templates.yaml").read_text(encoding="utf-8"))
+
+
+def test_banking_declares_a_template_for_every_supported_policy() -> None:
+    by_policy: dict[str, list[dict]] = {}
+    for template in _banking_templates():
+        by_policy.setdefault(template["turn_policy"], []).append(template)
+
+    assert set(by_policy) == {
+        "single_turn",
+        "missing_slot",
+        "confirmation",
+        "correction",
+        "multi_tool",
+        "dependent_call",
+        "negative_path",
+        "clarify_only",
+        "irrelevant",
+    }
+
+    chain = by_policy["dependent_call"][0]
+    producer, consumer = (
+        milestone
+        for milestone in chain["assistant_milestones"]
+        if milestone["type"] == "tool_call"
+    )
+    marker = consumer["args"]["transaction_id"]["from_result"]
+    assert marker["call"] == producer["id"]
+    assert producer["call_group"] < consumer["call_group"]
+
+    withheld = by_policy["missing_slot"][0]
+    hidden = [
+        name
+        for name, slot in withheld["slots"].items()
+        if slot.get("visible_in_first_turn") is False
+    ]
+    assert hidden
+    assert withheld["assistant_milestones"][0]["type"] == "ask_for_slot"
+    assert withheld["user_simulator_turns"][0]["after"] == "ask_for_slot"
+
+    clarify = by_policy["clarify_only"][0]
+    assert clarify["required_tools"] == []
+    assert clarify["assistant_milestones"][-1]["type"] == "ask_for_slot"
+
+    declines = by_policy["irrelevant"][0]
+    assert declines["required_tools"] == []
+    assert declines["assistant_milestones"][-1]["type"] == "decline"
+
+    parallel = by_policy["multi_tool"][0]
+    groups = {
+        milestone.get("call_group")
+        for milestone in parallel["assistant_milestones"]
+        if milestone["type"] == "tool_call"
+    }
+    assert len(groups) == 1
+
+    corrected = by_policy["correction"][0]
+    replacing, reconfirming = corrected["user_simulator_turns"]
+    updated = replacing["slot_updates"]
+    assert set(updated) <= set(corrected["slots"])
+    # The correction has to arrive before the call and be confirmed again after it,
+    # otherwise the transfer would ride on a withdrawn confirmation.
+    confirms = [
+        milestone["id"]
+        for milestone in corrected["assistant_milestones"]
+        if milestone["type"] == "ask_confirm"
+    ]
+    assert replacing["after"] == confirms[0]
+    assert reconfirming["after"] == confirms[1]
+    assert "slot_updates" not in reconfirming
+    milestone_types = [milestone["type"] for milestone in corrected["assistant_milestones"]]
+    last_confirm = max(index for index, kind in enumerate(milestone_types) if kind == "ask_confirm")
+    assert milestone_types.index("tool_call") > last_confirm
+    for slot_name, update in updated.items():
+        assert corrected["slots"][slot_name]["visible_in_first_turn"] is True
+        assert update["bind_as"] in replacing["content_template"]["vi"]
+
+
+def test_banking_negative_paths_expect_documented_failures() -> None:
+    negatives = [
+        template for template in _banking_templates() if template["turn_policy"] == "negative_path"
+    ]
+    assert {template["template_id"] for template in negatives} == {
+        "bn_txn_status_unknown_id",
+        "bn_transfer_short_of_funds",
+    }
+    assert {
+        assertion for template in negatives for assertion in template["success_assertions"]
+    } == {"assert_transaction_not_found", "assert_transfer_rejected_for_funds"}
+
+
+def test_banking_mutations_require_explicit_confirmation_turns() -> None:
+    templates = _banking_templates()
+    mutators = [
+        item
+        for item in templates
+        if item["template_id"] in {"bn_create_transfer_single", "bn_create_dispute_single"}
+    ]
+    assert len(mutators) == 2
+    for template in mutators:
+        assert template["turn_policy"] == "confirmation"
+        kinds = [milestone["type"] for milestone in template["assistant_milestones"]]
+        assert kinds == ["ask_confirm", "tool_call", "final_answer"]
+        assert template["user_simulator_turns"][0]["after"] == "ask_confirm"

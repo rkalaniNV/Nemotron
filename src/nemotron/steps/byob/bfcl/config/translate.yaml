@@ -1,0 +1,15 @@
+# BFCL translation configuration reserved for adapter-based localization.
+# The family pin prevents the shared dispatcher from falling through to MCQ.
+
+family: bfcl
+expt_name: bfcl_translation
+stage: translate
+config_status: template
+
+dataset_path: /tmp/bfcl/default_out/bfcl_default_gold_v0/benchmark.parquet
+output_dir: /tmp/bfcl/translate_out
+source_language: en
+target_language: vi
+
+# The family must register a translation adapter before this config is runnable.
+translation_adapter: unavailable

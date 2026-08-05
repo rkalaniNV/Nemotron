@@ -51,17 +51,42 @@ BFCL does not currently support `translate` or `skip_until`.
 
 ## Oracle Pack
 
-A runnable pack contains:
+A runnable pack uses these files:
 
-```text
-manifest.yaml
-tools.json
-backend.py
-fixtures.json
-task_templates.yaml
-assertions.py
-validation_cases.yaml
-```
+| File | Purpose |
+| --- | --- |
+| `manifest.yaml` | Identifies the pack and declares languages, paths, prompts, primary keys, and confirmation behavior. |
+| `tools.json` | Defines the model-facing function schemas and pack-local mutation or confirmation metadata. |
+| `backend.py` | Implements the local executable oracle. Use this or `endpoint_config.yaml`, never both. |
+| `endpoint_config.yaml` | Connects to a BFCL Oracle HTTP v1 service over HTTPS and pins its identity/content digest. Use this or `backend.py`, never both. |
+| `fixtures.json` | Supplies deterministic records and initial backend state for generated tasks. |
+| `task_templates.yaml` | Declares intents, slot sources, conversation policies, milestones, and success assertions. |
+| `assertions.py` | Checks the final backend state and executed trace to decide whether a replay actually succeeded. |
+| `validation_cases.yaml` | Provides positive and negative probes for backend/schema alignment, determinism, errors, and confirmation behavior. |
+
+### Direct HTTPS endpoint
+
+An endpoint-backed pack declares `paths.endpoint: endpoint_config.yaml` in its
+manifest, or sets `oracle_pack.endpoint_config_path` in the run config. The
+endpoint must implement BFCL Oracle HTTP v1:
+
+- `GET /v1/metadata`
+- `GET /v1/tools`
+- `POST /v1/sessions`
+- `POST /v1/sessions/{session_id}/calls`
+- `GET /v1/sessions/{session_id}/state`
+- `DELETE /v1/sessions/{session_id}`
+
+Session creation receives the frozen clock, seed, task id, timeout, and fixtures.
+It returns a unique `session_id` plus the oracle identity. The endpoint identity
+and `content_digest` must match `endpoint_config.yaml` during validation, replay,
+and final publication.
+
+Only HTTPS is accepted. Bearer tokens and custom secret headers are referenced by
+environment-variable name; their values are never stored in the pack, report, or
+manifest. See
+[`../references/bfcl-endpoint-config.example.yaml`](../references/bfcl-endpoint-config.example.yaml)
+for a complete configuration example.
 
 Pack code must live under an `oracle_runtime.allowed_roots` entry. Gold
 eligibility requires `oracle_runtime.worker: process`; thread mode is available

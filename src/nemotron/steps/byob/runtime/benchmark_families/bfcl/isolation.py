@@ -216,7 +216,7 @@ def run_with_timeout(
 
 
 def _run_backend_episode_sync_inner(
-    backend_path: str,
+    backend_path: str | None,
     fixtures: dict[str, Any] | None,
     clock_iso: str,
     seed: int,
@@ -227,6 +227,9 @@ def _run_backend_episode_sync_inner(
     sanitize_environment: bool,
     assertions_path: str | None = None,
     import_root: str | None = None,
+    endpoint_config: Any = None,
+    endpoint_headers: dict[str, str] | None = None,
+    oracle_holder: list[Any] | None = None,
 ) -> list[Any]:
     """Run an episode synchronously (debug-thread path only).
 
@@ -240,11 +243,26 @@ def _run_backend_episode_sync_inner(
 
     if sanitize_environment:
         _sanitize_pack_environment()
-    module = _load_module(
-        Path(backend_path),
-        f"_bfcl_episode_{Path(backend_path).stem}_{task_id}",
-        import_root,
-    )
+    if endpoint_config is not None:
+        from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+            EndpointOracleClient,
+        )
+
+        module = EndpointOracleClient(
+            endpoint_config,
+            headers=endpoint_headers or {},
+            timeout_s=tool_timeout_s,
+        )
+    else:
+        if backend_path is None:
+            raise ValueError("backend_path is required for a local oracle")
+        module = _load_module(
+            Path(backend_path),
+            f"_bfcl_episode_{Path(backend_path).stem}_{task_id}",
+            import_root,
+        )
+    if oracle_holder is not None:
+        oracle_holder.append(module)
     assertions_module = None
     if assertions_path is not None:
         assertions_module = _load_module(
@@ -289,6 +307,9 @@ def _run_backend_episode_sync_inner(
             outputs.append(result)
         elif op == "list_tools":
             outputs.append(module.list_tools())
+        elif op == "metadata":
+            metadata = getattr(module, "metadata", None)
+            outputs.append(metadata() if callable(metadata) else None)
         elif op == "inspect_backend":
             outputs.append(
                 {
@@ -329,7 +350,7 @@ def _run_backend_episode_sync_inner(
 
 
 def _run_backend_episode_sync(
-    backend_path: str,
+    backend_path: str | None,
     fixtures: dict[str, Any] | None,
     clock_iso: str,
     seed: int,
@@ -340,21 +361,32 @@ def _run_backend_episode_sync(
     sanitize_environment: bool,
     assertions_path: str | None = None,
     import_root: str | None = None,
+    endpoint_config: Any = None,
+    endpoint_headers: dict[str, str] | None = None,
 ) -> list[Any]:
     """Run the debug-thread episode and restore process-global import state."""
+    oracle_holder: list[Any] = []
     with _restored_import_state():
-        return _run_backend_episode_sync_inner(
-            backend_path,
-            fixtures,
-            clock_iso,
-            seed,
-            task_id,
-            tool_timeout_s,
-            steps,
-            sanitize_environment=sanitize_environment,
-            assertions_path=assertions_path,
-            import_root=import_root,
-        )
+        try:
+            return _run_backend_episode_sync_inner(
+                backend_path,
+                fixtures,
+                clock_iso,
+                seed,
+                task_id,
+                tool_timeout_s,
+                steps,
+                sanitize_environment=sanitize_environment,
+                assertions_path=assertions_path,
+                import_root=import_root,
+                endpoint_config=endpoint_config,
+                endpoint_headers=endpoint_headers,
+                oracle_holder=oracle_holder,
+            )
+        finally:
+            close = getattr(oracle_holder[0], "close", None) if oracle_holder else None
+            if callable(close):
+                close()
 
 
 def _resolve_assertion(module: ModuleType, name: str) -> Callable[..., Any]:
@@ -370,7 +402,7 @@ def _resolve_assertion(module: ModuleType, name: str) -> Callable[..., Any]:
 
 def _backend_worker(
     connection: Any,
-    backend_path: str,
+    backend_path: str | None,
     fixtures: dict[str, Any] | None,
     clock_iso: str,
     seed: int,
@@ -378,6 +410,8 @@ def _backend_worker(
     tool_timeout_s: float,
     assertions_path: str | None = None,
     import_root: str | None = None,
+    endpoint_config: Any = None,
+    endpoint_headers: dict[str, str] | None = None,
 ) -> None:
     """Persistent backend worker; parent enforces import and per-operation deadlines."""
     from datetime import datetime
@@ -386,11 +420,24 @@ def _backend_worker(
 
     try:
         _sanitize_pack_environment()
-        module = _load_module(
-            Path(backend_path),
-            f"_bfcl_backend_{Path(backend_path).stem}_{abs(hash((backend_path, task_id)))}",
-            import_root,
-        )
+        if endpoint_config is not None:
+            from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+                EndpointOracleClient,
+            )
+
+            module = EndpointOracleClient(
+                endpoint_config,
+                headers=endpoint_headers or {},
+                timeout_s=tool_timeout_s,
+            )
+        else:
+            if backend_path is None:
+                raise ValueError("backend_path is required for a local oracle")
+            module = _load_module(
+                Path(backend_path),
+                f"_bfcl_backend_{Path(backend_path).stem}_{abs(hash((backend_path, task_id)))}",
+                import_root,
+            )
         assertions_module = None
         if assertions_path is not None:
             assertions_module = _load_module(
@@ -405,12 +452,16 @@ def _backend_worker(
             task_id=task_id,
             turn_index=0,
         )
-        connection.send(("ready", None))
+        connection.send(("ready", None, None))
         trace: list[dict[str, Any]] = []
         while True:
             step = connection.recv()
             op = step["op"]
             if op == "close":
+                close = getattr(module, "close", None)
+                if callable(close):
+                    close()
+                connection.send(("ok", None, None))
                 return
             if op == "reset":
                 value = module.reset(ctx=ctx, fixtures=fixtures)
@@ -431,6 +482,9 @@ def _backend_worker(
                 )
             elif op == "list_tools":
                 value = module.list_tools()
+            elif op == "metadata":
+                metadata = getattr(module, "metadata", None)
+                value = metadata() if callable(metadata) else None
             elif op == "inspect_backend":
                 value = {
                     name: callable(getattr(module, name, None))
@@ -458,15 +512,21 @@ def _backend_worker(
                     }
             else:
                 raise ValueError(f"unknown episode op {op!r}")
-            connection.send(("ok", value))
+            connection.send(("ok", value, getattr(module, "session_id", None)))
     except EOFError:
         return
     except BaseException:  # noqa: BLE001
         try:
-            connection.send(("err", traceback.format_exc()))
+            connection.send(("err", traceback.format_exc(), getattr(locals().get("module"), "session_id", None)))
         except (BrokenPipeError, EOFError):
             pass
     finally:
+        close = getattr(locals().get("module"), "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
         connection.close()
 
 
@@ -581,7 +641,8 @@ class ProcessWorker:
     def run_episode(
         self,
         *,
-        backend_path: Path | str,
+        backend_path: Path | str | None = None,
+        endpoint_config: Any = None,
         fixtures: dict[str, Any] | None,
         clock_iso: str,
         seed: int,
@@ -608,12 +669,21 @@ class ProcessWorker:
         tool_timeout = self.default_timeout_s if tool_timeout_s is None else tool_timeout_s
         assertion_timeout = self.default_timeout_s if assertion_timeout_s is None else assertion_timeout_s
         episode_timeout = self.default_timeout_s if episode_timeout_s is None else episode_timeout_s
+        if (backend_path is None) == (endpoint_config is None):
+            raise ValueError("run_episode requires exactly one of backend_path or endpoint_config")
+        endpoint_headers: dict[str, str] | None = None
+        if endpoint_config is not None:
+            from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+                resolve_endpoint_headers,
+            )
+
+            endpoint_headers = resolve_endpoint_headers(endpoint_config)
 
         if self.worker == "thread":
             return run_with_timeout(
                 _run_backend_episode_sync,
                 episode_timeout,
-                str(backend_path),
+                None if backend_path is None else str(backend_path),
                 fixtures,
                 clock_iso,
                 seed,
@@ -623,6 +693,8 @@ class ProcessWorker:
                 sanitize_environment=False,
                 assertions_path=None if assertions_path is None else str(assertions_path),
                 import_root=None if import_root is None else str(import_root),
+                endpoint_config=endpoint_config,
+                endpoint_headers=endpoint_headers,
                 worker="thread",
             )
         if self.worker != "process":
@@ -634,7 +706,7 @@ class ProcessWorker:
             target=_backend_worker,
             args=(
                 child,
-                str(backend_path),
+                None if backend_path is None else str(backend_path),
                 fixtures,
                 clock_iso,
                 seed,
@@ -642,13 +714,39 @@ class ProcessWorker:
                 tool_timeout,
                 None if assertions_path is None else str(assertions_path),
                 None if import_root is None else str(import_root),
+                endpoint_config,
+                endpoint_headers,
             ),
         )
         started = time.monotonic()
         proc.start()
         child.close()
+        remote_session_id: str | None = None
 
-        def exchange(timeout_s: float, label: str, step: dict[str, Any] | None = None) -> Any:
+        def cleanup_endpoint_session() -> None:
+            nonlocal remote_session_id
+            if endpoint_config is None or remote_session_id is None:
+                return
+            from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+                EndpointOracleClient,
+            )
+
+            client = EndpointOracleClient(
+                endpoint_config,
+                headers=endpoint_headers or {},
+                timeout_s=tool_timeout,
+            )
+            client.session_id = remote_session_id
+            client.close()
+            remote_session_id = None
+
+        def exchange(
+            timeout_s: float,
+            label: str,
+            step: dict[str, Any] | None = None,
+            *,
+            respect_episode_deadline: bool = True,
+        ) -> Any:
             """Send one step and receive its reply without blocking past the deadline.
 
             ``Connection.poll`` only proves that the first bytes of a message are
@@ -656,11 +754,20 @@ class ProcessWorker:
             still being written, so the complete exchange has to run behind the same
             deadline as the backend operation.
             """
+            nonlocal remote_session_id
             remaining = episode_timeout - (time.monotonic() - started)
-            timeout = min(timeout_s, remaining)
+            timeout = min(timeout_s, remaining) if respect_episode_deadline else timeout_s
             if timeout <= 0:
                 _stop_process(proc)
-                raise TimeoutError(f"{label} exceeded timeout_s={timeout_s}")
+                error = TimeoutError(f"{label} exceeded timeout_s={timeout_s}")
+                try:
+                    cleanup_endpoint_session()
+                except Exception as cleanup_exc:  # noqa: BLE001
+                    error.add_note(
+                        "endpoint session cleanup also failed: "
+                        f"{type(cleanup_exc).__name__}"
+                    )
+                raise error
 
             replies: queue_module.Queue[tuple[str, Any]] = queue_module.Queue(maxsize=1)
 
@@ -679,14 +786,31 @@ class ProcessWorker:
                 _stop_process(proc)
                 parent.close()
                 receiver.join(1.0)
-                raise TimeoutError(f"{label} exceeded timeout_s={timeout_s}")
+                error = TimeoutError(f"{label} exceeded timeout_s={timeout_s}")
+                try:
+                    cleanup_endpoint_session()
+                except Exception as cleanup_exc:  # noqa: BLE001
+                    error.add_note(
+                        "endpoint session cleanup also failed: "
+                        f"{type(cleanup_exc).__name__}"
+                    )
+                raise error
             kind, value = replies.get_nowait()
             if kind == "exception":
                 raise RuntimeError(f"worker connection failed during {label}: {value}") from value
-            status, payload = value
+            status, payload, session_id = value
+            remote_session_id = session_id
             if status == "err":
                 _stop_process(proc)
-                raise RuntimeError(f"worker failed during {label}:\n{payload}")
+                error = RuntimeError(f"worker failed during {label}:\n{payload}")
+                try:
+                    cleanup_endpoint_session()
+                except Exception as cleanup_exc:  # noqa: BLE001
+                    error.add_note(
+                        "endpoint session cleanup also failed: "
+                        f"{type(cleanup_exc).__name__}"
+                    )
+                raise error
             return payload
 
         try:
@@ -703,16 +827,21 @@ class ProcessWorker:
                     step = _advance_episode(iterator, output)
             except StopIteration:
                 pass
-            try:
-                parent.send({"op": "close"})
-            except (BrokenPipeError, EOFError, OSError):
-                pass
-            proc.join(min(1.0, max(0.0, episode_timeout - (time.monotonic() - started))))
+            exchange(
+                tool_timeout,
+                "session close",
+                {"op": "close"},
+                respect_episode_deadline=False,
+            )
+            proc.join(min(tool_timeout, max(0.0, episode_timeout - (time.monotonic() - started))))
             _stop_process(proc)
             return outputs
         finally:
-            parent.close()
             _stop_process(proc)
+            parent.close()
+            # Covers parent-side generator failures and broken IPC after a reset:
+            # neither path passes through exchange's timeout/error cleanup.
+            cleanup_endpoint_session()
 
     def inspect_assertions(
         self,

@@ -7,7 +7,7 @@ tags = ["benchmark", "byob", "bfcl", "function-calling", "oracle-pack"]
 
 [[consumes]]
 type = "oracle_pack"
-description = "Allowlisted executable oracle pack (manifest + tools + backend/fixtures/templates/assertions/validation_cases)."
+description = "Allowlisted executable oracle pack using backend.py or a BFCL Oracle HTTP v1 endpoint, plus tools/fixtures/templates/assertions/validation_cases."
 
 [[produces]]
 type = "bfcl_benchmark_parquet"
@@ -64,6 +64,14 @@ recovery = "Every bfcl/config/*.yaml must set family: bfcl. Without it the share
 [[errors]]
 name = "pack_outside_allowlist"
 recovery = "Place the oracle pack under an oracle_runtime.allowed_roots entry (default: byob/data) or extend allowed_roots explicitly."
+
+[[errors]]
+name = "endpoint_contract_invalid"
+recovery = "Use an HTTPS BFCL Oracle HTTP v1 endpoint with metadata, tools, isolated sessions, calls, state, and session deletion routes. Store only environment-variable names in endpoint_config.yaml and pin the expected oracle id, version, and content digest."
+
+[[errors]]
+name = "endpoint_identity_changed"
+recovery = "The endpoint metadata no longer matches endpoint_config.yaml or changed during the run. Deploy or select the intended immutable oracle revision, then update the expected digest and re-run prepare."
 
 [[errors]]
 name = "stage_resume_unavailable"

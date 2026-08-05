@@ -73,6 +73,11 @@ def prepare_oracle_pack(config: BfclConfig) -> LoadedPack:
                     if pack.paths.endpoint_config_path
                     else None
                 ),
+                "endpoint_ca_bundle_path": (
+                    str(pack.paths.endpoint_ca_bundle_path)
+                    if pack.paths.endpoint_ca_bundle_path
+                    else None
+                ),
             },
             indent=2,
             sort_keys=True,

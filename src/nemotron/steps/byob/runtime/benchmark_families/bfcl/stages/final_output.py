@@ -53,16 +53,6 @@ def _write_parquet_atomic(table: Any, path: Path, parquet: Any) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _write_text_atomic(text: str, path: Path) -> None:
-    """Replace a text artifact without leaving a partial destination or temp file."""
-    temporary = path.with_suffix(f"{path.suffix}.tmp")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 def _require_pack_fingerprint(
     pack: LoadedPack,
     expected: str,
@@ -79,6 +69,67 @@ def _require_pack_fingerprint(
     raise RuntimeError(
         f"oracle pack changed {phase}; refusing to publish content that validation did not certify"
     )
+
+
+def _require_endpoint_identity(
+    config: BfclConfig,
+    pack: LoadedPack,
+    expected: dict[str, Any] | None,
+    *,
+    cleanup: tuple[Path, ...] = (),
+) -> None:
+    """Abort publication when a remote oracle no longer matches validation."""
+    if pack.endpoint_config is None:
+        return
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
+
+    runtime = config.oracle_runtime
+    outputs = ProcessWorker(
+        default_timeout_s=runtime.episode_timeout_s,
+        worker=runtime.worker,
+    ).run_episode(
+        endpoint_config=pack.endpoint_config,
+        fixtures=None,
+        clock_iso=runtime.clock,
+        seed=int(config.random_seed or 0),
+        task_id="final-output-endpoint-metadata",
+        steps=[{"op": "metadata"}],
+        import_timeout_s=runtime.import_timeout_s,
+        tool_timeout_s=runtime.tool_timeout_s,
+        episode_timeout_s=runtime.episode_timeout_s,
+    )
+    if outputs[0] == expected:
+        return
+    for path in cleanup:
+        path.unlink(missing_ok=True)
+    raise RuntimeError(
+        "endpoint identity changed during final output; refusing to publish "
+        "artifacts from an uncertified oracle revision"
+    )
+
+
+def _write_endpoint_manifest_atomic(
+    text: str,
+    path: Path,
+    *,
+    config: BfclConfig,
+    pack: LoadedPack,
+    expected_endpoint_metadata: dict[str, Any] | None,
+    cleanup: tuple[Path, ...],
+) -> None:
+    """Recheck endpoint identity immediately before replacing the manifest."""
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        _require_endpoint_identity(
+            config,
+            pack,
+            expected_endpoint_metadata,
+            cleanup=cleanup,
+        )
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _jsonable(
@@ -352,6 +403,11 @@ def run_final_output(
 
     output_dir = Path(config.output_dir) / config.expt_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    _require_endpoint_identity(
+        config,
+        pack,
+        validation_report.get("endpoint_metadata"),
+    )
     schema = benchmark_schema()
     raw_path = output_dir / "benchmark_raw.parquet"
     _write_parquet_atomic(pa.Table.from_pylist(rows, schema=schema), raw_path, pq)
@@ -419,6 +475,10 @@ def run_final_output(
             "version": pack.manifest.get("version"),
             "content_hash": f"sha256:{current_pack_fingerprint}",
         },
+        "oracle": {
+            "kind": "endpoint" if pack.endpoint_config is not None else "python",
+            "endpoint_metadata": validation_report.get("endpoint_metadata"),
+        },
         "reference_benchmark": config.reference_benchmark,
         "prompt_bundle_hash": prompt_bundle["prompt_bundle_hash"],
         "tier": tier,
@@ -460,9 +520,13 @@ def run_final_output(
         cleanup=(raw_path, benchmark_path),
     )
     manifest_path = output_dir / "run_manifest.json"
-    _write_text_atomic(
+    _write_endpoint_manifest_atomic(
         json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         manifest_path,
+        config=config,
+        pack=pack,
+        expected_endpoint_metadata=validation_report.get("endpoint_metadata"),
+        cleanup=(raw_path, benchmark_path),
     )
     logger.info(
         "BFCL final_output wrote %d rows (%d published) to %s",

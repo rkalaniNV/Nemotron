@@ -11,6 +11,10 @@ from typing import Any
 import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig, OraclePackRef
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+    EndpointConfig,
+    load_endpoint_config,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import assert_pack_allowed
 
 
@@ -26,6 +30,7 @@ class ResolvedPackPaths:
     system_prompt_path: Path | None
     backend_path: Path | None
     endpoint_config_path: Path | None
+    endpoint_ca_bundle_path: Path | None = None
 
 
 @dataclass
@@ -36,6 +41,7 @@ class LoadedPack:
     fixtures: dict[str, Any] | None
     templates: list[dict[str, Any]]
     validation_cases: list[dict[str, Any]]
+    endpoint_config: EndpointConfig | None = None
 
 
 def _as_path(pack_root: Path, value: str | Path | None) -> Path | None:
@@ -130,11 +136,16 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
 
     if (backend_path is None) == (endpoint_config_path is None):
         raise ValueError("oracle pack must declare exactly one of backend.py or endpoint_config.yaml")
+    endpoint_ca_bundle_path = None
     if endpoint_config_path is not None:
-        raise ValueError(
-            "endpoint-backed oracle packs are not supported; declare backend.py instead of "
-            f"{endpoint_config_path.name}"
-        )
+        if not endpoint_config_path.is_file():
+            raise FileNotFoundError(f"missing endpoint config: {endpoint_config_path}")
+        endpoint_ca_bundle_path = load_endpoint_config(
+            endpoint_config_path,
+            allowed_roots=config.oracle_runtime.allowed_roots,
+        ).ca_bundle_path
+    elif backend_path is not None and not backend_path.is_file():
+        raise FileNotFoundError(f"missing backend module: {backend_path}")
 
     for required in (tools_path, templates_path, assertions_path, validation_cases_path):
         if not required.exists():
@@ -151,6 +162,7 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
         system_prompt_path=system_prompt_path,
         backend_path=backend_path,
         endpoint_config_path=endpoint_config_path,
+        endpoint_ca_bundle_path=endpoint_ca_bundle_path,
     )
 
 
@@ -210,6 +222,7 @@ def pack_files(paths: ResolvedPackPaths) -> list[Path]:
         paths.system_prompt_path,
         paths.backend_path,
         paths.endpoint_config_path,
+        paths.endpoint_ca_bundle_path,
     ):
         if declared is not None and declared.is_file():
             collected[declared] = None
@@ -237,6 +250,7 @@ def pack_fingerprint(paths: ResolvedPackPaths) -> str:
         "system_prompt": paths.system_prompt_path,
         "backend": paths.backend_path,
         "endpoint": paths.endpoint_config_path,
+        "endpoint_ca_bundle": paths.endpoint_ca_bundle_path,
     }
     for role, path in declared.items():
         if path is None or not path.is_file():
@@ -418,6 +432,14 @@ def load_pack(config: BfclConfig) -> LoadedPack:
     if not isinstance(cases_raw, list):
         raise ValueError("validation_cases.yaml must be a list")
     _require_unique_string_ids(cases_raw, "id", "validation_cases.yaml")
+    endpoint_config = (
+        load_endpoint_config(
+            paths.endpoint_config_path,
+            allowed_roots=config.oracle_runtime.allowed_roots,
+        )
+        if paths.endpoint_config_path is not None
+        else None
+    )
 
     return LoadedPack(
         paths=paths,
@@ -426,4 +448,5 @@ def load_pack(config: BfclConfig) -> LoadedPack:
         fixtures=fixtures,
         templates=templates,
         validation_cases=cases_raw,
+        endpoint_config=endpoint_config,
     )
