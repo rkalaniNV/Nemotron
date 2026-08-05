@@ -2,7 +2,7 @@
 
 Use this README to create or translate benchmark artifacts while keeping benchmark-family logic easy for developers to extend.
 
-## Developer Journey
+## MCQ Developer Journey
 
 BYOB turns domain source documents into benchmark artifacts. Treat the source
 corpus as evaluation data, not training data: keep it separate from SDG, SFT, and
@@ -16,7 +16,7 @@ CPT inputs so the final benchmark remains held out.
 5. Validate row count, schema, answer indexes, and quality filters before using
    the benchmark for model claims.
 
-## Data And Artifact Flow
+## MCQ Data And Artifact Flow
 
 ```text
 domain source documents
@@ -30,7 +30,7 @@ domain source documents
 Final benchmark rows must preserve `question_id`, `question`, `options`,
 `answer_index`, `answer`, `cot_content`, `src`, and `category`.
 
-## Quick Start
+## MCQ Quick Start
 
 1. Install BYOB runtime dependencies with `uv sync --extra byob` or `pip install ".[byob]"` in the target environment.
 2. Read [references/STEP.md](references/STEP.md) for the artifact manifest.
@@ -41,17 +41,46 @@ Final benchmark rows must preserve `question_id`, `question`, `options`,
 6. Run `nemotron steps run byob/mcq -c <CONFIG> stage=generate family=mcq`.
 7. Translate an existing benchmark with `stage=translate` and a translation config.
 
+## Function-Calling Benchmarks (BFCL)
+
+The `bfcl` family generates function-calling benchmarks from an executable oracle
+pack instead of source documents, so its flow differs from MCQ:
+
+```text
+oracle pack (tools + backend + fixtures + templates + assertions + validation_cases)
+  -> byob/bfcl stage=prepare
+  -> stage_cache/ normalized artifacts + oracle_validation_report.json
+  -> byob/bfcl stage=generate  (requires a gold-eligible report)
+  -> expand -> state_machine -> render -> expected_trace
+  -> schema_validation -> executable_replay (reset + replay twice + assertions)
+  -> benchmark_raw.parquet + benchmark.parquet + run_manifest.json
+```
+
+Each generation stage writes one `stage_cache/` parquet keyed by `task_id`
+(`task_instances`, `conversation_plans`, `rendered_conversations`,
+`expected_traces`, `schema_validated_traces`, `replay_validated_tasks`), so
+joining them shows which stage dropped a task.
+
+- Run the whole slice on the checked-in tiny pack with `nemotron steps run byob/bfcl -c src/nemotron/steps/byob/bfcl/config/tiny.yaml stage=all family=bfcl`.
+- Swap in `bfcl/config/banking_vn.yaml` for a domain-sized run: it budgets `tasks_per_category` across six categories and covers every conversation shape the pipeline supports.
+- Validate a pack without generating with `python -m nemotron.steps.byob.scripts.validate_oracle_pack --config <CONFIG>`.
+- No stage of BFCL generation calls a model: user and assistant turns are rendered from the pack's templates.
+- Keep pack code under an `oracle_runtime.allowed_roots` entry; the default root is `data/`.
+- Keep `oracle_runtime.worker: process`. `thread` runs pack code in-process for debugging and can never reach the gold tier.
+- Read [references/bfcl-oracle-pack.md](references/bfcl-oracle-pack.md) for the pack layout, backend contract, validation-case keys, and tier rules.
+
 ## CLI And Config Knobs
+
+### MCQ
 
 Start from `mcq/config/tiny.yaml` for a smoke run, `mcq/config/default.yaml` for
 generation, and `mcq/config/translate.yaml` for translation. Developers usually
 change:
 
-- `family`: currently `mcq`.
 - `stage`: `prepare`, `generate`, `translate`, or `all`.
 - `target_source_mapping`: target subjects mapped to source document roots.
 - `filtering_model_configs`: explicit model configs for filtering and dedup.
-- `skip_until`: resume only when the previous stage cache exists.
+- `skip_until`: resume from an MCQ stage only when the preceding stage cache exists.
 - Translation backend and language settings in the translate config.
 - BYOB translation controls under `translation_model_config.stage`
   (`translation_prompt_path`) and `translation_model_config.segment_stage`
@@ -65,6 +94,20 @@ uv run nemotron steps run byob/mcq \
   stage=all \
   family=mcq
 ```
+
+### BFCL
+
+Start from `bfcl/config/tiny.yaml` for a smoke run or
+`bfcl/config/banking_vn.yaml` for the bundled domain example. BFCL supports:
+
+- `stage`: `prepare`, `generate`, or `all`.
+- `oracle_pack.manifest_path`: executable oracle-pack manifest.
+- `oracle_runtime`: clock, process-worker timeouts, and `allowed_roots`.
+- `task_generation.tasks_per_category`: category-wide task budget.
+- `surface_generation.language`: language rendered from pack templates.
+
+BFCL does not support `translate` or `skip_until`; generation must validate the
+current pack and config before publishing output.
 
 ## Change Points
 
@@ -85,7 +128,7 @@ uv run nemotron steps run byob/mcq \
 - Do not drop staged rows inline during translation reassembly. Filtering belongs after rows are restored.
 - Do not add a translation mode selector; BYOB translation always uses Curator experimental translation.
 - Keep semantic dedup as a two-step flow: compute embeddings first, then run KMeans, pairwise similarity, and duplicate identification.
-- Resume with `--skip-until` only when the expected cached parquet for the previous stage already exists.
+- For MCQ, resume with `--skip-until` only when the expected cached parquet for the previous stage already exists. BFCL does not support stage resume.
 - Use deterministic seeds for sampling and distractor shuffling when comparing benchmark runs.
 
 ## Validate
@@ -99,6 +142,7 @@ uv run nemotron steps run byob/mcq \
 
 - [references/guide.md](references/guide.md) for orchestration details
 - [references/benchmark-schema.md](references/benchmark-schema.md) for MCQ schema rules
+- [references/bfcl-oracle-pack.md](references/bfcl-oracle-pack.md) for the BFCL oracle-pack contract
 - [references/new-family-checklist.md](references/new-family-checklist.md) for GSM8K-style or non-MCQ extensions
 - [references/quality-and-filtering.md](references/quality-and-filtering.md) for quality gates
 - [patterns/index.yaml](patterns/index.yaml) for BYOB-local routing hints
