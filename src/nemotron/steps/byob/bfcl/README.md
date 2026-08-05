@@ -122,3 +122,27 @@ Start from `config/default.yaml` for a new pack. The main settings are:
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
 [`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md).
+
+## Planned Pipeline Completion
+
+> **Status: Implementing.** The capabilities in this section are planned and
+> are not part of the currently supported `prepare`, `generate`, or `all`
+> contract. Configuring them today is rejected rather than silently ignored.
+
+| Capability | Status | Planned purpose |
+| --- | --- | --- |
+| Reference profiling | **Implementing** | Measure reference data and guide generation without weakening oracle-derived expected traces. |
+| Model paraphrasing | **Implementing** | Produce additional natural-language surfaces while preserving slot values, tool intent, and deterministic task lineage. |
+| Surface quality judging | **Implementing** | Score generated conversations and optionally reject low-quality or policy-breaking surfaces. |
+| Semantic deduplication | **Implementing** | Remove near-duplicate tasks before publication while retaining deterministic provenance. |
+| Evaluation and scoring | **Implementing** | Run a model or agent against the published benchmark and score tool selection, arguments, call ordering, results, and final task success. |
+| Held-out evaluation | **Implementing** | Evaluate on separately governed fixtures or cases and record coverage and dropped-row metrics in run lineage. |
+| Translation and localization | **Implementing** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
+| Additional exports | **Implementing** | Emit BFCL JSON and NeMo Evaluator bundles from the replay-validated benchmark. |
+| Stage resume | **Implementing** | Resume from a verified intermediate stage without accepting stale pack, endpoint, or config state. |
+
+The final evaluation interface, metric names, artifact schemas, and CLI stage
+names may change while implementation is in progress. Until they are promoted
+to the supported contract above, `benchmark.parquet` and `run_manifest.json`
+remain generation outputs rather than evidence that a target model has been
+evaluated.
