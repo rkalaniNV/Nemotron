@@ -1,0 +1,30 @@
+# Tokenizer extension — ONE arm per job (add OR replace). CPU-only. Production starter.
+
+model_id: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+trust_remote_code: true
+
+method: replace                  # add | replace  (run the two as separate jobs)
+extension_size: 30000
+remove_script: devanagari        # for Replace: script(s) whose residual tokens are pruned
+
+# Corpus for TRAINING the BPE. Provide EITHER an HF dataset OR a local path.
+# HF subset model: hf_dataset (path) -> hf_name (config/subset) -> hf_split,
+# plus optional hf_data_dir / hf_data_files / hf_revision.
+corpus:
+  hf_dataset: ai4bharat/sangraha
+  hf_name: verified              # e.g. 'verified' (sangraha) or 'hi' (samanantar)
+  hf_split: hin                  # e.g. 'hin' (sangraha) or 'train' (samanantar)
+  hf_data_dir: null
+  hf_data_files: null
+  hf_revision: null
+  streaming: false               # false = download+cache (reused by later jobs)
+  path: null                     # OR a local parquet dir/glob or jsonl (leave hf_dataset null)
+  glob: "*.parquet"
+  text_field: text               # the text column
+  samples: 1000000
+  max_doc_chars: 20000
+  min_frequency: 0               # 0 = keep all merges (splice is rank-dead-proof)
+  diversify: true
+
+batch_size: 1000
+output_dir: ./output/tokenizer_extension
