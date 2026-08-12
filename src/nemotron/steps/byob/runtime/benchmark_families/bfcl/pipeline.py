@@ -33,6 +33,7 @@ _FINAL_ARTIFACTS = (
     "benchmark_raw.parquet.tmp",
 )
 
+
 def _unsupported_requests(config: BfclConfig) -> list[str]:
     """List config features that are requested but that generation cannot honor.
 
@@ -41,12 +42,6 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     """
     roles = config.lineage.roles or {}
     requested: list[str] = []
-    if (role := roles.get("profile")) and role.enabled:
-        requested.append("lineage.roles.profile.enabled")
-    if (role := roles.get("paraphrase")) and role.enabled:
-        requested.append("lineage.roles.paraphrase.enabled")
-    if config.surface_generation.get("model_paraphrase_enabled"):
-        requested.append("surface_generation.model_paraphrase_enabled")
     if (role := roles.get("surface_judge")) and role.enabled:
         requested.append("lineage.roles.surface_judge.enabled")
     if config.surface_quality_validation.get("enabled"):
@@ -55,8 +50,6 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
         requested.append("semantic_deduplication_config.enabled")
     # A claim the manifest would publish but no stage substantiates: no profile shapes
     # the surface and no judge runs, so neither may be asserted.
-    if config.lineage.profile_influenced_surface:
-        requested.append("lineage.profile_influenced_surface")
     if config.lineage.judge_advisory:
         requested.append("lineage.judge_advisory")
     requested.extend(f"exports.{name}" for name, on in sorted(config.exports.items()) if on)
@@ -67,8 +60,6 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     )
     # Asking for work a disabled stage would have done. Reading these is what keeps
     # "refuse, do not ignore" true for the whole config and not just the gate flags.
-    if config.surface_generation.get("paraphrases_per_template"):
-        requested.append("surface_generation.paraphrases_per_template")
     if config.surface_quality_validation.get("drop_authority"):
         requested.append("surface_quality_validation.drop_authority")
     if config.eval_config_path is not None:
@@ -83,8 +74,6 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
         requested.append("generation_model_config")
     if config.judge_model_config:
         requested.append("judge_model_config")
-    if "ndd_batch_size" in (config.raw or {}):
-        requested.append("ndd_batch_size")
     # A key no stage reads is almost always a typo for one that matters, so name it
     # rather than letting the run proceed with a setting that had no effect.
     requested.extend(
@@ -184,7 +173,6 @@ def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
         derive_pack_tier,
     )
-
     config = BfclConfig.from_yaml(str(config_path))
     report, report_path = _validate_pack(config)
     gold_eligible, tier = derive_pack_tier(report)
@@ -213,6 +201,10 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.final_output import run_final_output
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
         derive_pack_tier,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        apply_expected_result_guards,
+        run_paraphrase,
     )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.reference_profile import (
         run_reference_profile,
@@ -251,9 +243,13 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
             f"BFCL generate refuses non-gold pack (tier={tier!r}). "
             "Re-run stage=prepare and fix oracle_validation failures."
         )
-    run_reference_profile(config)
-
     pack = load_pack(config)
+    if pack.held_out is not None:
+        raise NotImplementedError(
+            "BFCL generate validated manifest.held_out, but held-out binding enforcement "
+            "is not implemented yet; remove held_out or wait for the held-out stage"
+        )
+    profile = run_reference_profile(config)
     expected_endpoint_metadata = report.get("endpoint_metadata")
     if _endpoint_metadata(config, pack) != expected_endpoint_metadata:
         raise RuntimeError(
@@ -263,10 +259,20 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     templates_by_id = {str(template["template_id"]): template for template in pack.templates}
 
     tasks = run_expand(config, pack)
-    expanded_tasks = list(tasks)
-    expanded = len(expanded_tasks)
+    canonical_expanded = len(tasks)
     plans = run_state_machine(config, templates_by_id, tasks)
     surfaces, prompt_bundle = run_render(config, pack, templates_by_id, tasks, plans)
+    tasks, plans, surfaces, paraphrase_report = run_paraphrase(
+        config,
+        pack,
+        templates_by_id,
+        tasks,
+        plans,
+        surfaces,
+        profile,
+    )
+    expanded_tasks = list(tasks)
+    expanded = len(expanded_tasks)
     # Drops an instance whose own fixture data cannot bind a trace, so `tasks` shrinks
     # to the kept set. Schema/replay still receive every expanded task so stage tables
     # keep a joinable row for each drop.
@@ -276,6 +282,13 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     )
     verdicts = run_executable_replay(
         config, pack, expanded_tasks, traces, schema_failures, skipped=drop_reasons
+    )
+    paraphrase_report = apply_expected_result_guards(
+        config,
+        expanded_tasks,
+        surfaces,
+        verdicts,
+        paraphrase_report,
     )
     current_fingerprint = pack_fingerprint(pack.paths)
     if current_fingerprint != report.get("pack_fingerprint"):
@@ -293,6 +306,16 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     # a paraphrase the guards rejected. ``published`` is where the stages meet.
     stage_counts = {
         "expanded": expanded,
+        "canonical_expanded": canonical_expanded,
+        "paraphrase_requested": int(
+            paraphrase_report["requested_candidates"]
+        ),
+        "paraphrase_accepted": int(
+            paraphrase_report["accepted_candidates"]
+        ),
+        "paraphrase_rejected": int(
+            paraphrase_report["rejected_candidates"]
+        ),
         "surface_passed": sum(
             1 for surface in surfaces.values() if not surface["guard_violations"]
         ),

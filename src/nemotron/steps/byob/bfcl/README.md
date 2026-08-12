@@ -115,9 +115,26 @@ Start from `config/default.yaml` for a new pack. The main settings are:
 
 - `oracle_pack.manifest_path`
 - `oracle_runtime.clock`, timeouts, `worker`, and `allowed_roots`
-- `task_generation.tasks_per_category`
+- `task_generation`: category budget, turn/tool limits, and normalized
+  `difficulty_mix`, `turn_mix`, and `tool_call_count_mix`
 - `surface_generation.language`
 - `lineage.policy`
+
+Week 4 contracts are parsed strictly even while their owning stages remain
+disabled. Enabled model roles require a non-secret `canonical_id`, and
+`strict_separation` requires every enabled role to use a distinct identity.
+`reference_benchmark` pins an allowlisted JSONL source by SHA-256:
+
+```yaml
+reference_benchmark:
+  name: bfcl_vi_style
+  samples_path: /data/reference_bfcl_samples.jsonl
+  content_hash: sha256:<64-hex-digest>
+```
+
+Semantic deduplication accepts `model_identifier`, `n_clusters`, `eps`, and
+`remove_duplicates`. Generation still rejects enabled deduplication until its
+stage is implemented, so no new setting is silently ignored.
 
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
@@ -125,14 +142,14 @@ requirements, see
 
 ## Planned Pipeline Completion
 
-> **Status: Implementing.** The capabilities in this section are planned and
-> are not part of the currently supported `prepare`, `generate`, or `all`
-> contract. Configuring them today is rejected rather than silently ignored.
+> **Status: Implementing.** Reference profiling and controlled paraphrasing are
+> available. Remaining capabilities stay gated and are rejected rather than
+> silently ignored.
 
 | Capability | Status | Planned purpose |
 | --- | --- | --- |
-| Reference profiling | **Implementing** | Measure reference data and guide generation without weakening oracle-derived expected traces. |
-| Model paraphrasing | **Implementing** | Produce additional natural-language surfaces while preserving slot values, tool intent, and deterministic task lineage. |
+| Reference profiling | **Implemented** | Normalize content-addressed style samples and create a cached profile without exposing oracle truth. |
+| Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implementing** | Score generated conversations and optionally reject low-quality or policy-breaking surfaces. |
 | Semantic deduplication | **Implementing** | Remove near-duplicate tasks before publication while retaining deterministic provenance. |
 | Evaluation and scoring | **Implementing** | Run a model or agent against the published benchmark and score tool selection, arguments, call ordering, results, and final task success. |

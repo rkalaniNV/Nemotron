@@ -29,7 +29,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     canonical_json,
     encode_arguments,
 )
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import STAGE_TABLES
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
+    REFERENCE_SAMPLES,
+    STAGE_TABLES,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
 
 logger = logging.getLogger(__name__)
@@ -66,9 +69,7 @@ def _require_pack_fingerprint(
         return current
     for path in cleanup:
         path.unlink(missing_ok=True)
-    raise RuntimeError(
-        f"oracle pack changed {phase}; refusing to publish content that validation did not certify"
-    )
+    raise RuntimeError(f"oracle pack changed {phase}; refusing to publish content that validation did not certify")
 
 
 def _require_endpoint_identity(
@@ -147,10 +148,7 @@ def _jsonable(
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     if isinstance(value, dict):
-        return {
-            str(key): _jsonable(child, roots=roots)
-            for key, child in value.items()
-        }
+        return {str(key): _jsonable(child, roots=roots) for key, child in value.items()}
     if isinstance(value, (list, tuple)):
         return [_jsonable(child, roots=roots) for child in value]
     if isinstance(value, str) and value.startswith("/"):
@@ -219,9 +217,7 @@ def build_messages(
     call is followed immediately by its own tool result message.
     """
     if len(results) != len(expected_calls):
-        raise ValueError(
-            f"replay returned {len(results)} results for {len(expected_calls)} expected calls"
-        )
+        raise ValueError(f"replay returned {len(results)} results for {len(expected_calls)} expected calls")
     messages: list[dict[str, Any]] = [{"role": "system", "content": surface["system_prompt"]}]
     # Walk the calls in trace order so one assistant message consumes exactly the
     # calls of its own step, even if two steps were to carry the same group value.
@@ -287,9 +283,7 @@ def build_row(
         "variant_index": int(task["variant_index"]),
         "messages": build_messages(surface, expected_calls, verdict["results"]),
         "tools": canonical_json(model_tools),
-        "expected_tool_calls": [
-            {**call, "arguments": encode_arguments(call["arguments"])} for call in expected_calls
-        ],
+        "expected_tool_calls": [{**call, "arguments": encode_arguments(call["arguments"])} for call in expected_calls],
         "success_assertions": list(task.get("success_assertions") or []),
         "fixture_refs": list(task.get("fixture_refs") or []),
         "intent": task.get("intent"),
@@ -306,19 +300,27 @@ def build_row(
         "system_prompt_id": surface["system_prompt_id"],
         "tier": tier,
         "gold_eligible": tier == "gold" and config.lineage.policy != "smoke_no_publication",
-        "validated_by": ["schema", "replay", "assertions"]
-        if task.get("success_assertions")
-        else ["schema", "replay"],
+        "validated_by": ["schema", "replay", "assertions"] if task.get("success_assertions") else ["schema", "replay"],
         "pack_id": task["pack_id"],
         "pack_version": task["pack_version"],
         "seed": int(task.get("seed") or 0),
-        "paraphrase_model": None,
-        "paraphrase_model_canonical": None,
+        "paraphrase_model": surface.get("paraphrase_model"),
+        "paraphrase_model_canonical": surface.get(
+            "paraphrase_model_canonical"
+        ),
         # Null, not False: no held-out source is configured, so the row was never
         # checked against one and must not claim it was.
         "held_out_hit": None,
         "src": f"{task['pack_id']}:{task['template_id']}",
-        "metadata": canonical_json({"language": surface["language"], "expt_name": config.expt_name}),
+        "metadata": canonical_json(
+            {
+                "language": surface["language"],
+                "expt_name": config.expt_name,
+                "base_task_id": surface.get("base_task_id"),
+                "surface_source": surface.get("source", "template"),
+                "profile_hash": surface.get("profile_hash"),
+            }
+        ),
     }
 
 
@@ -326,7 +328,14 @@ def _model_role(name: str, config: BfclConfig) -> dict[str, Any]:
     role = (config.lineage.roles or {}).get(name)
     enabled = bool(role and role.enabled)
     if not enabled:
-        return {"alias": None, "provider": None, "model_identity": None, "canonical_id": None, "enabled": False}
+        return {
+            "alias": None,
+            "provider": None,
+            "model_identity": None,
+            "canonical_id": None,
+            "config_hash": None,
+            "enabled": False,
+        }
     model_config = dict(role.model_config or {}) if role else {}
     return {
         "alias": model_config.get("alias"),
@@ -337,8 +346,85 @@ def _model_role(name: str, config: BfclConfig) -> dict[str, Any]:
             "revision": model_config.get("revision"),
             "weights_digest": model_config.get("weights_digest"),
         },
-        "canonical_id": model_config.get("canonical_id"),
+        "canonical_id": (
+            str(model_config["canonical_id"]).strip().lower()
+            if model_config.get("canonical_id")
+            else None
+        ),
+        "config_hash": _sha256(canonical_json(_jsonable(model_config))),
         "enabled": True,
+    }
+
+
+def _bias_applicability(pack: LoadedPack) -> dict[str, dict[str, str]]:
+    """Describe which audit dimensions the pack can meaningfully exercise."""
+    result = {f"B{index}": {"status": "applicable"} for index in range(1, 17)}
+    if pack.held_out is None:
+        result["B7"] = {
+            "status": "na",
+            "reason": "pack declares no held_out policy",
+        }
+    policies = {str(template.get("turn_policy")) for template in pack.templates}
+    has_parallel_group = any(
+        count > 1
+        for template in pack.templates
+        for count in Counter(
+            milestone.get("call_group")
+            for milestone in template.get("assistant_milestones") or []
+            if milestone.get("type") == "tool_call"
+            and milestone.get("call_group") is not None
+        ).values()
+    )
+    for policy in (
+        "single_turn",
+        "missing_slot",
+        "confirmation",
+        "correction",
+        "multi_tool",
+        "dependent_call",
+        "negative_path",
+        "clarify_only",
+        "irrelevant",
+    ):
+        key = f"B3.{policy}"
+        applicable = policy in policies or (
+            policy == "multi_tool" and has_parallel_group
+        )
+        result[key] = (
+            {"status": "applicable"}
+            if applicable
+            else {
+                "status": "na",
+                "reason": f"pack declares no {policy} template",
+            }
+        )
+    has_distractor = any(
+        set(template.get("tools_present") or [])
+        - set(template.get("required_tools") or [])
+        for template in pack.templates
+    )
+    result["B3.distractor_present"] = (
+        {"status": "applicable"}
+        if has_distractor
+        else {
+            "status": "na",
+            "reason": "pack templates expose no distractor tools",
+        }
+    )
+    return result
+
+
+def _reference_benchmark_manifest(config: BfclConfig) -> dict[str, Any] | None:
+    reference = config.reference_benchmark
+    if reference is None:
+        return None
+    return {
+        "name": reference.name,
+        "samples_path": _jsonable(
+            reference.samples_path,
+            roots=_config_roots(config),
+        ),
+        "content_hash": reference.content_hash,
     }
 
 
@@ -361,9 +447,7 @@ def run_final_output(
 
     tier = str(validation_report.get("tier", "prototype"))
     model_tools = project_model_facing_tools(pack.tools)
-    model_tools_by_name = {
-        str((tool.get("function") or {}).get("name")): tool for tool in model_tools
-    }
+    model_tools_by_name = {str((tool.get("function") or {}).get("name")): tool for tool in model_tools}
     rows: list[dict[str, Any]] = []
     for task in tasks:
         task_id = str(task["task_id"])
@@ -372,24 +456,20 @@ def run_final_output(
         if not verdict.get("passed"):
             continue
         task_tools = [
-            model_tools_by_name[name]
-            for name in task.get("tools_present") or []
-            if name in model_tools_by_name
+            model_tools_by_name[name] for name in task.get("tools_present") or [] if name in model_tools_by_name
         ]
         rows.append(build_row(config, pack, task, surface, traces[task_id], verdict, tier, task_tools))
 
     if not rows:
         raise RuntimeError(
-            "BFCL final_output has no replay-validated rows; inspect "
-            "stage_cache/replay_validated_tasks.parquet"
+            "BFCL final_output has no replay-validated rows; inspect stage_cache/replay_validated_tasks.parquet"
         )
 
     cache = stage_cache_dir(config)
     # Hash the intermediates first: a missing stage artifact must stop the run before
     # a published parquet exists without the manifest that explains it.
     stage_artifacts = {
-        name.removesuffix(".parquet"): {"content_hash": _file_hash(cache / name)}
-        for name in STAGE_TABLES
+        name.removesuffix(".parquet"): {"content_hash": _file_hash(cache / name)} for name in STAGE_TABLES
     }
     tool_artifacts = {
         "tools_internal": {"content_hash": _file_hash(cache / "tools_normalized_internal.json")},
@@ -414,11 +494,7 @@ def run_final_output(
 
     # Raw means executable/schema-valid. Publication additionally applies deterministic
     # surface guards; future held-out/judge/dedup stages can narrow it further.
-    published = [
-        row
-        for row in rows
-        if not surfaces[str(row["task_id"])]["guard_violations"]
-    ]
+    published = [row for row in rows if not surfaces[str(row["task_id"])]["guard_violations"]]
     benchmark_path = output_dir / "benchmark.parquet"
     _write_parquet_atomic(pa.Table.from_pylist(published, schema=schema), benchmark_path, pq)
 
@@ -429,6 +505,14 @@ def run_final_output(
             surface_rejections[template_id] = surface_rejections.get(template_id, 0) + 1
     trace_drop_reasons = trace_drop_reasons or {}
     trace_drop_summary = dict(sorted(Counter(trace_drop_reasons.values()).items()))
+    # A pack whose run never reached the paraphrase stage still needs a manifest, so an
+    # absent report reads as "nothing was requested" rather than stopping publication.
+    paraphrase_report_path = cache / "paraphrase_rejections.json"
+    paraphrase_report: dict[str, Any] = (
+        json.loads(paraphrase_report_path.read_text(encoding="utf-8"))
+        if paraphrase_report_path.is_file()
+        else {}
+    )
     created_at = datetime.now(timezone.utc)
     schema_version = str(config.schema_version or DEFAULT_BENCHMARK_SCHEMA_VERSION)
     _require_pack_fingerprint(
@@ -440,15 +524,25 @@ def run_final_output(
     # Hash prepare/validation intermediates the published rows depend on, not only
     # the six stage tables — otherwise a tampered validation report would not show.
     lineage_artifacts = {
-        "oracle_validation_report": {
-            "content_hash": _file_hash(cache / "oracle_validation_report.json")
-        },
+        "oracle_validation_report": {"content_hash": _file_hash(cache / "oracle_validation_report.json")},
         "pack_manifest": {"content_hash": _file_hash(cache / "pack_manifest.json")},
         "fixtures_normalized": {"content_hash": _file_hash(cache / "fixtures_normalized.json")},
-        "task_templates_normalized": {
-            "content_hash": _file_hash(cache / "task_templates_normalized.yaml")
+        "task_templates_normalized": {"content_hash": _file_hash(cache / "task_templates_normalized.yaml")},
+        "reference_profile": {"content_hash": _file_hash(cache / "reference_profile.json")},
+        "reference_samples": {
+            "content_hash": _file_hash(cache / REFERENCE_SAMPLES)
         },
     }
+    for artifact_name in (
+        "reference_profile_io_cache.jsonl",
+        "paraphrase_io_cache.jsonl",
+        "paraphrase_rejections.json",
+        "surface_judge_io_cache.jsonl",
+        "held_out_normalized.json",
+    ):
+        artifact_path = cache / artifact_name
+        if artifact_path.is_file():
+            lineage_artifacts[artifact_name.rsplit(".", 1)[0]] = {"content_hash": _file_hash(artifact_path)}
     manifest = {
         "schema_version": schema_version,
         # The timestamp is part of the id: two runs of the same config are different
@@ -479,12 +573,16 @@ def run_final_output(
             "kind": "endpoint" if pack.endpoint_config is not None else "python",
             "endpoint_metadata": validation_report.get("endpoint_metadata"),
         },
-        "reference_benchmark": config.reference_benchmark,
+        "reference_benchmark": _reference_benchmark_manifest(config),
         "prompt_bundle_hash": prompt_bundle["prompt_bundle_hash"],
         "tier": tier,
         "gold_eligible": tier == "gold" and config.lineage.policy != "smoke_no_publication",
         "lineage_policy": config.lineage.policy,
-        "profile_influenced_surface": bool(config.lineage.profile_influenced_surface),
+        # Reported from what ships, not from what was attempted: a profile that shaped
+        # only rejected candidates influenced no published surface.
+        "profile_influenced_surface": any(
+            bool(surfaces[str(row["task_id"])].get("profile_hash")) for row in published
+        ),
         "models": {name: _model_role(name, config) for name in ("profile", "paraphrase", "surface_judge")},
         "judge_advisory": config.lineage.judge_advisory,
         "seeds": {
@@ -495,10 +593,19 @@ def run_final_output(
             ),
         },
         "held_out": {"source": None, "evaluated": False, "rows_dropped": 0},
+        "bias_targets": _jsonable(config.task_generation),
+        "bias_applicability": _bias_applicability(pack),
         "stage_counts": {**stage_counts, "published": len(published)},
         # Guard rejections are counted per template, because a template is what an
         # author fixes; paraphrase does not run, so these are surface guards only.
         "surface_guard_rejections": {"by_template": surface_rejections},
+        "paraphrase_rejections": {
+            "requested_candidates": int(paraphrase_report.get("requested_candidates", 0)),
+            "accepted_candidates": int(paraphrase_report.get("accepted_candidates", 0)),
+            "rejected_candidates": int(paraphrase_report.get("rejected_candidates", 0)),
+            "by_reason": dict(paraphrase_report.get("by_reason") or {}),
+            "by_template": dict(paraphrase_report.get("by_template") or {}),
+        },
         "trace_drop_rejections": {
             "count": len(trace_drop_reasons),
             "by_reason": trace_drop_summary,

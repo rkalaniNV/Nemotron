@@ -21,6 +21,7 @@ should use absolute `manifest_path` / `allowed_roots` values. Paths declared ins
 | `tools.json` | yes | OpenAI-style tool array plus pack-local `x-*` keys. |
 | `backend.py` | one oracle required | Local executable oracle. Mutually exclusive with `endpoint_config.yaml`. |
 | `endpoint_config.yaml` | one oracle required | BFCL Oracle HTTP v1 endpoint, expected identity, TLS, and secret environment references. Mutually exclusive with `backend.py`. |
+| `held_out.yaml` | optional | Versioned fixture primary IDs and template IDs excluded from normal generation; referenced by `manifest.yaml` as `held_out: held_out.yaml`. |
 | `fixtures.json` | no | Seed state passed to `reset`. |
 | `task_templates.yaml` | yes | Task templates with `slots` and `paraphrase`. |
 | `validation_cases.yaml` | yes | Declared probes proving tool behavior. |
@@ -506,10 +507,11 @@ The manifest also summarizes dependent binding failures under `trace_drop_reject
 and counts guard rejections per template under `surface_guard_rejections`.
 `benchmark_raw.parquet` holds every row that passed schema and replay;
 `benchmark.parquet` is that set minus surface-guard rejections, so the two files match
-only when no guard fired. No held-out source is loaded
-yet, so `held_out_hit` is null rather than false, and the
-manifest's `held_out` block records `evaluated: false` instead of a drop that did not
-happen.
+only when no guard fired. A declared held-out policy is validated and included in the
+pack fingerprint during prepare. Generation refuses such a pack until held-out binding
+and publication enforcement are enabled; it never silently publishes rows without
+checking them. Packs without a held-out source keep `held_out_hit` null and record
+`evaluated: false`.
 Each row exposes exactly the tool definitions named by its `tools_present`.
 Rows from `lineage.policy: smoke_no_publication` retain the pack's validation
 `tier` but set `gold_eligible: false`.

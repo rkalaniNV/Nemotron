@@ -1,0 +1,96 @@
+"""Small Data Designer adapter for BFCL structured model calls."""
+
+from __future__ import annotations
+
+import tempfile
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel
+
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+
+
+def run_structured_model(
+    config: BfclConfig,
+    *,
+    stage_name: str,
+    model_config: dict[str, Any],
+    requests: Sequence[dict[str, str]],
+    system_prompt: str,
+    prompt: str,
+    output_format: type[BaseModel],
+) -> dict[str, dict[str, Any]]:
+    """Execute one structured column and return responses by request id."""
+    if not requests:
+        return {}
+
+    import pandas as pd
+    from data_designer.config import DataDesignerConfigBuilder, LocalFileSeedSource
+    from data_designer.interface import DataDesigner
+
+    from nemotron.steps.byob.runtime.data_designer_utils import setup_model_config
+
+    rows = list(requests)
+    request_ids = [row["request_id"] for row in rows]
+    if len(request_ids) != len(set(request_ids)):
+        raise ValueError(f"{stage_name} received duplicate request ids")
+
+    run_dir = Path(config.output_dir) / config.expt_name
+    temp_dir = run_dir / "artifacts" / "model_seeds"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    seed_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".csv",
+            prefix=f"{stage_name}-",
+            dir=temp_dir,
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            seed_path = Path(handle.name)
+            pd.DataFrame(rows).to_csv(handle, index=False)
+
+        builder = DataDesignerConfigBuilder(
+            model_configs=[setup_model_config(model_config)]
+        )
+        builder.with_seed_dataset(LocalFileSeedSource(path=str(seed_path)))
+        builder.add_column(
+            name="response",
+            column_type="llm-structured",
+            system_prompt=system_prompt,
+            prompt=prompt,
+            output_format=output_format,
+            model_alias=str(model_config["alias"]),
+        )
+        designer = DataDesigner(
+            artifact_path=str(run_dir / "artifacts" / "data_designer")
+        )
+        designer.validate(builder)
+        result = designer.create(
+            config_builder=builder,
+            num_records=len(rows),
+        ).load_dataset()
+    finally:
+        if seed_path is not None:
+            seed_path.unlink(missing_ok=True)
+
+    responses: dict[str, dict[str, Any]] = {}
+    for row in result.to_dict(orient="records"):
+        request_id = row.get("request_id")
+        response = row.get("response")
+        if isinstance(response, BaseModel):
+            response = response.model_dump()
+        if not isinstance(request_id, str) or not isinstance(response, dict):
+            raise RuntimeError(
+                f"{stage_name} returned a row without request_id/structured response"
+            )
+        responses[request_id] = response
+    missing = sorted(set(request_ids) - set(responses))
+    if missing:
+        raise RuntimeError(
+            f"{stage_name} returned no response for: {', '.join(missing)}"
+        )
+    return responses

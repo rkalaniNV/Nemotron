@@ -31,6 +31,7 @@ class ResolvedPackPaths:
     backend_path: Path | None
     endpoint_config_path: Path | None
     endpoint_ca_bundle_path: Path | None = None
+    held_out_path: Path | None = None
 
 
 @dataclass
@@ -42,6 +43,7 @@ class LoadedPack:
     templates: list[dict[str, Any]]
     validation_cases: list[dict[str, Any]]
     endpoint_config: EndpointConfig | None = None
+    held_out: dict[str, Any] | None = None
 
 
 def _as_path(pack_root: Path, value: str | Path | None) -> Path | None:
@@ -108,15 +110,23 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
         )
         if not system_prompt_path.exists():
             raise FileNotFoundError(f"missing system prompt file: {system_prompt_path}")
+    held_out_path = None
+    if manifest.get("held_out") is not None:
+        if not isinstance(manifest["held_out"], str) or not manifest["held_out"].strip():
+            raise ValueError("manifest held_out must be a non-empty path string")
+        held_out_path = assert_pack_allowed(
+            _as_path(pack_root, manifest["held_out"]),  # type: ignore[arg-type]
+            config.oracle_runtime.allowed_roots,
+        )
+        if not held_out_path.is_file():
+            raise FileNotFoundError(f"missing held-out policy file: {held_out_path}")
 
     backend_path = None
     endpoint_config_path = None
     if ref.backend_path is not None:
         backend_path = assert_pack_allowed(ref.backend_path, config.oracle_runtime.allowed_roots)
     elif ref.endpoint_config_path is not None:
-        endpoint_config_path = assert_pack_allowed(
-            ref.endpoint_config_path, config.oracle_runtime.allowed_roots
-        )
+        endpoint_config_path = assert_pack_allowed(ref.endpoint_config_path, config.oracle_runtime.allowed_roots)
     elif paths_block.get("backend"):
         backend_path = assert_pack_allowed(
             _as_path(pack_root, paths_block["backend"]),  # type: ignore[arg-type]
@@ -163,6 +173,7 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
         backend_path=backend_path,
         endpoint_config_path=endpoint_config_path,
         endpoint_ca_bundle_path=endpoint_ca_bundle_path,
+        held_out_path=held_out_path,
     )
 
 
@@ -187,9 +198,7 @@ def confirmation_protocol(manifest: dict[str, Any]) -> dict[str, str]:
         raise ValueError("manifest confirmation must be a mapping")
     unknown = set(declared) - set(DEFAULT_CONFIRMATION_PROTOCOL)
     if unknown:
-        raise ValueError(
-            "manifest confirmation has unknown keys: " + ", ".join(sorted(unknown))
-        )
+        raise ValueError("manifest confirmation has unknown keys: " + ", ".join(sorted(unknown)))
     resolved = dict(DEFAULT_CONFIRMATION_PROTOCOL)
     for key, value in declared.items():
         if not isinstance(value, str) or not value.strip():
@@ -223,6 +232,7 @@ def pack_files(paths: ResolvedPackPaths) -> list[Path]:
         paths.backend_path,
         paths.endpoint_config_path,
         paths.endpoint_ca_bundle_path,
+        paths.held_out_path,
     ):
         if declared is not None and declared.is_file():
             collected[declared] = None
@@ -251,6 +261,7 @@ def pack_fingerprint(paths: ResolvedPackPaths) -> str:
         "backend": paths.backend_path,
         "endpoint": paths.endpoint_config_path,
         "endpoint_ca_bundle": paths.endpoint_ca_bundle_path,
+        "held_out": paths.held_out_path,
     }
     for role, path in declared.items():
         if path is None or not path.is_file():
@@ -316,6 +327,19 @@ def normalize_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]
         item.setdefault("paraphrase", {})
         if not isinstance(item["paraphrase"], dict):
             raise ValueError(f"template {template_id!r} paraphrase must be a mapping")
+        paraphrase = item["paraphrase"]
+        if "allowed" in paraphrase and not isinstance(paraphrase["allowed"], bool):
+            raise ValueError(
+                f"template {template_id!r} paraphrase.allowed must be a boolean"
+            )
+        if "max_variants" in paraphrase and (
+            not isinstance(paraphrase["max_variants"], int)
+            or isinstance(paraphrase["max_variants"], bool)
+            or paraphrase["max_variants"] < 0
+        ):
+            raise ValueError(
+                f"template {template_id!r} paraphrase.max_variants must be a non-negative integer"
+            )
         item.setdefault("call_order", "strict")
         item.setdefault("success_assertions", [])
         if not isinstance(item["success_assertions"], list):
@@ -352,27 +376,20 @@ def normalize_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]
                     f"{required_count} required_tools"
                 )
         elif prefix is not None:
-            raise ValueError(
-                f"template {template_id!r} sets call_order_prefix without call_order: prefix"
-            )
+            raise ValueError(f"template {template_id!r} sets call_order_prefix without call_order: prefix")
         milestone_ids: set[str] = set()
         for index, milestone in enumerate(item.get("assistant_milestones") or []):
             if not isinstance(milestone, dict):
-                raise ValueError(
-                    f"template {template_id!r} assistant_milestones[{index}] must be a mapping"
-                )
+                raise ValueError(f"template {template_id!r} assistant_milestones[{index}] must be a mapping")
             identifier = milestone.get("id")
             if identifier is None:
                 continue
             if not isinstance(identifier, str) or not identifier.strip():
                 raise ValueError(
-                    f"template {template_id!r} assistant_milestones[{index}].id must be "
-                    "a non-empty string"
+                    f"template {template_id!r} assistant_milestones[{index}].id must be a non-empty string"
                 )
             if identifier in milestone_ids:
-                raise ValueError(
-                    f"template {template_id!r} contains duplicate milestone id {identifier!r}"
-                )
+                raise ValueError(f"template {template_id!r} contains duplicate milestone id {identifier!r}")
             milestone_ids.add(identifier)
         # Guarding a slot needs to know whether the user stated it, and a missing flag
         # would put the slot in neither the preserve nor the omit set.
@@ -381,8 +398,7 @@ def normalize_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]
                 raise ValueError(f"template {template_id!r} slot {name!r} must be a mapping")
             if not isinstance(slot.get("visible_in_first_turn"), bool):
                 raise ValueError(
-                    f"template {template_id!r} slot {name!r} must declare "
-                    "visible_in_first_turn as a boolean"
+                    f"template {template_id!r} slot {name!r} must declare visible_in_first_turn as a boolean"
                 )
         normalized.append(item)
     return normalized
@@ -400,20 +416,189 @@ def _require_unique_string_ids(items: list[Any], field: str, source: str) -> Non
         seen.add(value)
 
 
+def _fixture_primary_key(manifest: dict[str, Any], collection: str, rows: list[dict[str, Any]]) -> str:
+    declared = (manifest.get("primary_keys") or {}).get(collection)
+    if isinstance(declared, str) and declared:
+        return declared
+    fields = set().union(*(row.keys() for row in rows)) if rows else set()
+    singular = collection[:-1] if collection.endswith("s") else collection
+    for candidate in (f"{singular}_id", "id"):
+        if candidate in fields:
+            return candidate
+    candidates = sorted(field for field in fields if field.endswith("_id"))
+    if len(candidates) == 1:
+        return candidates[0]
+    raise ValueError(
+        f"held_out.fixtures.{collection} cannot resolve a primary key; declare manifest primary_keys.{collection}"
+    )
+
+
+def _load_held_out_policy(
+    path: Path | None,
+    *,
+    manifest: dict[str, Any],
+    fixtures: dict[str, Any] | None,
+    templates: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("held_out.yaml must be a mapping")
+    unknown = sorted(set(raw) - {"version", "fixtures", "templates", "policy"})
+    if unknown:
+        raise ValueError("held_out.yaml has unknown keys: " + ", ".join(unknown))
+    if not isinstance(raw.get("version"), (str, int, float)) or not str(raw["version"]).strip():
+        raise ValueError("held_out.yaml version must be non-empty")
+
+    held_fixtures = raw.get("fixtures") or {}
+    if not isinstance(held_fixtures, dict):
+        raise ValueError("held_out.fixtures must be a mapping")
+    normalized_fixtures: dict[str, list[str]] = {}
+    absent_ids = manifest.get("absent_ids") or {}
+    for collection, identifiers in held_fixtures.items():
+        rows = (fixtures or {}).get(collection)
+        if not isinstance(rows, list):
+            raise ValueError(f"held_out.fixtures names unknown fixture collection {collection!r}")
+        if not isinstance(identifiers, list) or any(
+            not isinstance(identifier, (str, int, float)) or isinstance(identifier, bool)
+            for identifier in identifiers
+        ):
+            raise ValueError(f"held_out.fixtures.{collection} must be a list of scalar primary ids")
+        if not identifiers:
+            normalized_fixtures[str(collection)] = []
+            continue
+        primary_key = _fixture_primary_key(manifest, str(collection), rows)
+        available = {str(row.get(primary_key)) for row in rows if primary_key in row}
+        normalized = [str(identifier) for identifier in identifiers]
+        missing = sorted(set(normalized) - available)
+        if missing:
+            raise ValueError(f"held_out.fixtures.{collection} contains unknown primary ids: " + ", ".join(missing))
+        absent = absent_ids.get(collection)
+        absent_values = {str(absent)} if isinstance(absent, str) else {str(item) for item in (absent or [])}
+        overlap = sorted(set(normalized) & absent_values)
+        if overlap:
+            raise ValueError(f"held_out.fixtures.{collection} overlaps manifest absent_ids: " + ", ".join(overlap))
+        if len(normalized) != len(set(normalized)):
+            raise ValueError(f"held_out.fixtures.{collection} contains duplicate primary ids")
+        normalized_fixtures[str(collection)] = sorted(normalized)
+
+    template_ids = {str(template["template_id"]) for template in templates}
+    held_templates = raw.get("templates") or []
+    if not isinstance(held_templates, list) or any(
+        not isinstance(identifier, str) or not identifier.strip() for identifier in held_templates
+    ):
+        raise ValueError("held_out.templates must be a list of non-empty strings")
+    unknown_templates = sorted(set(held_templates) - template_ids)
+    if unknown_templates:
+        raise ValueError("held_out.templates contains unknown template ids: " + ", ".join(unknown_templates))
+    if len(held_templates) != len(set(held_templates)):
+        raise ValueError("held_out.templates contains duplicate template ids")
+
+    policy = raw.get("policy") or {}
+    if not isinstance(policy, dict):
+        raise ValueError("held_out.policy must be a mapping")
+    unknown_policy = sorted(set(policy) - {"fixtures_in_backend_state", "seed"})
+    if unknown_policy:
+        raise ValueError("held_out.policy has unknown keys: " + ", ".join(unknown_policy))
+    fixtures_in_state = policy.get("fixtures_in_backend_state", True)
+    if not isinstance(fixtures_in_state, bool):
+        raise ValueError("held_out.policy.fixtures_in_backend_state must be a boolean")
+    seed = policy.get("seed", 0)
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError("held_out.policy.seed must be an integer")
+    return {
+        "version": str(raw["version"]),
+        "fixtures": normalized_fixtures,
+        "templates": sorted(held_templates),
+        "policy": {
+            "fixtures_in_backend_state": fixtures_in_state,
+            "seed": seed,
+        },
+        "source": str(path),
+    }
+
+
+def _validate_generation_targets(
+    config: BfclConfig,
+    templates: list[dict[str, Any]],
+) -> None:
+    """Reject positive mix targets that the template inventory cannot supply."""
+    targets = config.task_generation
+    difficulty_inventory = {
+        str(template.get("difficulty"))
+        for template in templates
+        if template.get("difficulty") is not None
+    }
+    difficulty_mix = targets.get("difficulty_mix") or {}
+    unavailable = sorted(
+        name
+        for name, weight in difficulty_mix.items()
+        if float(weight) > 0 and name not in difficulty_inventory
+    )
+    if unavailable:
+        raise ValueError(
+            "task_generation.difficulty_mix targets unavailable template difficulties: "
+            + ", ".join(unavailable)
+        )
+
+    user_turn_counts = [
+        1 + len(template.get("user_simulator_turns") or [])
+        for template in templates
+    ]
+    turn_inventory = set()
+    if any(count == 1 for count in user_turn_counts):
+        turn_inventory.add("single_turn")
+    if any(count > 1 for count in user_turn_counts):
+        turn_inventory.add("multi_turn")
+    turn_mix = targets.get("turn_mix") or {}
+    unavailable = sorted(
+        name
+        for name, weight in turn_mix.items()
+        if float(weight) > 0 and name not in turn_inventory
+    )
+    if unavailable:
+        raise ValueError(
+            "task_generation.turn_mix targets unavailable conversation shapes: "
+            + ", ".join(unavailable)
+        )
+
+    call_counts = [
+        sum(
+            1
+            for milestone in template.get("assistant_milestones") or []
+            if milestone.get("type") == "tool_call"
+        )
+        for template in templates
+    ]
+    bucket_inventory = {
+        "1" if count == 1 else "2" if count == 2 else "3+"
+        for count in call_counts
+        if count > 0
+    }
+    call_mix = targets.get("tool_call_count_mix") or {}
+    unavailable = sorted(
+        name
+        for name, weight in call_mix.items()
+        if float(weight) > 0 and name not in bucket_inventory
+    )
+    if unavailable:
+        raise ValueError(
+            "task_generation.tool_call_count_mix targets unavailable call-count buckets: "
+            + ", ".join(unavailable)
+        )
+
+
 def load_pack(config: BfclConfig) -> LoadedPack:
     paths = resolve_pack_paths(config)
     manifest = yaml.safe_load(paths.manifest_path.read_text(encoding="utf-8")) or {}
     for field in ("pack_id", "version"):
-        if not isinstance(manifest.get(field), (str, int, float)) or not str(
-            manifest[field]
-        ).strip():
+        if not isinstance(manifest.get(field), (str, int, float)) or not str(manifest[field]).strip():
             raise ValueError(f"manifest must declare a non-empty {field!r}")
     tools = json.loads(paths.tools_path.read_text(encoding="utf-8"))
     if not isinstance(tools, list):
         raise ValueError("tools.json must be a JSON array")
-    tool_functions = [
-        tool.get("function") if isinstance(tool, dict) else None for tool in tools
-    ]
+    tool_functions = [tool.get("function") if isinstance(tool, dict) else None for tool in tools]
     _require_unique_string_ids(tool_functions, "name", "tools.json functions")
 
     fixtures = None
@@ -427,6 +612,7 @@ def load_pack(config: BfclConfig) -> LoadedPack:
         raise ValueError("task_templates.yaml must be a list")
     templates = normalize_templates(templates_raw)
     _require_unique_string_ids(templates, "template_id", "task_templates.yaml")
+    _validate_generation_targets(config, templates)
 
     cases_raw = yaml.safe_load(paths.validation_cases_path.read_text(encoding="utf-8")) or []
     if not isinstance(cases_raw, list):
@@ -440,6 +626,12 @@ def load_pack(config: BfclConfig) -> LoadedPack:
         if paths.endpoint_config_path is not None
         else None
     )
+    held_out = _load_held_out_policy(
+        paths.held_out_path,
+        manifest=manifest,
+        fixtures=fixtures,
+        templates=templates,
+    )
 
     return LoadedPack(
         paths=paths,
@@ -449,4 +641,5 @@ def load_pack(config: BfclConfig) -> LoadedPack:
         templates=templates,
         validation_cases=cases_raw,
         endpoint_config=endpoint_config,
+        held_out=held_out,
     )

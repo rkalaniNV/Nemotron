@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -71,6 +72,19 @@ _ORACLE_RUNTIME_KEYS = frozenset(
 _LINEAGE_KEYS = frozenset({"policy", "profile_influenced_surface", "judge_advisory", "roles"})
 _LINEAGE_ROLES = frozenset({"profile", "paraphrase", "surface_judge"})
 _LINEAGE_ROLE_KEYS = frozenset({"enabled", "model_config"})
+_MODEL_CONFIG_SECRET_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer_token",
+        "password",
+        "secret",
+        "token",
+        "access_token",
+        "auth_token",
+    }
+)
 SURFACE_GENERATION_KEYS = frozenset(
     {
         "language",
@@ -81,9 +95,19 @@ SURFACE_GENERATION_KEYS = frozenset(
     }
 )
 _SURFACE_QUALITY_KEYS = frozenset({"enabled", "drop_authority"})
-_TASK_GENERATION_KEYS = frozenset({"tasks_per_category"})
-_DEDUP_KEYS = frozenset({"enabled", "model_identifier"})
+_TASK_GENERATION_KEYS = frozenset(
+    {
+        "tasks_per_category",
+        "max_turns",
+        "max_tool_calls",
+        "difficulty_mix",
+        "turn_mix",
+        "tool_call_count_mix",
+    }
+)
+_DEDUP_KEYS = frozenset({"enabled", "model_identifier", "n_clusters", "eps", "remove_duplicates"})
 _EXPORT_KEYS = frozenset({"bfcl_json", "nemo_evaluator_bundle"})
+_REFERENCE_BENCHMARK_KEYS = frozenset({"name", "samples_path", "content_hash"})
 
 
 def _reject_unknown(mapping: dict[str, Any], allowed: frozenset[str], path: str) -> None:
@@ -115,6 +139,125 @@ def _require_number(value: Any, path: str) -> float:
     return converted
 
 
+def _require_probability_mix(value: Any, path: str) -> dict[str, float]:
+    """Validate and normalize one deterministic balancing target."""
+    if not isinstance(value, dict) or not value:
+        raise ValueError(f"{path} must be a non-empty mapping")
+    normalized: dict[str, float] = {}
+    for key, raw in value.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError(f"{path} keys must be non-empty strings")
+        probability = _require_number(raw, f"{path}.{key}")
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError(f"{path}.{key} must be between 0 and 1, got {raw!r}")
+        normalized[key] = probability
+    if not math.isclose(sum(normalized.values()), 1.0, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(f"{path} probabilities must sum to 1, got {sum(normalized.values())!r}")
+    return normalized
+
+
+def _reject_model_secrets(value: Any, path: str) -> None:
+    """Keep credentials out of resolved configs, hashes, and public manifests."""
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_model_secrets(child, f"{path}[{index}]")
+        return
+    if not isinstance(value, dict):
+        return
+    for key, child in value.items():
+        lowered = str(key).lower().replace("-", "_")
+        if lowered in _MODEL_CONFIG_SECRET_KEYS or lowered.endswith(
+            ("_api_key", "_password", "_secret", "_access_token", "_auth_token")
+        ):
+            raise ValueError(f"{path}.{key} looks like a secret; provide credentials through the provider environment")
+        _reject_model_secrets(child, f"{path}.{key}")
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _validate_reference_samples(path: Path) -> None:
+    """Reject malformed samples and any oracle-truth fields before model use."""
+    import json
+
+    forbidden = {
+        "assertion",
+        "assertions",
+        "assertion_verdict",
+        "backend_state",
+        "expected_result",
+        "expected_tool_calls",
+        "oracle_state",
+        "success_assertions",
+        "tool_calls",
+        "tools",
+    }
+
+    def forbidden_paths(value: Any, prefix: str = "") -> list[str]:
+        if isinstance(value, dict):
+            paths: list[str] = []
+            for key, child in value.items():
+                current = f"{prefix}.{key}" if prefix else str(key)
+                if str(key) in forbidden:
+                    paths.append(current)
+                paths.extend(forbidden_paths(child, current))
+            return paths
+        if isinstance(value, list):
+            return [item for index, child in enumerate(value) for item in forbidden_paths(child, f"{prefix}[{index}]")]
+        return []
+
+    seen: set[str] = set()
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            sample = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"reference sample line {line_number} is not valid JSON") from exc
+        if not isinstance(sample, dict):
+            raise ValueError(f"reference sample line {line_number} must be an object")
+        sample_id = sample.get("sample_id")
+        if not isinstance(sample_id, str) or not sample_id.strip():
+            raise ValueError(f"reference sample line {line_number} must declare a non-empty sample_id")
+        if sample_id in seen:
+            raise ValueError(f"reference benchmark contains duplicate sample_id {sample_id!r}")
+        seen.add(sample_id)
+        if not isinstance(sample.get("language"), str) or not sample["language"].strip():
+            raise ValueError(f"reference sample {sample_id!r} needs a language")
+        tags = sample.get("tags", [])
+        if not isinstance(tags, list) or any(
+            not isinstance(tag, str) or not tag.strip() for tag in tags
+        ):
+            raise ValueError(
+                f"reference sample {sample_id!r} tags must be a list of non-empty strings"
+            )
+        messages = sample.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise ValueError(f"reference sample {sample_id!r} messages must be a non-empty list")
+        for index, message in enumerate(messages):
+            if (
+                not isinstance(message, dict)
+                or message.get("role") not in {"system", "user", "assistant"}
+                or not isinstance(message.get("content"), str)
+            ):
+                raise ValueError(
+                    f"reference sample {sample_id!r} messages[{index}] must contain "
+                    "a supported role and string content"
+                )
+        leaked = forbidden_paths(sample)
+        if leaked:
+            raise ValueError(
+                f"reference sample {sample_id!r} contains oracle-truth fields: " + ", ".join(sorted(leaked))
+            )
+    if not seen:
+        raise ValueError("reference benchmark must contain at least one sample")
+
+
 def _placeholder_paths(value: Any, path: str = "") -> list[str]:
     """Return config paths whose values still carry replacement sentinels."""
     if isinstance(value, dict):
@@ -124,11 +267,7 @@ def _placeholder_paths(value: Any, path: str = "") -> list[str]:
             for item in _placeholder_paths(child, f"{path}.{key}" if path else str(key))
         ]
     if isinstance(value, list):
-        return [
-            item
-            for index, child in enumerate(value)
-            for item in _placeholder_paths(child, f"{path}[{index}]")
-        ]
+        return [item for index, child in enumerate(value) for item in _placeholder_paths(child, f"{path}[{index}]")]
     if isinstance(value, str) and "REPLACE_ME_" in value:
         return [path]
     return []
@@ -141,9 +280,7 @@ def _validate_clock(raw: str) -> None:
     except ValueError as exc:
         raise ValueError(f"oracle_runtime.clock must be an ISO-8601 timestamp, got {raw!r}") from exc
     if parsed.tzinfo is None:
-        raise ValueError(
-            f"oracle_runtime.clock must carry a UTC offset so runs stay reproducible, got {raw!r}"
-        )
+        raise ValueError(f"oracle_runtime.clock must carry a UTC offset so runs stay reproducible, got {raw!r}")
 
 
 def _resolve_path(raw: str | Path | None, *, base: Path = BYOB_ROOT) -> Path | None:
@@ -211,6 +348,15 @@ class LineageConfig:
     roles: dict[str, LineageRole] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ReferenceBenchmarkConfig:
+    """Allowlisted style-only reference samples with a pinned identity."""
+
+    name: str
+    samples_path: Path
+    content_hash: str
+
+
 @dataclass
 class BfclConfig:
     """Validated BFCL generation config.
@@ -236,7 +382,7 @@ class BfclConfig:
     task_generation: dict[str, Any] = field(default_factory=dict)
     semantic_deduplication_config: dict[str, Any] = field(default_factory=dict)
     exports: dict[str, Any] = field(default_factory=dict)
-    reference_benchmark: dict[str, Any] | None = None
+    reference_benchmark: ReferenceBenchmarkConfig | None = None
     generation_model_config: dict[str, Any] | None = None
     judge_model_config: dict[str, Any] | None = None
     eval_config_path: str | None = None
@@ -286,15 +432,12 @@ class BfclConfig:
 
         config_status = data.get("config_status")
         if config_status not in {None, "template", "resolved"}:
-            raise ValueError(
-                f"config_status must be 'template' or 'resolved' when present, got {config_status!r}"
-            )
+            raise ValueError(f"config_status must be 'template' or 'resolved' when present, got {config_status!r}")
         if config_status == "resolved":
             placeholders = _placeholder_paths(data)
             if placeholders:
                 raise ValueError(
-                    "resolved BFCL config still contains REPLACE_ME_* values at: "
-                    + ", ".join(placeholders)
+                    "resolved BFCL config still contains REPLACE_ME_* values at: " + ", ".join(placeholders)
                 )
 
         pack_raw = data["oracle_pack"]
@@ -310,8 +453,7 @@ class BfclConfig:
             raise ValueError("oracle_runtime.clock is required")
         if not isinstance(runtime_raw["clock"], str):
             raise ValueError(
-                "oracle_runtime.clock must be a quoted ISO-8601 string; "
-                f"got {type(runtime_raw['clock']).__name__}"
+                f"oracle_runtime.clock must be a quoted ISO-8601 string; got {type(runtime_raw['clock']).__name__}"
             )
 
         allowed_raw = runtime_raw.get("allowed_roots")
@@ -321,18 +463,14 @@ class BfclConfig:
             raise ValueError("oracle_runtime.allowed_roots must be a list when present")
         if any(not isinstance(item, str) or not item.strip() for item in allowed_raw):
             raise ValueError("oracle_runtime.allowed_roots entries must be non-empty path strings")
-        allowed_roots = tuple(
-            p for p in (_resolve_path(item) for item in allowed_raw) if p is not None
-        )
+        allowed_roots = tuple(p for p in (_resolve_path(item) for item in allowed_raw) if p is not None)
         if not allowed_roots:
             # Default trust root: checked-in BYOB data directory.
             allowed_roots = ((BYOB_ROOT / "data").resolve(),)
 
         oracle_runtime = OracleRuntimeConfig(
             clock=runtime_raw["clock"],
-            tool_timeout_s=_require_number(
-                runtime_raw.get("tool_timeout_s", 5.0), "oracle_runtime.tool_timeout_s"
-            ),
+            tool_timeout_s=_require_number(runtime_raw.get("tool_timeout_s", 5.0), "oracle_runtime.tool_timeout_s"),
             assertion_timeout_s=_require_number(
                 runtime_raw.get("assertion_timeout_s", 5.0),
                 "oracle_runtime.assertion_timeout_s",
@@ -341,9 +479,7 @@ class BfclConfig:
                 runtime_raw.get("import_timeout_s", 10.0),
                 "oracle_runtime.import_timeout_s",
             ),
-            reset_timeout_s=_require_number(
-                runtime_raw.get("reset_timeout_s", 5.0), "oracle_runtime.reset_timeout_s"
-            ),
+            reset_timeout_s=_require_number(runtime_raw.get("reset_timeout_s", 5.0), "oracle_runtime.reset_timeout_s"),
             episode_timeout_s=_require_number(
                 runtime_raw.get("episode_timeout_s", 60.0),
                 "oracle_runtime.episode_timeout_s",
@@ -358,9 +494,7 @@ class BfclConfig:
         _reject_unknown(lineage_raw, _LINEAGE_KEYS, "lineage")
         policy = str(lineage_raw["policy"])
         if policy not in LINEAGE_POLICIES:
-            raise ValueError(
-                f"lineage.policy must be one of {', '.join(sorted(LINEAGE_POLICIES))}, got {policy!r}"
-            )
+            raise ValueError(f"lineage.policy must be one of {', '.join(sorted(LINEAGE_POLICIES))}, got {policy!r}")
         roles_raw = lineage_raw.get("roles")
         if roles_raw is None:
             roles_raw = {}
@@ -372,22 +506,63 @@ class BfclConfig:
             if not isinstance(role, dict):
                 raise ValueError(f"lineage.roles.{name} must be a mapping")
             _reject_unknown(role, _LINEAGE_ROLE_KEYS, f"lineage.roles.{name}")
-            enabled = _require_bool(
-                role.get("enabled", False), f"lineage.roles.{name}.enabled"
-            )
+            enabled = _require_bool(role.get("enabled", False), f"lineage.roles.{name}.enabled")
             model_config = role.get("model_config")
             if model_config is not None and not isinstance(model_config, dict):
                 raise ValueError(f"lineage.roles.{name}.model_config must be a mapping or null")
+            if model_config is not None:
+                model_config = dict(model_config)
+                _reject_model_secrets(model_config, f"lineage.roles.{name}.model_config")
+                inference_parameters = model_config.get("inference_parameters", {})
+                if not isinstance(inference_parameters, dict):
+                    raise ValueError(
+                        f"lineage.roles.{name}.model_config.inference_parameters "
+                        "must be a mapping"
+                    )
+                model_config["inference_parameters"] = dict(inference_parameters)
+            if enabled:
+                if not model_config:
+                    raise ValueError(f"lineage.roles.{name}.model_config is required when the role is enabled")
+                missing_identity = [
+                    key
+                    for key in ("alias", "provider", "model", "canonical_id")
+                    if not isinstance(model_config.get(key), str) or not str(model_config[key]).strip()
+                ]
+                if missing_identity:
+                    raise ValueError(
+                        f"lineage.roles.{name}.model_config requires non-empty strings for: "
+                        + ", ".join(missing_identity)
+                    )
             roles[name] = LineageRole(enabled=enabled, model_config=model_config)
+
+        if policy == "strict_separation":
+            canonical_roles: dict[str, str] = {
+                name: str(role.model_config["canonical_id"]).strip().lower()
+                for name, role in roles.items()
+                if role.enabled and role.model_config is not None
+            }
+            duplicates = sorted(
+                canonical_id
+                for canonical_id in set(canonical_roles.values())
+                if list(canonical_roles.values()).count(canonical_id) > 1
+            )
+            if duplicates:
+                colliding = sorted(
+                    name for name, canonical_id in canonical_roles.items() if canonical_id in duplicates
+                )
+                raise ValueError(
+                    "lineage.policy strict_separation requires distinct canonical model "
+                    f"identities; roles {', '.join(colliding)} collide"
+                )
 
         profile_influenced = lineage_raw.get("profile_influenced_surface", False)
         if profile_influenced is not None:
-            profile_influenced = _require_bool(
-                profile_influenced, "lineage.profile_influenced_surface"
-            )
+            profile_influenced = _require_bool(profile_influenced, "lineage.profile_influenced_surface")
         judge_advisory = lineage_raw.get("judge_advisory")
         if judge_advisory is not None:
             judge_advisory = _require_bool(judge_advisory, "lineage.judge_advisory")
+        if profile_influenced and not bool(roles.get("profile") and roles["profile"].enabled):
+            raise ValueError("lineage.profile_influenced_surface can only be true when the profile role is enabled")
 
         lineage = LineageConfig(
             policy=policy,
@@ -451,31 +626,90 @@ class BfclConfig:
                 "surface_generation.paraphrases_per_template",
                 minimum=0,
             )
-        if "language" in surface and (
-            not isinstance(surface["language"], str) or not surface["language"].strip()
-        ):
+        if "language" in surface and (not isinstance(surface["language"], str) or not surface["language"].strip()):
             raise ValueError("surface_generation.language must be a non-empty string")
+        paraphrase_role_enabled = bool(roles.get("paraphrase") and roles["paraphrase"].enabled)
+        paraphrase_enabled = bool(surface.get("model_paraphrase_enabled", False))
+        paraphrase_count = int(surface.get("paraphrases_per_template", 0))
+        if paraphrase_enabled != paraphrase_role_enabled:
+            raise ValueError("surface_generation.model_paraphrase_enabled must match lineage.roles.paraphrase.enabled")
+        if paraphrase_enabled and paraphrase_count < 1:
+            raise ValueError(
+                "surface_generation.paraphrases_per_template must be positive when model paraphrasing is enabled"
+            )
+        if not paraphrase_enabled and paraphrase_count:
+            raise ValueError(
+                "surface_generation.paraphrases_per_template must be zero when model paraphrasing is disabled"
+            )
+        if profile_influenced and not paraphrase_enabled:
+            raise ValueError("lineage.profile_influenced_surface can only be true when model paraphrasing is enabled")
 
         quality = sections["surface_quality_validation"]
         for key in ("enabled", "drop_authority"):
             if key in quality:
                 _require_bool(quality[key], f"surface_quality_validation.{key}")
+        judge_enabled = bool(roles.get("surface_judge") and roles["surface_judge"].enabled)
+        if bool(quality.get("enabled", False)) != judge_enabled:
+            raise ValueError("surface_quality_validation.enabled must match lineage.roles.surface_judge.enabled")
+        if judge_enabled and quality.get("enabled"):
+            expected_advisory = not bool(quality.get("drop_authority", False))
+            if judge_advisory is not expected_advisory:
+                raise ValueError(
+                    "lineage.judge_advisory must equal the inverse of "
+                    "surface_quality_validation.drop_authority when the surface judge is enabled"
+                )
         task_generation = sections["task_generation"]
-        if "tasks_per_category" in task_generation:
+        for key in ("tasks_per_category", "max_turns", "max_tool_calls"):
+            if key not in task_generation:
+                continue
             _require_int(
-                task_generation["tasks_per_category"],
-                "task_generation.tasks_per_category",
+                task_generation[key],
+                f"task_generation.{key}",
                 minimum=1,
+            )
+        for key in ("difficulty_mix", "turn_mix", "tool_call_count_mix"):
+            if key in task_generation:
+                task_generation[key] = _require_probability_mix(task_generation[key], f"task_generation.{key}")
+        turn_keys = set(task_generation.get("turn_mix") or {})
+        if unknown := sorted(turn_keys - {"single_turn", "multi_turn"}):
+            raise ValueError(
+                "task_generation.turn_mix has unknown keys: "
+                + ", ".join(unknown)
+            )
+        call_count_keys = set(
+            task_generation.get("tool_call_count_mix") or {}
+        )
+        if unknown := sorted(call_count_keys - {"1", "2", "3+"}):
+            raise ValueError(
+                "task_generation.tool_call_count_mix has unknown keys: "
+                + ", ".join(unknown)
             )
         dedup = sections["semantic_deduplication_config"]
         if "enabled" in dedup:
             _require_bool(dedup["enabled"], "semantic_deduplication_config.enabled")
         if "model_identifier" in dedup and (
-            not isinstance(dedup["model_identifier"], str)
-            or not dedup["model_identifier"].strip()
+            not isinstance(dedup["model_identifier"], str) or not dedup["model_identifier"].strip()
         ):
+            raise ValueError("semantic_deduplication_config.model_identifier must be a non-empty string")
+        if dedup.get("enabled") and not dedup.get("model_identifier"):
             raise ValueError(
-                "semantic_deduplication_config.model_identifier must be a non-empty string"
+                "semantic_deduplication_config.model_identifier is required when deduplication is enabled"
+            )
+        if "n_clusters" in dedup:
+            _require_int(
+                dedup["n_clusters"],
+                "semantic_deduplication_config.n_clusters",
+                minimum=1,
+            )
+        if "eps" in dedup:
+            eps = _require_number(dedup["eps"], "semantic_deduplication_config.eps")
+            if eps <= 0:
+                raise ValueError("semantic_deduplication_config.eps must be positive")
+            dedup["eps"] = eps
+        if "remove_duplicates" in dedup:
+            _require_bool(
+                dedup["remove_duplicates"],
+                "semantic_deduplication_config.remove_duplicates",
             )
         exports = sections["exports"]
         for key, value in exports.items():
@@ -484,6 +718,55 @@ class BfclConfig:
             _require_int(data["random_seed"], "random_seed")
         if "ndd_batch_size" in data:
             _require_int(data["ndd_batch_size"], "ndd_batch_size", minimum=1)
+
+        reference_benchmark = None
+        reference_raw = data.get("reference_benchmark")
+        if reference_raw is not None:
+            if not isinstance(reference_raw, dict):
+                raise ValueError("reference_benchmark must be a mapping or null")
+            _reject_unknown(reference_raw, _REFERENCE_BENCHMARK_KEYS, "reference_benchmark")
+            missing = sorted(
+                key
+                for key in _REFERENCE_BENCHMARK_KEYS
+                if not isinstance(reference_raw.get(key), str) or not str(reference_raw[key]).strip()
+            )
+            if missing:
+                raise ValueError("reference_benchmark requires non-empty strings for: " + ", ".join(missing))
+            samples_path = _resolve_path(reference_raw["samples_path"])
+            assert samples_path is not None
+            from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import (
+                assert_pack_allowed,
+            )
+
+            samples_path = assert_pack_allowed(samples_path, allowed_roots)
+            if not samples_path.is_file():
+                raise FileNotFoundError(f"reference_benchmark.samples_path does not exist: {samples_path}")
+            content_hash = str(reference_raw["content_hash"]).lower()
+            if not content_hash.startswith("sha256:") or len(content_hash) != 71:
+                raise ValueError("reference_benchmark.content_hash must be sha256:<64 lowercase hex characters>")
+            try:
+                int(content_hash.removeprefix("sha256:"), 16)
+            except ValueError as exc:
+                raise ValueError(
+                    "reference_benchmark.content_hash must be sha256:<64 lowercase hex characters>"
+                ) from exc
+            actual_hash = _sha256_file(samples_path)
+            if actual_hash != content_hash:
+                raise ValueError(
+                    "reference_benchmark.content_hash does not match samples_path "
+                    f"(expected {content_hash}, got {actual_hash})"
+                )
+            _validate_reference_samples(samples_path)
+            reference_benchmark = ReferenceBenchmarkConfig(
+                name=str(reference_raw["name"]).strip(),
+                samples_path=samples_path,
+                content_hash=content_hash,
+            )
+        profile_role_enabled = bool(roles.get("profile") and roles["profile"].enabled)
+        if profile_role_enabled and reference_benchmark is None:
+            raise ValueError(
+                "reference_benchmark must be configured when lineage.roles.profile is enabled"
+            )
 
         return cls(
             family="bfcl",
@@ -501,11 +784,9 @@ class BfclConfig:
             surface_generation=dict(sections["surface_generation"]),
             surface_quality_validation=dict(sections["surface_quality_validation"]),
             task_generation=dict(sections["task_generation"]),
-            semantic_deduplication_config=dict(
-                sections["semantic_deduplication_config"]
-            ),
+            semantic_deduplication_config=dict(sections["semantic_deduplication_config"]),
             exports=dict(sections["exports"]),
-            reference_benchmark=data.get("reference_benchmark"),
+            reference_benchmark=reference_benchmark,
             generation_model_config=data.get("generation_model_config"),
             judge_model_config=data.get("judge_model_config"),
             eval_config_path=data.get("eval_config_path"),

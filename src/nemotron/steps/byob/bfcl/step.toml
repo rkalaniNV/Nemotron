@@ -19,7 +19,7 @@ description = "run_manifest.json recording lineage, oracle clock, generation mod
 
 [[produces]]
 type = "bfcl_stage_cache"
-description = "One parquet per generation stage under stage_cache/ (task_instances, conversation_plans, rendered_conversations, expected_traces, schema_validated_traces, replay_validated_tasks), each keyed by task_id."
+description = "Task-indexed generation parquets under stage_cache/ plus content-addressed reference_samples, model I/O caches, and rejection reports."
 
 [[parameters]]
 name = "family"
@@ -72,6 +72,18 @@ recovery = "Use an HTTPS BFCL Oracle HTTP v1 endpoint with metadata, tools, isol
 [[errors]]
 name = "endpoint_identity_changed"
 recovery = "The endpoint metadata no longer matches endpoint_config.yaml or changed during the run. Deploy or select the intended immutable oracle revision, then update the expected digest and re-run prepare."
+
+[[errors]]
+name = "model_lineage_invalid"
+recovery = "Every enabled profile, paraphrase, or surface-judge role needs a non-secret canonical_id. Under strict_separation, enabled roles must use pairwise-distinct canonical identities; provide credentials through the provider environment."
+
+[[errors]]
+name = "reference_benchmark_invalid"
+recovery = "Place the reference JSONL under oracle_runtime.allowed_roots and pin its exact sha256 content_hash. Reference samples are style-only and must not carry oracle truth."
+
+[[errors]]
+name = "held_out_contract_invalid"
+recovery = "Reference held_out.yaml from the pack manifest, list existing fixture primary IDs and template IDs, keep them disjoint from absent_ids, and use a boolean fixtures_in_backend_state plus an integer seed."
 
 [[errors]]
 name = "stage_resume_unavailable"

@@ -5,8 +5,8 @@
 # The optional profile / paraphrase / surface-judge roles are disabled here so
 # this config runs end to end. A gold run may disable them: disabled roles are
 # recorded with null identity and make generation_mode template_only, which does
-# not change gold eligibility. Enabling one before its stage exists makes
-# generate refuse the run rather than silently skip the work.
+# not change gold eligibility. Profile and paraphrase are available; features
+# whose owning stage is still pending are refused rather than silently skipped.
 
 schema_version: "1.1"
 config_status: template
@@ -47,6 +47,7 @@ lineage:
         alias: profile_style
         model: REPLACE_ME_PROFILE_MODEL
         provider: nvidia
+        canonical_id: REPLACE_ME_PROFILE_CANONICAL_ID
         inference_parameters:
           temperature: 0.0
           max_tokens: 4000
@@ -57,6 +58,7 @@ lineage:
         alias: paraphrase_vi
         model: REPLACE_ME_PARAPHRASE_MODEL
         provider: nvidia
+        canonical_id: REPLACE_ME_PARAPHRASE_CANONICAL_ID
         inference_parameters:
           temperature: 0.7
           max_tokens: 2048
@@ -67,10 +69,18 @@ lineage:
         alias: surface_judge
         model: REPLACE_ME_SURFACE_JUDGE_MODEL
         provider: nvidia
+        canonical_id: REPLACE_ME_SURFACE_JUDGE_CANONICAL_ID
         inference_parameters:
           temperature: 0.0
           max_tokens: 2000
           max_parallel_requests: 4
+
+# Required when lineage.roles.profile.enabled is true. The JSONL is style-only:
+# expected calls, oracle state, tool results, and assertion verdicts are rejected.
+# reference_benchmark:
+#   name: REPLACE_ME_REFERENCE_NAME
+#   samples_path: REPLACE_ME_REFERENCE_JSONL
+#   content_hash: sha256:REPLACE_ME_64_HEX_DIGEST
 
 # Inert while every model role is disabled; kept so enabling a role needs no
 # other edit than its enabled flag and its REPLACE_ME_* identity.
@@ -87,10 +97,19 @@ surface_quality_validation:
 
 task_generation:
   tasks_per_category: 30
+  # Stage 11 targets (uncomment together after semantic balancing is enabled):
+  # max_turns: 6
+  # max_tool_calls: 3
+  # difficulty_mix: {easy: 0.30, medium: 0.50, hard: 0.20}
+  # turn_mix: {single_turn: 0.60, multi_turn: 0.40}
+  # tool_call_count_mix: {"1": 0.75, "2": 0.20, "3+": 0.05}
 
 semantic_deduplication_config:
   enabled: false
   model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_clusters: 20
+  eps: 0.08
+  remove_duplicates: true
 
 exports:
   bfcl_json: false
