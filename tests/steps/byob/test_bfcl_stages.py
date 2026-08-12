@@ -1793,9 +1793,49 @@ def test_a_guard_reads_a_number_as_a_whole_value() -> None:
     }
 
     assert check_surface_guards(template, task, ["Chuyển 200000đ giúp tôi."], []) == []
+    assert check_surface_guards(
+        template, task, ["Chuyển 200.000 đồng giúp tôi."], []
+    ) == []
 
     leaked = check_surface_guards(template, task, ["Chuyển 4 lần, 200000đ."], [])
     assert [violation["guard"] for violation in leaked] == ["must_omit"]
+
+
+def test_a_guard_reads_grouping_but_not_a_list_of_digits() -> None:
+    """Only three-digit grouping restates an amount; "1, 2, 3" states no amount at all.
+
+    Reading any punctuated digit run as one number would let an enumeration satisfy
+    must_preserve, so a surface that never states the amount would pass the guard.
+    """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        check_surface_guards,
+    )
+
+    template = {
+        "template_id": "tpl",
+        "slots": {"amount": {"source": "literal:[123]", "visible_in_first_turn": True}},
+        "paraphrase": {},
+    }
+    task = {"slots": {"amount": 123}, "slots_initial": {"amount": 123}}
+
+    assert check_surface_guards(template, task, ["Chuyển 123 đồng."], []) == []
+    assert check_surface_guards(
+        template, task, ["Chuyển 1, 2, 3 đồng."], []
+    ) == [{"guard": "must_preserve", "slot": "amount"}]
+
+    grouped = {
+        "template_id": "tpl",
+        "slots": {
+            "amount": {"source": "literal:[1234567]", "visible_in_first_turn": True}
+        },
+        "paraphrase": {},
+    }
+    grouped_task = {
+        "slots": {"amount": 1234567},
+        "slots_initial": {"amount": 1234567},
+    }
+    for written in ("1.234.567", "1,234,567", "1 234 567"):
+        assert check_surface_guards(grouped, grouped_task, [f"Chuyển {written} đồng."], []) == []
 
 
 def test_a_guard_reads_a_word_value_as_a_whole_token() -> None:

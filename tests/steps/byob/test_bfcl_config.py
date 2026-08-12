@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -11,15 +12,7 @@ import yaml
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.registry import list_families
 
-BFCL_CONFIG_DIR = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "nemotron"
-    / "steps"
-    / "byob"
-    / "bfcl"
-    / "config"
-)
+BFCL_CONFIG_DIR = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob" / "bfcl" / "config"
 BYOB_DIR = BFCL_CONFIG_DIR.parents[1]
 
 
@@ -165,6 +158,891 @@ def test_config_rejects_non_finite_timeouts(tmp_path: Path, value: float) -> Non
         BfclConfig.from_yaml(path)
 
 
+def test_week4_distribution_and_dedup_contracts_parse_strictly(
+    tmp_path: Path,
+) -> None:
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "week4-contract.yaml",
+            task_generation={
+                "tasks_per_category": 34,
+                "max_turns": 6,
+                "max_tool_calls": 3,
+                "difficulty_mix": {"easy": 0.3, "medium": 0.5, "hard": 0.2},
+                "turn_mix": {"single_turn": 0.6, "multi_turn": 0.4},
+                "tool_call_count_mix": {"1": 0.75, "2": 0.2, "3+": 0.05},
+            },
+            semantic_deduplication_config={
+                "enabled": False,
+                "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+                "n_clusters": 20,
+                "eps": 0.08,
+                "remove_duplicates": True,
+            },
+        )
+    )
+
+    assert config.task_generation["max_turns"] == 6
+    assert config.task_generation["difficulty_mix"]["medium"] == 0.5
+    assert config.semantic_deduplication_config["eps"] == 0.08
+
+
+@pytest.mark.parametrize(
+    ("task_generation", "message"),
+    [
+        (
+            {"difficulty_mix": {"easy": 0.6, "hard": 0.3}},
+            "probabilities must sum to 1",
+        ),
+        (
+            {"turn_mix": {"single_turn": True, "multi_turn": 0.0}},
+            "must be a number",
+        ),
+        (
+            {"tool_call_count_mix": {"1": 1.1, "2": -0.1}},
+            "must be between 0 and 1",
+        ),
+    ],
+)
+def test_week4_mix_contract_rejects_invalid_probabilities(
+    tmp_path: Path,
+    task_generation: dict[str, Any],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "invalid-week4-mix.yaml",
+                task_generation=task_generation,
+            )
+        )
+
+
+def test_generation_mix_rejects_targets_missing_from_template_inventory(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "unavailable-difficulty.yaml",
+            task_generation={"difficulty_mix": {"impossible": 1.0}},
+        )
+    )
+    with pytest.raises(ValueError, match="unavailable template difficulties"):
+        load_pack(config)
+
+
+def test_strict_lineage_requires_distinct_canonical_model_identities(
+    tmp_path: Path,
+) -> None:
+    role = {
+        "enabled": True,
+        "model_config": {
+            "alias": "writer",
+            "provider": "nvidia",
+            "model": "model-a",
+            "canonical_id": "source::model-a@revision",
+        },
+    }
+    with pytest.raises(ValueError, match="distinct canonical model identities"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "duplicate-role-model.yaml",
+                lineage={
+                    "policy": "strict_separation",
+                    "roles": {"profile": role, "paraphrase": role},
+                },
+            )
+        )
+
+
+def test_enabled_lineage_role_requires_canonical_identity_and_rejects_secrets(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="canonical_id"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "missing-canonical.yaml",
+                lineage={
+                    "roles": {
+                        "profile": {
+                            "enabled": True,
+                            "model_config": {"provider": "nvidia", "model": "profile"},
+                        }
+                    }
+                },
+            )
+        )
+    with pytest.raises(ValueError, match="looks like a secret"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "inline-secret.yaml",
+                lineage={
+                    "roles": {
+                        "profile": {
+                            "enabled": False,
+                            "model_config": {"api_key": "must-not-enter-config"},
+                        }
+                    }
+                },
+            )
+        )
+
+
+def test_reference_benchmark_is_allowlisted_and_content_addressed(
+    tmp_path: Path,
+) -> None:
+    samples = tmp_path / "reference.jsonl"
+    samples.write_text(
+        '{"sample_id":"ref-1","language":"vi","messages":[{"role":"user","content":"Xin chào"}]}\n',
+        encoding="utf-8",
+    )
+    content_hash = f"sha256:{hashlib.sha256(samples.read_bytes()).hexdigest()}"
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "reference-contract.yaml",
+            oracle_runtime={"allowed_roots": [str(tmp_path), str(BYOB_DIR / "data")]},
+            reference_benchmark={
+                "name": "vi-style",
+                "samples_path": str(samples),
+                "content_hash": content_hash,
+            },
+        )
+    )
+    assert config.reference_benchmark is not None
+    assert config.reference_benchmark.samples_path == samples
+
+    with pytest.raises(ValueError, match="does not match"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "reference-hash-mismatch.yaml",
+                oracle_runtime={"allowed_roots": [str(tmp_path), str(BYOB_DIR / "data")]},
+                reference_benchmark={
+                    "name": "vi-style",
+                    "samples_path": str(samples),
+                    "content_hash": f"sha256:{'0' * 64}",
+                },
+            )
+        )
+
+    samples.write_text(
+        '{"sample_id":"ref-1","language":"vi","messages":[{"role":"user","content":"Xin chào"}],'
+        '"expected_tool_calls":[]}\n',
+        encoding="utf-8",
+    )
+    leaked_hash = f"sha256:{hashlib.sha256(samples.read_bytes()).hexdigest()}"
+    with pytest.raises(ValueError, match="oracle-truth fields"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "reference-truth-leak.yaml",
+                oracle_runtime={"allowed_roots": [str(tmp_path), str(BYOB_DIR / "data")]},
+                reference_benchmark={
+                    "name": "vi-style",
+                    "samples_path": str(samples),
+                    "content_hash": leaked_hash,
+                },
+            )
+        )
+
+
+def test_held_out_pack_contract_validates_ids_and_enters_fingerprint(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+        pack_fingerprint,
+    )
+
+    pack_root = _copy_tiny_pack(tmp_path)
+    manifest_path = pack_root / "manifest.yaml"
+    _edit_pack_yaml(manifest_path, lambda manifest: manifest.update({"held_out": "held_out.yaml"}))
+    held_out_path = pack_root / "held_out.yaml"
+    held_out = {
+        "version": "0.1.0",
+        "fixtures": {"books": ["BK-300"]},
+        "templates": ["lib_status_single"],
+        "policy": {"fixtures_in_backend_state": True, "seed": 42},
+    }
+    held_out_path.write_text(yaml.safe_dump(held_out), encoding="utf-8")
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "held-out-contract.yaml",
+            oracle_pack={"manifest_path": str(manifest_path)},
+            oracle_runtime={"allowed_roots": [str(tmp_path)]},
+        )
+    )
+
+    pack = load_pack(config)
+    assert pack.held_out is not None
+    assert pack.held_out["fixtures"]["books"] == ["BK-300"]
+    fingerprint_before = pack_fingerprint(pack.paths)
+
+    held_out["policy"]["seed"] = 43
+    held_out_path.write_text(yaml.safe_dump(held_out), encoding="utf-8")
+    assert pack_fingerprint(pack.paths) != fingerprint_before
+
+    held_out["fixtures"]["books"] = ["BK-UNKNOWN"]
+    held_out_path.write_text(yaml.safe_dump(held_out), encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown primary ids"):
+        load_pack(config)
+
+
+def test_model_io_cache_key_is_stable_and_entries_are_immutable(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
+        ImmutableModelIOCache,
+        request_hash,
+    )
+
+    arguments = {
+        "model_canonical": "Source::Model@Revision",
+        "prompt_hash": "sha256:prompt",
+        "model_input": {"text": "Xin chào", "protected": ["ACC-001"]},
+        "inference_parameters": {"temperature": 0.0},
+        "output_schema": {"type": "object"},
+        "seed": 42,
+    }
+    key = request_hash(**arguments)
+    assert key == request_hash(**arguments)
+    assert key != request_hash(**{**arguments, "output_schema": {"type": "array"}})
+
+    cache_path = tmp_path / "model_io.jsonl"
+    cache = ImmutableModelIOCache(cache_path)
+    cache.put(
+        key,
+        {"style_hints": ["concise"]},
+        model_canonical=arguments["model_canonical"],
+        input_hash="sha256:input",
+    )
+    assert cache.get(key) == {"style_hints": ["concise"]}
+    with pytest.raises(ValueError, match="immutable"):
+        cache.put(
+            key,
+            {"style_hints": ["different"]},
+            model_canonical=arguments["model_canonical"],
+            input_hash="sha256:input",
+        )
+    entry = json.loads(cache_path.read_text(encoding="utf-8"))
+    entry["response"] = {"style_hints": ["tampered"]}
+    cache_path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid response_hash"):
+        ImmutableModelIOCache(cache_path)
+
+
+def test_reference_profile_normalizes_samples_and_reuses_model_cache(
+    tmp_path: Path,
+) -> None:
+    import pyarrow.parquet as pq
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.reference_profile import (
+        run_reference_profile,
+    )
+
+    samples = tmp_path / "profile-samples.jsonl"
+    samples.write_text(
+        '{"sample_id":"ref-1","language":" VI ","messages":'
+        '[{"role":"user","content":"Bạn kiểm tra giúp mình nhé."}],'
+        '"tags":["polite","concise"]}\n',
+        encoding="utf-8",
+    )
+    content_hash = f"sha256:{hashlib.sha256(samples.read_bytes()).hexdigest()}"
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "profile-enabled.yaml",
+            oracle_runtime={"allowed_roots": [str(tmp_path), str(BYOB_DIR / "data")]},
+            lineage={
+                "roles": {
+                    "profile": {
+                        "enabled": True,
+                        "model_config": {
+                            "alias": "profile",
+                            "provider": "nvidia",
+                            "model": "profile-model",
+                            "canonical_id": "source::profile-model@revision",
+                            "inference_parameters": {"temperature": 0.0},
+                        },
+                    }
+                }
+            },
+            reference_benchmark={
+                "name": "vi-style",
+                "samples_path": str(samples),
+                "content_hash": content_hash,
+            },
+        )
+    )
+    calls: list[dict[str, Any]] = []
+
+    def fake_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        del args
+        calls.append(kwargs)
+        request_id = kwargs["requests"][0]["request_id"]
+        model_input = kwargs["requests"][0]["model_input"]
+        assert "expected_tool_calls" not in model_input
+        return {
+            request_id: {
+                "style_hints": ["Use conversational Vietnamese", "Be concise"],
+                "avoid": ["Internal tool names"],
+            }
+        }
+
+    first = run_reference_profile(config, model_runner=fake_runner)
+    profile_path = (
+        Path(config.output_dir)
+        / config.expt_name
+        / "stage_cache"
+        / "reference_profile.json"
+    )
+    first_bytes = profile_path.read_bytes()
+    second = run_reference_profile(
+        config,
+        model_runner=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("cache hit called the model")
+        ),
+    )
+
+    assert first == second
+    assert profile_path.read_bytes() == first_bytes
+    assert len(calls) == 1
+    assert first["status"] == "completed"
+    assert first["languages"] == ["vi"]
+    assert first["profile_model_canonical"] == "source::profile-model@revision"
+    rows = pq.read_table(profile_path.parent / "reference_samples.parquet").to_pylist()
+    assert rows[0]["sample_id"] == "ref-1"
+    assert rows[0]["language"] == "vi"
+    assert rows[0]["tags"] == ["polite", "concise"]
+
+
+def test_reference_profile_keeps_an_unusable_response_out_of_the_cache(
+    tmp_path: Path,
+) -> None:
+    """A malformed response must stay retryable: the cache it would land in is immutable."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.reference_profile import (
+        run_reference_profile,
+    )
+
+    samples = tmp_path / "profile-samples.jsonl"
+    samples.write_text(
+        '{"sample_id":"ref-1","language":"vi","messages":'
+        '[{"role":"user","content":"Bạn kiểm tra giúp mình nhé."}]}\n',
+        encoding="utf-8",
+    )
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "profile-unusable.yaml",
+            oracle_runtime={"allowed_roots": [str(tmp_path), str(BYOB_DIR / "data")]},
+            lineage={
+                "roles": {
+                    "profile": {
+                        "enabled": True,
+                        "model_config": {
+                            "alias": "profile",
+                            "provider": "nvidia",
+                            "model": "profile-model",
+                            "canonical_id": "source::profile-model@revision",
+                        },
+                    }
+                }
+            },
+            reference_benchmark={
+                "name": "vi-style",
+                "samples_path": str(samples),
+                "content_hash": f"sha256:{hashlib.sha256(samples.read_bytes()).hexdigest()}",
+            },
+        )
+    )
+    assert config.lineage.roles["profile"].model_config["inference_parameters"] == {}
+
+    def broken_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        del args
+        return {kwargs["requests"][0]["request_id"]: {"style_hints": [" "]}}
+
+    def working_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        del args
+        return {
+            kwargs["requests"][0]["request_id"]: {
+                "style_hints": ["Use conversational Vietnamese"],
+                "avoid": [],
+            }
+        }
+
+    with pytest.raises(RuntimeError, match="style_hints"):
+        run_reference_profile(config, model_runner=broken_runner)
+
+    io_cache_path = (
+        Path(config.output_dir)
+        / config.expt_name
+        / "stage_cache"
+        / "reference_profile_io_cache.jsonl"
+    )
+    assert not io_cache_path.exists() or not io_cache_path.read_text(encoding="utf-8").strip()
+
+    profile = run_reference_profile(config, model_runner=working_runner)
+
+    assert profile["status"] == "completed"
+    assert profile["style_hints"] == ["Use conversational Vietnamese"]
+
+
+def test_profile_language_is_not_gated_when_no_template_consumes_it(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import LineageRole
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
+        run_expand,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        run_paraphrase,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        run_render,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
+        run_state_machine,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "unused-profile-language.yaml",
+            lineage={
+                "roles": {
+                    "paraphrase": {
+                        "enabled": True,
+                        "model_config": {
+                            "alias": "paraphrase",
+                            "provider": "nvidia",
+                            "model": "paraphrase-model",
+                            "canonical_id": "source::paraphrase-model@revision",
+                        },
+                    }
+                }
+            },
+            surface_generation={
+                "model_paraphrase_enabled": True,
+                "paraphrases_per_template": 1,
+            },
+        )
+    )
+    roles = dict(config.lineage.roles)
+    roles["profile"] = LineageRole(
+        enabled=True,
+        model_config={
+            "alias": "profile",
+            "provider": "nvidia",
+            "model": "profile-model",
+            "canonical_id": "source::profile-model@revision",
+            "inference_parameters": {},
+        },
+    )
+    config.lineage = replace(
+        config.lineage,
+        profile_influenced_surface=True,
+        roles=roles,
+    )
+    pack = load_pack(config)
+    assert not any(
+        (template.get("paraphrase") or {}).get("allowed") is True
+        for template in pack.templates
+    )
+    templates = {
+        str(template["template_id"]): template for template in pack.templates
+    }
+    tasks = run_expand(config, pack)
+    plans = run_state_machine(config, templates, tasks)
+    surfaces, _ = run_render(config, pack, templates, tasks, plans)
+
+    result = run_paraphrase(
+        config,
+        pack,
+        templates,
+        tasks,
+        plans,
+        surfaces,
+        {
+            "status": "completed",
+            "languages": ["fr"],
+            "style_hints": ["Use French phrasing"],
+            "avoid": [],
+            "output_hash": "sha256:profile",
+        },
+        model_runner=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("no eligible template should call the model")
+        ),
+    )
+
+    assert result[3]["requested_candidates"] == 0
+    assert result[3]["profile_consumed"] is False
+
+
+def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
+    tmp_path: Path,
+) -> None:
+    import pyarrow.parquet as pq
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
+        run_expand,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        run_paraphrase,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.reference_profile import (
+        run_reference_profile,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        run_render,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
+        run_state_machine,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "paraphrase-enabled.yaml",
+            lineage={
+                "roles": {
+                    "paraphrase": {
+                        "enabled": True,
+                        "model_config": {
+                            "alias": "paraphrase",
+                            "provider": "nvidia",
+                            "model": "paraphrase-model",
+                            "canonical_id": "source::paraphrase-model@revision",
+                            "inference_parameters": {"temperature": 0.0},
+                        },
+                    }
+                }
+            },
+            surface_generation={
+                "model_paraphrase_enabled": True,
+                "paraphrases_per_template": 2,
+            },
+        )
+    )
+    pack = load_pack(config)
+    pack.templates[0]["paraphrase"] = {
+        "allowed": True,
+        "must_preserve": ["book_id"],
+    }
+    templates = {
+        str(template["template_id"]): template for template in pack.templates
+    }
+    canonical_tasks = run_expand(config, pack)
+    plans = run_state_machine(config, templates, canonical_tasks)
+    surfaces, _ = run_render(
+        config,
+        pack,
+        templates,
+        canonical_tasks,
+        plans,
+    )
+    profile = run_reference_profile(config)
+    model_calls = 0
+
+    def fake_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        nonlocal model_calls
+        del args
+        model_calls += 1
+        responses = {}
+        for request in kwargs["requests"]:
+            contract = json.loads(request["model_input"])
+            canonical = contract["canonical_user_turns"]
+            protected = contract["must_preserve"][0]
+            assert contract["style_avoid"] == []
+            responses[request["request_id"]] = {
+                "variants": [
+                    {
+                        "user_turns": [
+                            f"{text} Please help." for text in canonical
+                        ]
+                    },
+                    {
+                        "user_turns": [
+                            text.replace(protected, "that book")
+                            for text in canonical
+                        ]
+                    },
+                ]
+            }
+        return responses
+
+    cache = Path(config.output_dir) / config.expt_name / "stage_cache"
+
+    def invalid_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        del args
+        return {
+            request["request_id"]: {"variants": []}
+            for request in kwargs["requests"]
+        }
+
+    invalid_run = run_paraphrase(
+        config,
+        pack,
+        templates,
+        canonical_tasks,
+        plans,
+        surfaces,
+        profile,
+        model_runner=invalid_runner,
+    )
+    assert invalid_run[3]["accepted_candidates"] == 0
+    io_cache_path = cache / "paraphrase_io_cache.jsonl"
+    assert not io_cache_path.exists() or not io_cache_path.read_text(
+        encoding="utf-8"
+    ).strip()
+
+    tasks, variant_plans, variant_surfaces, report = run_paraphrase(
+        config,
+        pack,
+        templates,
+        canonical_tasks,
+        plans,
+        surfaces,
+        profile,
+        model_runner=fake_runner,
+    )
+    accepted = [task for task in tasks if task["variant_index"] == 1]
+    assert accepted
+    assert all(task["task_id"] != task["base_task_id"] for task in accepted)
+    assert all(
+        task["slots"] == next(
+            base["slots"]
+            for base in canonical_tasks
+            if base["task_id"] == task["base_task_id"]
+        )
+        for task in accepted
+    )
+    assert report["requested_candidates"] == 2 * len(accepted)
+    assert report["accepted_candidates"] == len(accepted)
+    assert report["rejected_candidates"] == len(accepted)
+    assert report["by_reason"]["must_preserve"] == len(accepted)
+    assert all(
+        variant_surfaces[str(task["task_id"])]["paraphrase_model_canonical"]
+        == "source::paraphrase-model@revision"
+        for task in accepted
+    )
+    assert all(
+        variant_plans[str(task["task_id"])]["steps"]
+        == plans[str(task["base_task_id"])]["steps"]
+        for task in accepted
+    )
+
+    task_ids = {
+        row["task_id"]
+        for row in pq.read_table(cache / "task_instances.parquet").to_pylist()
+    }
+    plan_ids = {
+        row["task_id"]
+        for row in pq.read_table(cache / "conversation_plans.parquet").to_pylist()
+    }
+    render_ids = {
+        row["task_id"]
+        for row in pq.read_table(
+            cache / "rendered_conversations.parquet"
+        ).to_pylist()
+    }
+    assert task_ids == plan_ids == render_ids
+
+    rerun = run_paraphrase(
+        config,
+        pack,
+        templates,
+        canonical_tasks,
+        plans,
+        surfaces,
+        profile,
+        model_runner=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("cache hit called the model")
+        ),
+    )
+    assert [task["task_id"] for task in rerun[0]] == [
+        task["task_id"] for task in tasks
+    ]
+    assert model_calls == 1
+
+
+def test_pipeline_publishes_paraphrase_variants_with_the_base_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import model_runner
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        generate_bfcl,
+    )
+
+    pack = _copy_tiny_pack(tmp_path)
+
+    def allow_first_template(templates: list[dict[str, Any]]) -> None:
+        templates[0]["paraphrase"] = {
+            "allowed": True,
+            "must_preserve": ["book_id"],
+        }
+
+    _edit_pack_yaml(pack / "task_templates.yaml", allow_first_template)
+    config_path = _write_tiny_config(
+        tmp_path,
+        "paraphrase-pipeline.yaml",
+        oracle_pack={"manifest_path": str(pack / "manifest.yaml")},
+        oracle_runtime={"allowed_roots": [str(tmp_path)]},
+        lineage={
+            "roles": {
+                "paraphrase": {
+                    "enabled": True,
+                    "model_config": {
+                        "alias": "paraphrase",
+                        "provider": "nvidia",
+                        "model": "paraphrase-model",
+                        "canonical_id": "source::paraphrase-model@revision",
+                        "inference_parameters": {"temperature": 0.0},
+                    },
+                }
+            }
+        },
+        surface_generation={
+            "model_paraphrase_enabled": True,
+            "paraphrases_per_template": 1,
+        },
+    )
+
+    def fake_model(
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, dict[str, Any]]:
+        del args
+        return {
+            request["request_id"]: {
+                "variants": [
+                    {
+                        "user_turns": [
+                            f"{turn} Please help."
+                            for turn in json.loads(request["model_input"])[
+                                "canonical_user_turns"
+                            ]
+                        ]
+                    }
+                ]
+            }
+            for request in kwargs["requests"]
+        }
+
+    monkeypatch.setattr(model_runner, "run_structured_model", fake_model)
+    benchmark_path = generate_bfcl(config_path)
+    rows = pq.read_table(benchmark_path).to_pylist()
+    rows_by_id = {str(row["task_id"]): row for row in rows}
+    variants = [row for row in rows if row["variant_index"] == 1]
+
+    assert variants
+    for variant in variants:
+        metadata = json.loads(variant["metadata"])
+        base = rows_by_id[metadata["base_task_id"]]
+        assert variant["expected_tool_calls"] == base["expected_tool_calls"]
+        assert variant["success_assertions"] == base["success_assertions"]
+        assert variant["paraphrase_model_canonical"] == (
+            "source::paraphrase-model@revision"
+        )
+    manifest = json.loads(
+        (benchmark_path.parent / "run_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["generation_mode"] == "smoke_no_publication"
+    assert manifest["stage_counts"]["paraphrase_accepted"] == len(variants)
+    assert "paraphrase_io_cache" in manifest["artifacts"]
+    assert "paraphrase_rejections" in manifest["artifacts"]
+
+
+def test_post_replay_guard_rejects_expected_result_leakage(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        apply_expected_result_guards,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(tmp_path, "result-leakage.yaml")
+    )
+    base_id = "base"
+    variant_id = "variant"
+    surfaces = {
+        base_id: {
+            "task_id": base_id,
+            "base_task_id": base_id,
+            "template_id": "tpl",
+            "variant_index": 0,
+            "source": "template",
+            "language": "vi",
+            "system_prompt_id": "prompt",
+            "steps": [{"kind": "user", "content": "Kiểm tra tài khoản ACC-1."}],
+            "guard_violations": [],
+        },
+        variant_id: {
+            "task_id": variant_id,
+            "base_task_id": base_id,
+            "template_id": "tpl",
+            "variant_index": 1,
+            "source": "model",
+            "language": "vi",
+            "system_prompt_id": "prompt",
+            "steps": [
+                {
+                    "kind": "user",
+                    "content": "Tài khoản ACC-1 còn 500.000 đồng phải không?",
+                }
+            ],
+            "guard_violations": [],
+        },
+    }
+    tasks = [
+        {"task_id": base_id, "template_id": "tpl", "variant_index": 0},
+        {"task_id": variant_id, "template_id": "tpl", "variant_index": 1},
+    ]
+    report = {
+        "accepted_candidates": 1,
+        "rejected_candidates": 0,
+        "by_reason": {},
+        "by_template": {
+            "tpl": {"requested": 1, "accepted": 1, "rejected": 0}
+        },
+        "events": [],
+    }
+
+    updated = apply_expected_result_guards(
+        config,
+        tasks,
+        surfaces,
+        {variant_id: {"passed": True, "results": [{"balance": 500000}]}},
+        report,
+    )
+
+    assert updated["accepted_candidates"] == 0
+    assert updated["rejected_candidates"] == 1
+    assert surfaces[variant_id]["guard_violations"] == [
+        {"guard": "expected_result_leakage", "value": "500000"}
+    ]
+
+
 def test_config_rejects_output_nested_inside_pack_root(tmp_path: Path) -> None:
     pack = _copy_tiny_pack(tmp_path)
     config = _write_tiny_config(
@@ -184,9 +1062,7 @@ def test_config_rejects_output_nested_inside_pack_root(tmp_path: Path) -> None:
     "expt_name",
     ["../escape", "nested/run", ".", "..", " padded "],
 )
-def test_config_rejects_an_expt_name_that_is_not_one_directory(
-    tmp_path: Path, expt_name: str
-) -> None:
+def test_config_rejects_an_expt_name_that_is_not_one_directory(tmp_path: Path, expt_name: str) -> None:
     """The run directory names the run, so it may not move the output somewhere else."""
     config = _write_tiny_config(tmp_path, "odd-expt-name.yaml", expt_name=expt_name)
 
@@ -222,9 +1098,7 @@ def test_manifest_reports_replay_apart_from_surface_rejections(
     monkeypatch.setattr(render, "check_surface_guards", reject_the_first_surface)
     benchmark_path = generate_bfcl(config)
 
-    manifest = json.loads(
-        (benchmark_path.parent / "run_manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((benchmark_path.parent / "run_manifest.json").read_text(encoding="utf-8"))
     counts = manifest["stage_counts"]
     assert len(rejected) == 1
     assert counts["replay_passed"] == counts["expanded"]
@@ -264,9 +1138,7 @@ def test_prepare_rejects_a_template_whose_bound_call_breaks_schema(
     pack = _copy_tiny_pack(tmp_path)
     _edit_pack_yaml(
         pack / "task_templates.yaml",
-        lambda templates: templates[0]["assistant_milestones"][0].update(
-            {"args": {"unexpected": "value"}}
-        ),
+        lambda templates: templates[0]["assistant_milestones"][0].update({"args": {"unexpected": "value"}}),
     )
     config = _write_tiny_config(
         tmp_path,
@@ -373,9 +1245,7 @@ def test_prepare_runs_a_representative_templates_assertions(tmp_path: Path) -> N
     report = json.loads(prepare_bfcl(config).read_text(encoding="utf-8"))
     contract = next(check for check in report["checks"] if check["id"] == 7)
     assert contract["status"] == "fail"
-    assert {
-        failure["reason"] for failure in contract["failures"]
-    } == {"representative_replay_failed"}
+    assert {failure["reason"] for failure in contract["failures"]} == {"representative_replay_failed"}
     assert report["gold_eligible"] is False
 
 
@@ -509,8 +1379,7 @@ def test_prepare_rejects_bad_plans_and_missing_fixture_primary_keys(tmp_path: Pa
     )
     plan_report = json.loads(prepare_bfcl(plan_config).read_text(encoding="utf-8"))
     assert any(
-        failure.get("reason") == "invalid_conversation_plan"
-        for failure in plan_report["checks"][0]["failures"]
+        failure.get("reason") == "invalid_conversation_plan" for failure in plan_report["checks"][0]["failures"]
     )
 
     key_root = tmp_path / "missing-key"
@@ -522,15 +1391,11 @@ def test_prepare_rejects_bad_plans_and_missing_fixture_primary_keys(tmp_path: Pa
     fixtures_path.write_text(json.dumps(fixtures), encoding="utf-8")
     _edit_pack_yaml(
         key_pack / "manifest.yaml",
-        lambda manifest: manifest.setdefault("primary_keys", {}).update(
-            {"books": "book_id"}
-        ),
+        lambda manifest: manifest.setdefault("primary_keys", {}).update({"books": "book_id"}),
     )
     _edit_pack_yaml(
         key_pack / "task_templates.yaml",
-        lambda templates: templates[0]["slots"]["book_id"].update(
-            {"source": "fixture:books.title"}
-        ),
+        lambda templates: templates[0]["slots"]["book_id"].update({"source": "fixture:books.title"}),
     )
     key_config = _write_tiny_config(
         tmp_path,
@@ -540,8 +1405,7 @@ def test_prepare_rejects_bad_plans_and_missing_fixture_primary_keys(tmp_path: Pa
     )
     key_report = json.loads(prepare_bfcl(key_config).read_text(encoding="utf-8"))
     assert any(
-        failure.get("reason") == "fixture_row_missing_primary_key"
-        for failure in key_report["checks"][1]["failures"]
+        failure.get("reason") == "fixture_row_missing_primary_key" for failure in key_report["checks"][1]["failures"]
     )
 
 
@@ -655,9 +1519,7 @@ def test_rejects_a_schema_version_this_build_cannot_write(tmp_path: Path) -> Non
         BfclConfig.from_yaml(_write_tiny_config(tmp_path, "future-schema.yaml", schema_version="9.9"))
 
     config = BfclConfig.from_yaml(
-        _write_tiny_config(
-            tmp_path, "known-schema.yaml", schema_version=DEFAULT_BENCHMARK_SCHEMA_VERSION
-        )
+        _write_tiny_config(tmp_path, "known-schema.yaml", schema_version=DEFAULT_BENCHMARK_SCHEMA_VERSION)
     )
     assert config.schema_version == DEFAULT_BENCHMARK_SCHEMA_VERSION
 
@@ -794,9 +1656,7 @@ def test_gold_rejects_a_declared_mutation_that_no_success_probe_observes(tmp_pat
     pack = _copy_tiny_pack(tmp_path)
     tools_path = pack / "tools.json"
     tools = json.loads(tools_path.read_text(encoding="utf-8"))
-    read_only = next(
-        tool for tool in tools if tool["function"]["name"] == "get_book_status"
-    )
+    read_only = next(tool for tool in tools if tool["function"]["name"] == "get_book_status")
     read_only["x-mutates"] = True
     tools_path.write_text(json.dumps(tools, indent=2) + "\n", encoding="utf-8")
 
@@ -811,8 +1671,7 @@ def test_gold_rejects_a_declared_mutation_that_no_success_probe_observes(tmp_pat
     mutation_check = next(check for check in report["extra_checks"] if check["id"] == "M1")
     assert mutation_check["status"] == "fail"
     assert any(
-        failure["reason"] == "declared_mutation_not_observed"
-        and failure["tool"] == "get_book_status"
+        failure["reason"] == "declared_mutation_not_observed" and failure["tool"] == "get_book_status"
         for failure in mutation_check["failures"]
     )
 
@@ -865,14 +1724,9 @@ def test_determinism_compares_state_even_when_result_is_stable(tmp_path: Path) -
     )
 
     report = json.loads(prepare_bfcl(config).read_text(encoding="utf-8"))
-    determinism = next(
-        check for check in report["extra_checks"] if check["id"] == "D1"
-    )
+    determinism = next(check for check in report["extra_checks"] if check["id"] == "D1")
     assert determinism["status"] == "fail"
-    assert any(
-        failure["reason"] == "nondeterministic"
-        for failure in determinism["failures"]
-    )
+    assert any(failure["reason"] == "nondeterministic" for failure in determinism["failures"])
 
 
 def test_pack_load_checks_what_the_guards_depend_on(tmp_path: Path) -> None:
@@ -1025,9 +1879,7 @@ def test_gold_requires_every_template_to_state_what_success_means(tmp_path: Path
     # assertion has no statement of success, so replay could only confirm the trace ran.
     assert report["stats"]["n_assertions"] > 0
     assert check["status"] == "fail"
-    assert {failure["reason"] for failure in check["failures"]} == {
-        "template_without_success_assertion"
-    }
+    assert {failure["reason"] for failure in check["failures"]} == {"template_without_success_assertion"}
     assert report["gold_eligible"] is False
 
 
@@ -1047,16 +1899,10 @@ def test_generate_revalidates_when_worker_changes(tmp_path: Path) -> None:
         generate_bfcl(thread_config)
 
     report_path = (
-        tmp_path
-        / "output"
-        / "bfcl_tiny_library_validation"
-        / "stage_cache"
-        / "oracle_validation_report.json"
+        tmp_path / "output" / "bfcl_tiny_library_validation" / "stage_cache" / "oracle_validation_report.json"
     )
     thread_report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert thread_report["validation_config_fingerprint"] != process_report[
-        "validation_config_fingerprint"
-    ]
+    assert thread_report["validation_config_fingerprint"] != process_report["validation_config_fingerprint"]
     isolation = next(check for check in thread_report["extra_checks"] if check["id"] == "I1")
     assert isolation["status"] == "fail"
 
@@ -1123,31 +1969,25 @@ def test_generate_refuses_settings_it_would_otherwise_ignore(tmp_path: Path) -> 
     baseline = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "baseline.yaml"))
     assert _unsupported_requests(baseline) == []
 
-    asks_for_paraphrases = BfclConfig.from_yaml(
-        _write_tiny_config(
-            tmp_path,
-            "paraphrases.yaml",
-            surface_generation={"paraphrases_per_template": 3},
+    with pytest.raises(ValueError, match="must be zero"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "paraphrases.yaml",
+                surface_generation={"paraphrases_per_template": 3},
+            )
         )
-    )
-    assert "surface_generation.paraphrases_per_template" in _unsupported_requests(
-        asks_for_paraphrases
-    )
 
     with pytest.raises(ValueError, match="surface_generation has unknown keys: langauge"):
-        BfclConfig.from_yaml(
-            _write_tiny_config(tmp_path, "typo.yaml", surface_generation={"langauge": "en"})
-        )
+        BfclConfig.from_yaml(_write_tiny_config(tmp_path, "typo.yaml", surface_generation={"langauge": "en"}))
 
-    claims_a_judge = BfclConfig.from_yaml(
-        _write_tiny_config(tmp_path, "judge.yaml", lineage={"judge_advisory": True})
-    )
+    claims_a_judge = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "judge.yaml", lineage={"judge_advisory": True}))
     assert "lineage.judge_advisory" in _unsupported_requests(claims_a_judge)
 
-    leftover = BfclConfig.from_yaml(
+    batched = BfclConfig.from_yaml(
         _write_tiny_config(tmp_path, "batch.yaml", ndd_batch_size=8)
     )
-    assert "ndd_batch_size" in _unsupported_requests(leftover)
+    assert _unsupported_requests(batched) == []
 
 
 def test_generate_revalidates_a_hand_edited_gold_report(tmp_path: Path) -> None:
@@ -1160,11 +2000,7 @@ def test_generate_revalidates_a_hand_edited_gold_report(tmp_path: Path) -> None:
     config = _write_tiny_config(tmp_path, "tampered.yaml")
     prepare_bfcl(config)
     report_path = (
-        tmp_path
-        / "output"
-        / "bfcl_tiny_library_validation"
-        / "stage_cache"
-        / "oracle_validation_report.json"
+        tmp_path / "output" / "bfcl_tiny_library_validation" / "stage_cache" / "oracle_validation_report.json"
     )
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["gold_eligible"] is True
@@ -1245,6 +2081,20 @@ def test_generate_refuses_features_no_stage_applies(tmp_path: Path) -> None:
     temp_config = _write_tiny_config(
         tmp_path,
         "judged.yaml",
+        lineage={
+            "judge_advisory": False,
+            "roles": {
+                "surface_judge": {
+                    "enabled": True,
+                    "model_config": {
+                        "alias": "surface-judge",
+                        "provider": "nvidia",
+                        "model": "judge-model",
+                        "canonical_id": "source::judge-model@revision",
+                    },
+                }
+            },
+        },
         surface_quality_validation={"enabled": True, "drop_authority": True},
     )
 
@@ -1260,7 +2110,7 @@ def test_generate_refuses_ignored_task_generation_controls(tmp_path: Path) -> No
         "balanced.yaml",
         task_generation={"turn_mix": {"single_turn": 1.0}},
     )
-    with pytest.raises(ValueError, match="task_generation has unknown keys: turn_mix"):
+    with pytest.raises(NotImplementedError, match="task_generation.turn_mix"):
         generate_bfcl(temp_config)
 
 

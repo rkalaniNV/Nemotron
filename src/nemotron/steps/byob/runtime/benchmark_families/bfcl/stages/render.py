@@ -143,6 +143,9 @@ def _edge_guard(character: str, *, preceding: bool) -> str:
     return rf"(?<!{forbidden})" if preceding else rf"(?!{forbidden})"
 
 
+_GROUPED_NUMBER = re.compile(r"(?<!\d)\d{1,3}(?:[.,\u00a0\u202f ]\d{3})+(?!\d)")
+
+
 def _mentions(haystack: str, value: str) -> bool:
     """Report whether ``value`` appears in ``haystack`` as its own value.
 
@@ -154,6 +157,14 @@ def _mentions(haystack: str, value: str) -> bool:
     """
     if not value:
         return False
+    if value.isdigit():
+        # Natural-language amount formatting may add grouping separators without changing
+        # the protected value (500000 -> 500.000 -> 500,000 -> 500 000). Only true
+        # three-digit grouping counts: reading any digit run joined by punctuation as one
+        # number would let "1, 2, 3" stand in for 123, which states no amount at all.
+        for candidate in _GROUPED_NUMBER.findall(haystack):
+            if re.sub(r"\D", "", candidate) == value:
+                return True
     pattern = (
         _edge_guard(value[0], preceding=True)
         + re.escape(value)
@@ -165,6 +176,11 @@ def _mentions(haystack: str, value: str) -> bool:
 def _mentions_name(haystack: str, name: str) -> bool:
     """Report whether a tool name appears as a word rather than inside a longer one."""
     return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", haystack) is not None
+
+
+def mentions_value(haystack: str, value: str) -> bool:
+    """Public value-aware matcher for deterministic post-replay surface guards."""
+    return _mentions(haystack, value)
 
 
 def _assistant_text_templates(pack: LoadedPack, template: dict[str, Any]) -> dict[str, Any]:
@@ -364,12 +380,18 @@ def render_task(
     )
     return {
         "task_id": task["task_id"],
+        "base_task_id": task["task_id"],
         "template_id": task["template_id"],
+        "variant_index": int(task.get("variant_index", 0)),
+        "source": "template",
         "language": language,
         "system_prompt": prompt_bundle["system_prompt"],
         "system_prompt_id": prompt_bundle["system_prompt_id"],
         "steps": rendered_steps,
         "guard_violations": violations,
+        "paraphrase_model": None,
+        "paraphrase_model_canonical": None,
+        "profile_hash": None,
     }
 
 
@@ -384,9 +406,6 @@ def resolve_render_contract(
     validation resolves them before granting gold instead of letting a missing text
     block or an unlocalized prompt abort a run halfway through rendering.
     """
-    if config.surface_generation.get("model_paraphrase_enabled"):
-        raise NotImplementedError("Model paraphrase of user turns is not supported")
-
     available: set[str] = set()
     for template in pack.templates:
         available.update((template.get("user_turn_templates") or {}).keys())

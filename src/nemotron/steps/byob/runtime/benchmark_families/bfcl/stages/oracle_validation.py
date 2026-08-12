@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 # Bump whenever a check is added or tightened: a cached report was produced by the
 # older rules and must not stand in for the newer ones.
-VALIDATION_LOGIC_VERSION = 6
+VALIDATION_LOGIC_VERSION = 7
 
 _PROBES = Path(__file__).resolve().parent.parent / "probes"
 SLOW_BACKEND_PATH = _PROBES / "slow_backend.py"
@@ -97,6 +97,22 @@ def validation_config_fingerprint(config: BfclConfig) -> str:
         "tasks_per_category": int(config.task_generation.get("tasks_per_category", 1) or 1),
         "surface_generation": config.surface_generation,
         "lineage_policy": config.lineage.policy,
+        "lineage_roles": {
+            name: {
+                "enabled": role.enabled,
+                "canonical_id": (
+                    (role.model_config or {}).get("canonical_id")
+                    if role.model_config
+                    else None
+                ),
+            }
+            for name, role in sorted((config.lineage.roles or {}).items())
+        },
+        "reference_content_hash": (
+            config.reference_benchmark.content_hash
+            if config.reference_benchmark is not None
+            else None
+        ),
     }
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 

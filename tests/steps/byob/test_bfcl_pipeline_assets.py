@@ -464,9 +464,18 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
     assert manifest["pack"]["pack_id"] == "tiny_library"
     assert manifest["models"]["paraphrase"]["enabled"] is False
     assert manifest["models"]["paraphrase"]["canonical_id"] is None
+    assert manifest["models"]["paraphrase"]["config_hash"] is None
+    assert manifest["bias_targets"] == {"tasks_per_category": 4}
+    assert manifest["bias_applicability"]["B1"]["status"] == "applicable"
+    assert manifest["bias_applicability"]["B7"] == {
+        "status": "na",
+        "reason": "pack declares no held_out policy",
+    }
     assert manifest["generation_config_hash"] != manifest["resolved_config_hash"]
     assert manifest["stage_counts"]["expanded"] >= manifest["stage_counts"]["replay_passed"]
     assert manifest["stage_counts"]["trace_dropped"] == 0
+    assert manifest["paraphrase_rejections"]["requested_candidates"] == 0
+    assert manifest["paraphrase_rejections"]["rejected_candidates"] == 0
     assert manifest["trace_drop_rejections"] == {"count": 0, "by_reason": {}}
     for artifact in (
         "benchmark_raw_parquet",
@@ -476,6 +485,8 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
         "pack_manifest",
         "fixtures_normalized",
         "task_templates_normalized",
+        "reference_profile",
+        "reference_samples",
         "task_instances",
         "conversation_plans",
         "rendered_conversations",

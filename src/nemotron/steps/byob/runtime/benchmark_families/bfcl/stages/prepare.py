@@ -54,6 +54,11 @@ def prepare_oracle_pack(config: BfclConfig) -> LoadedPack:
         json.dumps(pack.manifest, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",
     )
+    if pack.held_out is not None:
+        (cache / "held_out_normalized.json").write_text(
+            json.dumps(pack.held_out, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
     (cache / "pack_paths.json").write_text(
         json.dumps(
             {
@@ -65,7 +70,9 @@ def prepare_oracle_pack(config: BfclConfig) -> LoadedPack:
                 "assertions_path": str(pack.paths.assertions_path),
                 "validation_cases_path": str(pack.paths.validation_cases_path),
                 "system_prompt_path": (
-                    str(pack.paths.system_prompt_path) if pack.paths.system_prompt_path else None
+                    str(pack.paths.system_prompt_path)
+                    if pack.paths.system_prompt_path
+                    else None
                 ),
                 "backend_path": str(pack.paths.backend_path) if pack.paths.backend_path else None,
                 "endpoint_config_path": (
@@ -76,6 +83,11 @@ def prepare_oracle_pack(config: BfclConfig) -> LoadedPack:
                 "endpoint_ca_bundle_path": (
                     str(pack.paths.endpoint_ca_bundle_path)
                     if pack.paths.endpoint_ca_bundle_path
+                    else None
+                ),
+                "held_out_path": (
+                    str(pack.paths.held_out_path)
+                    if pack.paths.held_out_path
                     else None
                 ),
             },

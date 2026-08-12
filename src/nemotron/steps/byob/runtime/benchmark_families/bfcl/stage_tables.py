@@ -17,6 +17,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canon
 
 TASK_INSTANCES = "task_instances.parquet"
 CONVERSATION_PLANS = "conversation_plans.parquet"
+REFERENCE_SAMPLES = "reference_samples.parquet"
 RENDERED_CONVERSATIONS = "rendered_conversations.parquet"
 EXPECTED_TRACES = "expected_traces.parquet"
 SCHEMA_VALIDATED_TRACES = "schema_validated_traces.parquet"
@@ -30,6 +31,20 @@ STAGE_TABLES = (
     SCHEMA_VALIDATED_TRACES,
     REPLAY_VALIDATED_TASKS,
 )
+
+
+def reference_samples_schema() -> Any:
+    import pyarrow as pa
+
+    return pa.schema(
+        [
+            ("sample_id", pa.string()),
+            ("language", pa.string()),
+            ("messages", pa.string()),
+            ("tags", pa.list_(pa.string())),
+            ("source_hash", pa.string()),
+        ]
+    )
 
 
 def write_stage_table(path: Path, rows: list[dict[str, Any]], schema: Any) -> Path:
@@ -49,6 +64,7 @@ def task_instances_schema() -> Any:
     return pa.schema(
         [
             ("task_id", pa.string()),
+            ("base_task_id", pa.string()),
             ("template_id", pa.string()),
             ("pack_id", pa.string()),
             ("pack_version", pa.string()),
@@ -76,6 +92,7 @@ def task_instance_row(task: dict[str, Any]) -> dict[str, Any]:
     """Project one locked task instance, slot timeline included."""
     return {
         "task_id": str(task["task_id"]),
+        "base_task_id": str(task.get("base_task_id") or task["task_id"]),
         "template_id": str(task.get("template_id")),
         "pack_id": str(task.get("pack_id")),
         "pack_version": str(task.get("pack_version")),
@@ -155,8 +172,14 @@ def rendered_conversations_schema() -> Any:
     return pa.schema(
         [
             ("task_id", pa.string()),
+            ("base_task_id", pa.string()),
+            ("variant_index", pa.int32()),
+            ("source", pa.string()),
             ("language", pa.string()),
             ("system_prompt_id", pa.string()),
+            ("paraphrase_model", pa.string()),
+            ("paraphrase_model_canonical", pa.string()),
+            ("profile_hash", pa.string()),
             ("num_user_turns", pa.int32()),
             ("accepted", pa.bool_()),
             ("guard_violations", pa.string()),
@@ -170,8 +193,16 @@ def rendered_conversation_row(surface: dict[str, Any]) -> dict[str, Any]:
     violations = surface["guard_violations"]
     return {
         "task_id": str(surface["task_id"]),
+        "base_task_id": str(surface.get("base_task_id") or surface["task_id"]),
+        "variant_index": int(surface.get("variant_index", 0)),
+        "source": str(surface.get("source", "template")),
         "language": str(surface["language"]),
         "system_prompt_id": str(surface["system_prompt_id"]),
+        "paraphrase_model": _optional_str(surface.get("paraphrase_model")),
+        "paraphrase_model_canonical": _optional_str(
+            surface.get("paraphrase_model_canonical")
+        ),
+        "profile_hash": _optional_str(surface.get("profile_hash")),
         "num_user_turns": sum(1 for step in surface["steps"] if step["kind"] == "user"),
         "accepted": not violations,
         "guard_violations": canonical_json(violations),
