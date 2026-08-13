@@ -136,6 +136,66 @@ Semantic deduplication accepts `model_identifier`, `n_clusters`, `eps`, and
 `remove_duplicates`. Generation still rejects enabled deduplication until its
 stage is implemented, so no new setting is silently ignored.
 
+Surface quality uses the versioned `1.1` six-check contract:
+
+- Python owns `surface_shape`, `semantic_preservation`, and `leakage`.
+- The optional surface judge owns `language_locale`, `fluency_naturalness`,
+  and `clarity_coherence`.
+
+The judge contract is surface-only: it cannot label tool correctness, change
+arguments, inspect oracle results, or rewrite benchmark truth. A complete
+quality result contains exactly one verdict for each check. Python checks are
+`passed` or `failed`; judged checks may also be `not_applicable` when the task
+policy intentionally permits the observed condition, `not_run` when the judge
+is skipped, or `error` when the judge call fails. These states are not quality
+failures and are not counted as passes. The deterministic stage can be enabled without a judge, while
+`drop_authority: true` requires one. Judge responses carry only a controlled
+reason code — no free-text evidence. Turn-policy applicability is checked when
+the six results are assembled: intentional ambiguity in `clarify_only` is not a
+quality failure.
+
+Python owns the first three checks by mapping the existing render and paraphrase
+guards (`must_preserve`, `must_omit`, `must_not_mention`, `novel_literal`,
+`expected_result_leakage`, `semantic_shape`). Canonical template surfaces never
+fail `unchanged_surface`. Each task gets a complete six-check record. When the
+optional judge is disabled the judged checks are `not_run`; when it runs, it
+sees only language, user-facing turns, style hints, and the surface rubric, and
+`clarify_only` ambiguity is recorded as `not_applicable` before assembly.
+Expected-result and novel-literal values remain private guard diagnostics and
+are not copied into quality-record evidence.
+
+Drop authority is deliberately asymmetric. A Python failure always drops the
+row, because those three checks protect semantics and leakage. A judge failure
+drops the row only under `drop_authority: true`; otherwise it is recorded as an
+advisory observation that changes nothing. A judge error never decides
+anything: an advisory run records it and continues, while an authoritative run
+refuses to publish, since a gate that could not answer was never enforced.
+If the policy drops every replay survivor, final output also refuses to stamp an
+empty benchmark as gold.
+Stage 10 writes `stage_cache/surface_validated_tasks.parquet` with one row per
+task: identity, contract version, keep/drop authority, six queryable statuses,
+and canonical JSON check detail. Nested detail remains JSON text so arbitrary
+pack-specific evidence cannot mutate the Arrow schema. Generation still rejects
+later-stage features it cannot honor, but Stage 10 now runs between replay and
+final output, filters publication rows, and records its report and artifact
+hashes in `run_manifest.json`.
+
+The immutable judge I/O cache is shared and append-only, so the manifest does
+not hash that changing file as though it belonged to one run. Instead,
+`surface_judge_cache_usage.json` records only the request, input, and observed
+response hashes this run used (including an empty request list when Python
+rejected every surface first), and the manifest hashes that per-run usage file.
+The Stage-10 end-to-end tests also run an English warehouse-asset oracle pack
+outside the bundled banking and tiny domains; checks and parquet schemas contain
+no domain-specific branching.
+
+```yaml
+surface_quality_validation:
+  contract_version: "1.1"
+  enabled: false
+  drop_authority: false
+```
+
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
 [`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md).
@@ -150,7 +210,7 @@ requirements, see
 | --- | --- | --- |
 | Reference profiling | **Implemented** | Normalize content-addressed style samples and create a cached profile without exposing oracle truth. |
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
-| Surface quality judging | **Implementing** | Score generated conversations and optionally reject low-quality or policy-breaking surfaces. |
+| Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Implementing** | Remove near-duplicate tasks before publication while retaining deterministic provenance. |
 | Evaluation and scoring | **Implementing** | Run a model or agent against the published benchmark and score tool selection, arguments, call ordering, results, and final task success. |
 | Held-out evaluation | **Implementing** | Evaluate on separately governed fixtures or cases and record coverage and dropped-row metrics in run lineage. |

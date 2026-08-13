@@ -11,6 +11,10 @@ from typing import Any
 
 import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_quality_contract import (
+    SURFACE_QUALITY_CONTRACT_VERSION,
+)
+
 # runtime/benchmark_families/bfcl/config.py → …/steps/byob
 BYOB_ROOT = Path(__file__).resolve().parents[3]
 
@@ -94,7 +98,7 @@ SURFACE_GENERATION_KEYS = frozenset(
         "prevent_tool_name_leakage",
     }
 )
-_SURFACE_QUALITY_KEYS = frozenset({"enabled", "drop_authority"})
+_SURFACE_QUALITY_KEYS = frozenset({"contract_version", "enabled", "drop_authority"})
 _TASK_GENERATION_KEYS = frozenset(
     {
         "tasks_per_category",
@@ -230,12 +234,8 @@ def _validate_reference_samples(path: Path) -> None:
         if not isinstance(sample.get("language"), str) or not sample["language"].strip():
             raise ValueError(f"reference sample {sample_id!r} needs a language")
         tags = sample.get("tags", [])
-        if not isinstance(tags, list) or any(
-            not isinstance(tag, str) or not tag.strip() for tag in tags
-        ):
-            raise ValueError(
-                f"reference sample {sample_id!r} tags must be a list of non-empty strings"
-            )
+        if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag.strip() for tag in tags):
+            raise ValueError(f"reference sample {sample_id!r} tags must be a list of non-empty strings")
         messages = sample.get("messages")
         if not isinstance(messages, list) or not messages:
             raise ValueError(f"reference sample {sample_id!r} messages must be a non-empty list")
@@ -515,10 +515,7 @@ class BfclConfig:
                 _reject_model_secrets(model_config, f"lineage.roles.{name}.model_config")
                 inference_parameters = model_config.get("inference_parameters", {})
                 if not isinstance(inference_parameters, dict):
-                    raise ValueError(
-                        f"lineage.roles.{name}.model_config.inference_parameters "
-                        "must be a mapping"
-                    )
+                    raise ValueError(f"lineage.roles.{name}.model_config.inference_parameters must be a mapping")
                 model_config["inference_parameters"] = dict(inference_parameters)
             if enabled:
                 if not model_config:
@@ -645,19 +642,39 @@ class BfclConfig:
             raise ValueError("lineage.profile_influenced_surface can only be true when model paraphrasing is enabled")
 
         quality = sections["surface_quality_validation"]
+        contract_version = quality.get(
+            "contract_version",
+            SURFACE_QUALITY_CONTRACT_VERSION,
+        )
+        if contract_version != SURFACE_QUALITY_CONTRACT_VERSION:
+            raise ValueError(
+                "surface_quality_validation.contract_version must be "
+                f"{SURFACE_QUALITY_CONTRACT_VERSION!r}, got {contract_version!r}"
+            )
+        quality["contract_version"] = contract_version
         for key in ("enabled", "drop_authority"):
             if key in quality:
                 _require_bool(quality[key], f"surface_quality_validation.{key}")
+        quality_enabled = bool(quality.get("enabled", False))
+        judge_drop_authority = bool(quality.get("drop_authority", False))
         judge_enabled = bool(roles.get("surface_judge") and roles["surface_judge"].enabled)
-        if bool(quality.get("enabled", False)) != judge_enabled:
-            raise ValueError("surface_quality_validation.enabled must match lineage.roles.surface_judge.enabled")
-        if judge_enabled and quality.get("enabled"):
-            expected_advisory = not bool(quality.get("drop_authority", False))
+        if judge_enabled and not quality_enabled:
+            raise ValueError(
+                "surface_quality_validation.enabled must be true when lineage.roles.surface_judge is enabled"
+            )
+        if judge_drop_authority and not judge_enabled:
+            raise ValueError(
+                "surface_quality_validation.drop_authority requires an enabled lineage.roles.surface_judge"
+            )
+        if judge_enabled:
+            expected_advisory = not judge_drop_authority
             if judge_advisory is not expected_advisory:
                 raise ValueError(
                     "lineage.judge_advisory must equal the inverse of "
                     "surface_quality_validation.drop_authority when the surface judge is enabled"
                 )
+        elif judge_advisory is not None:
+            raise ValueError("lineage.judge_advisory must be null when the surface judge is disabled")
         task_generation = sections["task_generation"]
         for key in ("tasks_per_category", "max_turns", "max_tool_calls"):
             if key not in task_generation:
@@ -672,18 +689,10 @@ class BfclConfig:
                 task_generation[key] = _require_probability_mix(task_generation[key], f"task_generation.{key}")
         turn_keys = set(task_generation.get("turn_mix") or {})
         if unknown := sorted(turn_keys - {"single_turn", "multi_turn"}):
-            raise ValueError(
-                "task_generation.turn_mix has unknown keys: "
-                + ", ".join(unknown)
-            )
-        call_count_keys = set(
-            task_generation.get("tool_call_count_mix") or {}
-        )
+            raise ValueError("task_generation.turn_mix has unknown keys: " + ", ".join(unknown))
+        call_count_keys = set(task_generation.get("tool_call_count_mix") or {})
         if unknown := sorted(call_count_keys - {"1", "2", "3+"}):
-            raise ValueError(
-                "task_generation.tool_call_count_mix has unknown keys: "
-                + ", ".join(unknown)
-            )
+            raise ValueError("task_generation.tool_call_count_mix has unknown keys: " + ", ".join(unknown))
         dedup = sections["semantic_deduplication_config"]
         if "enabled" in dedup:
             _require_bool(dedup["enabled"], "semantic_deduplication_config.enabled")
@@ -764,9 +773,7 @@ class BfclConfig:
             )
         profile_role_enabled = bool(roles.get("profile") and roles["profile"].enabled)
         if profile_role_enabled and reference_benchmark is None:
-            raise ValueError(
-                "reference_benchmark must be configured when lineage.roles.profile is enabled"
-            )
+            raise ValueError("reference_benchmark must be configured when lineage.roles.profile is enabled")
 
         return cls(
             family="bfcl",

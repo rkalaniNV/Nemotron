@@ -557,7 +557,8 @@ Disabled roles are recorded with null identity and set
 `generation_mode: template_only`, which does not affect gold eligibility. The
 remaining `REPLACE_ME_*` entries only matter once the corresponding role is enabled.
 
-Generation refuses a config that asks for work no stage performs — an enabled
-profile, paraphrase, or surface-judge role, `model_paraphrase_enabled`,
-`surface_quality_validation`, `semantic_deduplication_config`, or an export — so
-a run never claims lineage or quality guarantees nothing produced.
+Generation supports reference profiling, controlled paraphrasing, and Stage 10
+surface-quality validation, including an optional advisory or authoritative
+surface judge. It still refuses settings for later work no stage performs, such
+as enabled semantic deduplication or exports, so a run never claims guarantees
+nothing produced.

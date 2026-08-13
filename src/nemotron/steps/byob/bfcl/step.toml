@@ -143,7 +143,7 @@ recovery = "Declare assistant_turn_templates for the non-tool milestones the tem
 
 [[errors]]
 name = "unsupported_config_feature"
-recovery = "stage=generate refuses a config that asks for work no stage performs (an enabled profile, paraphrase, or surface_judge role, model_paraphrase_enabled, surface_quality_validation, semantic_deduplication_config, an export, a paraphrase count, a judge drop authority, a lineage claim such as profile_influenced_surface or judge_advisory, or an unrecognized surface_generation key) instead of ignoring it. Disable or remove the listed settings to run the template-only path."
+recovery = "stage=generate refuses a config that asks for work no stage performs (semantic_deduplication_config, an export, unsupported balancing controls, eval/translation orchestration, shared MCQ model fields, or an unrecognized surface_generation key) instead of ignoring it. Disable or remove the listed settings, or implement the owning stage."
 
 [reference]
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"

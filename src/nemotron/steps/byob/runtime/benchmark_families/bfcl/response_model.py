@@ -4,6 +4,17 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_quality_contract import (
+    SurfaceJudgeResult,
+)
+
+__all__ = [
+    "ParaphraseResult",
+    "ParaphraseVariant",
+    "ReferenceProfileResult",
+    "SurfaceJudgeResult",
+]
+
 
 class ReferenceProfileResult(BaseModel):
     style_hints: list[str] = Field(

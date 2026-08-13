@@ -32,6 +32,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     REFERENCE_SAMPLES,
     STAGE_TABLES,
+    SURFACE_VALIDATED_TASKS,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
 
@@ -305,9 +306,7 @@ def build_row(
         "pack_version": task["pack_version"],
         "seed": int(task.get("seed") or 0),
         "paraphrase_model": surface.get("paraphrase_model"),
-        "paraphrase_model_canonical": surface.get(
-            "paraphrase_model_canonical"
-        ),
+        "paraphrase_model_canonical": surface.get("paraphrase_model_canonical"),
         # Null, not False: no held-out source is configured, so the row was never
         # checked against one and must not claim it was.
         "held_out_hit": None,
@@ -347,9 +346,7 @@ def _model_role(name: str, config: BfclConfig) -> dict[str, Any]:
             "weights_digest": model_config.get("weights_digest"),
         },
         "canonical_id": (
-            str(model_config["canonical_id"]).strip().lower()
-            if model_config.get("canonical_id")
-            else None
+            str(model_config["canonical_id"]).strip().lower() if model_config.get("canonical_id") else None
         ),
         "config_hash": _sha256(canonical_json(_jsonable(model_config))),
         "enabled": True,
@@ -371,8 +368,7 @@ def _bias_applicability(pack: LoadedPack) -> dict[str, dict[str, str]]:
         for count in Counter(
             milestone.get("call_group")
             for milestone in template.get("assistant_milestones") or []
-            if milestone.get("type") == "tool_call"
-            and milestone.get("call_group") is not None
+            if milestone.get("type") == "tool_call" and milestone.get("call_group") is not None
         ).values()
     )
     for policy in (
@@ -387,9 +383,7 @@ def _bias_applicability(pack: LoadedPack) -> dict[str, dict[str, str]]:
         "irrelevant",
     ):
         key = f"B3.{policy}"
-        applicable = policy in policies or (
-            policy == "multi_tool" and has_parallel_group
-        )
+        applicable = policy in policies or (policy == "multi_tool" and has_parallel_group)
         result[key] = (
             {"status": "applicable"}
             if applicable
@@ -399,8 +393,7 @@ def _bias_applicability(pack: LoadedPack) -> dict[str, dict[str, str]]:
             }
         )
     has_distractor = any(
-        set(template.get("tools_present") or [])
-        - set(template.get("required_tools") or [])
+        set(template.get("tools_present") or []) - set(template.get("required_tools") or [])
         for template in pack.templates
     )
     result["B3.distractor_present"] = (
@@ -440,6 +433,8 @@ def run_final_output(
     stage_counts: dict[str, int],
     expected_pack_fingerprint: str,
     trace_drop_reasons: dict[str, str] | None = None,
+    surface_quality_records: list[dict[str, Any]] | None = None,
+    surface_quality_report: dict[str, Any] | None = None,
 ) -> Path:
     """Write benchmark_raw.parquet, benchmark.parquet, and run_manifest.json."""
     import pyarrow as pa
@@ -475,6 +470,23 @@ def run_final_output(
         "tools_internal": {"content_hash": _file_hash(cache / "tools_normalized_internal.json")},
         "tools_model_facing": {"content_hash": _file_hash(cache / "tools_normalized.json")},
     }
+    # Stage 10 ran, so its outputs are evidence the manifest must carry. Hash them here,
+    # with the other mandatory intermediates, so a deleted artifact stops the run before
+    # a published parquet exists: hashing only when present would let a missing file
+    # publish a quality claim that nothing substantiates.
+    surface_quality_artifacts = (
+        {
+            "surface_validated_tasks": {"content_hash": _file_hash(cache / SURFACE_VALIDATED_TASKS)},
+            "surface_quality_rejections": {"content_hash": _file_hash(cache / "surface_quality_rejections.json")},
+            **(
+                {"surface_judge_cache_usage": {"content_hash": _file_hash(cache / "surface_judge_cache_usage.json")}}
+                if (judge_role := (config.lineage.roles or {}).get("surface_judge")) and judge_role.enabled
+                else {}
+            ),
+        }
+        if surface_quality_records is not None
+        else {}
+    )
     current_pack_fingerprint = _require_pack_fingerprint(
         pack,
         expected_pack_fingerprint,
@@ -490,11 +502,41 @@ def run_final_output(
     )
     schema = benchmark_schema()
     raw_path = output_dir / "benchmark_raw.parquet"
-    _write_parquet_atomic(pa.Table.from_pylist(rows, schema=schema), raw_path, pq)
 
-    # Raw means executable/schema-valid. Publication additionally applies deterministic
-    # surface guards; future held-out/judge/dedup stages can narrow it further.
-    published = [row for row in rows if not surfaces[str(row["task_id"])]["guard_violations"]]
+    # Raw means executable/schema-valid. Publication additionally applies Stage 10
+    # when enabled; the disabled path preserves the legacy deterministic guard gate.
+    if surface_quality_records is None:
+        if surface_quality_report is not None:
+            raise ValueError("a surface-quality report requires surface-quality records")
+        published = [row for row in rows if not surfaces[str(row["task_id"])]["guard_violations"]]
+    else:
+        if surface_quality_report is None:
+            raise ValueError("surface-quality records require a surface-quality report")
+        quality_by_task: dict[str, dict[str, Any]] = {}
+        for record in surface_quality_records:
+            task_id = str(record["task_id"])
+            if task_id in quality_by_task:
+                raise ValueError(f"duplicate surface-quality record for task {task_id!r}")
+            quality_by_task[task_id] = record
+        raw_ids = {str(row["task_id"]) for row in rows}
+        if set(quality_by_task) != raw_ids:
+            missing = sorted(raw_ids - set(quality_by_task))
+            extra = sorted(set(quality_by_task) - raw_ids)
+            raise ValueError(
+                f"surface-quality records must match replay-validated rows exactly (missing={missing}, extra={extra})"
+            )
+        published = [row for row in rows if quality_by_task[str(row["task_id"])]["decision"] == "kept"]
+    if not published:
+        if surface_quality_records is not None:
+            source = "Stage 10 surface-quality policy"
+            recovery = (
+                "inspect stage_cache/surface_validated_tasks.parquet and stage_cache/surface_quality_rejections.json"
+            )
+        else:
+            source = "deterministic surface guards"
+            recovery = "inspect stage_cache/rendered_conversations.parquet"
+        raise RuntimeError(f"BFCL final_output has no publication rows after {source}; {recovery}")
+    _write_parquet_atomic(pa.Table.from_pylist(rows, schema=schema), raw_path, pq)
     benchmark_path = output_dir / "benchmark.parquet"
     _write_parquet_atomic(pa.Table.from_pylist(published, schema=schema), benchmark_path, pq)
 
@@ -509,9 +551,7 @@ def run_final_output(
     # absent report reads as "nothing was requested" rather than stopping publication.
     paraphrase_report_path = cache / "paraphrase_rejections.json"
     paraphrase_report: dict[str, Any] = (
-        json.loads(paraphrase_report_path.read_text(encoding="utf-8"))
-        if paraphrase_report_path.is_file()
-        else {}
+        json.loads(paraphrase_report_path.read_text(encoding="utf-8")) if paraphrase_report_path.is_file() else {}
     )
     created_at = datetime.now(timezone.utc)
     schema_version = str(config.schema_version or DEFAULT_BENCHMARK_SCHEMA_VERSION)
@@ -529,17 +569,16 @@ def run_final_output(
         "fixtures_normalized": {"content_hash": _file_hash(cache / "fixtures_normalized.json")},
         "task_templates_normalized": {"content_hash": _file_hash(cache / "task_templates_normalized.yaml")},
         "reference_profile": {"content_hash": _file_hash(cache / "reference_profile.json")},
-        "reference_samples": {
-            "content_hash": _file_hash(cache / REFERENCE_SAMPLES)
-        },
+        "reference_samples": {"content_hash": _file_hash(cache / REFERENCE_SAMPLES)},
     }
-    for artifact_name in (
+    optional_artifacts = [
         "reference_profile_io_cache.jsonl",
         "paraphrase_io_cache.jsonl",
         "paraphrase_rejections.json",
-        "surface_judge_io_cache.jsonl",
         "held_out_normalized.json",
-    ):
+    ]
+    lineage_artifacts.update(surface_quality_artifacts)
+    for artifact_name in optional_artifacts:
         artifact_path = cache / artifact_name
         if artifact_path.is_file():
             lineage_artifacts[artifact_name.rsplit(".", 1)[0]] = {"content_hash": _file_hash(artifact_path)}
@@ -585,6 +624,12 @@ def run_final_output(
         ),
         "models": {name: _model_role(name, config) for name in ("profile", "paraphrase", "surface_judge")},
         "judge_advisory": config.lineage.judge_advisory,
+        "surface_quality_validation": {
+            "contract_version": config.surface_quality_validation.get("contract_version"),
+            "enabled": bool(config.surface_quality_validation.get("enabled")),
+            "drop_authority": bool(config.surface_quality_validation.get("drop_authority")),
+            "report": surface_quality_report,
+        },
         "seeds": {
             "global": int(config.random_seed or 0),
             "derivation": (
