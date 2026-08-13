@@ -33,6 +33,24 @@ def _run_tiny(tmp_path: Path) -> tuple[list[dict[str, Any]], Path]:
     return pq.read_table(benchmark_path).to_pylist(), benchmark_path.parent
 
 
+def _write_tiny_quality_config(tmp_path: Path, *, enabled: bool, name: str) -> Path:
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_data["surface_quality_validation"]["enabled"] = enabled
+    config_path = tmp_path / name
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+    return config_path
+
+
+def _run_tiny_with_surface_quality(
+    tmp_path: Path,
+) -> tuple[list[dict[str, Any]], Path]:
+    import pyarrow.parquet as pq
+
+    benchmark_path = generate_bfcl(_write_tiny_quality_config(tmp_path, enabled=True, name="tiny-quality.yaml"))
+    return pq.read_table(benchmark_path).to_pylist(), benchmark_path.parent
+
+
 @pytest.fixture(scope="module")
 def tiny_run(tmp_path_factory: pytest.TempPathFactory) -> tuple[list[dict[str, Any]], Path]:
     return _run_tiny(tmp_path_factory.mktemp("tiny_slice"))
@@ -53,8 +71,10 @@ def banking_run(tmp_path_factory: pytest.TempPathFactory) -> list[dict[str, Any]
 
 
 @pytest.fixture(scope="module")
-def third_pack_run(tmp_path_factory: pytest.TempPathFactory) -> list[dict[str, Any]]:
-    """Build a non-bundled domain pack to prove the runtime reads only the contract."""
+def third_pack_run(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[list[dict[str, Any]], Path]:
+    """Build a non-bundled domain pack and run it through enabled Stage 10."""
     import pyarrow.parquet as pq
 
     tmp_path = tmp_path_factory.mktemp("third_pack_slice")
@@ -191,12 +211,13 @@ ASSERTIONS = {"assert_asset_returned": assert_asset_returned}
     config_data["oracle_pack"] = {"manifest_path": str(pack / "manifest.yaml")}
     config_data["oracle_runtime"]["allowed_roots"] = [str(pack)]
     config_data["task_generation"]["tasks_per_category"] = 1
+    config_data["surface_quality_validation"]["enabled"] = True
     config_path = tmp_path / "third-pack.yaml"
     config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
 
     benchmark_path = generate_bfcl(config_path)
     assert benchmark_path is not None
-    return pq.read_table(benchmark_path).to_pylist()
+    return pq.read_table(benchmark_path).to_pylist(), benchmark_path.parent
 
 
 def _row(rows: list[dict[str, Any]], template_id: str) -> dict[str, Any]:
@@ -206,14 +227,53 @@ def _row(rows: list[dict[str, Any]], template_id: str) -> dict[str, Any]:
 
 
 def test_non_bundled_oracle_pack_runs_end_to_end(third_pack_run) -> None:
-    assert len(third_pack_run) == 1
-    row = third_pack_run[0]
+    rows, _ = third_pack_run
+    assert len(rows) == 1
+    row = rows[0]
     assert row["pack_id"] == "warehouse_assets"
     assert row["template_id"] == "asset_inspection"
     assert row["expected_tool_calls"][0]["function_name"] == "inspect_asset"
-    assert decode_arguments(row["expected_tool_calls"][0]["arguments"]) == {
-        "asset_id": "ASSET-7"
+    assert decode_arguments(row["expected_tool_calls"][0]["arguments"]) == {"asset_id": "ASSET-7"}
+
+
+def test_surface_quality_is_generic_to_a_non_banking_oracle_pack(
+    third_pack_run,
+) -> None:
+    import pyarrow.parquet as pq
+
+    rows, output_dir = third_pack_run
+    cache = output_dir / "stage_cache"
+    quality_rows = pq.read_table(cache / "surface_validated_tasks.parquet").to_pylist()
+    report = json.loads((cache / "surface_quality_rejections.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
+
+    assert [row["task_id"] for row in quality_rows] == [row["task_id"] for row in rows]
+    assert quality_rows[0]["template_id"] == "asset_inspection"
+    assert quality_rows[0]["accepted"] is True
+    assert quality_rows[0]["surface_source"] == "template"
+    assert {
+        quality_rows[0]["surface_shape_status"],
+        quality_rows[0]["semantic_preservation_status"],
+        quality_rows[0]["leakage_status"],
+    } == {"passed"}
+    assert {
+        quality_rows[0]["language_locale_status"],
+        quality_rows[0]["fluency_naturalness_status"],
+        quality_rows[0]["clarity_coherence_status"],
+    } == {"not_run"}
+    assert report["by_template"] == {
+        "asset_inspection": {
+            "evaluated": 1,
+            "kept": 1,
+            "dropped": 0,
+            "drop_reason_counts": {},
+            "advisory_failure_counts": {},
+            "judge_error_counts": {},
+        }
     }
+    assert manifest["pack"]["pack_id"] == "warehouse_assets"
+    assert manifest["surface_quality_validation"]["enabled"] is True
+    assert manifest["stage_counts"]["surface_quality_evaluated"] == 1
 
 
 def test_tiny_slice_produces_replay_validated_non_publishable_rows(tiny_run) -> None:
@@ -320,9 +380,7 @@ def test_banking_rows_expose_only_declared_tools_and_confirm_mutations(banking_r
 def test_banking_categories_share_one_budget(banking_run) -> None:
     config = yaml.safe_load((BFCL_CONFIG_DIR / "banking_vn.yaml").read_text(encoding="utf-8"))
     budget = config["task_generation"]["tasks_per_category"]
-    templates = yaml.safe_load(
-        (BANKING_PACK_ROOT / "task_templates.yaml").read_text(encoding="utf-8")
-    )
+    templates = yaml.safe_load((BANKING_PACK_ROOT / "task_templates.yaml").read_text(encoding="utf-8"))
 
     counts: dict[str, int] = {}
     for row in banking_run:
@@ -330,9 +388,7 @@ def test_banking_categories_share_one_budget(banking_run) -> None:
     assert counts
     assert max(counts.values()) <= budget
     # Splitting a budget across templates must not silently drop a template.
-    assert {row["template_id"] for row in banking_run} == {
-        template["template_id"] for template in templates
-    }
+    assert {row["template_id"] for row in banking_run} == {template["template_id"] for template in templates}
 
 
 def test_banking_covers_every_supported_policy_edge(banking_run) -> None:
@@ -349,9 +405,7 @@ def test_banking_covers_every_supported_policy_edge(banking_run) -> None:
         "irrelevant",
     }
     assert any(row["num_tool_calls"] >= 2 for row in banking_run)
-    assert all(
-        set(row["required_tools"]) <= set(row["tools_present"]) for row in banking_run
-    )
+    assert all(set(row["required_tools"]) <= set(row["tools_present"]) for row in banking_run)
     assert any(set(row["required_tools"]) < set(row["tools_present"]) for row in banking_run)
 
 
@@ -375,9 +429,7 @@ def test_banking_dependent_call_reads_its_id_from_the_first_result(banking_run) 
     assert first["call_group"] < second["call_group"]
     assert (first["turn_index"], second["turn_index"]) == (0, 1)
 
-    listed = json.loads(
-        next(message for message in row["messages"] if message["role"] == "tool")["content"]
-    )
+    listed = json.loads(next(message for message in row["messages"] if message["role"] == "tool")["content"])
     checked_id = decode_arguments(second["arguments"])["transaction_id"]
     assert checked_id == listed["transactions"][0]["transaction_id"]
     assert checked_id not in decode_arguments(first["arguments"]).values()
@@ -397,18 +449,14 @@ def test_banking_correction_transfers_only_the_replacement_amount(banking_run) -
     assert len(user_turns) == 3
     assert call["turn_index"] == 2
 
-    committed = json.loads(
-        next(message for message in row["messages"] if message["role"] == "tool")["content"]
-    )
+    committed = json.loads(next(message for message in row["messages"] if message["role"] == "tool")["content"])
     assert committed["status"] == "succeeded"
     assert committed["amount_vnd"] == arguments["amount_vnd"]
 
 
 def test_banking_negative_paths_keep_the_failure_in_the_trace(banking_run) -> None:
     not_found = _row(banking_run, "bn_txn_status_unknown_id")
-    tool_message = next(
-        message for message in not_found["messages"] if message["role"] == "tool"
-    )
+    tool_message = next(message for message in not_found["messages"] if message["role"] == "tool")
     assert json.loads(tool_message["content"])["error"]["code"] == "not_found"
 
     rejected = _row(banking_run, "bn_transfer_short_of_funds")
@@ -499,14 +547,111 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
     assert (output_dir / "benchmark_raw.parquet").exists()
 
 
+def test_enabled_surface_quality_is_integrated_into_pipeline_and_manifest(
+    tmp_path: Path,
+) -> None:
+    import pyarrow.parquet as pq
+
+    rows, output_dir = _run_tiny_with_surface_quality(tmp_path)
+    cache = output_dir / "stage_cache"
+    quality_rows = pq.read_table(cache / "surface_validated_tasks.parquet").to_pylist()
+    raw_rows = pq.read_table(output_dir / "benchmark_raw.parquet").to_pylist()
+    report = json.loads((cache / "surface_quality_rejections.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
+
+    assert {row["task_id"] for row in quality_rows} == {row["task_id"] for row in raw_rows}
+    assert {row["task_id"] for row in rows} == {row["task_id"] for row in quality_rows if row["accepted"]}
+    assert report["evaluated"] == len(raw_rows)
+    assert report["kept"] == len(rows)
+    assert manifest["surface_quality_validation"] == {
+        "contract_version": "1.1",
+        "enabled": True,
+        "drop_authority": False,
+        "report": report,
+    }
+    assert manifest["stage_counts"]["surface_quality_evaluated"] == len(raw_rows)
+    assert manifest["stage_counts"]["surface_quality_kept"] == len(rows)
+    assert manifest["stage_counts"]["surface_quality_judge_errors"] == 0
+    assert manifest["artifacts"]["surface_validated_tasks"]["content_hash"].startswith("sha256:")
+    assert manifest["artifacts"]["surface_quality_rejections"]["content_hash"].startswith("sha256:")
+
+
+def test_disabling_stage_ten_does_not_republish_its_previous_artifacts(
+    tmp_path: Path,
+) -> None:
+    """A rerun that skips Stage 10 must not inherit the last run's quality verdict."""
+    _, output_dir = _run_tiny_with_surface_quality(tmp_path)
+    cache = output_dir / "stage_cache"
+    assert (cache / "surface_validated_tasks.parquet").is_file()
+
+    generate_bfcl(_write_tiny_quality_config(tmp_path, enabled=False, name="tiny-plain.yaml"))
+    manifest = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["surface_quality_validation"]["enabled"] is False
+    assert manifest["surface_quality_validation"]["report"] is None
+    assert "surface_validated_tasks" not in manifest["artifacts"]
+    assert "surface_quality_rejections" not in manifest["artifacts"]
+    assert not (cache / "surface_validated_tasks.parquet").exists()
+    assert not (cache / "surface_quality_rejections.json").exists()
+
+
+def test_a_deleted_stage_ten_artifact_blocks_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An enabled quality stage may not publish without the evidence it produced."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import surface_quality
+
+    run_validation = surface_quality.run_surface_quality_validation
+
+    def delete_report(config, tasks, surfaces, **kwargs):  # type: ignore[no-untyped-def]
+        decided, report = run_validation(config, tasks, surfaces, **kwargs)
+        (Path(config.output_dir) / config.expt_name / "stage_cache" / "surface_quality_rejections.json").unlink()
+        return decided, report
+
+    monkeypatch.setattr(surface_quality, "run_surface_quality_validation", delete_report)
+
+    with pytest.raises(FileNotFoundError):
+        _run_tiny_with_surface_quality(tmp_path)
+    # The run must stop before a published parquet exists without its manifest.
+    assert not list((tmp_path / "output").glob("**/run_manifest.json"))
+    assert not list((tmp_path / "output").glob("**/benchmark.parquet"))
+
+
+def test_stage_ten_cannot_publish_an_empty_gold_benchmark(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import surface_quality
+
+    run_validation = surface_quality.run_surface_quality_validation
+
+    def reject_every_surface(config, tasks, surfaces, **kwargs):  # type: ignore[no-untyped-def]
+        for task in tasks:
+            surfaces[str(task["task_id"])]["guard_violations"].append(
+                {"guard": "must_not_mention", "phrase": "forced-quality-rejection"}
+            )
+        return run_validation(config, tasks, surfaces, **kwargs)
+
+    monkeypatch.setattr(
+        surface_quality,
+        "run_surface_quality_validation",
+        reject_every_surface,
+    )
+
+    with pytest.raises(RuntimeError, match="no publication rows after Stage 10"):
+        _run_tiny_with_surface_quality(tmp_path)
+    assert not list((tmp_path / "output").glob("**/run_manifest.json"))
+    assert not list((tmp_path / "output").glob("**/benchmark.parquet"))
+
+
 def test_slice_is_deterministic_across_runs(tmp_path: Path, tiny_run) -> None:
     rows, _ = tiny_run
     rerun_rows, _ = _run_tiny(tmp_path)
 
     def fingerprint(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
         return sorted(
-            (row["task_id"], row["seed"], json.dumps(row["messages"], sort_keys=True, default=str))
-            for row in items
+            (row["task_id"], row["seed"], json.dumps(row["messages"], sort_keys=True, default=str)) for row in items
         )
 
     assert fingerprint(rows) == fingerprint(rerun_rows)

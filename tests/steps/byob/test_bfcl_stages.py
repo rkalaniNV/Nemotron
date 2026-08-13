@@ -348,9 +348,7 @@ def test_dependent_call_needs_the_oracle_and_a_later_call_group() -> None:
             resolve_results=resolve,
         )
 
-    unknown = _dependent_template(
-        args={"thing_id": {"from_result": {"call": "nope", "path": "items.0.id"}}}
-    )
+    unknown = _dependent_template(args={"thing_id": {"from_result": {"call": "nope", "path": "items.0.id"}}})
     with pytest.raises(ExpectedTraceError, match="unknown milestone id"):
         build_expected_calls(
             _Pack(TOOLS),
@@ -434,9 +432,7 @@ def test_withheld_slot_may_be_revealed_in_a_later_user_turn() -> None:
     }
     task = {"slots": {"thing_id": "T-1"}}
 
-    assert (
-        check_surface_guards(template, task, ["Check my thing.", "It is T-1."], ["do_thing"]) == []
-    )
+    assert check_surface_guards(template, task, ["Check my thing.", "It is T-1."], ["do_thing"]) == []
     assert check_surface_guards(template, task, ["Check thing T-1."], ["do_thing"]) == [
         {"guard": "must_omit", "slot": "thing_id"}
     ]
@@ -455,9 +451,7 @@ def test_missing_slot_policy_must_collect_the_slot_it_withholds() -> None:
             {"type": "tool_call", "tool": "do_thing"},
             {"type": "final_answer"},
         ],
-        "user_simulator_turns": [
-            {"after": "ask", "content_template": {"en": "Public is {public}."}}
-        ],
+        "user_simulator_turns": [{"after": "ask", "content_template": {"en": "Public is {public}."}}],
     }
     task = {**TASK, "turn_policy": "missing_slot"}
 
@@ -542,9 +536,7 @@ def test_correction_refuses_a_call_that_kept_the_replaced_value() -> None:
         ]
     )
     with pytest.raises(ExpectedTraceError, match="the value the user replaced"):
-        build_expected_calls(
-            _Pack(TOOLS), CORRECTION_TASK, build_plan(early, CORRECTION_TASK)
-        )
+        build_expected_calls(_Pack(TOOLS), CORRECTION_TASK, build_plan(early, CORRECTION_TASK))
 
 
 def test_correction_withdraws_the_confirmation_it_replaces() -> None:
@@ -578,9 +570,7 @@ def test_correction_withdraws_the_confirmation_it_replaces() -> None:
     task = {**CORRECTION_TASK, "confirmed_call_turns": stale["confirmed_call_turns"]}
     reasons = {
         failure["reason"]
-        for failure in validate_task(
-            pack, task, [_call(thing_id="T-1", count=20) | {"turn_index": 1}]
-        )
+        for failure in validate_task(pack, task, [_call(thing_id="T-1", count=20) | {"turn_index": 1}])
     }
     assert "confirmed_mutation_without_user_confirmation" not in reasons
 
@@ -591,9 +581,7 @@ def test_correction_withdraws_the_confirmation_it_replaces() -> None:
 
 
 def test_validation_rejects_a_published_trace_holding_the_replaced_value() -> None:
-    failures = validate_task(
-        _Pack(TOOLS), CORRECTION_TASK, [_call(thing_id="T-1", count=10)]
-    )
+    failures = validate_task(_Pack(TOOLS), CORRECTION_TASK, [_call(thing_id="T-1", count=10)])
     assert {
         "reason": "superseded_slot_value_in_trace",
         "tool": "do_thing",
@@ -630,6 +618,48 @@ def test_correction_renders_each_turn_with_the_value_in_force() -> None:
     assert surface["guard_violations"] == []
 
 
+def test_render_rejects_empty_user_facing_turns() -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        RenderError,
+        render_task,
+    )
+
+    pack = SimpleNamespace(
+        manifest={"assistant_turn_templates": {"final_answer": {"en": "Done."}}},
+        tools=TOOLS,
+    )
+    prompt_bundle = {
+        "system_prompt": "s",
+        "system_prompt_id": "sha256:0",
+    }
+
+    empty_user = _correction_template()
+    empty_user["user_turn_templates"] = {"en": "   "}
+    with pytest.raises(RenderError, match="empty user-facing turn"):
+        render_task(
+            pack,
+            empty_user,
+            CORRECTION_TASK,
+            build_plan(empty_user, CORRECTION_TASK),
+            language="en",
+            prompt_bundle=prompt_bundle,
+            tool_names=["do_thing"],
+        )
+
+    empty_assistant = _correction_template()
+    empty_assistant["assistant_milestones"][0]["content_template"] = {"en": "   "}
+    with pytest.raises(RenderError, match="empty user-facing turn"):
+        render_task(
+            pack,
+            empty_assistant,
+            CORRECTION_TASK,
+            build_plan(empty_assistant, CORRECTION_TASK),
+            language="en",
+            prompt_bundle=prompt_bundle,
+            tool_names=["do_thing"],
+        )
+
+
 def test_correction_expansion_binds_both_values_and_refuses_a_no_op() -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import expand_template
 
@@ -638,9 +668,7 @@ def test_correction_expansion_binds_both_values_and_refuses_a_no_op() -> None:
 
     assert [task["slots"]["count"] for task in tasks] == [20]
     assert [task["slots_initial"]["count"] for task in tasks] == [10]
-    assert tasks[0]["slot_updates"] == [
-        {"entry_index": 0, "values": {"count": 20}, "aliases": {"count_new": 20}}
-    ]
+    assert tasks[0]["slot_updates"] == [{"entry_index": 0, "values": {"count": 20}, "aliases": {"count_new": 20}}]
 
     no_op = _correction_template(
         user_simulator_turns=[
@@ -769,9 +797,7 @@ def test_irrelevant_template_must_end_in_decline() -> None:
                     {"type": "tool_call", "tool": "do_thing"},
                     {"type": "final_answer"},
                 ],
-                "user_simulator_turns": [
-                    {"after": "ask_confirm", "content_template": {"en": "Yes."}}
-                ],
+                "user_simulator_turns": [{"after": "ask_confirm", "content_template": {"en": "Yes."}}],
             },
             "plans 2 user turns",
         ),
@@ -976,9 +1002,7 @@ def test_tool_schema_validation_rejects_malformed_constraints(
             "properties": {"value": property_schema},
         },
     }
-    assert reason in {
-        failure["reason"] for failure in validate_function_schema(function)
-    }
+    assert reason in {failure["reason"] for failure in validate_function_schema(function)}
 
 
 def test_tool_schema_validation_rejects_a_repeated_required_property() -> None:
@@ -990,9 +1014,7 @@ def test_tool_schema_validation_rejects_a_repeated_required_property() -> None:
             "required": ["value", "value"],
         },
     }
-    assert {failure["reason"] for failure in validate_function_schema(function)} == {
-        "duplicate_required_property"
-    }
+    assert {failure["reason"] for failure in validate_function_schema(function)} == {"duplicate_required_property"}
 
 
 def test_tool_schema_validation_keeps_distinct_values_of_different_types() -> None:
@@ -1022,9 +1044,7 @@ def test_argument_constraints_keep_json_booleans_distinct_from_integers(
     )
 
     schema = {"type": ["integer", "boolean"], **constraint}
-    assert _check_value(schema, 1, "value") == [
-        {"reason": reason, "argument": "value"}
-    ]
+    assert _check_value(schema, 1, "value") == [{"reason": reason, "argument": "value"}]
 
 
 def test_message_builder_rejects_trace_surface_mismatches() -> None:
@@ -1119,9 +1139,7 @@ def test_confirmed_mutation_requires_confirmation_conversation() -> None:
         TASK,
         [_call(thing_id="T-1", confirm=True)],
     )
-    assert "confirmed_mutation_without_user_confirmation" in {
-        failure["reason"] for failure in failures
-    }
+    assert "confirmed_mutation_without_user_confirmation" in {failure["reason"] for failure in failures}
 
 
 def test_schema_validation_requires_prefix_count_when_declared() -> None:
@@ -1527,9 +1545,7 @@ def test_a_narrow_budget_still_binds_a_correction() -> None:
             {
                 "after": "confirm_first",
                 "content_template": {"en": "Make it {count_new}."},
-                "slot_updates": {
-                    "count": {"source": "literal:[10, 20, 30]", "bind_as": "count_new"}
-                },
+                "slot_updates": {"count": {"source": "literal:[10, 20, 30]", "bind_as": "count_new"}},
             },
             {"after": "confirm_again", "content_template": {"en": "Yes."}},
         ],
@@ -1793,9 +1809,7 @@ def test_a_guard_reads_a_number_as_a_whole_value() -> None:
     }
 
     assert check_surface_guards(template, task, ["Chuyển 200000đ giúp tôi."], []) == []
-    assert check_surface_guards(
-        template, task, ["Chuyển 200.000 đồng giúp tôi."], []
-    ) == []
+    assert check_surface_guards(template, task, ["Chuyển 200.000 đồng giúp tôi."], []) == []
 
     leaked = check_surface_guards(template, task, ["Chuyển 4 lần, 200000đ."], [])
     assert [violation["guard"] for violation in leaked] == ["must_omit"]
@@ -1819,15 +1833,13 @@ def test_a_guard_reads_grouping_but_not_a_list_of_digits() -> None:
     task = {"slots": {"amount": 123}, "slots_initial": {"amount": 123}}
 
     assert check_surface_guards(template, task, ["Chuyển 123 đồng."], []) == []
-    assert check_surface_guards(
-        template, task, ["Chuyển 1, 2, 3 đồng."], []
-    ) == [{"guard": "must_preserve", "slot": "amount"}]
+    assert check_surface_guards(template, task, ["Chuyển 1, 2, 3 đồng."], []) == [
+        {"guard": "must_preserve", "slot": "amount"}
+    ]
 
     grouped = {
         "template_id": "tpl",
-        "slots": {
-            "amount": {"source": "literal:[1234567]", "visible_in_first_turn": True}
-        },
+        "slots": {"amount": {"source": "literal:[1234567]", "visible_in_first_turn": True}},
         "paraphrase": {},
     }
     grouped_task = {
@@ -1858,9 +1870,7 @@ def test_a_guard_reads_a_word_value_as_a_whole_token() -> None:
     }
 
     # "status" contains both values as substrings and states neither.
-    hidden_inside_words = check_surface_guards(
-        template, task, ["Check the status of my invnoice."], []
-    )
+    hidden_inside_words = check_surface_guards(template, task, ["Check the status of my invnoice."], [])
     assert hidden_inside_words == [{"guard": "must_preserve", "slot": "rail"}]
 
     assert check_surface_guards(template, task, ["Send over rail us please."], []) == []
@@ -2003,9 +2013,7 @@ def test_all_trace_drops_are_written_before_the_stage_raises(
             {str(task["task_id"]): {"steps": []}},
         )
 
-    rows = pq.read_table(
-        tmp_path / "all-dropped" / "stage_cache" / "expected_traces.parquet"
-    ).to_pylist()
+    rows = pq.read_table(tmp_path / "all-dropped" / "stage_cache" / "expected_traces.parquet").to_pylist()
     assert rows[0]["task_id"] == task["task_id"]
     assert rows[0]["derived"] is False
     assert "fixture row has no dependent value" in rows[0]["drop_reason"]

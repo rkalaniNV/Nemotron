@@ -32,6 +32,14 @@ _FINAL_ARTIFACTS = (
     "benchmark_raw.parquet",
     "benchmark_raw.parquet.tmp",
 )
+# Derived Stage 10 outputs, rewritten whenever the stage runs. A previous run must not
+# leave them behind for a run that disables the stage, or for one that aborts on pack
+# drift: either way the next manifest would hash a verdict this run never reached.
+_SURFACE_QUALITY_ARTIFACTS = (
+    "surface_validated_tasks.parquet",
+    "surface_quality_rejections.json",
+    "surface_judge_cache_usage.json",
+)
 
 
 def _unsupported_requests(config: BfclConfig) -> list[str]:
@@ -40,28 +48,15 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     Generation refuses these instead of ignoring them, so a run never reports
     lineage or quality guarantees that no stage actually applied.
     """
-    roles = config.lineage.roles or {}
     requested: list[str] = []
-    if (role := roles.get("surface_judge")) and role.enabled:
-        requested.append("lineage.roles.surface_judge.enabled")
-    if config.surface_quality_validation.get("enabled"):
-        requested.append("surface_quality_validation.enabled")
     if config.semantic_deduplication_config.get("enabled"):
         requested.append("semantic_deduplication_config.enabled")
-    # A claim the manifest would publish but no stage substantiates: no profile shapes
-    # the surface and no judge runs, so neither may be asserted.
-    if config.lineage.judge_advisory:
-        requested.append("lineage.judge_advisory")
     requested.extend(f"exports.{name}" for name, on in sorted(config.exports.items()) if on)
     requested.extend(
-        f"task_generation.{name}"
-        for name in sorted(config.task_generation)
-        if name != "tasks_per_category"
+        f"task_generation.{name}" for name in sorted(config.task_generation) if name != "tasks_per_category"
     )
     # Asking for work a disabled stage would have done. Reading these is what keeps
     # "refuse, do not ignore" true for the whole config and not just the gate flags.
-    if config.surface_quality_validation.get("drop_authority"):
-        requested.append("surface_quality_validation.drop_authority")
     if config.eval_config_path is not None:
         requested.append("eval_config_path")
     if config.translation_config_path is not None:
@@ -134,9 +129,14 @@ def _invalidate_final_outputs(config: BfclConfig) -> None:
     The manifest is removed first: if this generation later fails, no old manifest can
     make stale parquets look like the result of the failed invocation.
     """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
+
     output_dir = Path(config.output_dir) / config.expt_name
     for name in _FINAL_ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
+    cache = stage_cache_dir(config)
+    for name in _SURFACE_QUALITY_ARTIFACTS:
+        (cache / name).unlink(missing_ok=True)
 
 
 def _endpoint_metadata(config: BfclConfig, pack: LoadedPack) -> dict[str, str] | None:
@@ -173,6 +173,7 @@ def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
         derive_pack_tier,
     )
+
     config = BfclConfig.from_yaml(str(config_path))
     report, report_path = _validate_pack(config)
     gold_eligible, tier = derive_pack_tier(report)
@@ -215,6 +216,9 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
         run_state_machine,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.surface_quality import (
+        run_surface_quality_validation,
     )
 
     if skip_until is not None:
@@ -277,12 +281,8 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     # to the kept set. Schema/replay still receive every expanded task so stage tables
     # keep a joinable row for each drop.
     traces, drop_reasons = run_expected_trace(config, pack, tasks, plans)
-    schema_failures = run_schema_validation(
-        config, pack, expanded_tasks, traces, skipped=drop_reasons
-    )
-    verdicts = run_executable_replay(
-        config, pack, expanded_tasks, traces, schema_failures, skipped=drop_reasons
-    )
+    schema_failures = run_schema_validation(config, pack, expanded_tasks, traces, skipped=drop_reasons)
+    verdicts = run_executable_replay(config, pack, expanded_tasks, traces, schema_failures, skipped=drop_reasons)
     paraphrase_report = apply_expected_result_guards(
         config,
         expanded_tasks,
@@ -290,6 +290,16 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
         verdicts,
         paraphrase_report,
     )
+    replay_tasks = [task for task in expanded_tasks if (verdicts.get(str(task["task_id"])) or {}).get("passed")]
+    surface_quality_records: list[dict] | None = None
+    surface_quality_report: dict | None = None
+    if config.surface_quality_validation.get("enabled"):
+        surface_quality_records, surface_quality_report = run_surface_quality_validation(
+            config,
+            replay_tasks,
+            surfaces,
+            profile=profile,
+        )
     current_fingerprint = pack_fingerprint(pack.paths)
     if current_fingerprint != report.get("pack_fingerprint"):
         raise RuntimeError(
@@ -298,8 +308,7 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
         )
     if _endpoint_metadata(config, pack) != expected_endpoint_metadata:
         raise RuntimeError(
-            "endpoint metadata changed during generation; refusing to publish "
-            "artifacts from multiple oracle revisions"
+            "endpoint metadata changed during generation; refusing to publish artifacts from multiple oracle revisions"
         )
 
     # Each count reports its own stage, so a reader can tell a backend disagreement from
@@ -307,31 +316,29 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     stage_counts = {
         "expanded": expanded,
         "canonical_expanded": canonical_expanded,
-        "paraphrase_requested": int(
-            paraphrase_report["requested_candidates"]
-        ),
-        "paraphrase_accepted": int(
-            paraphrase_report["accepted_candidates"]
-        ),
-        "paraphrase_rejected": int(
-            paraphrase_report["rejected_candidates"]
-        ),
-        "surface_passed": sum(
-            1 for surface in surfaces.values() if not surface["guard_violations"]
-        ),
+        "paraphrase_requested": int(paraphrase_report["requested_candidates"]),
+        "paraphrase_accepted": int(paraphrase_report["accepted_candidates"]),
+        "paraphrase_rejected": int(paraphrase_report["rejected_candidates"]),
+        "surface_passed": sum(1 for surface in surfaces.values() if not surface["guard_violations"]),
         "trace_derived": len(traces),
         "trace_dropped": len(drop_reasons),
         "schema_passed": sum(
-            1
-            for task_id, failures in schema_failures.items()
-            if not failures and task_id not in drop_reasons
+            1 for task_id, failures in schema_failures.items() if not failures and task_id not in drop_reasons
         ),
-        "replay_passed": sum(
-            1
-            for task in expanded_tasks
-            if (verdicts.get(str(task["task_id"])) or {}).get("passed")
-        ),
+        "replay_passed": sum(1 for task in expanded_tasks if (verdicts.get(str(task["task_id"])) or {}).get("passed")),
     }
+    if surface_quality_report is not None:
+        stage_counts.update(
+            {
+                "surface_quality_evaluated": int(surface_quality_report["evaluated"]),
+                "surface_quality_kept": int(surface_quality_report["kept"]),
+                "surface_quality_dropped_python": int(surface_quality_report["dropped_by_python"]),
+                "surface_quality_dropped_judge": int(surface_quality_report["dropped_by_surface_judge"]),
+                "surface_quality_judge_errors": sum(
+                    int(count) for count in surface_quality_report["judge_error_counts"].values()
+                ),
+            }
+        )
     return run_final_output(
         config,
         pack,
@@ -343,5 +350,7 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
         prompt_bundle,
         stage_counts,
         trace_drop_reasons=drop_reasons,
+        surface_quality_records=surface_quality_records,
+        surface_quality_report=surface_quality_report,
         expected_pack_fingerprint=current_fingerprint,
     )

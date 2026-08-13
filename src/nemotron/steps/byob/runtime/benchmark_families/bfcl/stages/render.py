@@ -88,6 +88,13 @@ def _substitute(text: str, values: dict[str, Any], *, what: str = "surface text"
         raise RenderError(str(exc)) from exc
 
 
+def _require_nonempty_text(text: str, *, what: str) -> str:
+    """Reject pack text that would create an empty user-facing turn."""
+    if not text.strip():
+        raise RenderError(f"{what} rendered an empty user-facing turn")
+    return text
+
+
 def _localized(block: Any, language: str, what: str) -> str:
     if not isinstance(block, dict):
         raise RenderError(f"{what} must be a language mapping")
@@ -108,9 +115,7 @@ def _asked_slot(milestone: dict[str, Any], template: dict[str, Any], language: s
     declared = milestone.get("slot")
     if declared is not None:
         if str(declared) not in slots:
-            raise RenderError(
-                f"template {template.get('template_id')!r} asks for undeclared slot {declared!r}"
-            )
+            raise RenderError(f"template {template.get('template_id')!r} asks for undeclared slot {declared!r}")
         name = str(declared)
     else:
         hidden = [name for name, slot in slots.items() if slot.get("visible_in_first_turn") is False]
@@ -165,11 +170,7 @@ def _mentions(haystack: str, value: str) -> bool:
         for candidate in _GROUPED_NUMBER.findall(haystack):
             if re.sub(r"\D", "", candidate) == value:
                 return True
-    pattern = (
-        _edge_guard(value[0], preceding=True)
-        + re.escape(value)
-        + _edge_guard(value[-1], preceding=False)
-    )
+    pattern = _edge_guard(value[0], preceding=True) + re.escape(value) + _edge_guard(value[-1], preceding=False)
     return re.search(pattern, haystack) is not None
 
 
@@ -242,9 +243,7 @@ def check_surface_guards(
     violations: list[dict[str, Any]] = []
 
     declared_preserve = set(paraphrase.get("must_preserve") or [])
-    visible_slots = {
-        name for name, slot in slots.items() if slot.get("visible_in_first_turn")
-    }
+    visible_slots = {name for name, slot in slots.items() if slot.get("visible_in_first_turn")}
     # The visibility flag describes the opening request specifically. Searching the
     # whole conversation would accept a template that withholds the value first and
     # only states it in a later simulator reply.
@@ -261,11 +260,7 @@ def check_surface_guards(
         # is not governed by the run-wide visible-slot rule.
         if name in declared_preserve and name not in auto_preserve and name in initial:
             stated.append(initial[name])
-        stated.extend(
-            update["values"][name]
-            for update in task.get("slot_updates") or []
-            if name in update["values"]
-        )
+        stated.extend(update["values"][name] for update in task.get("slot_updates") or [] if name in update["values"])
         if not stated and name in declared_preserve and name not in auto_preserve and name in bound:
             stated = [bound[name]]
         for value in dict.fromkeys(str(item) for item in stated):
@@ -273,9 +268,7 @@ def check_surface_guards(
                 violations.append({"guard": "must_preserve", "slot": name})
 
     must_omit = set(paraphrase.get("must_omit") or [])
-    must_omit.update(
-        name for name, slot in slots.items() if slot.get("visible_in_first_turn") is False
-    )
+    must_omit.update(name for name, slot in slots.items() if slot.get("visible_in_first_turn") is False)
     for name in sorted(must_omit):
         if name in bound and _mentions(first_turn, str(bound[name])):
             violations.append({"guard": "must_omit", "slot": name})
@@ -286,9 +279,7 @@ def check_surface_guards(
     # that names one forbidden term must not thereby stop leak detection.
     if TOOL_NAME_RULE in declared or prevent_tool_name_leakage:
         violations.extend(
-            {"guard": "must_not_mention", "tool": name}
-            for name in tool_names
-            if _mentions_name(lowered, name.lower())
+            {"guard": "must_not_mention", "tool": name} for name in tool_names if _mentions_name(lowered, name.lower())
         )
     violations.extend(
         {"guard": "must_not_mention", "phrase": phrase}
@@ -351,6 +342,10 @@ def render_task(
                     ),
                     values,
                 )
+            text = _require_nonempty_text(
+                text,
+                what=(f"template {template.get('template_id')!r} {step.get('source')!r} user turn"),
+            )
             user_texts.append(text)
             rendered_steps.append({"kind": "user", "content": text})
         elif step["kind"] == "text":
@@ -365,7 +360,10 @@ def render_task(
             values = dict(slots)
             if SLOT_NAME_PLACEHOLDER in placeholder_names(raw) and SLOT_NAME_PLACEHOLDER not in values:
                 values[SLOT_NAME_PLACEHOLDER] = _asked_slot(step["milestone"], template, language)
-            text = _substitute(raw, values)
+            text = _require_nonempty_text(
+                _substitute(raw, values),
+                what=(f"template {template.get('template_id')!r} assistant milestone {milestone_type!r}"),
+            )
             rendered_steps.append({"kind": "assistant_text", "content": text})
         else:
             rendered_steps.append({"kind": "calls", "call_group": step["call_group"]})
@@ -414,11 +412,7 @@ def resolve_render_contract(
     # languages are on offer. Report the rest of the blocks now: a pack that states
     # its simulator turns in one language and its assistant turns in another should
     # hear about every gap at once, not one RenderError per run.
-    gaps = sorted(
-        gap
-        for template in templates_by_id.values()
-        for gap in _language_gaps(pack, template, language)
-    )
+    gaps = sorted(gap for template in templates_by_id.values() for gap in _language_gaps(pack, template, language))
     if gaps:
         raise RenderError(
             f"no entry for language {language!r} in: "
@@ -484,9 +478,7 @@ def run_render(
             prompt_bundle=prompt_bundle,
             tool_names=tool_names,
             preserve_slot_values=bool(config.surface_generation.get("preserve_slot_values", True)),
-            prevent_tool_name_leakage=bool(
-                config.surface_generation.get("prevent_tool_name_leakage", True)
-            ),
+            prevent_tool_name_leakage=bool(config.surface_generation.get("prevent_tool_name_leakage", True)),
         )
 
     write_stage_table(
@@ -495,9 +487,7 @@ def run_render(
         rendered_conversations_schema(),
     )
     rejected = {
-        task_id: surface["guard_violations"]
-        for task_id, surface in surfaces.items()
-        if surface["guard_violations"]
+        task_id: surface["guard_violations"] for task_id, surface in surfaces.items() if surface["guard_violations"]
     }
     logger.info(
         "BFCL render produced %d surfaces (language=%s, guard rejections=%d)",

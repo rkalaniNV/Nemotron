@@ -92,6 +92,7 @@ surface_generation:
   prevent_tool_name_leakage: true
 
 surface_quality_validation:
+  contract_version: "1.1"
   enabled: false
   drop_authority: false
 

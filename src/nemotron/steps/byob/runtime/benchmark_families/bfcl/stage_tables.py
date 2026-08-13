@@ -1,11 +1,20 @@
 """Arrow schemas for the per-stage artifacts every generation stage leaves behind.
 
-Each table is keyed by ``task_id`` and holds one row per task, so a run can be
-inspected stage by stage and the tables can be joined without bookkeeping. Nested
-content — slot bindings, plan steps, rendered turns, derived calls, failure lists —
-is stored as canonical JSON text for the same reason the benchmark row does it: an
-inferred Arrow struct unions keys across rows and pads the absent ones with nulls,
-which turns "this task has no such field" into "this task's field is null".
+Each table in ``STAGE_TABLES`` is keyed by ``task_id`` and holds one row per task, so
+a run can be inspected stage by stage and the tables can be joined without
+bookkeeping. Nested content — slot bindings, plan steps, rendered turns, derived
+calls, failure lists — is stored as canonical JSON text for the same reason the
+benchmark row does it: an inferred Arrow struct unions keys across rows and pads the
+absent ones with nulls, which turns "this task has no such field" into "this task's
+field is null".
+
+``SURFACE_VALIDATED_TASKS`` is deliberately outside that set. Stage 10 judges only
+the replay survivors, so a task an earlier stage already dropped has no row here; its
+drop is explained by ``EXPECTED_TRACES``, ``SCHEMA_VALIDATED_TRACES``, or
+``REPLAY_VALIDATED_TASKS`` instead. A row missing from this table therefore means
+"never evaluated", not "evaluated and unrecorded". The table is also optional in a
+way the others are not: it exists only for a run that enabled surface-quality
+validation.
 """
 
 from __future__ import annotations
@@ -22,6 +31,7 @@ RENDERED_CONVERSATIONS = "rendered_conversations.parquet"
 EXPECTED_TRACES = "expected_traces.parquet"
 SCHEMA_VALIDATED_TRACES = "schema_validated_traces.parquet"
 REPLAY_VALIDATED_TASKS = "replay_validated_tasks.parquet"
+SURFACE_VALIDATED_TASKS = "surface_validated_tasks.parquet"
 
 STAGE_TABLES = (
     TASK_INSTANCES,
@@ -199,9 +209,7 @@ def rendered_conversation_row(surface: dict[str, Any]) -> dict[str, Any]:
         "language": str(surface["language"]),
         "system_prompt_id": str(surface["system_prompt_id"]),
         "paraphrase_model": _optional_str(surface.get("paraphrase_model")),
-        "paraphrase_model_canonical": _optional_str(
-            surface.get("paraphrase_model_canonical")
-        ),
+        "paraphrase_model_canonical": _optional_str(surface.get("paraphrase_model_canonical")),
         "profile_hash": _optional_str(surface.get("profile_hash")),
         "num_user_turns": sum(1 for step in surface["steps"] if step["kind"] == "user"),
         "accepted": not violations,
@@ -258,9 +266,7 @@ def schema_validated_traces_schema() -> Any:
     )
 
 
-def schema_validated_row(
-    task: dict[str, Any], failures: list[dict[str, Any]], reject_reason: str
-) -> dict[str, Any]:
+def schema_validated_row(task: dict[str, Any], failures: list[dict[str, Any]], reject_reason: str) -> dict[str, Any]:
     """Project one schema verdict, keeping the failure detail next to it."""
     return {
         "task_id": str(task["task_id"]),
@@ -306,6 +312,83 @@ def replay_validated_row(task: dict[str, Any], verdict: dict[str, Any]) -> dict[
         "num_tool_results": len(results),
         "tool_results": canonical_json(results),
         "assertions": canonical_json(verdict.get("assertions") or []),
+    }
+
+
+def surface_validated_tasks_schema() -> Any:
+    """Schema for Stage 10's complete six-check and authority verdict."""
+    import pyarrow as pa
+
+    return pa.schema(
+        [
+            ("task_id", pa.string()),
+            ("base_task_id", pa.string()),
+            ("template_id", pa.string()),
+            ("variant_index", pa.int32()),
+            ("surface_source", pa.string()),
+            ("turn_policy", pa.string()),
+            ("contract_version", pa.string()),
+            ("accepted", pa.bool_()),
+            ("decision", pa.string()),
+            ("drop_source", pa.string()),
+            ("drop_reasons", pa.list_(pa.string())),
+            ("advisory_failures", pa.list_(pa.string())),
+            ("judge_error", pa.string()),
+            ("surface_shape_status", pa.string()),
+            ("semantic_preservation_status", pa.string()),
+            ("leakage_status", pa.string()),
+            ("language_locale_status", pa.string()),
+            ("fluency_naturalness_status", pa.string()),
+            ("clarity_coherence_status", pa.string()),
+            ("checks", pa.string()),
+        ]
+    )
+
+
+def surface_validated_task_row(record: dict[str, Any]) -> dict[str, Any]:
+    """Project one decided Stage 10 record without expanding arbitrary evidence."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_quality_contract import (
+        SURFACE_QUALITY_CHECKS,
+        SURFACE_QUALITY_CONTRACT_VERSION,
+        SurfaceQualityCheckResult,
+        validate_complete_check_set,
+    )
+
+    turn_policy = str(record["turn_policy"])
+    checks = validate_complete_check_set(
+        [SurfaceQualityCheckResult.model_validate(item) for item in record["checks"]],
+        turn_policy=turn_policy,
+    )
+    by_check = {result.check: result for result in checks}
+    decision = str(record["decision"])
+    if decision not in {"kept", "dropped"}:
+        raise ValueError(f"unknown surface-quality decision {decision!r}")
+    drop_source = record.get("drop_source")
+    if decision == "kept" and drop_source is not None:
+        raise ValueError("a kept surface-quality row cannot have drop_source")
+    if decision == "dropped" and drop_source not in {"python", "surface_judge"}:
+        raise ValueError("a dropped surface-quality row requires a valid drop_source")
+    drop_reasons = [str(item) for item in record.get("drop_reasons") or []]
+    if decision == "kept" and drop_reasons:
+        raise ValueError("a kept surface-quality row cannot have drop_reasons")
+    if decision == "dropped" and not drop_reasons:
+        raise ValueError("a dropped surface-quality row requires drop_reasons")
+    return {
+        "task_id": str(record["task_id"]),
+        "base_task_id": str(record.get("base_task_id") or record["task_id"]),
+        "template_id": str(record["template_id"]),
+        "variant_index": int(record.get("variant_index") or 0),
+        "surface_source": str(record.get("surface_source") or "template"),
+        "turn_policy": turn_policy,
+        "contract_version": SURFACE_QUALITY_CONTRACT_VERSION,
+        "accepted": decision == "kept",
+        "decision": decision,
+        "drop_source": None if drop_source is None else str(drop_source),
+        "drop_reasons": drop_reasons,
+        "advisory_failures": [str(item) for item in record.get("advisory_failures") or []],
+        "judge_error": _optional_str(record.get("judge_error")),
+        **{f"{check}_status": by_check[check].status for check in SURFACE_QUALITY_CHECKS},
+        "checks": canonical_json([result.model_dump() for result in checks]),
     }
 
 

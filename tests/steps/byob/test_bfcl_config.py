@@ -66,7 +66,52 @@ def test_tiny_config_loads_as_smoke(tmp_path: Path) -> None:
     assert config.oracle_runtime.tool_timeout_s == 5.0
     assert config.lineage.roles["paraphrase"].enabled is False
     assert config.surface_generation.get("paraphrases_per_template") == 0
+    assert config.surface_quality_validation["contract_version"] == "1.1"
     assert config.oracle_pack.manifest_path.name == "manifest.yaml"
+
+
+def test_config_rejects_unknown_surface_quality_contract_version(
+    tmp_path: Path,
+) -> None:
+    path = _write_tiny_config(
+        tmp_path,
+        "unknown-surface-contract.yaml",
+        surface_quality_validation={"contract_version": "2.0"},
+    )
+
+    with pytest.raises(ValueError, match="contract_version must be '1.1'"):
+        BfclConfig.from_yaml(path)
+
+
+def test_config_allows_deterministic_surface_quality_without_a_judge(
+    tmp_path: Path,
+) -> None:
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "deterministic-surface-quality.yaml",
+            surface_quality_validation={
+                "enabled": True,
+                "drop_authority": False,
+            },
+        )
+    )
+
+    assert config.surface_quality_validation["enabled"] is True
+    assert config.lineage.roles["surface_judge"].enabled is False
+
+
+def test_config_rejects_judge_drop_authority_without_a_judge(
+    tmp_path: Path,
+) -> None:
+    path = _write_tiny_config(
+        tmp_path,
+        "judge-authority-without-judge.yaml",
+        surface_quality_validation={"enabled": True, "drop_authority": True},
+    )
+
+    with pytest.raises(ValueError, match="drop_authority requires an enabled"):
+        BfclConfig.from_yaml(path)
 
 
 def test_default_config_loads() -> None:
@@ -502,18 +547,11 @@ def test_reference_profile_normalizes_samples_and_reuses_model_cache(
         }
 
     first = run_reference_profile(config, model_runner=fake_runner)
-    profile_path = (
-        Path(config.output_dir)
-        / config.expt_name
-        / "stage_cache"
-        / "reference_profile.json"
-    )
+    profile_path = Path(config.output_dir) / config.expt_name / "stage_cache" / "reference_profile.json"
     first_bytes = profile_path.read_bytes()
     second = run_reference_profile(
         config,
-        model_runner=lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("cache hit called the model")
-        ),
+        model_runner=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cache hit called the model")),
     )
 
     assert first == second
@@ -538,8 +576,7 @@ def test_reference_profile_keeps_an_unusable_response_out_of_the_cache(
 
     samples = tmp_path / "profile-samples.jsonl"
     samples.write_text(
-        '{"sample_id":"ref-1","language":"vi","messages":'
-        '[{"role":"user","content":"Bạn kiểm tra giúp mình nhé."}]}\n',
+        '{"sample_id":"ref-1","language":"vi","messages":[{"role":"user","content":"Bạn kiểm tra giúp mình nhé."}]}\n',
         encoding="utf-8",
     )
     config = BfclConfig.from_yaml(
@@ -585,12 +622,7 @@ def test_reference_profile_keeps_an_unusable_response_out_of_the_cache(
     with pytest.raises(RuntimeError, match="style_hints"):
         run_reference_profile(config, model_runner=broken_runner)
 
-    io_cache_path = (
-        Path(config.output_dir)
-        / config.expt_name
-        / "stage_cache"
-        / "reference_profile_io_cache.jsonl"
-    )
+    io_cache_path = Path(config.output_dir) / config.expt_name / "stage_cache" / "reference_profile_io_cache.jsonl"
     assert not io_cache_path.exists() or not io_cache_path.read_text(encoding="utf-8").strip()
 
     profile = run_reference_profile(config, model_runner=working_runner)
@@ -659,13 +691,8 @@ def test_profile_language_is_not_gated_when_no_template_consumes_it(
         roles=roles,
     )
     pack = load_pack(config)
-    assert not any(
-        (template.get("paraphrase") or {}).get("allowed") is True
-        for template in pack.templates
-    )
-    templates = {
-        str(template["template_id"]): template for template in pack.templates
-    }
+    assert not any((template.get("paraphrase") or {}).get("allowed") is True for template in pack.templates)
+    templates = {str(template["template_id"]): template for template in pack.templates}
     tasks = run_expand(config, pack)
     plans = run_state_machine(config, templates, tasks)
     surfaces, _ = run_render(config, pack, templates, tasks, plans)
@@ -746,9 +773,7 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
         "allowed": True,
         "must_preserve": ["book_id"],
     }
-    templates = {
-        str(template["template_id"]): template for template in pack.templates
-    }
+    templates = {str(template["template_id"]): template for template in pack.templates}
     canonical_tasks = run_expand(config, pack)
     plans = run_state_machine(config, templates, canonical_tasks)
     surfaces, _ = run_render(
@@ -773,17 +798,8 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
             assert contract["style_avoid"] == []
             responses[request["request_id"]] = {
                 "variants": [
-                    {
-                        "user_turns": [
-                            f"{text} Please help." for text in canonical
-                        ]
-                    },
-                    {
-                        "user_turns": [
-                            text.replace(protected, "that book")
-                            for text in canonical
-                        ]
-                    },
+                    {"user_turns": [f"{text} Please help." for text in canonical]},
+                    {"user_turns": [text.replace(protected, "that book") for text in canonical]},
                 ]
             }
         return responses
@@ -792,10 +808,7 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
 
     def invalid_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
         del args
-        return {
-            request["request_id"]: {"variants": []}
-            for request in kwargs["requests"]
-        }
+        return {request["request_id"]: {"variants": []} for request in kwargs["requests"]}
 
     invalid_run = run_paraphrase(
         config,
@@ -809,9 +822,7 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
     )
     assert invalid_run[3]["accepted_candidates"] == 0
     io_cache_path = cache / "paraphrase_io_cache.jsonl"
-    assert not io_cache_path.exists() or not io_cache_path.read_text(
-        encoding="utf-8"
-    ).strip()
+    assert not io_cache_path.exists() or not io_cache_path.read_text(encoding="utf-8").strip()
 
     tasks, variant_plans, variant_surfaces, report = run_paraphrase(
         config,
@@ -827,11 +838,7 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
     assert accepted
     assert all(task["task_id"] != task["base_task_id"] for task in accepted)
     assert all(
-        task["slots"] == next(
-            base["slots"]
-            for base in canonical_tasks
-            if base["task_id"] == task["base_task_id"]
-        )
+        task["slots"] == next(base["slots"] for base in canonical_tasks if base["task_id"] == task["base_task_id"])
         for task in accepted
     )
     assert report["requested_candidates"] == 2 * len(accepted)
@@ -839,30 +846,16 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
     assert report["rejected_candidates"] == len(accepted)
     assert report["by_reason"]["must_preserve"] == len(accepted)
     assert all(
-        variant_surfaces[str(task["task_id"])]["paraphrase_model_canonical"]
-        == "source::paraphrase-model@revision"
+        variant_surfaces[str(task["task_id"])]["paraphrase_model_canonical"] == "source::paraphrase-model@revision"
         for task in accepted
     )
     assert all(
-        variant_plans[str(task["task_id"])]["steps"]
-        == plans[str(task["base_task_id"])]["steps"]
-        for task in accepted
+        variant_plans[str(task["task_id"])]["steps"] == plans[str(task["base_task_id"])]["steps"] for task in accepted
     )
 
-    task_ids = {
-        row["task_id"]
-        for row in pq.read_table(cache / "task_instances.parquet").to_pylist()
-    }
-    plan_ids = {
-        row["task_id"]
-        for row in pq.read_table(cache / "conversation_plans.parquet").to_pylist()
-    }
-    render_ids = {
-        row["task_id"]
-        for row in pq.read_table(
-            cache / "rendered_conversations.parquet"
-        ).to_pylist()
-    }
+    task_ids = {row["task_id"] for row in pq.read_table(cache / "task_instances.parquet").to_pylist()}
+    plan_ids = {row["task_id"] for row in pq.read_table(cache / "conversation_plans.parquet").to_pylist()}
+    render_ids = {row["task_id"] for row in pq.read_table(cache / "rendered_conversations.parquet").to_pylist()}
     assert task_ids == plan_ids == render_ids
 
     rerun = run_paraphrase(
@@ -873,13 +866,9 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
         plans,
         surfaces,
         profile,
-        model_runner=lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("cache hit called the model")
-        ),
+        model_runner=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cache hit called the model")),
     )
-    assert [task["task_id"] for task in rerun[0]] == [
-        task["task_id"] for task in tasks
-    ]
+    assert [task["task_id"] for task in rerun[0]] == [task["task_id"] for task in tasks]
     assert model_calls == 1
 
 
@@ -939,9 +928,7 @@ def test_pipeline_publishes_paraphrase_variants_with_the_base_trace(
                     {
                         "user_turns": [
                             f"{turn} Please help."
-                            for turn in json.loads(request["model_input"])[
-                                "canonical_user_turns"
-                            ]
+                            for turn in json.loads(request["model_input"])["canonical_user_turns"]
                         ]
                     }
                 ]
@@ -961,12 +948,8 @@ def test_pipeline_publishes_paraphrase_variants_with_the_base_trace(
         base = rows_by_id[metadata["base_task_id"]]
         assert variant["expected_tool_calls"] == base["expected_tool_calls"]
         assert variant["success_assertions"] == base["success_assertions"]
-        assert variant["paraphrase_model_canonical"] == (
-            "source::paraphrase-model@revision"
-        )
-    manifest = json.loads(
-        (benchmark_path.parent / "run_manifest.json").read_text(encoding="utf-8")
-    )
+        assert variant["paraphrase_model_canonical"] == ("source::paraphrase-model@revision")
+    manifest = json.loads((benchmark_path.parent / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["generation_mode"] == "smoke_no_publication"
     assert manifest["stage_counts"]["paraphrase_accepted"] == len(variants)
     assert "paraphrase_io_cache" in manifest["artifacts"]
@@ -980,9 +963,7 @@ def test_post_replay_guard_rejects_expected_result_leakage(
         apply_expected_result_guards,
     )
 
-    config = BfclConfig.from_yaml(
-        _write_tiny_config(tmp_path, "result-leakage.yaml")
-    )
+    config = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "result-leakage.yaml"))
     base_id = "base"
     variant_id = "variant"
     surfaces = {
@@ -1022,9 +1003,7 @@ def test_post_replay_guard_rejects_expected_result_leakage(
         "accepted_candidates": 1,
         "rejected_candidates": 0,
         "by_reason": {},
-        "by_template": {
-            "tpl": {"requested": 1, "accepted": 1, "rejected": 0}
-        },
+        "by_template": {"tpl": {"requested": 1, "accepted": 1, "rejected": 0}},
         "events": [],
     }
 
@@ -1038,9 +1017,7 @@ def test_post_replay_guard_rejects_expected_result_leakage(
 
     assert updated["accepted_candidates"] == 0
     assert updated["rejected_candidates"] == 1
-    assert surfaces[variant_id]["guard_violations"] == [
-        {"guard": "expected_result_leakage", "value": "500000"}
-    ]
+    assert surfaces[variant_id]["guard_violations"] == [{"guard": "expected_result_leakage", "value": "500000"}]
 
 
 def test_config_rejects_output_nested_inside_pack_root(tmp_path: Path) -> None:
@@ -1981,12 +1958,16 @@ def test_generate_refuses_settings_it_would_otherwise_ignore(tmp_path: Path) -> 
     with pytest.raises(ValueError, match="surface_generation has unknown keys: langauge"):
         BfclConfig.from_yaml(_write_tiny_config(tmp_path, "typo.yaml", surface_generation={"langauge": "en"}))
 
-    claims_a_judge = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "judge.yaml", lineage={"judge_advisory": True}))
-    assert "lineage.judge_advisory" in _unsupported_requests(claims_a_judge)
+    with pytest.raises(ValueError, match="judge_advisory must be null"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                "judge.yaml",
+                lineage={"judge_advisory": True},
+            )
+        )
 
-    batched = BfclConfig.from_yaml(
-        _write_tiny_config(tmp_path, "batch.yaml", ndd_batch_size=8)
-    )
+    batched = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "batch.yaml", ndd_batch_size=8))
     assert _unsupported_requests(batched) == []
 
 
@@ -2075,8 +2056,10 @@ def test_resolved_config_hash_input_is_portable_for_external_packs(tmp_path: Pat
     assert _resolved_config(config_a) == _resolved_config(config_b)
 
 
-def test_generate_refuses_features_no_stage_applies(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
+def test_surface_quality_settings_are_supported_by_generation(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        _unsupported_requests,
+    )
 
     temp_config = _write_tiny_config(
         tmp_path,
@@ -2098,8 +2081,8 @@ def test_generate_refuses_features_no_stage_applies(tmp_path: Path) -> None:
         surface_quality_validation={"enabled": True, "drop_authority": True},
     )
 
-    with pytest.raises(NotImplementedError, match="surface_quality_validation.enabled"):
-        generate_bfcl(temp_config)
+    config = BfclConfig.from_yaml(temp_config)
+    assert _unsupported_requests(config) == []
 
 
 def test_generate_refuses_ignored_task_generation_controls(tmp_path: Path) -> None:
