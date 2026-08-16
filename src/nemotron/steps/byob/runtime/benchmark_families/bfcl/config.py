@@ -11,6 +11,9 @@ from typing import Any
 
 import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
+    DEDUP_BALANCING_CONTRACT_VERSION,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_quality_contract import (
     SURFACE_QUALITY_CONTRACT_VERSION,
 )
@@ -109,7 +112,18 @@ _TASK_GENERATION_KEYS = frozenset(
         "tool_call_count_mix",
     }
 )
-_DEDUP_KEYS = frozenset({"enabled", "model_identifier", "n_clusters", "eps", "remove_duplicates"})
+_DEDUP_KEYS = frozenset(
+    {
+        "contract_version",
+        "enabled",
+        "model_identifier",
+        "n_clusters",
+        "eps",
+        "remove_duplicates",
+        "representative_source_preference",
+        "unmet_target_policy",
+    }
+)
 _EXPORT_KEYS = frozenset({"bfcl_json", "nemo_evaluator_bundle"})
 _REFERENCE_BENCHMARK_KEYS = frozenset({"name", "samples_path", "content_hash"})
 
@@ -694,16 +708,42 @@ class BfclConfig:
         if unknown := sorted(call_count_keys - {"1", "2", "3+"}):
             raise ValueError("task_generation.tool_call_count_mix has unknown keys: " + ", ".join(unknown))
         dedup = sections["semantic_deduplication_config"]
+        dedup_contract_version = dedup.get(
+            "contract_version",
+            DEDUP_BALANCING_CONTRACT_VERSION,
+        )
+        if dedup_contract_version != DEDUP_BALANCING_CONTRACT_VERSION:
+            raise ValueError(
+                "semantic_deduplication_config.contract_version must be "
+                f"{DEDUP_BALANCING_CONTRACT_VERSION!r}, got "
+                f"{dedup_contract_version!r}"
+            )
+        dedup["contract_version"] = dedup_contract_version
         if "enabled" in dedup:
             _require_bool(dedup["enabled"], "semantic_deduplication_config.enabled")
+        if dedup.get("enabled") and not quality_enabled:
+            raise ValueError(
+                "surface_quality_validation.enabled must be true when semantic_deduplication_config.enabled is true"
+            )
+        if dedup.get("enabled"):
+            required_dedup_keys = {
+                "model_identifier",
+                "n_clusters",
+                "eps",
+                "remove_duplicates",
+            }
+            missing_dedup_keys = sorted(required_dedup_keys - set(dedup))
+            if missing_dedup_keys:
+                raise ValueError(
+                    "semantic_deduplication_config is missing required keys when enabled: "
+                    + ", ".join(missing_dedup_keys)
+                )
         if "model_identifier" in dedup and (
             not isinstance(dedup["model_identifier"], str) or not dedup["model_identifier"].strip()
         ):
             raise ValueError("semantic_deduplication_config.model_identifier must be a non-empty string")
-        if dedup.get("enabled") and not dedup.get("model_identifier"):
-            raise ValueError(
-                "semantic_deduplication_config.model_identifier is required when deduplication is enabled"
-            )
+        if "model_identifier" in dedup:
+            dedup["model_identifier"] = dedup["model_identifier"].strip()
         if "n_clusters" in dedup:
             _require_int(
                 dedup["n_clusters"],
@@ -712,14 +752,47 @@ class BfclConfig:
             )
         if "eps" in dedup:
             eps = _require_number(dedup["eps"], "semantic_deduplication_config.eps")
-            if eps <= 0:
-                raise ValueError("semantic_deduplication_config.eps must be positive")
+            if not 0.0 < eps < 1.0:
+                raise ValueError("semantic_deduplication_config.eps must be between 0 and 1")
             dedup["eps"] = eps
         if "remove_duplicates" in dedup:
             _require_bool(
                 dedup["remove_duplicates"],
                 "semantic_deduplication_config.remove_duplicates",
             )
+        if "representative_source_preference" in dedup:
+            preference = dedup["representative_source_preference"]
+            if (
+                not isinstance(preference, list)
+                or not preference
+                or any(not isinstance(source, str) or not source.strip() for source in preference)
+            ):
+                raise ValueError(
+                    "semantic_deduplication_config.representative_source_preference "
+                    "must be a non-empty list of source names"
+                )
+            normalized_preference = [source.strip() for source in preference]
+            if len(set(normalized_preference)) != len(normalized_preference):
+                raise ValueError(
+                    "semantic_deduplication_config.representative_source_preference must not repeat a source"
+                )
+            unknown_sources = sorted(set(normalized_preference) - {"template", "model"})
+            if unknown_sources:
+                raise ValueError(
+                    "semantic_deduplication_config.representative_source_preference "
+                    "has unknown sources: " + ", ".join(unknown_sources)
+                )
+            dedup["representative_source_preference"] = normalized_preference
+        unmet_target_policy = dedup.get("unmet_target_policy", "abort")
+        if (
+            not isinstance(unmet_target_policy, str)
+            or unmet_target_policy not in {"abort", "publish_non_gold"}
+        ):
+            raise ValueError(
+                "semantic_deduplication_config.unmet_target_policy must be "
+                "'abort' or 'publish_non_gold'"
+            )
+        dedup["unmet_target_policy"] = unmet_target_policy
         exports = sections["exports"]
         for key, value in exports.items():
             _require_bool(value, f"exports.{key}")

@@ -83,6 +83,172 @@ def test_config_rejects_unknown_surface_quality_contract_version(
         BfclConfig.from_yaml(path)
 
 
+def test_config_locks_stage_eleven_contract_version(tmp_path: Path) -> None:
+    config = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "stage-eleven-default.yaml"))
+    assert config.semantic_deduplication_config["contract_version"] == "1.0"
+    assert config.semantic_deduplication_config["unmet_target_policy"] == "abort"
+
+    path = _write_tiny_config(
+        tmp_path,
+        "unknown-stage-eleven-contract.yaml",
+        semantic_deduplication_config={"contract_version": "2.0"},
+    )
+    with pytest.raises(ValueError, match="contract_version must be '1.0'"):
+        BfclConfig.from_yaml(path)
+
+
+@pytest.mark.parametrize("policy", ["continue", 1, ["abort"]])
+def test_stage_eleven_rejects_unknown_unmet_target_policy(
+    tmp_path: Path,
+    policy: object,
+) -> None:
+    path = _write_tiny_config(
+        tmp_path,
+        "invalid-unmet-target-policy.yaml",
+        semantic_deduplication_config={"unmet_target_policy": policy},
+    )
+
+    with pytest.raises(ValueError, match="unmet_target_policy must be"):
+        BfclConfig.from_yaml(path)
+
+
+def test_enabled_stage_eleven_requires_stage_ten(tmp_path: Path) -> None:
+    path = _write_tiny_config(
+        tmp_path,
+        "dedup-without-quality.yaml",
+        semantic_deduplication_config={
+            "enabled": True,
+            "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+            "n_clusters": 20,
+            "eps": 0.08,
+            "remove_duplicates": True,
+        },
+    )
+    with pytest.raises(
+        ValueError,
+        match="surface_quality_validation.enabled must be true",
+    ):
+        BfclConfig.from_yaml(path)
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "dedup-after-quality.yaml",
+            surface_quality_validation={"enabled": True},
+            semantic_deduplication_config={
+                "enabled": True,
+                "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+                "n_clusters": 20,
+                "eps": 0.08,
+                "remove_duplicates": True,
+            },
+        )
+    )
+    assert config.semantic_deduplication_config["enabled"] is True
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    ["model_identifier", "n_clusters", "eps", "remove_duplicates"],
+)
+def test_enabled_stage_eleven_requires_complete_config(
+    tmp_path: Path,
+    missing_key: str,
+) -> None:
+    dedup = {
+        "enabled": True,
+        "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+        "n_clusters": 20,
+        "eps": 0.08,
+        "remove_duplicates": True,
+    }
+    del dedup[missing_key]
+    path = _write_tiny_config(
+        tmp_path,
+        f"dedup-missing-{missing_key}.yaml",
+        surface_quality_validation={"enabled": True},
+        semantic_deduplication_config=dedup,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"missing required keys.*{missing_key}",
+    ):
+        BfclConfig.from_yaml(path)
+
+
+@pytest.mark.parametrize("eps", [0, -0.1, 1, 1.1])
+def test_stage_eleven_requires_a_curator_cosine_distance_threshold(
+    tmp_path: Path,
+    eps: float,
+) -> None:
+    path = _write_tiny_config(
+        tmp_path,
+        f"dedup-invalid-eps-{eps}.yaml",
+        surface_quality_validation={"enabled": True},
+        semantic_deduplication_config={
+            "enabled": True,
+            "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+            "n_clusters": 20,
+            "eps": eps,
+            "remove_duplicates": True,
+        },
+    )
+
+    with pytest.raises(ValueError, match="eps must be between 0 and 1"):
+        BfclConfig.from_yaml(path)
+
+
+def test_stage_eleven_normalizes_the_model_identifier(tmp_path: Path) -> None:
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "dedup-normalized-model.yaml",
+            surface_quality_validation={"enabled": True},
+            semantic_deduplication_config={
+                "enabled": True,
+                "model_identifier": " sentence-transformers/all-MiniLM-L6-v2 ",
+                "n_clusters": 20,
+                "eps": 0.08,
+                "remove_duplicates": True,
+            },
+        )
+    )
+
+    assert config.semantic_deduplication_config["model_identifier"] == "sentence-transformers/all-MiniLM-L6-v2"
+
+
+@pytest.mark.parametrize(
+    ("preference", "message"),
+    [
+        ([], "must be a non-empty list"),
+        (["template", "template"], "must not repeat"),
+        (["template", "oracle"], "unknown sources: oracle"),
+    ],
+)
+def test_stage_eleven_validates_representative_source_preference(
+    tmp_path: Path,
+    preference: list[str],
+    message: str,
+) -> None:
+    path = _write_tiny_config(
+        tmp_path,
+        "dedup-source-preference.yaml",
+        surface_quality_validation={"enabled": True},
+        semantic_deduplication_config={
+            "enabled": True,
+            "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+            "n_clusters": 20,
+            "eps": 0.08,
+            "remove_duplicates": True,
+            "representative_source_preference": preference,
+        },
+    )
+
+    with pytest.raises(ValueError, match=message):
+        BfclConfig.from_yaml(path)
+
+
 def test_config_allows_deterministic_surface_quality_without_a_judge(
     tmp_path: Path,
 ) -> None:
@@ -1718,6 +1884,16 @@ def test_pack_load_checks_what_the_guards_depend_on(tmp_path: Path) -> None:
 
     # The paraphrase block is optional; the run-wide guards still apply without it.
     assert normalize_templates([template])[0]["paraphrase"] == {}
+    assert normalize_templates(
+        [{**template, "edge_signatures": [" rare_b ", "rare_a"]}]
+    )[0]["edge_signatures"] == ["rare_a", "rare_b"]
+
+    with pytest.raises(ValueError, match="edge_signatures must be unique"):
+        normalize_templates(
+            [{**template, "edge_signatures": ["rare", " rare "]}]
+        )
+    with pytest.raises(ValueError, match="edge_signatures must be a list"):
+        normalize_templates([{**template, "edge_signatures": "rare"}])
 
     unflagged = {**template, "slots": {"thing_id": {"source": "literal:['T-1']"}}}
     with pytest.raises(ValueError, match="visible_in_first_turn"):
@@ -2095,6 +2271,36 @@ def test_generate_refuses_ignored_task_generation_controls(tmp_path: Path) -> No
     )
     with pytest.raises(NotImplementedError, match="task_generation.turn_mix"):
         generate_bfcl(temp_config)
+
+
+def test_stage_eleven_enables_implemented_balancing_controls(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        _unsupported_requests,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "stage-eleven-balancing.yaml",
+            surface_quality_validation={"enabled": True},
+            semantic_deduplication_config={
+                "enabled": True,
+                "model_identifier": "test/embedding",
+                "n_clusters": 4,
+                "eps": 0.08,
+                "remove_duplicates": True,
+            },
+            task_generation={
+                "difficulty_mix": {"easy": 1.0},
+                "turn_mix": {"single_turn": 1.0},
+                "tool_call_count_mix": {"1": 1.0},
+                "max_turns": 3,
+                "max_tool_calls": 2,
+            },
+        )
+    )
+
+    assert _unsupported_requests(config) == []
 
 
 def test_generate_revalidates_when_pack_changed(tmp_path: Path) -> None:

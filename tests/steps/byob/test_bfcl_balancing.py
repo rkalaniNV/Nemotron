@@ -1,0 +1,465 @@
+"""Tests for Stage 11 eight-dimension publication balancing."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
+    BALANCING_DIMENSIONS,
+    DedupBalancingDecision,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.dedup_balancing import (
+    balance_publication_set,
+    balancing_features,
+    largest_remainder_quotas,
+)
+
+BFCL_CONFIG_DIR = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob" / "bfcl" / "config"
+
+
+def _config(
+    tmp_path: Path,
+    *,
+    task_generation: dict[str, Any] | None = None,
+    remove_duplicates: bool = True,
+) -> BfclConfig:
+    data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    data["output_dir"] = str(tmp_path / "output")
+    data["random_seed"] = 23
+    data["surface_quality_validation"] = {
+        **(data.get("surface_quality_validation") or {}),
+        "enabled": True,
+    }
+    data["task_generation"] = {
+        **(data.get("task_generation") or {}),
+        "tasks_per_category": 100,
+        **(task_generation or {}),
+    }
+    data["semantic_deduplication_config"] = {
+        "enabled": True,
+        "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+        "n_clusters": 20,
+        "eps": 0.08,
+        "remove_duplicates": remove_duplicates,
+    }
+    path = tmp_path / "balancing.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return BfclConfig.from_yaml(path)
+
+
+def _task(task_id: str, **overrides: Any) -> dict[str, Any]:
+    task = {
+        "task_id": task_id,
+        "template_id": "template",
+        "intent": "lookup",
+        "category": "general",
+        "required_tools": ["lookup"],
+        "tools_present": ["lookup"],
+        "difficulty": "easy",
+        "turn_policy": "single_turn",
+        "num_tool_calls": 1,
+    }
+    task.update(overrides)
+    return task
+
+
+def _surface(task_id: str, *, turns: int = 1) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "language": "en",
+        "source": "template",
+        "steps": [{"kind": "user", "content": f"Request {index}"} for index in range(turns)],
+    }
+
+
+def _selected(task_ids: list[str]) -> list[DedupBalancingDecision]:
+    return [
+        DedupBalancingDecision(
+            task_id=task_id,
+            selected=True,
+            is_duplicate=False,
+            selection_rank=index,
+        )
+        for index, task_id in enumerate(task_ids)
+    ]
+
+
+def _run(
+    config: BfclConfig,
+    tasks: list[dict[str, Any]],
+    surfaces: dict[str, dict[str, Any]],
+    decisions: list[DedupBalancingDecision] | None = None,
+    **kwargs: Any,
+) -> tuple[list[DedupBalancingDecision], list[dict[str, Any]], dict[str, Any]]:
+    ids = [task["task_id"] for task in tasks]
+    return balance_publication_set(
+        config,
+        tasks,
+        surfaces,
+        decisions or _selected(ids),
+        **kwargs,
+    )
+
+
+def test_largest_remainder_quotas_are_exact_and_deterministic() -> None:
+    assert largest_remainder_quotas(
+        7,
+        {"easy": 0.5, "medium": 0.3, "hard": 0.2},
+    ) == {"easy": 4, "medium": 2, "hard": 1}
+    assert largest_remainder_quotas(1, {"b": 0.5, "a": 0.5}) == {
+        "a": 1,
+        "b": 0,
+    }
+    assert largest_remainder_quotas(0, {"a": 1.0}) == {"a": 0}
+
+
+def test_features_cover_all_eight_dimensions() -> None:
+    task = _task(
+        "task-a",
+        intent="transfer",
+        category="payments",
+        required_tools=["b", "a"],
+        tools_present=["c", "a"],
+        difficulty="hard",
+        turn_policy="confirmation",
+        num_tool_calls=3,
+    )
+
+    features = balancing_features(task, _surface("task-a", turns=2))
+
+    assert set(BALANCING_DIMENSIONS) <= set(features)
+    assert features["required_tools"] == '["a","b"]'
+    assert features["tools_present"] == '["a","c"]'
+    assert features["turn_class"] == "multi_turn"
+    assert features["tool_call_count"] == "3+"
+
+
+def test_balancing_finds_the_largest_feasible_difficulty_mix(
+    tmp_path: Path,
+) -> None:
+    difficulties = ["easy"] * 5 + ["medium"] * 3 + ["hard"] * 2
+    tasks = [_task(f"task-{index}", difficulty=difficulty) for index, difficulty in enumerate(difficulties)]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+
+    decisions, _, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={"difficulty_mix": {"easy": 0.3, "medium": 0.5, "hard": 0.2}},
+        ),
+        tasks,
+        surfaces,
+    )
+
+    assert sum(decision.selected for decision in decisions) == 6
+    assert summary["target_counts"]["difficulty"] == {
+        "easy": 2,
+        "hard": 1,
+        "medium": 3,
+    }
+    assert summary["actual_counts"]["difficulty"] == {
+        "easy": 2,
+        "hard": 1,
+        "medium": 3,
+    }
+    assert summary["unmet_targets"] == []
+
+
+def test_a_feasible_mix_is_reached_despite_the_greedy_pick_order(
+    tmp_path: Path,
+) -> None:
+    tasks = [
+        _task("task-0"),
+        _task("task-1"),
+        _task("task-2", difficulty="hard"),
+    ]
+    surfaces = {
+        "task-0": _surface("task-0"),
+        "task-1": _surface("task-1", turns=2),
+        "task-2": _surface("task-2"),
+    }
+
+    decisions, records, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={
+                "tasks_per_category": 2,
+                "difficulty_mix": {"easy": 0.5, "hard": 0.5},
+                "turn_mix": {"single_turn": 0.5, "multi_turn": 0.5},
+            },
+        ),
+        tasks,
+        surfaces,
+    )
+
+    assert {decision.task_id for decision in decisions if decision.selected} == {
+        "task-1",
+        "task-2",
+    }
+    assert summary["actual_counts"]["difficulty"] == {"easy": 1, "hard": 1}
+    assert summary["actual_counts"]["turn_class"] == {
+        "multi_turn": 1,
+        "single_turn": 1,
+    }
+    assert summary["unmet_targets"] == []
+    assert sorted(record["selection_rank"] for record in records if record["selected"]) == [0, 1]
+
+
+def test_category_cap_is_applied_without_cloning_rows(tmp_path: Path) -> None:
+    tasks = [
+        *[_task(f"a-{index}", category="a") for index in range(3)],
+        *[_task(f"b-{index}", category="b") for index in range(3)],
+    ]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+
+    decisions, _, summary = _run(
+        _config(tmp_path, task_generation={"tasks_per_category": 2}),
+        tasks,
+        surfaces,
+    )
+
+    assert sum(decision.selected for decision in decisions) == 4
+    assert summary["actual_counts"]["category"] == {"a": 2, "b": 2}
+    assert len({decision.task_id for decision in decisions}) == len(tasks)
+
+
+def test_turn_and_tool_call_targets_are_satisfied_together(
+    tmp_path: Path,
+) -> None:
+    tasks = [
+        _task("single-a"),
+        _task("single-b"),
+        _task("multi-a", turn_policy="multi_tool", num_tool_calls=2),
+        _task("multi-b", turn_policy="multi_tool", num_tool_calls=2),
+    ]
+    surfaces = {
+        "single-a": _surface("single-a"),
+        "single-b": _surface("single-b"),
+        "multi-a": _surface("multi-a", turns=2),
+        "multi-b": _surface("multi-b", turns=2),
+    }
+
+    _, _, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={
+                "tasks_per_category": 2,
+                "turn_mix": {"single_turn": 0.5, "multi_turn": 0.5},
+                "tool_call_count_mix": {"1": 0.5, "2": 0.5},
+            },
+        ),
+        tasks,
+        surfaces,
+    )
+
+    assert summary["actual_counts"]["turn_class"] == {
+        "multi_turn": 1,
+        "single_turn": 1,
+    }
+    assert summary["actual_counts"]["tool_call_count"] == {"1": 1, "2": 1}
+    assert summary["unmet_targets"] == []
+
+
+def test_coverage_survivor_overrides_a_soft_mix_target(tmp_path: Path) -> None:
+    tasks = [
+        *[_task(f"easy-{index}") for index in range(4)],
+        _task("rare-hard", difficulty="hard"),
+    ]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+    edges = {task["task_id"]: (["rare_edge"] if task["task_id"] == "rare-hard" else []) for task in tasks}
+
+    decisions, records, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={"difficulty_mix": {"easy": 1.0}},
+        ),
+        tasks,
+        surfaces,
+        edge_signatures_by_task_id=edges,
+    )
+
+    by_id = {decision.task_id: decision for decision in decisions}
+    assert by_id["rare-hard"].selected is True
+    assert next(record for record in records if record["task_id"] == "rare-hard")["coverage_locked"] is True
+    assert summary["actual_counts"]["difficulty"]["hard"] == 1
+    assert summary["unmet_targets"][0]["reason"] == ("coverage_or_cross_dimension_constraint")
+
+
+@pytest.mark.parametrize(
+    ("limit_key", "task_overrides", "turns", "reason"),
+    [
+        (
+            "max_turns",
+            {},
+            3,
+            "max_turns_exceeded",
+        ),
+        (
+            "max_tool_calls",
+            {"num_tool_calls": 4},
+            1,
+            "max_tool_calls_exceeded",
+        ),
+    ],
+)
+def test_hard_limits_drop_rows_with_controlled_reasons(
+    tmp_path: Path,
+    limit_key: str,
+    task_overrides: dict[str, Any],
+    turns: int,
+    reason: str,
+) -> None:
+    tasks = [
+        _task("kept"),
+        _task("limited", **task_overrides),
+    ]
+    surfaces = {
+        "kept": _surface("kept"),
+        "limited": _surface("limited", turns=turns),
+    }
+
+    decisions, _, summary = _run(
+        _config(tmp_path, task_generation={limit_key: 2}),
+        tasks,
+        surfaces,
+    )
+
+    by_id = {decision.task_id: decision for decision in decisions}
+    assert by_id["limited"].drop_reason == reason
+    assert summary["hard_limit_drops"] == {reason: 1}
+
+
+def test_hard_limits_cannot_remove_the_last_coverage_survivor(
+    tmp_path: Path,
+) -> None:
+    tasks = [_task("normal"), _task("rare")]
+    surfaces = {
+        "normal": _surface("normal"),
+        "rare": _surface("rare", turns=3),
+    }
+
+    with pytest.raises(ValueError, match="final survivor of coverage bucket"):
+        _run(
+            _config(tmp_path, task_generation={"max_turns": 2}),
+            tasks,
+            surfaces,
+            edge_signatures_by_task_id={"normal": [], "rare": ["rare_edge"]},
+        )
+
+
+def test_cluster_members_never_survive_without_their_representative(
+    tmp_path: Path,
+) -> None:
+    tasks = [_task("representative"), _task("duplicate")]
+    surfaces = {
+        "representative": _surface("representative"),
+        "duplicate": _surface("duplicate"),
+    }
+    cluster = "cluster-1"
+    decisions = [
+        DedupBalancingDecision(
+            task_id="representative",
+            selected=True,
+            is_duplicate=False,
+            duplicate_cluster_id=cluster,
+            representative_task_id="representative",
+            selection_rank=0,
+        ),
+        DedupBalancingDecision(
+            task_id="duplicate",
+            selected=True,
+            is_duplicate=True,
+            duplicate_cluster_id=cluster,
+            representative_task_id="representative",
+            selection_rank=1,
+        ),
+    ]
+
+    balanced, _, _ = _run(
+        _config(
+            tmp_path,
+            remove_duplicates=False,
+            task_generation={"tasks_per_category": 1},
+        ),
+        tasks,
+        surfaces,
+        decisions,
+    )
+
+    by_id = {decision.task_id: decision for decision in balanced}
+    assert by_id["representative"].selected is True
+    assert by_id["duplicate"].selected is False
+    assert by_id["duplicate"].drop_reason == "balance_quota"
+
+
+def test_duplicate_is_ineligible_when_its_representative_hits_a_hard_limit(
+    tmp_path: Path,
+) -> None:
+    tasks = [
+        _task("representative", num_tool_calls=4),
+        _task("duplicate"),
+        _task("other"),
+    ]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+    cluster = "cluster-1"
+    decisions = [
+        DedupBalancingDecision(
+            task_id="representative",
+            selected=True,
+            is_duplicate=False,
+            duplicate_cluster_id=cluster,
+            representative_task_id="representative",
+            selection_rank=0,
+        ),
+        DedupBalancingDecision(
+            task_id="duplicate",
+            selected=True,
+            is_duplicate=True,
+            duplicate_cluster_id=cluster,
+            representative_task_id="representative",
+            selection_rank=1,
+        ),
+        DedupBalancingDecision(
+            task_id="other",
+            selected=True,
+            is_duplicate=False,
+            selection_rank=2,
+        ),
+    ]
+
+    balanced, _, _ = _run(
+        _config(
+            tmp_path,
+            remove_duplicates=False,
+            task_generation={"max_tool_calls": 3},
+        ),
+        tasks,
+        surfaces,
+        decisions,
+    )
+
+    by_id = {decision.task_id: decision for decision in balanced}
+    assert by_id["representative"].drop_reason == "max_tool_calls_exceeded"
+    assert by_id["duplicate"].selected is False
+    assert by_id["other"].selected is True
+
+
+def test_balancing_is_deterministic_and_reports_every_dimension(
+    tmp_path: Path,
+) -> None:
+    tasks = [_task(f"task-{index}") for index in range(5)]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+    config = _config(tmp_path, task_generation={"tasks_per_category": 3})
+
+    first, _, first_summary = _run(config, tasks, surfaces)
+    second, _, second_summary = _run(config, tasks, surfaces)
+
+    assert [decision.task_id for decision in first if decision.selected] == [
+        decision.task_id for decision in second if decision.selected
+    ]
+    assert first_summary == second_summary
+    assert set(first_summary["actual_counts"]) == set(BALANCING_DIMENSIONS)

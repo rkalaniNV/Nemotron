@@ -32,6 +32,7 @@ EXPECTED_TRACES = "expected_traces.parquet"
 SCHEMA_VALIDATED_TRACES = "schema_validated_traces.parquet"
 REPLAY_VALIDATED_TASKS = "replay_validated_tasks.parquet"
 SURFACE_VALIDATED_TASKS = "surface_validated_tasks.parquet"
+BALANCED_TASKS = "balanced_tasks.parquet"
 
 STAGE_TABLES = (
     TASK_INSTANCES,
@@ -63,7 +64,12 @@ def write_stage_table(path: Path, rows: list[dict[str, Any]], schema: Any) -> Pa
     import pyarrow.parquet as pq
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.Table.from_pylist(rows, schema=schema), path)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        pq.write_table(pa.Table.from_pylist(rows, schema=schema), temporary)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return path
 
 
@@ -90,6 +96,7 @@ def task_instances_schema() -> Any:
             ("required_tools", string_list),
             ("tools_present", string_list),
             ("success_assertions", string_list),
+            ("edge_signatures", string_list),
             ("fixture_refs", string_list),
             ("slots", pa.string()),
             ("slots_initial", pa.string()),
@@ -118,6 +125,7 @@ def task_instance_row(task: dict[str, Any]) -> dict[str, Any]:
         "required_tools": [str(name) for name in task.get("required_tools") or []],
         "tools_present": [str(name) for name in task.get("tools_present") or []],
         "success_assertions": [str(name) for name in task.get("success_assertions") or []],
+        "edge_signatures": [str(name) for name in task.get("edge_signatures") or []],
         "fixture_refs": [str(ref) for ref in task.get("fixture_refs") or []],
         "slots": canonical_json(task.get("slots") or {}),
         "slots_initial": canonical_json(task.get("slots_initial") or task.get("slots") or {}),
@@ -390,6 +398,45 @@ def surface_validated_task_row(record: dict[str, Any]) -> dict[str, Any]:
         **{f"{check}_status": by_check[check].status for check in SURFACE_QUALITY_CHECKS},
         "checks": canonical_json([result.model_dump() for result in checks]),
     }
+
+
+def balanced_tasks_schema() -> Any:
+    """Schema for Stage 11's complete deduplication and balancing decision."""
+    import pyarrow as pa
+
+    return pa.schema(
+        [
+            ("task_id", pa.string()),
+            ("contract_version", pa.string()),
+            ("selected", pa.bool_()),
+            ("is_duplicate", pa.bool_()),
+            ("duplicate_cluster_id", pa.string()),
+            ("representative_task_id", pa.string()),
+            ("drop_reason", pa.string()),
+            ("balance_dimension", pa.string()),
+            ("selection_rank", pa.int32()),
+            ("curator_cluster_id", pa.string()),
+            ("curator_is_duplicate", pa.bool_()),
+            ("curator_predecessor_id", pa.string()),
+            ("curator_similarity_score", pa.float64()),
+            ("text_hash", pa.string()),
+            ("capability_signature", pa.string()),
+            ("language", pa.string()),
+            ("edge_signatures", pa.list_(pa.string())),
+            ("intent", pa.string()),
+            ("category", pa.string()),
+            ("required_tools", pa.string()),
+            ("tools_present", pa.string()),
+            ("difficulty", pa.string()),
+            ("turn_class", pa.string()),
+            ("tool_call_count", pa.string()),
+            ("turn_policy", pa.string()),
+            ("num_turns", pa.int32()),
+            ("num_tool_calls", pa.int32()),
+            ("coverage_locked", pa.bool_()),
+            ("representative_rank", pa.string()),
+        ]
+    )
 
 
 def _optional_str(value: Any) -> str | None:

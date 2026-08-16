@@ -404,6 +404,7 @@ def expand_template(pack: LoadedPack, template: dict[str, Any], limit: int, glob
                 "required_tools": list(template.get("required_tools") or []),
                 "tools_present": list(template.get("tools_present") or []),
                 "success_assertions": list(template.get("success_assertions") or []),
+                "edge_signatures": list(template.get("edge_signatures") or []),
                 "mutates": bool(template.get("mutates", False)),
             }
         )

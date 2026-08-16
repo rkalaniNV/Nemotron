@@ -168,6 +168,11 @@ Generation renders every assistant and user turn from the pack, never from a mod
 - Every template declares one supported `turn_policy`, and every declared milestone
   `id` is a unique non-empty string. Missing policies and duplicate ids are rejected
   before references can silently bind to the wrong conversation edge.
+- A template may declare `edge_signatures` as a unique list of non-empty,
+  pack-defined labels for rare behavior not already distinguished by
+  `turn_policy`. Expansion carries these labels into Stage 11, where
+  deduplication and balancing preserve at least one selected row for every
+  complete language/policy/edge bucket.
 - A policy is a claim about the conversation's shape, because it is what consumers
   slice the published rows by, so each one is held to that shape:
 
@@ -557,8 +562,9 @@ Disabled roles are recorded with null identity and set
 `generation_mode: template_only`, which does not affect gold eligibility. The
 remaining `REPLACE_ME_*` entries only matter once the corresponding role is enabled.
 
-Generation supports reference profiling, controlled paraphrasing, and Stage 10
-surface-quality validation, including an optional advisory or authoritative
-surface judge. It still refuses settings for later work no stage performs, such
-as enabled semantic deduplication or exports, so a run never claims guarantees
-nothing produced.
+Generation supports reference profiling, controlled paraphrasing, Stage 10
+surface-quality validation, and optional Stage 11 semantic deduplication and
+balancing. Stage 11 fails closed on backend/artifact errors and requires an
+explicit abort-or-non-gold policy for unmet targets. Generation still refuses
+settings for later work no stage performs, such as exports, so a run never
+claims guarantees nothing produced.

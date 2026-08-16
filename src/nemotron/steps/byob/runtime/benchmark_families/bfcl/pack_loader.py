@@ -400,6 +400,23 @@ def normalize_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]
                 raise ValueError(
                     f"template {template_id!r} slot {name!r} must declare visible_in_first_turn as a boolean"
                 )
+        edge_signatures = item.get("edge_signatures") or []
+        if (
+            not isinstance(edge_signatures, list)
+            or any(
+                not isinstance(signature, str) or not signature.strip()
+                for signature in edge_signatures
+            )
+        ):
+            raise ValueError(
+                f"template {template_id!r} edge_signatures must be a list of non-empty strings"
+            )
+        normalized_edges = [signature.strip() for signature in edge_signatures]
+        if len(set(normalized_edges)) != len(normalized_edges):
+            raise ValueError(
+                f"template {template_id!r} edge_signatures must be unique"
+            )
+        item["edge_signatures"] = sorted(normalized_edges)
         normalized.append(item)
     return normalized
 

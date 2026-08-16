@@ -133,8 +133,8 @@ reference_benchmark:
 ```
 
 Semantic deduplication accepts `model_identifier`, `n_clusters`, `eps`, and
-`remove_duplicates`. Generation still rejects enabled deduplication until its
-stage is implemented, so no new setting is silently ignored.
+`remove_duplicates`. When enabled, generation runs it after Stage 10 and applies
+the resulting total selection order to `benchmark.parquet`.
 
 Surface quality uses the versioned `1.1` six-check contract:
 
@@ -196,6 +196,128 @@ surface_quality_validation:
   drop_authority: false
 ```
 
+Stage 11 uses versioned contract `1.0`. It requires exactly one decision for
+every Stage-10 survivor, preserves input order, and restricts balancing reports
+to eight generic dimensions: `intent`, `category`, `required_tools`,
+`tools_present`, `difficulty`, `turn_class`, `tool_call_count`, and
+`turn_policy`. Controlled drop reasons distinguish semantic duplicates, balance
+quotas, and hard turn/call limits. A selected row cannot carry drop detail, and
+selected rows carry `selection_rank` `0..k-1` exactly once so publication order
+is total.
+
+Deduplication may only collapse tasks that share one coverage bucket, so every
+cluster holds exactly one representative and never mixes `language`,
+`turn_policy`, or pack-defined edge signatures. A representative may itself be
+dropped on quota only when every member of that cluster is dropped. Validation
+also preserves at least one selected row for every complete input coverage
+bucket, not merely each language, policy, and edge value independently. Bucket
+keys and task identifiers are normalized, because bucket identity is string
+equality and an untrimmed variant would otherwise become a phantom bucket.
+
+Stage 11 embeds a text projection rather than the published row. The projection
+keeps only user-authored turns, in conversation order, each prefixed with a
+`[user]` marker; assistant milestones, tool-call payloads, and oracle results
+never reach it. Turn whitespace is collapsed, and every literal the pack bound
+into the task, corrections included, is masked to `<slot_name>`, so two tasks
+that differ only in a bound id project the same text. Masking matches whole
+tokens and longest literals first, so a short value cannot corrupt a word that
+merely contains it, and a literal two slots share masks under one deterministic
+slot name. Correction aliases are masked as well as canonical slot keys.
+
+Embedding runs through the shared Curator semantic-dedup workflow, with
+`task_id` as the id and the projected text as the embedded field. `n_clusters`
+is capped so non-trivial inputs retain an average of at least two rows per
+partition; setting k equal to the row count would turn pairwise deduplication
+into a collection of singletons. The effective value is reported. A set of
+fewer than two rows never reaches the embedding backend: one surface cannot
+duplicate anything and zero surfaces have nothing to embed. `eps` is constrained
+to `(0, 1)`, matching Curator's cosine-similarity threshold and keeping singleton
+sentinels below it. Both duplicate flags and cluster membership come from one
+Curator run. Stage 11 consumes Curator's K-means-partitioned pairwise artifact:
+each row crossing `1 - eps` is linked to the predecessor Curator ranked for it,
+and those links form the duplicate clusters. It also requires that the official
+Curator duplicate artifact names exactly the same ids. This avoids a second
+similarity implementation, comparisons across Curator's candidate partitions,
+and an extra global quadratic pass. The run records the settings hash, the
+projected-input hash, and a signature over the embeddings themselves, so a
+deduplication decision can be traced to the exact model, settings, and vectors
+that produced it. A backend result is rejected before it can decide anything if
+it fails to cover the embedded ids, if Curator's pairwise and duplicate
+artifacts disagree, or if a cluster does not carry exactly one non-duplicate
+representative. Embeddings decide duplication only; nothing a model produces
+reaches a task's text, calls, arguments, or assertions.
+
+Curator clusters are then partitioned by the complete
+`(language, turn_policy, edge_signatures)` coverage bucket and by a hash of the
+task's generic executable capabilities (`required_tools`, `tools_present`,
+assertion contract, mutation flag, and call-order policy). A Curator
+representative in one partition therefore cannot erase the final survivor of
+another. Each resulting multi-row partition selects exactly one representative
+using, in order: eligibility under the run's `max_turns` and `max_tool_calls`
+limits, no judge error or advisory failure, applicable-check status,
+coverage rarity, configured surface-source preference, a seeded hash, and
+`task_id`. The default source preference is `template` before `model`; a run can
+reverse it explicitly. Metadata retains the original Curator cluster, duplicate
+flag, predecessor, similarity score, final cluster, capability signature,
+coverage bucket, and every deterministic rank component.
+
+Balancing then projects every candidate onto the eight locked dimensions:
+`intent`, `category`, canonical `required_tools`, canonical `tools_present`,
+`difficulty`, `turn_class`, `tool_call_count`, and `turn_policy`. `max_turns`
+and `max_tool_calls` are hard filters; removing the final survivor of a coverage
+bucket aborts instead of weakening the lock. One representative per complete
+coverage bucket is selected before quotas. Category caps and configured
+`difficulty_mix`, `turn_mix`, and `tool_call_count_mix` targets are then applied
+without cloning rows. Fractional targets use deterministic largest-remainder
+allocation, and selection fills outstanding cross-dimension deficits with
+deterministic greedy choices. Because one row is chosen at a time, a final
+exchange pass swaps a selected row for a rejected one whenever that strictly
+shortens the distance to the declared targets and preserves coverage,
+representatives, and category caps, so a feasible mix is not reported unmet
+merely because of the order rows were picked in. Targets that inventory or a
+locked coverage survivor genuinely prevents are returned with explicit
+inventory, target, actual, and reason metadata rather than being silently
+claimed as met.
+
+Stage 11 writes `stage_cache/balanced_tasks.parquet` with one row for every
+Stage-10 survivor, including Curator lineage, final cluster and representative
+IDs, duplicate/selection verdict, drop detail, total publication rank, locked
+coverage, and all eight balancing dimensions. It also writes
+`stage_cache/dedup_balancing_report.json` with pre/post counts, grouped
+selection/drop statistics, target and actual mixes, unmet targets, hard-limit
+drops, rare-edge preservation, and the semantic/config/artifact hashes needed
+to audit the decision. Both files are replaced atomically.
+
+`remove_duplicates` controls whether duplicate rows must be dropped or may be
+retained as annotations. With `false`, semantic similarity alone never drops a
+row; subsequent hard limits and balancing quotas still apply and retain their
+own drop reasons.
+
+Stage 11 is fail-closed. An embedding/Curator error propagates and no final
+parquet or manifest is written. Missing Stage-11 artifacts stop final output,
+and an empty selected set cannot become an empty gold benchmark. Infeasible
+soft targets are always recorded without inventing rows.
+`unmet_target_policy: abort` (the default) leaves the diagnostic Stage-11
+artifacts but stops before publication. `publish_non_gold` permits publication
+only after setting both manifest and row `gold_eligible` values to false and
+recording `stage_eleven_unmet_targets` as the reason.
+
+Enabling Stage 11 requires Stage 10 and all Stage-11 model/clustering settings
+to be present, so deduplication never admits an unvalidated or under-specified
+run. The manifest embeds the Stage-11 report, model identifier, settings hash,
+embedding signature, stage counts, and hashes of both Stage-11 artifacts.
+
+```yaml
+semantic_deduplication_config:
+  contract_version: "1.0"
+  enabled: false
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_clusters: 20
+  eps: 0.08
+  remove_duplicates: true
+  representative_source_preference: [template, model]
+```
+
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
 [`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md).
@@ -211,7 +333,7 @@ requirements, see
 | Reference profiling | **Implemented** | Normalize content-addressed style samples and create a cached profile without exposing oracle truth. |
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
-| Semantic deduplication | **Implementing** | Remove near-duplicate tasks before publication while retaining deterministic provenance. |
+| Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
 | Evaluation and scoring | **Implementing** | Run a model or agent against the published benchmark and score tool selection, arguments, call ordering, results, and final task success. |
 | Held-out evaluation | **Implementing** | Evaluate on separately governed fixtures or cases and record coverage and dropped-row metrics in run lineage. |
 | Translation and localization | **Implementing** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |

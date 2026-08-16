@@ -40,6 +40,12 @@ _SURFACE_QUALITY_ARTIFACTS = (
     "surface_quality_rejections.json",
     "surface_judge_cache_usage.json",
 )
+_DEDUP_BALANCING_ARTIFACTS = (
+    "balanced_tasks.parquet",
+    "balanced_tasks.parquet.tmp",
+    "dedup_balancing_report.json",
+    "dedup_balancing_report.json.tmp",
+)
 
 
 def _unsupported_requests(config: BfclConfig) -> list[str]:
@@ -49,11 +55,22 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     lineage or quality guarantees that no stage actually applied.
     """
     requested: list[str] = []
-    if config.semantic_deduplication_config.get("enabled"):
-        requested.append("semantic_deduplication_config.enabled")
     requested.extend(f"exports.{name}" for name, on in sorted(config.exports.items()) if on)
+    supported_task_generation = {"tasks_per_category"}
+    if config.semantic_deduplication_config.get("enabled"):
+        supported_task_generation.update(
+            {
+                "difficulty_mix",
+                "turn_mix",
+                "tool_call_count_mix",
+                "max_turns",
+                "max_tool_calls",
+            }
+        )
     requested.extend(
-        f"task_generation.{name}" for name in sorted(config.task_generation) if name != "tasks_per_category"
+        f"task_generation.{name}"
+        for name in sorted(config.task_generation)
+        if name not in supported_task_generation
     )
     # Asking for work a disabled stage would have done. Reading these is what keeps
     # "refuse, do not ignore" true for the whole config and not just the gate flags.
@@ -135,7 +152,7 @@ def _invalidate_final_outputs(config: BfclConfig) -> None:
     for name in _FINAL_ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
     cache = stage_cache_dir(config)
-    for name in _SURFACE_QUALITY_ARTIFACTS:
+    for name in (*_SURFACE_QUALITY_ARTIFACTS, *_DEDUP_BALANCING_ARTIFACTS):
         (cache / name).unlink(missing_ok=True)
 
 
@@ -194,6 +211,9 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.executable_replay import (
         run_executable_replay,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.dedup_balancing import (
+        run_dedup_balancing_stage,
     )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import run_expand
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expected_trace import (
@@ -300,6 +320,29 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
             surfaces,
             profile=profile,
         )
+    dedup_balancing_result: dict | None = None
+    if config.semantic_deduplication_config.get("enabled"):
+        if surface_quality_records is None:
+            raise RuntimeError("Stage 11 requires Stage 10 surface-quality records")
+        quality_by_task = {
+            str(record["task_id"]): record
+            for record in surface_quality_records
+        }
+        stage_eleven_tasks = [
+            task
+            for task in replay_tasks
+            if quality_by_task[str(task["task_id"])]["decision"] == "kept"
+        ]
+        stage_eleven_quality = [
+            quality_by_task[str(task["task_id"])]
+            for task in stage_eleven_tasks
+        ]
+        dedup_balancing_result = run_dedup_balancing_stage(
+            config,
+            stage_eleven_tasks,
+            surfaces,
+            stage_eleven_quality,
+        )
     current_fingerprint = pack_fingerprint(pack.paths)
     if current_fingerprint != report.get("pack_fingerprint"):
         raise RuntimeError(
@@ -339,6 +382,16 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
                 ),
             }
         )
+    if dedup_balancing_result is not None:
+        dedup_report = dedup_balancing_result["artifacts"]["report"]
+        stage_counts.update(
+            {
+                "dedup_balancing_input": int(dedup_report["counts"]["stage_ten_survivors"]),
+                "semantic_duplicates": int(dedup_report["counts"]["final_duplicates"]),
+                "dedup_balancing_selected": int(dedup_report["counts"]["selected"]),
+                "dedup_balancing_dropped": int(dedup_report["counts"]["dropped"]),
+            }
+        )
     return run_final_output(
         config,
         pack,
@@ -352,5 +405,15 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
         trace_drop_reasons=drop_reasons,
         surface_quality_records=surface_quality_records,
         surface_quality_report=surface_quality_report,
+        dedup_balancing_decisions=(
+            dedup_balancing_result["decisions"]
+            if dedup_balancing_result is not None
+            else None
+        ),
+        dedup_balancing_report=(
+            dedup_balancing_result["artifacts"]["report"]
+            if dedup_balancing_result is not None
+            else None
+        ),
         expected_pack_fingerprint=current_fingerprint,
     )
