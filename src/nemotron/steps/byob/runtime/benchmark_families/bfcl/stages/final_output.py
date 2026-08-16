@@ -30,6 +30,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     encode_arguments,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
+    BALANCED_TASKS,
     REFERENCE_SAMPLES,
     STAGE_TABLES,
     SURFACE_VALIDATED_TASKS,
@@ -435,6 +436,8 @@ def run_final_output(
     trace_drop_reasons: dict[str, str] | None = None,
     surface_quality_records: list[dict[str, Any]] | None = None,
     surface_quality_report: dict[str, Any] | None = None,
+    dedup_balancing_decisions: list[Any] | None = None,
+    dedup_balancing_report: dict[str, Any] | None = None,
 ) -> Path:
     """Write benchmark_raw.parquet, benchmark.parquet, and run_manifest.json."""
     import pyarrow as pa
@@ -487,6 +490,33 @@ def run_final_output(
         if surface_quality_records is not None
         else {}
     )
+    dedup_enabled = bool(config.semantic_deduplication_config.get("enabled"))
+    if dedup_enabled != (dedup_balancing_decisions is not None):
+        raise ValueError(
+            "semantic_deduplication_config.enabled must match the presence of Stage 11 decisions"
+        )
+    if (dedup_balancing_decisions is None) != (dedup_balancing_report is None):
+        raise ValueError("Stage 11 decisions and report must be provided together")
+    dedup_balancing_artifacts: dict[str, dict[str, str]] = {}
+    if dedup_balancing_report is not None:
+        report_path = cache / "dedup_balancing_report.json"
+        stored_report = json.loads(report_path.read_text(encoding="utf-8"))
+        if stored_report != dedup_balancing_report:
+            raise ValueError("Stage 11 report does not match dedup_balancing_report.json")
+        current_balanced_tasks_hash = _file_hash(cache / BALANCED_TASKS)
+        reported_balanced_tasks_hash = (
+            (stored_report.get("artifacts") or {})
+            .get(BALANCED_TASKS, {})
+            .get("content_hash")
+        )
+        if reported_balanced_tasks_hash != current_balanced_tasks_hash:
+            raise ValueError(
+                "balanced_tasks.parquet content hash does not match the Stage 11 report"
+            )
+        dedup_balancing_artifacts = {
+            "balanced_tasks": {"content_hash": current_balanced_tasks_hash},
+            "dedup_balancing_report": {"content_hash": _file_hash(report_path)},
+        }
     current_pack_fingerprint = _require_pack_fingerprint(
         pack,
         expected_pack_fingerprint,
@@ -526,12 +556,80 @@ def run_final_output(
                 f"surface-quality records must match replay-validated rows exactly (missing={missing}, extra={extra})"
             )
         published = [row for row in rows if quality_by_task[str(row["task_id"])]["decision"] == "kept"]
+    if dedup_balancing_decisions is not None:
+        from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
+            DedupBalancingDecision,
+        )
+
+        decisions = [
+            value
+            if isinstance(value, DedupBalancingDecision)
+            else DedupBalancingDecision.model_validate(value)
+            for value in dedup_balancing_decisions
+        ]
+        decision_by_task: dict[str, DedupBalancingDecision] = {}
+        for decision in decisions:
+            if decision.task_id in decision_by_task:
+                raise ValueError(f"duplicate Stage 11 decision for task {decision.task_id!r}")
+            decision_by_task[decision.task_id] = decision
+        stage_ten_ids = {str(row["task_id"]) for row in published}
+        if set(decision_by_task) != stage_ten_ids:
+            missing = sorted(stage_ten_ids - set(decision_by_task))
+            extra = sorted(set(decision_by_task) - stage_ten_ids)
+            raise ValueError(
+                "Stage 11 decisions must match Stage 10 publication candidates exactly "
+                f"(missing={missing}, extra={extra})"
+            )
+        published = sorted(
+            (
+                row
+                for row in published
+                if decision_by_task[str(row["task_id"])].selected
+            ),
+            key=lambda row: decision_by_task[str(row["task_id"])].selection_rank,
+        )
+        expected_selected = int(dedup_balancing_report["counts"]["selected"])
+        if expected_selected != len(published):
+            raise ValueError("Stage 11 report selected count does not match its decisions")
+    stage_eleven_gold_eligible = True
+    if dedup_balancing_report is not None:
+        unmet_targets = dedup_balancing_report.get("unmet_targets") or []
+        release_policy = dedup_balancing_report.get("release_policy")
+        if not isinstance(release_policy, dict):
+            raise ValueError("Stage 11 report requires release_policy")
+        policy = release_policy.get("unmet_target_policy")
+        if policy not in {"abort", "publish_non_gold"}:
+            raise ValueError("Stage 11 report carries an invalid unmet_target_policy")
+        if policy != config.semantic_deduplication_config.get("unmet_target_policy", "abort"):
+            raise ValueError("Stage 11 report unmet_target_policy does not match config")
+        expected_action = policy if unmet_targets else "none"
+        if release_policy.get("unmet_target_action") != expected_action:
+            raise ValueError("Stage 11 report carries an inconsistent unmet_target_action")
+        if bool(unmet_targets) == bool(release_policy.get("gold_eligible")):
+            raise ValueError("Stage 11 release eligibility is inconsistent with unmet targets")
+        if unmet_targets and policy == "abort":
+            raise RuntimeError(
+                "Stage 11 has unmet balancing targets under abort policy; "
+                "inspect stage_cache/dedup_balancing_report.json"
+            )
+        stage_eleven_gold_eligible = bool(release_policy["gold_eligible"])
+        if not stage_eleven_gold_eligible:
+            for row in rows:
+                row["gold_eligible"] = False
     if not published:
         if surface_quality_records is not None:
-            source = "Stage 10 surface-quality policy"
-            recovery = (
-                "inspect stage_cache/surface_validated_tasks.parquet and stage_cache/surface_quality_rejections.json"
-            )
+            if dedup_balancing_decisions is not None:
+                source = "Stage 11 deduplication and balancing policy"
+                recovery = (
+                    "inspect stage_cache/balanced_tasks.parquet and "
+                    "stage_cache/dedup_balancing_report.json"
+                )
+            else:
+                source = "Stage 10 surface-quality policy"
+                recovery = (
+                    "inspect stage_cache/surface_validated_tasks.parquet and "
+                    "stage_cache/surface_quality_rejections.json"
+                )
         else:
             source = "deterministic surface guards"
             recovery = "inspect stage_cache/rendered_conversations.parquet"
@@ -578,10 +676,18 @@ def run_final_output(
         "held_out_normalized.json",
     ]
     lineage_artifacts.update(surface_quality_artifacts)
+    lineage_artifacts.update(dedup_balancing_artifacts)
     for artifact_name in optional_artifacts:
         artifact_path = cache / artifact_name
         if artifact_path.is_file():
             lineage_artifacts[artifact_name.rsplit(".", 1)[0]] = {"content_hash": _file_hash(artifact_path)}
+    gold_ineligibility_reasons: list[str] = []
+    if tier != "gold":
+        gold_ineligibility_reasons.append("pack_tier_not_gold")
+    if config.lineage.policy == "smoke_no_publication":
+        gold_ineligibility_reasons.append("smoke_no_publication")
+    if not stage_eleven_gold_eligible:
+        gold_ineligibility_reasons.append("stage_eleven_unmet_targets")
     manifest = {
         "schema_version": schema_version,
         # The timestamp is part of the id: two runs of the same config are different
@@ -615,7 +721,12 @@ def run_final_output(
         "reference_benchmark": _reference_benchmark_manifest(config),
         "prompt_bundle_hash": prompt_bundle["prompt_bundle_hash"],
         "tier": tier,
-        "gold_eligible": tier == "gold" and config.lineage.policy != "smoke_no_publication",
+        "gold_eligible": (
+            tier == "gold"
+            and config.lineage.policy != "smoke_no_publication"
+            and stage_eleven_gold_eligible
+        ),
+        "gold_ineligibility_reasons": gold_ineligibility_reasons,
         "lineage_policy": config.lineage.policy,
         # Reported from what ships, not from what was attempted: a profile that shaped
         # only rejected candidates influenced no published surface.
@@ -629,6 +740,26 @@ def run_final_output(
             "enabled": bool(config.surface_quality_validation.get("enabled")),
             "drop_authority": bool(config.surface_quality_validation.get("drop_authority")),
             "report": surface_quality_report,
+        },
+        "semantic_deduplication": {
+            "contract_version": config.semantic_deduplication_config.get("contract_version"),
+            "enabled": dedup_enabled,
+            "model_identifier": (
+                config.semantic_deduplication_config.get("model_identifier")
+                if dedup_enabled
+                else None
+            ),
+            "settings_hash": (
+                (dedup_balancing_report.get("lineage") or {}).get("settings_hash")
+                if dedup_balancing_report is not None
+                else None
+            ),
+            "embedding_signature": (
+                (dedup_balancing_report.get("lineage") or {}).get("embedding_signature")
+                if dedup_balancing_report is not None
+                else None
+            ),
+            "report": dedup_balancing_report,
         },
         "seeds": {
             "global": int(config.random_seed or 0),

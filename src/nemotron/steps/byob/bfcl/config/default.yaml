@@ -106,11 +106,14 @@ task_generation:
   # tool_call_count_mix: {"1": 0.75, "2": 0.20, "3+": 0.05}
 
 semantic_deduplication_config:
+  contract_version: "1.0"
   enabled: false
   model_identifier: sentence-transformers/all-MiniLM-L6-v2
   n_clusters: 20
   eps: 0.08
   remove_duplicates: true
+  representative_source_preference: [template, model]
+  unmet_target_policy: abort
 
 exports:
   bfcl_json: false

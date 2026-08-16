@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,68 @@ def _write_tiny_quality_config(tmp_path: Path, *, enabled: bool, name: str) -> P
     return config_path
 
 
+def _write_tiny_dedup_config(
+    tmp_path: Path,
+    *,
+    enabled: bool,
+    name: str,
+    unmet_target_policy: str = "abort",
+    impossible_mix: bool = False,
+) -> Path:
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_data["surface_quality_validation"]["enabled"] = True
+    config_data["semantic_deduplication_config"] = {
+        "enabled": enabled,
+        "model_identifier": "test/semantic-embedding",
+        "n_clusters": 4,
+        "eps": 0.08,
+        "remove_duplicates": True,
+        "unmet_target_policy": unmet_target_policy,
+    }
+    if impossible_mix:
+        # Medium exists in the template inventory, but coverage locking keeps
+        # required easy-policy rows, so a 100% medium publication is infeasible.
+        config_data["task_generation"]["difficulty_mix"] = {"medium": 1.0}
+    config_path = tmp_path / name
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+    return config_path
+
+
+def _semantic_singletons(config, projected, **_kwargs):  # type: ignore[no-untyped-def]
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    settings = dedup_balancing.resolve_dedup_settings(config)
+    return {
+        "settings": settings.as_lineage(),
+        "settings_hash": settings.settings_hash,
+        "input_hash": "sha256:test-projected-input",
+        "input_count": len(projected),
+        "effective_n_clusters": dedup_balancing.effective_n_clusters(
+            settings.n_clusters,
+            len(projected),
+        ),
+        "embedded": True,
+        "embedding_signature": "sha256:test-embeddings",
+        "duplicate_ids": [],
+        "clusters": {
+            str(record["task_id"]): f"curator-{record['task_id']}"
+            for record in projected
+        },
+        "records": [
+            {
+                "task_id": str(record["task_id"]),
+                "cluster_id": f"curator-{record['task_id']}",
+                "is_duplicate": False,
+                "text_hash": str(record["text_hash"]),
+            }
+            for record in projected
+        ],
+    }
+
+
 def _run_tiny_with_surface_quality(
     tmp_path: Path,
 ) -> tuple[list[dict[str, Any]], Path]:
@@ -74,7 +137,7 @@ def banking_run(tmp_path_factory: pytest.TempPathFactory) -> list[dict[str, Any]
 def third_pack_run(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[list[dict[str, Any]], Path]:
-    """Build a non-bundled domain pack and run it through enabled Stage 10."""
+    """Build a non-bundled domain pack and run it through Stages 10 and 11."""
     import pyarrow.parquet as pq
 
     tmp_path = tmp_path_factory.mktemp("third_pack_slice")
@@ -127,6 +190,7 @@ def third_pack_run(
             "category": "warehouse",
             "difficulty": "easy",
             "turn_policy": "single_turn",
+            "edge_signatures": ["inventory_read"],
             "required_tools": ["inspect_asset"],
             "tools_present": ["inspect_asset"],
             "slots": {
@@ -212,6 +276,13 @@ ASSERTIONS = {"assert_asset_returned": assert_asset_returned}
     config_data["oracle_runtime"]["allowed_roots"] = [str(pack)]
     config_data["task_generation"]["tasks_per_category"] = 1
     config_data["surface_quality_validation"]["enabled"] = True
+    config_data["semantic_deduplication_config"] = {
+        "enabled": True,
+        "model_identifier": "test/single-row-embedding",
+        "n_clusters": 4,
+        "eps": 0.08,
+        "remove_duplicates": True,
+    }
     config_path = tmp_path / "third-pack.yaml"
     config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
 
@@ -274,6 +345,36 @@ def test_surface_quality_is_generic_to_a_non_banking_oracle_pack(
     assert manifest["pack"]["pack_id"] == "warehouse_assets"
     assert manifest["surface_quality_validation"]["enabled"] is True
     assert manifest["stage_counts"]["surface_quality_evaluated"] == 1
+
+
+def test_stage_eleven_is_generic_to_a_non_banking_oracle_pack(
+    third_pack_run,
+) -> None:
+    import pyarrow.parquet as pq
+
+    rows, output_dir = third_pack_run
+    cache = output_dir / "stage_cache"
+    balanced = pq.read_table(cache / "balanced_tasks.parquet").to_pylist()
+    report = json.loads(
+        (cache / "dedup_balancing_report.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads(
+        (output_dir / "run_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert [row["task_id"] for row in balanced] == [
+        row["task_id"] for row in rows
+    ]
+    assert balanced[0]["selected"] is True
+    assert balanced[0]["category"] == "warehouse"
+    assert balanced[0]["required_tools"] == '["inspect_asset"]'
+    assert balanced[0]["edge_signatures"] == ["inventory_read"]
+    assert report["counts"]["stage_ten_survivors"] == 1
+    assert report["counts"]["selected"] == 1
+    assert report["rare_edge_preservation"]["inventory_read"]["preserved"] is True
+    assert report["lineage"]["embedding_signature"] is None
+    assert manifest["pack"]["pack_id"] == "warehouse_assets"
+    assert manifest["semantic_deduplication"]["enabled"] is True
 
 
 def test_tiny_slice_produces_replay_validated_non_publishable_rows(tiny_run) -> None:
@@ -509,6 +610,7 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
     assert manifest["lineage_policy"] == "smoke_no_publication"
     assert manifest["tier"] == "gold"
     assert manifest["gold_eligible"] is False
+    assert manifest["gold_ineligibility_reasons"] == ["smoke_no_publication"]
     assert manifest["pack"]["pack_id"] == "tiny_library"
     assert manifest["models"]["paraphrase"]["enabled"] is False
     assert manifest["models"]["paraphrase"]["canonical_id"] is None
@@ -574,6 +676,312 @@ def test_enabled_surface_quality_is_integrated_into_pipeline_and_manifest(
     assert manifest["stage_counts"]["surface_quality_judge_errors"] == 0
     assert manifest["artifacts"]["surface_validated_tasks"]["content_hash"].startswith("sha256:")
     assert manifest["artifacts"]["surface_quality_rejections"]["content_hash"].startswith("sha256:")
+
+
+def test_enabled_stage_eleven_filters_publication_and_is_in_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", _semantic_singletons)
+    benchmark_path = generate_bfcl(
+        _write_tiny_dedup_config(tmp_path, enabled=True, name="tiny-dedup.yaml")
+    )
+    output_dir = benchmark_path.parent
+    cache = output_dir / "stage_cache"
+    published = pq.read_table(benchmark_path).to_pylist()
+    balanced = pq.read_table(cache / "balanced_tasks.parquet").to_pylist()
+    report = json.loads((cache / "dedup_balancing_report.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
+
+    selected = sorted(
+        (row for row in balanced if row["selected"]),
+        key=lambda row: row["selection_rank"],
+    )
+    assert [row["task_id"] for row in published] == [row["task_id"] for row in selected]
+    assert len(balanced) == manifest["stage_counts"]["surface_quality_kept"]
+    assert report["counts"]["selected"] == len(published)
+    assert manifest["semantic_deduplication"]["enabled"] is True
+    assert manifest["semantic_deduplication"]["contract_version"] == "1.0"
+    assert manifest["semantic_deduplication"]["model_identifier"] == "test/semantic-embedding"
+    assert manifest["semantic_deduplication"]["embedding_signature"] == "sha256:test-embeddings"
+    assert manifest["semantic_deduplication"]["report"] == report
+    assert manifest["stage_counts"]["dedup_balancing_input"] == len(balanced)
+    assert manifest["stage_counts"]["dedup_balancing_selected"] == len(published)
+    assert manifest["artifacts"]["balanced_tasks"]["content_hash"].startswith("sha256:")
+    assert manifest["artifacts"]["dedup_balancing_report"]["content_hash"].startswith("sha256:")
+    assert manifest["artifacts"]["balanced_tasks"]["content_hash"] == (
+        "sha256:"
+        + hashlib.sha256((cache / "balanced_tasks.parquet").read_bytes()).hexdigest()
+    )
+    assert manifest["artifacts"]["dedup_balancing_report"]["content_hash"] == (
+        "sha256:"
+        + hashlib.sha256(
+            (cache / "dedup_balancing_report.json").read_bytes()
+        ).hexdigest()
+    )
+    assert report["artifacts"]["balanced_tasks.parquet"]["content_hash"] == (
+        manifest["artifacts"]["balanced_tasks"]["content_hash"]
+    )
+
+
+def test_disabling_stage_eleven_does_not_republish_stale_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", _semantic_singletons)
+    enabled_path = _write_tiny_dedup_config(
+        tmp_path,
+        enabled=True,
+        name="tiny-dedup-enabled.yaml",
+    )
+    benchmark_path = generate_bfcl(enabled_path)
+    output_dir = benchmark_path.parent
+    cache = output_dir / "stage_cache"
+    assert (cache / "balanced_tasks.parquet").is_file()
+    assert (cache / "dedup_balancing_report.json").is_file()
+
+    generate_bfcl(
+        _write_tiny_dedup_config(
+            tmp_path,
+            enabled=False,
+            name="tiny-dedup-disabled.yaml",
+        )
+    )
+    manifest = json.loads(
+        (output_dir / "run_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert manifest["semantic_deduplication"]["enabled"] is False
+    assert manifest["semantic_deduplication"]["report"] is None
+    assert "balanced_tasks" not in manifest["artifacts"]
+    assert "dedup_balancing_report" not in manifest["artifacts"]
+    assert not (cache / "balanced_tasks.parquet").exists()
+    assert not (cache / "dedup_balancing_report.json").exists()
+
+
+def test_stage_eleven_selected_ids_are_deterministic_across_reruns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", _semantic_singletons)
+    config_path = _write_tiny_dedup_config(
+        tmp_path,
+        enabled=True,
+        name="tiny-dedup-repeat.yaml",
+    )
+    first_path = generate_bfcl(config_path)
+    first_rows = pq.read_table(first_path).to_pylist()
+    first_balanced = pq.read_table(
+        first_path.parent / "stage_cache" / "balanced_tasks.parquet"
+    ).to_pylist()
+
+    second_path = generate_bfcl(config_path)
+    second_rows = pq.read_table(second_path).to_pylist()
+    second_balanced = pq.read_table(
+        second_path.parent / "stage_cache" / "balanced_tasks.parquet"
+    ).to_pylist()
+
+    assert [row["task_id"] for row in first_rows] == [
+        row["task_id"] for row in second_rows
+    ]
+    assert [
+        (row["task_id"], row["selected"], row["selection_rank"])
+        for row in first_balanced
+    ] == [
+        (row["task_id"], row["selected"], row["selection_rank"])
+        for row in second_balanced
+    ]
+
+
+def test_stage_eleven_aborts_on_unmet_targets_under_abort_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", _semantic_singletons)
+    config_path = _write_tiny_dedup_config(
+        tmp_path,
+        enabled=True,
+        name="tiny-unmet-abort.yaml",
+        impossible_mix=True,
+    )
+
+    with pytest.raises(
+        dedup_balancing.DedupBalancingPolicyError,
+        match="unmet_target_policy='abort'",
+    ):
+        generate_bfcl(config_path)
+
+    output_dir = tmp_path / "output" / "bfcl_tiny_library_validation"
+    report = json.loads(
+        (output_dir / "stage_cache" / "dedup_balancing_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["unmet_targets"]
+    assert report["release_policy"] == {
+        "gold_eligible": False,
+        "unmet_target_action": "abort",
+        "unmet_target_policy": "abort",
+    }
+    assert not (output_dir / "benchmark.parquet").exists()
+    assert not (output_dir / "run_manifest.json").exists()
+
+
+def test_stage_eleven_may_publish_unmet_targets_only_as_non_gold(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow.parquet as pq
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", _semantic_singletons)
+    benchmark_path = generate_bfcl(
+        _write_tiny_dedup_config(
+            tmp_path,
+            enabled=True,
+            name="tiny-unmet-non-gold.yaml",
+            unmet_target_policy="publish_non_gold",
+            impossible_mix=True,
+        )
+    )
+    rows = pq.read_table(benchmark_path).to_pylist()
+    manifest = json.loads(
+        (benchmark_path.parent / "run_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert rows
+    assert all(row["gold_eligible"] is False for row in rows)
+    assert manifest["gold_eligible"] is False
+    assert manifest["gold_ineligibility_reasons"] == [
+        "smoke_no_publication",
+        "stage_eleven_unmet_targets",
+    ]
+    assert manifest["semantic_deduplication"]["report"]["unmet_targets"]
+    assert manifest["semantic_deduplication"]["report"]["release_policy"] == {
+        "gold_eligible": False,
+        "unmet_target_action": "publish_non_gold",
+        "unmet_target_policy": "publish_non_gold",
+    }
+
+
+def test_stage_eleven_embedding_failure_aborts_without_final_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    def fail_embedding(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("forced embedding failure")
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", fail_embedding)
+    with pytest.raises(RuntimeError, match="forced embedding failure"):
+        generate_bfcl(
+            _write_tiny_dedup_config(
+                tmp_path,
+                enabled=True,
+                name="tiny-embedding-failure.yaml",
+            )
+        )
+
+    output_dir = tmp_path / "output" / "bfcl_tiny_library_validation"
+    assert not (output_dir / "benchmark.parquet").exists()
+    assert not (output_dir / "run_manifest.json").exists()
+
+
+def test_missing_stage_eleven_artifact_blocks_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    run_stage = dedup_balancing.run_dedup_balancing_stage
+
+    def delete_balanced_tasks(config, *args, **kwargs):  # type: ignore[no-untyped-def]
+        result = run_stage(config, *args, **kwargs)
+        result["artifacts"]["artifact_path"].unlink()
+        return result
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", _semantic_singletons)
+    monkeypatch.setattr(
+        dedup_balancing,
+        "run_dedup_balancing_stage",
+        delete_balanced_tasks,
+    )
+    with pytest.raises(FileNotFoundError):
+        generate_bfcl(
+            _write_tiny_dedup_config(
+                tmp_path,
+                enabled=True,
+                name="tiny-missing-dedup-artifact.yaml",
+            )
+        )
+
+    output_dir = tmp_path / "output" / "bfcl_tiny_library_validation"
+    assert not (output_dir / "benchmark.parquet").exists()
+    assert not (output_dir / "run_manifest.json").exists()
+
+
+def test_modified_stage_eleven_artifact_blocks_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        dedup_balancing,
+    )
+
+    run_stage = dedup_balancing.run_dedup_balancing_stage
+
+    def modify_balanced_tasks(config, *args, **kwargs):  # type: ignore[no-untyped-def]
+        result = run_stage(config, *args, **kwargs)
+        artifact_path = result["artifacts"]["artifact_path"]
+        artifact_path.write_bytes(artifact_path.read_bytes() + b"modified")
+        return result
+
+    monkeypatch.setattr(dedup_balancing, "run_semantic_dedup", _semantic_singletons)
+    monkeypatch.setattr(
+        dedup_balancing,
+        "run_dedup_balancing_stage",
+        modify_balanced_tasks,
+    )
+    with pytest.raises(ValueError, match="content hash does not match"):
+        generate_bfcl(
+            _write_tiny_dedup_config(
+                tmp_path,
+                enabled=True,
+                name="tiny-modified-dedup-artifact.yaml",
+            )
+        )
+
+    output_dir = tmp_path / "output" / "bfcl_tiny_library_validation"
+    assert not (output_dir / "benchmark.parquet").exists()
+    assert not (output_dir / "run_manifest.json").exists()
 
 
 def test_disabling_stage_ten_does_not_republish_its_previous_artifacts(
