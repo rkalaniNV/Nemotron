@@ -726,6 +726,7 @@ def test_expansion_shares_one_budget_across_a_category(tmp_path: Path) -> None:
             template("b", "shared"),
             template("c", "other"),
         ],
+        held_out=None,
     )
     config = SimpleNamespace(
         task_generation={"tasks_per_category": 3},
@@ -742,6 +743,33 @@ def test_expansion_shares_one_budget_across_a_category(tmp_path: Path) -> None:
     config.task_generation = {"tasks_per_category": 1}
     with pytest.raises(ExpansionError, match="tasks_per_category"):
         run_expand(config, pack)
+
+
+def test_narrow_expansion_budget_spreads_across_multiple_slots() -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import expand_template
+
+    pack = SimpleNamespace(
+        manifest={"pack_id": "pack", "version": "1.0"},
+        fixtures={},
+        tools=TOOLS,
+    )
+    template = {
+        "template_id": "two-wide-slots",
+        "category": "coverage",
+        "slots": {
+            "a": {"source": "literal:[1, 2, 3, 4]"},
+            "b": {"source": 'literal:["x", "y", "z", "w"]'},
+        },
+    }
+
+    tasks = expand_template(pack, template, 4, 17)
+
+    assert len(tasks) == 4
+    assert len({task["slots"]["a"] for task in tasks}) > 1
+    assert len({task["slots"]["b"] for task in tasks}) > 1
+    assert [task["task_id"] for task in tasks] == [
+        task["task_id"] for task in expand_template(pack, template, 4, 17)
+    ]
 
 
 def test_confirmed_mutation_is_gold_after_a_user_confirmation() -> None:

@@ -453,6 +453,7 @@ def _fixture_primary_key(manifest: dict[str, Any], collection: str, rows: list[d
 def _load_held_out_policy(
     path: Path | None,
     *,
+    source: str | None,
     manifest: dict[str, Any],
     fixtures: dict[str, Any] | None,
     templates: list[dict[str, Any]],
@@ -486,7 +487,13 @@ def _load_held_out_policy(
             normalized_fixtures[str(collection)] = []
             continue
         primary_key = _fixture_primary_key(manifest, str(collection), rows)
-        available = {str(row.get(primary_key)) for row in rows if primary_key in row}
+        available_values = [str(row.get(primary_key)) for row in rows if primary_key in row]
+        if len(available_values) != len(set(available_values)):
+            raise ValueError(
+                f"held_out.fixtures.{collection} cannot identify rows unambiguously: "
+                f"{primary_key!r} values must be unique after scalar normalization"
+            )
+        available = set(available_values)
         normalized = [str(identifier) for identifier in identifiers]
         missing = sorted(set(normalized) - available)
         if missing:
@@ -532,7 +539,7 @@ def _load_held_out_policy(
             "fixtures_in_backend_state": fixtures_in_state,
             "seed": seed,
         },
-        "source": str(path),
+        "source": source,
     }
 
 
@@ -645,6 +652,11 @@ def load_pack(config: BfclConfig) -> LoadedPack:
     )
     held_out = _load_held_out_policy(
         paths.held_out_path,
+        source=(
+            str(manifest.get("held_out")).replace("\\", "/")
+            if manifest.get("held_out") is not None
+            else None
+        ),
         manifest=manifest,
         fixtures=fixtures,
         templates=templates,

@@ -599,6 +599,7 @@ def test_held_out_pack_contract_validates_ids_and_enters_fingerprint(
     pack = load_pack(config)
     assert pack.held_out is not None
     assert pack.held_out["fixtures"]["books"] == ["BK-300"]
+    assert pack.held_out["source"] == "held_out.yaml"
     fingerprint_before = pack_fingerprint(pack.paths)
 
     held_out["policy"]["seed"] = 43
@@ -608,6 +609,46 @@ def test_held_out_pack_contract_validates_ids_and_enters_fingerprint(
     held_out["fixtures"]["books"] = ["BK-UNKNOWN"]
     held_out_path.write_text(yaml.safe_dump(held_out), encoding="utf-8")
     with pytest.raises(ValueError, match="unknown primary ids"):
+        load_pack(config)
+
+
+def test_held_out_rejects_primary_ids_that_collapse_after_normalization(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
+
+    pack_root = _copy_tiny_pack(tmp_path)
+    manifest_path = pack_root / "manifest.yaml"
+    _edit_pack_yaml(
+        manifest_path,
+        lambda manifest: manifest.update({"held_out": "held_out.yaml"}),
+    )
+    fixtures_path = pack_root / "fixtures.json"
+    fixtures = json.loads(fixtures_path.read_text(encoding="utf-8"))
+    fixtures["books"][0]["book_id"] = 1
+    fixtures["books"][1]["book_id"] = "1"
+    fixtures_path.write_text(json.dumps(fixtures), encoding="utf-8")
+    (pack_root / "held_out.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": "1",
+                "fixtures": {"books": [1]},
+                "templates": [],
+                "policy": {"fixtures_in_backend_state": True, "seed": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "ambiguous-held-out.yaml",
+            oracle_pack={"manifest_path": str(manifest_path)},
+            oracle_runtime={"allowed_roots": [str(tmp_path)]},
+        )
+    )
+
+    with pytest.raises(ValueError, match="must be unique after scalar normalization"):
         load_pack(config)
 
 

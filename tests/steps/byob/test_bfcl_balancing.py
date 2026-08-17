@@ -139,6 +139,52 @@ def test_features_cover_all_eight_dimensions() -> None:
     assert features["tool_call_count"] == "3+"
 
 
+def test_balancing_crosses_a_neutral_swap_to_reach_a_feasible_mix(
+    tmp_path: Path,
+) -> None:
+    """A strict local-improvement swap policy gets stuck on this inventory."""
+    triples = [
+        ("hard", 1, 2),
+        ("easy", 2, 2),
+        ("easy", 2, 2),
+        ("hard", 2, 2),
+        ("hard", 1, 1),
+        ("easy", 1, 1),
+        ("hard", 2, 1),
+        ("easy", 1, 2),
+    ]
+    tasks = [
+        _task(task_id, difficulty=difficulty, num_tool_calls=tool_calls)
+        for task_id, (difficulty, _, tool_calls) in (
+            (f"task-{index}", triple) for index, triple in enumerate(triples)
+        )
+    ]
+    surfaces = {
+        task["task_id"]: _surface(
+            task["task_id"],
+            turns=triples[index][1],
+        )
+        for index, task in enumerate(tasks)
+    }
+
+    _, _, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={
+                "tasks_per_category": 4,
+                "difficulty_mix": {"easy": 0.5, "hard": 0.5},
+                "turn_mix": {"single_turn": 0.5, "multi_turn": 0.5},
+                "tool_call_count_mix": {"1": 0.5, "2": 0.5},
+            },
+        ),
+        tasks,
+        surfaces,
+    )
+
+    assert summary["selected_count"] == 4
+    assert summary["unmet_targets"] == []
+
+
 def test_balancing_finds_the_largest_feasible_difficulty_mix(
     tmp_path: Path,
 ) -> None:

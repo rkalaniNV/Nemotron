@@ -955,6 +955,147 @@ def _dimension_counts(
     return counts
 
 
+def _solve_balanced_selection(
+    *,
+    candidates: Sequence[str],
+    candidates_by_bucket: Mapping[tuple[str, str, tuple[str, ...]], Sequence[str]],
+    features: Mapping[str, Mapping[str, Any]],
+    by_decision: Mapping[str, DedupBalancingDecision],
+    budget: int,
+    category_cap: int,
+    target_counts: Mapping[str, Mapping[str, int]],
+    stable_key: Callable[[str], tuple[Any, ...]],
+) -> set[str]:
+    """Globally minimize declared mix and category deviations."""
+    ordered = sorted(candidates, key=stable_key)
+
+    def deviation(selected: Sequence[str]) -> int:
+        total = sum(
+            max(
+                0,
+                sum(features[task_id]["category"] == category for task_id in selected)
+                - category_cap,
+            )
+            for category in {features[task_id]["category"] for task_id in ordered}
+        )
+        for dimension, quotas in target_counts.items():
+            counts = Counter(features[task_id][dimension] for task_id in selected)
+            for bucket in set(quotas) | set(counts):
+                total += abs(counts[bucket] - quotas.get(bucket, 0))
+        return total
+
+    try:
+        import pulp
+    except ModuleNotFoundError:
+        # Unit/minimal installations do not include the BYOB optimization extra.
+        # Keep small deterministic use cases functional, but never fall back to an
+        # approximate answer that could make an abort policy reject a feasible mix.
+        from itertools import combinations
+
+        if len(ordered) > 24:
+            raise RuntimeError(
+                "exact Stage 11 balancing requires the BYOB dependency 'pulp' "
+                "when more than 24 candidates survive"
+            ) from None
+        best: tuple[tuple[int, int], tuple[str, ...]] | None = None
+        rank = {task_id: index + 1 for index, task_id in enumerate(ordered)}
+        for chosen_tuple in combinations(ordered, budget):
+            chosen = set(chosen_tuple)
+            if any(not chosen.intersection(members) for members in candidates_by_bucket.values()):
+                continue
+            if any(
+                decision.representative_task_id is not None
+                and decision.representative_task_id != task_id
+                and decision.representative_task_id in ordered
+                and decision.representative_task_id not in chosen
+                for task_id in chosen
+                for decision in (by_decision[task_id],)
+            ):
+                continue
+            score = (deviation(chosen_tuple), sum(rank[task_id] for task_id in chosen_tuple))
+            candidate = (score, chosen_tuple)
+            if best is None or candidate < best:
+                best = candidate
+        if best is None:
+            raise RuntimeError("Stage 11 publication constraints have no feasible selection")
+        return set(best[1])
+
+    variables = {
+        task_id: pulp.LpVariable(f"selected_{index}", cat=pulp.LpBinary)
+        for index, task_id in enumerate(ordered)
+    }
+    problem = pulp.LpProblem("bfcl_stage11_balancing", pulp.LpMinimize)
+    problem += pulp.lpSum(variables.values()) == budget
+    for members in candidates_by_bucket.values():
+        problem += pulp.lpSum(variables[task_id] for task_id in members) >= 1
+    for task_id in ordered:
+        representative_id = by_decision[task_id].representative_task_id
+        if (
+            representative_id is not None
+            and representative_id != task_id
+            and representative_id in variables
+        ):
+            problem += variables[task_id] <= variables[representative_id]
+
+    deviation_terms: list[Any] = []
+    categories = sorted({str(features[task_id]["category"]) for task_id in ordered})
+    for category in categories:
+        count = pulp.lpSum(
+            variables[task_id]
+            for task_id in ordered
+            if features[task_id]["category"] == category
+        )
+        overflow = pulp.LpVariable(
+            f"category_overflow_{len(deviation_terms)}",
+            lowBound=0,
+            cat=pulp.LpInteger,
+        )
+        problem += count - category_cap <= overflow
+        deviation_terms.append(overflow)
+    for dimension, quotas in sorted(target_counts.items()):
+        buckets = sorted(
+            set(quotas) | {str(features[task_id][dimension]) for task_id in ordered}
+        )
+        for bucket in buckets:
+            count = pulp.lpSum(
+                variables[task_id]
+                for task_id in ordered
+                if features[task_id][dimension] == bucket
+            )
+            under = pulp.LpVariable(
+                f"under_{len(deviation_terms)}",
+                lowBound=0,
+                cat=pulp.LpInteger,
+            )
+            over = pulp.LpVariable(
+                f"over_{len(deviation_terms)}",
+                lowBound=0,
+                cat=pulp.LpInteger,
+            )
+            problem += count + under - over == quotas.get(bucket, 0)
+            deviation_terms.extend((under, over))
+
+    max_tie_cost = len(ordered) * (len(ordered) + 1) // 2
+    problem += (
+        (max_tie_cost + 1) * pulp.lpSum(deviation_terms)
+        + pulp.lpSum(
+            (index + 1) * variables[task_id]
+            for index, task_id in enumerate(ordered)
+        )
+    )
+    status = problem.solve(pulp.PULP_CBC_CMD(msg=False, threads=1))
+    if pulp.LpStatus[status] != "Optimal":
+        raise RuntimeError(
+            "Stage 11 could not solve the publication balancing constraints "
+            f"(solver_status={pulp.LpStatus[status]!r})"
+        )
+    return {
+        task_id
+        for task_id in ordered
+        if float(pulp.value(variables[task_id]) or 0.0) >= 0.5
+    }
+
+
 def balance_publication_set(
     config: BfclConfig,
     tasks: Sequence[Mapping[str, Any]],
@@ -1058,138 +1199,26 @@ def balance_publication_set(
     budget = max(budget, len(mandatory))
     target_counts = {dimension: largest_remainder_quotas(budget, mix) for dimension, mix in target_mixes.items()}
 
-    selected_order = sorted(mandatory, key=stable_key)
-    selected = set(selected_order)
+    # This is a multi-dimensional cardinality problem. A local greedy/swap
+    # optimizer can stop at a strict local optimum even when an exact selection
+    # exists, and its nested repair loop is cubic.
+    selected = _solve_balanced_selection(
+        candidates=candidates,
+        candidates_by_bucket=candidates_by_bucket,
+        features=features,
+        by_decision=by_decision,
+        budget=budget,
+        category_cap=category_cap,
+        target_counts=target_counts,
+        stable_key=stable_key,
+    )
+    selected_order = sorted(selected, key=stable_key)
     selected_counts = {
-        dimension: Counter(features[task_id][dimension] for task_id in selected) for dimension in BALANCING_DIMENSIONS
+        dimension: Counter(features[task_id][dimension] for task_id in selected)
+        for dimension in BALANCING_DIMENSIONS
     }
     category_counts = selected_counts["category"]
-
-    def representative_available(task_id: str) -> bool:
-        representative_id = by_decision[task_id].representative_task_id
-        return representative_id is None or representative_id in selected or representative_id == task_id
-
-    while len(selected) < budget:
-        choices: list[tuple[tuple[Any, ...], str]] = []
-        for task_id in candidates:
-            if task_id in selected:
-                continue
-            category = features[task_id]["category"]
-            if category_counts[category] >= category_cap:
-                continue
-            if not representative_available(task_id):
-                continue
-            quota_gain = 0.0
-            for dimension, quotas in target_counts.items():
-                bucket = features[task_id][dimension]
-                deficit = quotas.get(bucket, 0) - selected_counts[dimension][bucket]
-                if deficit > 0:
-                    quota_gain += deficit / max(1, quotas.get(bucket, 0))
-            diversity = tuple(
-                selected_counts[dimension][features[task_id][dimension]]
-                for dimension in (
-                    "intent",
-                    "required_tools",
-                    "tools_present",
-                    "turn_policy",
-                )
-            )
-            choices.append(
-                (
-                    (
-                        -quota_gain,
-                        diversity,
-                        *stable_key(task_id),
-                    ),
-                    task_id,
-                )
-            )
-        if not choices:
-            break
-        _, chosen = min(choices)
-        selected.add(chosen)
-        selected_order.append(chosen)
-        for dimension in BALANCING_DIMENSIONS:
-            selected_counts[dimension][features[chosen][dimension]] += 1
-
     selected_by_bucket = Counter(bucket_key[task_id] for task_id in selected)
-    dependent_count: Counter[str] = Counter()
-    for task_id in selected:
-        representative_id = by_decision[task_id].representative_task_id
-        if representative_id is not None and representative_id != task_id:
-            dependent_count[representative_id] += 1
-
-    def target_distance() -> int:
-        total = 0
-        for dimension, quotas in target_counts.items():
-            counts = selected_counts[dimension]
-            for bucket in set(quotas) | set(counts):
-                total += abs(counts[bucket] - quotas.get(bucket, 0))
-        return total
-
-    def swap_gain(removed: str, added: str) -> int:
-        gain = 0
-        for dimension, quotas in target_counts.items():
-            removed_bucket = features[removed][dimension]
-            added_bucket = features[added][dimension]
-            if removed_bucket == added_bucket:
-                continue
-            counts = selected_counts[dimension]
-            for bucket, change in ((removed_bucket, -1), (added_bucket, 1)):
-                target = quotas.get(bucket, 0)
-                gain += abs(counts[bucket] + change - target) - abs(counts[bucket] - target)
-        return gain
-
-    # Greedy fills one row at a time, so a coverage-locked or early high-gain
-    # choice can strand a mix target that another selection of the same size
-    # would have met. Exchanging one selected row for one rejected row repairs
-    # exactly that, and only while it strictly shortens the distance to the
-    # declared targets, so the loop cannot cycle.
-    for _ in range(len(candidates)):
-        if not target_counts or target_distance() == 0:
-            break
-        best: tuple[tuple[Any, ...], str, str] | None = None
-        for removed in sorted(selected, key=stable_key):
-            if dependent_count[removed]:
-                continue
-            removed_bucket = bucket_key[removed]
-            removed_category = features[removed]["category"]
-            for added in candidates:
-                if added in selected:
-                    continue
-                representative_id = by_decision[added].representative_task_id
-                if (
-                    representative_id is not None
-                    and representative_id != added
-                    and (representative_id not in selected or representative_id == removed)
-                ):
-                    continue
-                if selected_by_bucket[removed_bucket] == 1 and bucket_key[added] != removed_bucket:
-                    continue
-                category = features[added]["category"]
-                if category != removed_category and category_counts[category] >= category_cap:
-                    continue
-                gain = swap_gain(removed, added)
-                if gain >= 0:
-                    continue
-                key = (gain, *stable_key(removed), *stable_key(added))
-                if best is None or key < best[0]:
-                    best = (key, removed, added)
-        if best is None:
-            break
-        _, removed, added = best
-        selected.discard(removed)
-        selected.add(added)
-        selected_order[selected_order.index(removed)] = added
-        for dimension in BALANCING_DIMENSIONS:
-            selected_counts[dimension][features[removed][dimension]] -= 1
-            selected_counts[dimension][features[added][dimension]] += 1
-        selected_by_bucket[bucket_key[removed]] -= 1
-        selected_by_bucket[bucket_key[added]] += 1
-        for task_id, change in ((removed, -1), (added, 1)):
-            representative_id = by_decision[task_id].representative_task_id
-            if representative_id is not None and representative_id != task_id:
-                dependent_count[representative_id] += change
 
     coverage_locked_ids = {task_id for task_id in selected if selected_by_bucket[bucket_key[task_id]] == 1}
     rank_by_id = {task_id: rank for rank, task_id in enumerate(selected_order)}

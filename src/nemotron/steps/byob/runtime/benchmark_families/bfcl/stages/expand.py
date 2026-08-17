@@ -5,11 +5,16 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
+import math
 from collections import Counter
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.fixture_filter import evaluate_filter
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.held_out_contract import (
+    HeldOutPolicy,
+    fixture_ref,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import LoadedPack
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
@@ -19,6 +24,11 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     write_stage_table,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.held_out import (
+    BindingLedger,
+    held_out_policy,
+    write_binding_report,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
     simulator_delivery_order,
 )
@@ -78,6 +88,64 @@ class ExpansionError(ValueError):
     """Raised when a template cannot be bound against the pack."""
 
 
+def _permuted_indices(size: int, seed_material: Any) -> list[int]:
+    """Return a deterministic full-cycle permutation without sorting scores."""
+    if size <= 1:
+        return list(range(size))
+    digest = hashlib.sha256(canonical_json(seed_material).encode("utf-8")).digest()
+    start = int.from_bytes(digest[:8], "big") % size
+    step = int.from_bytes(digest[8:16], "big") % size or 1
+    while math.gcd(step, size) != 1:
+        step = (step + 1) % size or 1
+    return [(start + offset * step) % size for offset in range(size)]
+
+
+def _bounded_extend(
+    combinations: list[list[tuple[Any, str | None]]],
+    usable_by_combination: list[list[tuple[Any, str | None]]],
+    *,
+    limit: int,
+    seed_material: Any,
+) -> list[list[tuple[Any, str | None]]]:
+    """Extend combinations with deterministic, coverage-oriented sampling."""
+    cap = max(limit, 1)
+    total = sum(len(candidates) for candidates in usable_by_combination)
+    if total <= cap:
+        return [
+            combination + [candidate]
+            for combination, candidates in zip(
+                combinations,
+                usable_by_combination,
+                strict=True,
+            )
+            for candidate in candidates
+        ]
+
+    result: list[list[tuple[Any, str | None]]] = []
+    combination_order = _permuted_indices(
+        len(combinations),
+        {"seed": seed_material, "kind": "combinations"},
+    )
+    candidate_orders = {
+        index: _permuted_indices(
+            len(usable_by_combination[index]),
+            {"seed": seed_material, "kind": "candidates", "combination": index},
+        )
+        for index in combination_order
+    }
+    max_width = max(len(order) for order in candidate_orders.values())
+    for round_index in range(max_width):
+        for combination_index in combination_order:
+            order = candidate_orders[combination_index]
+            if round_index >= len(order):
+                continue
+            candidate = usable_by_combination[combination_index][order[round_index]]
+            result.append(combinations[combination_index] + [candidate])
+            if len(result) == cap:
+                return result
+    return result
+
+
 def primary_key_for(manifest: dict[str, Any], collection: str, rows: list[dict[str, Any]]) -> str:
     """Resolve a collection's primary id field, declared or by convention.
 
@@ -117,8 +185,20 @@ def _tool_parameter(pack: LoadedPack, tool_name: str, param: str) -> dict[str, A
     return {}
 
 
-def _candidates(pack: LoadedPack, slot_name: str, slot: dict[str, Any]) -> list[tuple[Any, str | None]]:
-    """Return ordered ``(value, fixture_ref)`` candidates for one slot."""
+def _candidates(
+    pack: LoadedPack,
+    slot_name: str,
+    slot: dict[str, Any],
+    *,
+    held_out: HeldOutPolicy | None = None,
+    ledger: BindingLedger | None = None,
+) -> list[tuple[Any, str | None]]:
+    """Return ordered ``(value, fixture_ref)`` candidates for one slot.
+
+    A held-out policy is applied here rather than after expansion because a task
+    that never binds a reserved row cannot leak it downstream, and dropping the
+    row afterwards would silently shrink the budget the pack asked for.
+    """
     source = str(slot.get("source") or "")
     kind, _, rest = source.partition(":")
     if not rest:
@@ -143,7 +223,28 @@ def _candidates(pack: LoadedPack, slot_name: str, slot: dict[str, Any]) -> list[
                 f"rows {missing} of {collection!r} carry no {key!r}, so the tasks they bind could not "
                 "record which record they came from"
             )
-        return [(row[field], f"{collection}.{row[key]}") for row in matched]
+        referenced = [(row, fixture_ref(collection, row[key])) for row in matched]
+        if ledger is not None:
+            ledger.examined(len(referenced))
+        if held_out is not None:
+            reserved = sorted(
+                reference for _, reference in referenced if held_out.blocks_fixture(reference)
+            )
+            if reserved:
+                if ledger is not None:
+                    ledger.blocked(reserved)
+                referenced = [
+                    (row, reference)
+                    for row, reference in referenced
+                    if not held_out.blocks_fixture(reference)
+                ]
+                if not referenced:
+                    raise ExpansionError(
+                        f"slot {slot_name!r} can bind no row of {collection!r}: the held-out policy "
+                        f"reserves every row its filter matched ({', '.join(reserved)}); declare more "
+                        "fixture rows or release some from held_out.fixtures"
+                    )
+        return [(row[field], reference) for row, reference in referenced]
 
     if kind == "enum":
         tool_name, _, param = rest.partition(".")
@@ -290,12 +391,25 @@ def _grouped_updates(
     ]
 
 
-def expand_template(pack: LoadedPack, template: dict[str, Any], limit: int, global_seed: int) -> list[dict]:
+def expand_template(
+    pack: LoadedPack,
+    template: dict[str, Any],
+    limit: int,
+    global_seed: int,
+    *,
+    held_out: HeldOutPolicy | None = None,
+    ledger: BindingLedger | None = None,
+) -> list[dict]:
     """Bind one template into at most ``limit`` deterministic task instances."""
     slots = template.get("slots") or {}
     slot_names = sorted(slots)
     updates = declared_slot_updates(template)
     _check_correction_contract(template, slots, updates)
+    if held_out is not None and held_out.blocks_template(template.get("template_id")):
+        raise ExpansionError(
+            f"template {template.get('template_id')!r} is reserved by the held-out policy and "
+            "must not be bound"
+        )
 
     delivery_order = simulator_delivery_order(template)
     ordered_updates = sorted(
@@ -304,9 +418,18 @@ def expand_template(pack: LoadedPack, template: dict[str, Any], limit: int, glob
     )
     update_keys = [(entry_index, name) for entry_index, name, _ in ordered_updates]
     keys: list[Any] = [*slot_names, *update_keys]
-    candidate_lists = [_candidates(pack, name, slots[name]) for name in slot_names]
+    candidate_lists = [
+        _candidates(pack, name, slots[name], held_out=held_out, ledger=ledger)
+        for name in slot_names
+    ]
     candidate_lists.extend(
-        _candidates(pack, f"{name} (correction)", definition)
+        _candidates(
+            pack,
+            f"{name} (correction)",
+            definition,
+            held_out=held_out,
+            ledger=ledger,
+        )
         for _, name, definition in ordered_updates
     )
 
@@ -327,7 +450,7 @@ def expand_template(pack: LoadedPack, template: dict[str, Any], limit: int, glob
                 if prior_name == replaced:
                     held_at = prior_position
                     break
-        next_combinations: list[list[tuple[Any, str | None]]] = []
+        usable_by_combination: list[list[tuple[Any, str | None]]] = []
         for combo in combinations:
             if held_at is None:
                 usable = candidates
@@ -338,10 +461,21 @@ def expand_template(pack: LoadedPack, template: dict[str, Any], limit: int, glob
                     if combo[held_at][0] != candidate[0]
                 ]
                 usable = differing if differing else candidates
-            for candidate in usable:
-                next_combinations.append(combo + [candidate])
-        # Cap breadth as we go so a wide pack cannot build a huge product first.
-        combinations = next_combinations[: max(limit, 1)]
+            usable_by_combination.append(usable)
+        # Bound breadth without repeatedly retaining the row-major prefix. A
+        # seeded full-cycle ordering spreads the budget across both existing
+        # combinations and the new slot's values without materializing the full
+        # Cartesian product.
+        combinations = _bounded_extend(
+            combinations,
+            usable_by_combination,
+            limit=limit,
+            seed_material={
+                "template_id": template.get("template_id"),
+                    "seed": global_seed,
+                "position": position,
+            },
+        )
 
     pack_id = str(pack.manifest.get("pack_id"))
     pack_version = str(pack.manifest.get("version"))
@@ -469,13 +603,78 @@ def run_expand(config: BfclConfig, pack: LoadedPack) -> list[dict[str, Any]]:
     budget = int(config.task_generation.get("tasks_per_category", 1) or 1)
     global_seed = int(config.random_seed or 0)
 
-    by_category = group_by_category(pack.templates)
-    check_category_budgets(pack.templates, budget)
+    policy = held_out_policy(pack)
+    bindable = list(pack.templates)
+    blocked_templates: list[str] = []
+    if policy is not None:
+        blocked_templates = sorted(
+            str(template["template_id"])
+            for template in bindable
+            if policy.blocks_template(template["template_id"])
+        )
+        bindable = [
+            template
+            for template in bindable
+            if not policy.blocks_template(template["template_id"])
+        ]
+        if not bindable:
+            raise ExpansionError(
+                "the held-out policy reserves every template in the pack, so generation would "
+                "have nothing to publish; release a template or drop it from held_out.templates"
+            )
+
+    original_by_category = group_by_category(pack.templates)
+    by_category = group_by_category(bindable)
+    check_category_budgets(bindable, budget)
 
     tasks: list[dict[str, Any]] = []
-    for templates in by_category.values():
-        pools = [expand_template(pack, template, budget, global_seed) for template in templates]
-        tasks.extend(_select_round_robin(pools, budget))
+    ledger = BindingLedger() if policy is not None else None
+    for category, original_templates in original_by_category.items():
+        templates = by_category.get(category, [])
+        blocked_in_category = sorted(
+            str(template["template_id"])
+            for template in original_templates
+            if policy is not None and policy.blocks_template(template["template_id"])
+        )
+        if not templates:
+            raise ExpansionError(
+                f"category {category!r} has no bindable template after the held-out policy "
+                f"reserved {', '.join(blocked_in_category)}; declare enough non-held-out "
+                "templates to retain the category"
+            )
+        # Tally per category, then merge: a row two categories both reserve is withheld
+        # from each of them, and a shared tally would hide the second shortfall.
+        category_ledger = BindingLedger() if policy is not None else None
+        pools = [
+            expand_template(
+                pack,
+                template,
+                budget,
+                global_seed,
+                held_out=policy,
+                ledger=category_ledger,
+            )
+            for template in templates
+        ]
+        selected = _select_round_robin(pools, budget)
+        withheld = sorted(category_ledger.blocked_refs) if category_ledger is not None else []
+        if ledger is not None and category_ledger is not None:
+            ledger.examined(category_ledger.attempts)
+            ledger.blocked(withheld)
+        # A budget the pack cannot meet once its reservations are honoured is a pack
+        # error, not a quiet reduction: publishing fewer rows would change the mix the
+        # run claims without saying so.
+        if (withheld or blocked_in_category) and len(selected) < budget:
+            causes = [
+                *(f"template:{template_id}" for template_id in blocked_in_category),
+                *(f"fixture:{reference}" for reference in withheld),
+            ]
+            raise ExpansionError(
+                f"category {category!r} bound {len(selected)} of {budget} instances once the "
+                f"held-out policy withheld {', '.join(causes)}; declare enough templates "
+                "and fixtures to meet tasks_per_category while keeping held-out reserved"
+            )
+        tasks.extend(selected)
     task_ids = [str(task["task_id"]) for task in tasks]
     duplicates = sorted(task_id for task_id, count in Counter(task_ids).items() if count > 1)
     if duplicates:
@@ -486,6 +685,22 @@ def run_expand(config: BfclConfig, pack: LoadedPack) -> list[dict[str, Any]]:
         [task_instance_row(task) for task in tasks],
         task_instances_schema(),
     )
+    if policy is not None and ledger is not None:
+        write_binding_report(
+            config,
+            policy,
+            blocked_templates=blocked_templates,
+            blocked_fixture_refs=sorted(ledger.blocked_refs),
+            bind_attempts=ledger.attempts,
+            tasks_expanded=len(tasks),
+        )
+        logger.info(
+            "BFCL expand honoured a held-out policy: %d template(s) and %d fixture row(s) withheld "
+            "across %d binding attempts",
+            len(blocked_templates),
+            len(ledger.blocked_refs),
+            ledger.attempts,
+        )
     logger.info(
         "BFCL expand produced %d task instances across %d categories",
         len(tasks),

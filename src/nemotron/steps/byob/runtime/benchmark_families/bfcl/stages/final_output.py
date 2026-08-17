@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import platform
+import subprocess
 import sys
 import uuid
 from collections import Counter, deque
@@ -36,8 +38,55 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     SURFACE_VALIDATED_TASKS,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.held_out import (
+    HELD_OUT_BINDINGS,
+    HELD_OUT_SCAN,
+    enforce_no_leak,
+    held_out_policy,
+    load_binding_report,
+    manifest_section,
+    scan_rows,
+    write_scan_report,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _pipeline_source_hash() -> str:
+    root = Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _dependency_lock_hash() -> str | None:
+    for parent in Path(__file__).resolve().parents:
+        lock = parent / "uv.lock"
+        if lock.is_file():
+            return _file_hash(lock)
+    return None
+
+
+def _pipeline_git_sha() -> str | None:
+    for name in ("GIT_COMMIT", "CI_COMMIT_SHA"):
+        if value := os.environ.get(name):
+            return value.strip() or None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None
 
 
 def _sha256(text: str) -> str:
@@ -357,10 +406,18 @@ def _model_role(name: str, config: BfclConfig) -> dict[str, Any]:
 def _bias_applicability(pack: LoadedPack) -> dict[str, dict[str, str]]:
     """Describe which audit dimensions the pack can meaningfully exercise."""
     result = {f"B{index}": {"status": "applicable"} for index in range(1, 17)}
-    if pack.held_out is None:
+    policy = held_out_policy(pack)
+    if policy is None:
         result["B7"] = {
             "status": "na",
             "reason": "pack declares no held_out policy",
+        }
+    elif policy.reserves_nothing:
+        # The policy was enforced, but it withholds nothing, so a leakage result
+        # from this run would say nothing about generalization.
+        result["B7"] = {
+            "status": "na",
+            "reason": "held_out policy reserves no fixture row or template",
         }
     policies = {str(template.get("turn_policy")) for template in pack.templates}
     has_parallel_group = any(
@@ -438,6 +495,7 @@ def run_final_output(
     surface_quality_report: dict[str, Any] | None = None,
     dedup_balancing_decisions: list[Any] | None = None,
     dedup_balancing_report: dict[str, Any] | None = None,
+    expected_artifact_hashes: dict[str, str] | None = None,
 ) -> Path:
     """Write benchmark_raw.parquet, benchmark.parquet, and run_manifest.json."""
     import pyarrow as pa
@@ -464,6 +522,35 @@ def run_final_output(
         )
 
     cache = stage_cache_dir(config)
+    for artifact_name, expected_hash in sorted((expected_artifact_hashes or {}).items()):
+        artifact_path = cache / artifact_name
+        try:
+            actual_hash = _file_hash(artifact_path)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                f"stage artifact {artifact_name} disappeared before publication"
+            ) from exc
+        if actual_hash != expected_hash:
+            raise RuntimeError(
+                f"stage artifact {artifact_name} changed after its producing stage completed"
+            )
+    if surface_quality_report is not None:
+        try:
+            stored_surface_report = json.loads(
+                (cache / "surface_quality_rejections.json").read_text(encoding="utf-8")
+            )
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                "Stage 10 requires surface_quality_rejections.json"
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "Stage 10 surface_quality_rejections.json is not valid JSON"
+            ) from exc
+        if stored_surface_report != surface_quality_report:
+            raise ValueError(
+                "surface_quality_rejections.json does not match the Stage 10 verdict"
+            )
     # Hash the intermediates first: a missing stage artifact must stop the run before
     # a published parquet exists without the manifest that explains it.
     stage_artifacts = {
@@ -634,6 +721,52 @@ def run_final_output(
             source = "deterministic surface guards"
             recovery = "inspect stage_cache/rendered_conversations.parquet"
         raise RuntimeError(f"BFCL final_output has no publication rows after {source}; {recovery}")
+    held_out = held_out_policy(pack)
+    held_out_scan_report: dict[str, Any] | None = None
+    if held_out is not None:
+        normalized_path = cache / "held_out_normalized.json"
+        try:
+            stored_policy = json.loads(normalized_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "a held-out run requires a valid stage_cache/held_out_normalized.json"
+            ) from exc
+        if stored_policy != pack.held_out:
+            raise ValueError(
+                "held_out_normalized.json does not match the loaded held-out policy"
+            )
+        binding_report = load_binding_report(
+            config,
+            held_out,
+            expected_tasks_expanded=int(stage_counts["canonical_expanded"]),
+        )
+        # Only tasks that actually recorded their bindings are mapped; a task missing
+        # the key is left out so the scan reports it instead of clearing it by default.
+        fixture_refs_by_task = {
+            str(task["task_id"]): [str(reference) for reference in task["fixture_refs"]]
+            for task in tasks
+            if isinstance(task.get("fixture_refs"), list)
+        }
+        # Scan every executable row, not only the published ones: a reserved binding
+        # anywhere means Stage 4 enforcement failed, and benchmark_raw.parquet ships
+        # beside the manifest that would claim it did not.
+        decisions = scan_rows(held_out, rows, fixture_refs_by_task=fixture_refs_by_task)
+        held_out_scan_report = write_scan_report(
+            config,
+            held_out,
+            decisions,
+            binding_report=binding_report,
+            rows_published=len(published),
+        )
+        stored_scan_report = json.loads(
+            (cache / HELD_OUT_SCAN).read_text(encoding="utf-8")
+        )
+        if stored_scan_report != held_out_scan_report:
+            raise ValueError("held_out_scan.json does not match the Stage 12 scan")
+        enforce_no_leak(config, held_out_scan_report)
+        decision_by_task = {decision.task_id: decision for decision in decisions}
+        for row in rows:
+            row["held_out_hit"] = decision_by_task[str(row["task_id"])].held_out_hit
     _write_parquet_atomic(pa.Table.from_pylist(rows, schema=schema), raw_path, pq)
     benchmark_path = output_dir / "benchmark.parquet"
     _write_parquet_atomic(pa.Table.from_pylist(published, schema=schema), benchmark_path, pq)
@@ -673,10 +806,23 @@ def run_final_output(
         "reference_profile_io_cache.jsonl",
         "paraphrase_io_cache.jsonl",
         "paraphrase_rejections.json",
-        "held_out_normalized.json",
     ]
+    # A declared policy makes its evidence mandatory: hashing it only when the file
+    # happens to exist would let a deleted scan publish an unbacked leakage claim.
+    held_out_artifacts = (
+        {
+            "held_out_normalized": {
+                "content_hash": _file_hash(cache / "held_out_normalized.json")
+            },
+            "held_out_bindings": {"content_hash": _file_hash(cache / HELD_OUT_BINDINGS)},
+            "held_out_scan": {"content_hash": _file_hash(cache / HELD_OUT_SCAN)},
+        }
+        if held_out is not None
+        else {}
+    )
     lineage_artifacts.update(surface_quality_artifacts)
     lineage_artifacts.update(dedup_balancing_artifacts)
+    lineage_artifacts.update(held_out_artifacts)
     for artifact_name in optional_artifacts:
         artifact_path = cache / artifact_name
         if artifact_path.is_file():
@@ -705,9 +851,10 @@ def run_final_output(
         "runtime": {
             "python": platform.python_version(),
             "platform": sys.platform,
-            "pipeline_git_sha": None,
-            "dependency_lock_hash": None,
-            "worker_image_digest": None,
+            "pipeline_git_sha": _pipeline_git_sha(),
+            "pipeline_source_hash": _pipeline_source_hash(),
+            "dependency_lock_hash": _dependency_lock_hash(),
+            "worker_image_digest": os.environ.get("BFCL_WORKER_IMAGE_DIGEST"),
         },
         "pack": {
             "pack_id": pack.manifest.get("pack_id"),
@@ -768,7 +915,7 @@ def run_final_output(
                 "template_id,sorted_fixture_refs,slot_bindings,variant_index))[0:8])"
             ),
         },
-        "held_out": {"source": None, "evaluated": False, "rows_dropped": 0},
+        "held_out": manifest_section(held_out, held_out_scan_report),
         "bias_targets": _jsonable(config.task_generation),
         "bias_applicability": _bias_applicability(pack),
         "stage_counts": {**stage_counts, "published": len(published)},

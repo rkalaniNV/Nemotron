@@ -6,8 +6,13 @@ This module owns the BFCL-specific stage order and cache paths.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +23,64 @@ if TYPE_CHECKING:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import LoadedPack
 
 logger = logging.getLogger(__name__)
+
+
+def _artifact_hash(path: Path) -> str:
+    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+
+def _write_json_atomic(path: Path, value: dict) -> None:
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(value, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _output_lock(config: BfclConfig) -> Iterator[None]:
+    """Prevent two writers from interleaving one experiment directory."""
+    output_dir = Path(config.output_dir) / config.expt_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = output_dir / ".bfcl.lock"
+    handle = lock_path.open("a+b")
+    unlock: Callable[[], None]
+    try:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                if lock_path.stat().st_size == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                unlock = partial(
+                    msvcrt.locking,
+                    handle.fileno(),
+                    msvcrt.LK_UNLCK,
+                    1,
+                )
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                unlock = partial(fcntl.flock, handle.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            raise RuntimeError(
+                f"another BFCL process is writing experiment {config.expt_name!r}"
+            ) from exc
+        yield
+    finally:
+        try:
+            if "unlock" in locals():
+                unlock()
+        finally:
+            handle.close()
 
 # Reports written to the stage cache are editable, so a stored gold claim is never
 # trusted across runs. Validation results are instead remembered for the lifetime of
@@ -45,6 +108,13 @@ _DEDUP_BALANCING_ARTIFACTS = (
     "balanced_tasks.parquet.tmp",
     "dedup_balancing_report.json",
     "dedup_balancing_report.json.tmp",
+)
+_HELD_OUT_ARTIFACTS = (
+    "held_out_normalized.json",
+    "held_out_bindings.json",
+    "held_out_bindings.json.tmp",
+    "held_out_scan.json",
+    "held_out_scan.json.tmp",
 )
 
 
@@ -128,6 +198,14 @@ def _validate_pack(config: BfclConfig) -> tuple[dict, Path]:
     )
     remembered = _VALIDATED_THIS_PROCESS.get(key)
     if remembered is not None:
+        # The in-process verdict is authoritative; repair a deleted or edited
+        # report so the manifest cannot hash evidence different from that verdict.
+        try:
+            stored = json.loads(report_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            stored = None
+        if stored != remembered:
+            _write_json_atomic(report_path, remembered)
         return remembered, report_path
     report = run_oracle_validation(config, pack)
     fingerprint_after = pack_fingerprint(pack.paths)
@@ -152,7 +230,7 @@ def _invalidate_final_outputs(config: BfclConfig) -> None:
     for name in _FINAL_ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
     cache = stage_cache_dir(config)
-    for name in (*_SURFACE_QUALITY_ARTIFACTS, *_DEDUP_BALANCING_ARTIFACTS):
+    for name in (*_SURFACE_QUALITY_ARTIFACTS, *_DEDUP_BALANCING_ARTIFACTS, *_HELD_OUT_ARTIFACTS):
         (cache / name).unlink(missing_ok=True)
 
 
@@ -184,7 +262,7 @@ def _endpoint_metadata(config: BfclConfig, pack: LoadedPack) -> dict[str, str] |
     return {str(key): str(value) for key, value in metadata.items()}
 
 
-def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
+def _prepare_bfcl_unlocked(config_path: str | os.PathLike[str]) -> Path:
     """Normalize and validate the configured oracle pack."""
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
@@ -192,6 +270,9 @@ def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
     )
 
     config = BfclConfig.from_yaml(str(config_path))
+    # Prepare rewrites the lineage cache. Remove any completed publication first
+    # so an old benchmark cannot remain beside validation evidence for a new pack.
+    _invalidate_final_outputs(config)
     report, report_path = _validate_pack(config)
     gold_eligible, tier = derive_pack_tier(report)
     if not gold_eligible:
@@ -202,18 +283,32 @@ def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
     return report_path
 
 
-def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None = None) -> Path:
+def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
+    """Normalize and validate an oracle pack under an output lock."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+
+    config = BfclConfig.from_yaml(str(config_path))
+    with _output_lock(config):
+        return _prepare_bfcl_unlocked(config_path)
+
+
+def _generate_bfcl_unlocked(
+    config_path: str | os.PathLike[str],
+    *,
+    skip_until: str | None = None,
+) -> Path:
     """Run the supported BFCL generation phases."""
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
         load_pack,
         pack_fingerprint,
     )
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.executable_replay import (
-        run_executable_replay,
-    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.dedup_balancing import (
         run_dedup_balancing_stage,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.executable_replay import (
+        run_executable_replay,
     )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import run_expand
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expected_trace import (
@@ -257,6 +352,26 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
         )
     _invalidate_final_outputs(config)
     report, _ = _validate_pack(config)
+    cache = stage_cache_dir(config)
+    expected_artifact_hashes: dict[str, str] = {}
+
+    def pin_artifacts(*names: str) -> None:
+        for name in names:
+            path = cache / name
+            if path.is_file():
+                expected_artifact_hashes[name] = _artifact_hash(path)
+
+    pin_artifacts(
+        "oracle_validation_report.json",
+        "tools_normalized_internal.json",
+        "tools_normalized.json",
+        "fixtures_normalized.json",
+        "task_templates_normalized.yaml",
+        "validation_cases_normalized.yaml",
+        "pack_manifest.json",
+        "pack_paths.json",
+        "held_out_normalized.json",
+    )
 
     # Derive the gate from the individual checks so a summary flag cannot stand alone.
     gold_eligible, tier = derive_pack_tier(report)
@@ -268,12 +383,8 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
             "Re-run stage=prepare and fix oracle_validation failures."
         )
     pack = load_pack(config)
-    if pack.held_out is not None:
-        raise NotImplementedError(
-            "BFCL generate validated manifest.held_out, but held-out binding enforcement "
-            "is not implemented yet; remove held_out or wait for the held-out stage"
-        )
     profile = run_reference_profile(config)
+    pin_artifacts("reference_samples.parquet", "reference_profile.json")
     expected_endpoint_metadata = report.get("endpoint_metadata")
     if _endpoint_metadata(config, pack) != expected_endpoint_metadata:
         raise RuntimeError(
@@ -283,9 +394,12 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
     templates_by_id = {str(template["template_id"]): template for template in pack.templates}
 
     tasks = run_expand(config, pack)
+    pin_artifacts("task_instances.parquet", "held_out_bindings.json")
     canonical_expanded = len(tasks)
     plans = run_state_machine(config, templates_by_id, tasks)
+    pin_artifacts("conversation_plans.parquet")
     surfaces, prompt_bundle = run_render(config, pack, templates_by_id, tasks, plans)
+    pin_artifacts("rendered_conversations.parquet")
     tasks, plans, surfaces, paraphrase_report = run_paraphrase(
         config,
         pack,
@@ -295,14 +409,24 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
         surfaces,
         profile,
     )
+    pin_artifacts(
+        "task_instances.parquet",
+        "conversation_plans.parquet",
+        "rendered_conversations.parquet",
+        "paraphrase_rejections.json",
+        "paraphrase_io_cache.jsonl",
+    )
     expanded_tasks = list(tasks)
     expanded = len(expanded_tasks)
     # Drops an instance whose own fixture data cannot bind a trace, so `tasks` shrinks
     # to the kept set. Schema/replay still receive every expanded task so stage tables
     # keep a joinable row for each drop.
     traces, drop_reasons = run_expected_trace(config, pack, tasks, plans)
+    pin_artifacts("expected_traces.parquet")
     schema_failures = run_schema_validation(config, pack, expanded_tasks, traces, skipped=drop_reasons)
+    pin_artifacts("schema_validated_traces.parquet")
     verdicts = run_executable_replay(config, pack, expanded_tasks, traces, schema_failures, skipped=drop_reasons)
+    pin_artifacts("replay_validated_tasks.parquet")
     paraphrase_report = apply_expected_result_guards(
         config,
         expanded_tasks,
@@ -319,6 +443,11 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
             replay_tasks,
             surfaces,
             profile=profile,
+        )
+        pin_artifacts(
+            "surface_validated_tasks.parquet",
+            "surface_quality_rejections.json",
+            "surface_judge_cache_usage.json",
         )
     dedup_balancing_result: dict | None = None
     if config.semantic_deduplication_config.get("enabled"):
@@ -343,6 +472,7 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
             surfaces,
             stage_eleven_quality,
         )
+        pin_artifacts("balanced_tasks.parquet", "dedup_balancing_report.json")
     current_fingerprint = pack_fingerprint(pack.paths)
     if current_fingerprint != report.get("pack_fingerprint"):
         raise RuntimeError(
@@ -416,4 +546,14 @@ def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None
             else None
         ),
         expected_pack_fingerprint=current_fingerprint,
+        expected_artifact_hashes=expected_artifact_hashes,
     )
+
+
+def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None = None) -> Path:
+    """Run BFCL generation under an exclusive experiment-directory lock."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+
+    config = BfclConfig.from_yaml(str(config_path))
+    with _output_lock(config):
+        return _generate_bfcl_unlocked(config_path, skip_until=skip_until)
