@@ -269,13 +269,14 @@ bucket aborts instead of weakening the lock. One representative per complete
 coverage bucket is selected before quotas. Category caps and configured
 `difficulty_mix`, `turn_mix`, and `tool_call_count_mix` targets are then applied
 without cloning rows. Fractional targets use deterministic largest-remainder
-allocation, and selection fills outstanding cross-dimension deficits with
-deterministic greedy choices. Because one row is chosen at a time, a final
-exchange pass swaps a selected row for a rejected one whenever that strictly
-shortens the distance to the declared targets and preserves coverage,
-representatives, and category caps, so a feasible mix is not reported unmet
-merely because of the order rows were picked in. Targets that inventory or a
-locked coverage survivor genuinely prevents are returned with explicit
+allocation. Selection is a deterministic binary optimization: coverage and
+representative lineage are hard constraints, while total category-cap and
+cross-dimension target deviation is minimized globally before stable rank breaks
+equivalent optima. This avoids both greedy local optima and the former cubic
+exchange pass, so a feasible mix is not reported unmet merely because of the
+order rows were picked in. Minimal environments use an exact bounded fallback;
+production BYOB environments use PuLP/CBC. Targets that inventory or a locked
+coverage survivor genuinely prevents are returned with explicit
 inventory, target, actual, and reason metadata rather than being silently
 claimed as met.
 
@@ -318,6 +319,29 @@ semantic_deduplication_config:
   representative_source_preference: [template, model]
 ```
 
+A pack that references `held_out.yaml` from its manifest is enforced under
+versioned contract `1.0` at two points. Stage 4 never binds a reserved template
+or fixture row: the reservation is applied while slot candidates are collected,
+so a reserved row cannot enter a task at all. A slot whose every matching row is
+reserved, a category that falls short of `tasks_per_category` once reservations
+are honoured, and a policy that reserves every template all stop generation with
+an explicit error instead of quietly publishing a smaller or differently mixed
+set. Stage 4 records what it examined and withheld in
+`stage_cache/held_out_bindings.json`.
+
+Stage 12 re-scans every executable row against the same policy before anything
+is written, comparing the canonical JSON `[collection, primary_id]` references expansion
+recorded and the template each row came from. The scan writes
+`stage_cache/held_out_scan.json` and stamps `held_out_hit` on published rows, so
+the column reports a checked result rather than the null a policy-free run
+publishes. Enforcement is fail-closed and abort-only: a single hit stops the run
+before `benchmark_raw.parquet`, `benchmark.parquet`, or the manifest exists,
+because Stage 11 has already fixed the publication set and silently dropping a
+row would break the balance the manifest reports. Missing or mismatched Stage-4
+evidence stops publication for the same reason. The manifest carries the policy
+lineage, scan counters, Stage-4 counters, and hashes of both artifacts, and
+marks audit dimension `B7` `na` when a declared policy reserves nothing.
+
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
 [`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md).
@@ -335,7 +359,7 @@ requirements, see
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
 | Evaluation and scoring | **Implementing** | Run a model or agent against the published benchmark and score tool selection, arguments, call ordering, results, and final task success. |
-| Held-out evaluation | **Implementing** | Evaluate on separately governed fixtures or cases and record coverage and dropped-row metrics in run lineage. |
+| Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Implementing** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Implementing** | Emit BFCL JSON and NeMo Evaluator bundles from the replay-validated benchmark. |
 | Stage resume | **Implementing** | Resume from a verified intermediate stage without accepting stale pack, endpoint, or config state. |

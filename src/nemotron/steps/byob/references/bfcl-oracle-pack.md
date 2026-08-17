@@ -513,10 +513,15 @@ and counts guard rejections per template under `surface_guard_rejections`.
 `benchmark_raw.parquet` holds every row that passed schema and replay;
 `benchmark.parquet` is that set minus surface-guard rejections, so the two files match
 only when no guard fired. A declared held-out policy is validated and included in the
-pack fingerprint during prepare. Generation refuses such a pack until held-out binding
-and publication enforcement are enabled; it never silently publishes rows without
-checking them. Packs without a held-out source keep `held_out_hit` null and record
-`evaluated: false`.
+pack fingerprint during prepare, then enforced twice during generation: expansion
+never binds a reserved template or fixture row, and publication re-scans every row
+against the same policy and stamps `held_out_hit`. Any hit aborts the run before a
+parquet or manifest exists, and the offending task ids are listed in
+`stage_cache/held_out_scan.json`. A reservation that leaves a slot with no bindable
+row, starves a category's `tasks_per_category`, or withholds every template is a pack
+error and stops generation with the shortfall named. The manifest records the policy
+lineage, the rows scanned, and the templates and fixture rows Stage 4 withheld. Packs
+without a held-out source keep `held_out_hit` null and record `evaluated: false`.
 Each row exposes exactly the tool definitions named by its `tools_present`.
 Rows from `lineage.policy: smoke_no_publication` retain the pack's validation
 `tier` but set `gold_eligible: false`.

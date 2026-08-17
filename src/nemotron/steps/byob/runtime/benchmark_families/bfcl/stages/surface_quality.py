@@ -143,6 +143,20 @@ def _sha256(value: str) -> str:
     return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
+def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(dict(value), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
+
+
 JUDGE_PROMPT_HASH = _sha256(JUDGE_PROMPT_VERSION + "\n" + JUDGE_SYSTEM_PROMPT + "\n" + JUDGE_PROMPT)
 
 
@@ -528,9 +542,7 @@ def surface_quality_report(
 def write_surface_quality_report(config: BfclConfig, report: Mapping[str, Any]) -> Path:
     """Write the deterministic Stage 10 report consumed by the manifest."""
     path = stage_cache_dir(config) / "surface_quality_rejections.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dict(report), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return path
+    return _write_json_atomic(path, report)
 
 
 def run_surface_quality_validation(
@@ -729,9 +741,7 @@ def _write_judge_cache_usage(
         ],
     }
     path = stage_cache_dir(config) / "surface_judge_cache_usage.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(usage, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return path
+    return _write_json_atomic(path, usage)
 
 
 def run_surface_judge(

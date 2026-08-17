@@ -622,6 +622,8 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
         "reason": "pack declares no held_out policy",
     }
     assert manifest["generation_config_hash"] != manifest["resolved_config_hash"]
+    assert manifest["runtime"]["pipeline_source_hash"].startswith("sha256:")
+    assert manifest["runtime"]["dependency_lock_hash"].startswith("sha256:")
     assert manifest["stage_counts"]["expanded"] >= manifest["stage_counts"]["replay_passed"]
     assert manifest["stage_counts"]["trace_dropped"] == 0
     assert manifest["paraphrase_rejections"]["requested_candidates"] == 0
@@ -647,6 +649,34 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
         assert manifest["artifacts"][artifact]["content_hash"].startswith("sha256:")
     assert manifest["stage_counts"]["replay_passed"] == manifest["stage_counts"]["published"]
     assert (output_dir / "benchmark_raw.parquet").exists()
+
+
+def test_prepare_invalidates_a_previous_publication_before_rewriting_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import pipeline
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_path = tmp_path / "prepare.yaml"
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+    config = BfclConfig.from_yaml(config_path)
+    output = Path(config.output_dir) / config.expt_name
+    output.mkdir(parents=True)
+    stale = [output / "run_manifest.json", output / "benchmark.parquet"]
+    for path in stale:
+        path.write_text("stale", encoding="utf-8")
+
+    def stop_after_invalidation(_config):  # type: ignore[no-untyped-def]
+        assert all(not path.exists() for path in stale)
+        raise RuntimeError("invalidation observed")
+
+    monkeypatch.setattr(pipeline, "_validate_pack", stop_after_invalidation)
+
+    with pytest.raises(RuntimeError, match="invalidation observed"):
+        pipeline.prepare_bfcl(config_path)
 
 
 def test_enabled_surface_quality_is_integrated_into_pipeline_and_manifest(
@@ -1022,6 +1052,33 @@ def test_a_deleted_stage_ten_artifact_blocks_publication(
     with pytest.raises(FileNotFoundError):
         _run_tiny_with_surface_quality(tmp_path)
     # The run must stop before a published parquet exists without its manifest.
+    assert not list((tmp_path / "output").glob("**/run_manifest.json"))
+    assert not list((tmp_path / "output").glob("**/benchmark.parquet"))
+
+
+def test_a_stage_artifact_changed_after_completion_blocks_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import final_output
+
+    real_final_output = final_output.run_final_output
+
+    def mutate_then_publish(config, *args, **kwargs):  # type: ignore[no-untyped-def]
+        path = (
+            Path(config.output_dir)
+            / config.expt_name
+            / "stage_cache"
+            / "task_instances.parquet"
+        )
+        with path.open("ab") as handle:
+            handle.write(b"changed-after-stage")
+        return real_final_output(config, *args, **kwargs)
+
+    monkeypatch.setattr(final_output, "run_final_output", mutate_then_publish)
+
+    with pytest.raises(RuntimeError, match="changed after its producing stage"):
+        _run_tiny(tmp_path)
     assert not list((tmp_path / "output").glob("**/run_manifest.json"))
     assert not list((tmp_path / "output").glob("**/benchmark.parquet"))
 

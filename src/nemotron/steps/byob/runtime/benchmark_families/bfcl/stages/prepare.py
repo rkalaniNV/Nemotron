@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -19,6 +20,15 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cac
 logger = logging.getLogger(__name__)
 
 
+def _write_text_atomic(path: Path, text: str) -> None:
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def prepare_oracle_pack(config: BfclConfig) -> LoadedPack:
     """Resolve pack, normalize artifacts, write stage_cache/."""
     pack = load_pack(config)
@@ -28,38 +38,41 @@ def prepare_oracle_pack(config: BfclConfig) -> LoadedPack:
     tools_internal = pack.tools
     tools_model = project_model_facing_tools(tools_internal)
 
-    (cache / "tools_normalized_internal.json").write_text(
+    _write_text_atomic(
+        cache / "tools_normalized_internal.json",
         json.dumps(tools_internal, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
     )
-    (cache / "tools_normalized.json").write_text(
+    _write_text_atomic(
+        cache / "tools_normalized.json",
         json.dumps(tools_model, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
     )
 
     fixtures_payload: dict[str, Any] = pack.fixtures or {}
-    (cache / "fixtures_normalized.json").write_text(
+    _write_text_atomic(
+        cache / "fixtures_normalized.json",
         json.dumps(fixtures_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
     )
-    (cache / "task_templates_normalized.yaml").write_text(
+    _write_text_atomic(
+        cache / "task_templates_normalized.yaml",
         yaml.safe_dump(pack.templates, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
     )
-    (cache / "validation_cases_normalized.yaml").write_text(
+    _write_text_atomic(
+        cache / "validation_cases_normalized.yaml",
         yaml.safe_dump(pack.validation_cases, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
     )
-    (cache / "pack_manifest.json").write_text(
+    _write_text_atomic(
+        cache / "pack_manifest.json",
         json.dumps(pack.manifest, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
     )
     if pack.held_out is not None:
-        (cache / "held_out_normalized.json").write_text(
+        _write_text_atomic(
+            cache / "held_out_normalized.json",
             json.dumps(pack.held_out, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-            encoding="utf-8",
         )
-    (cache / "pack_paths.json").write_text(
+    else:
+        (cache / "held_out_normalized.json").unlink(missing_ok=True)
+    _write_text_atomic(
+        cache / "pack_paths.json",
         json.dumps(
             {
                 "pack_root": str(pack.paths.pack_root),
@@ -95,7 +108,6 @@ def prepare_oracle_pack(config: BfclConfig) -> LoadedPack:
             sort_keys=True,
         )
         + "\n",
-        encoding="utf-8",
     )
 
     logger.info("BFCL prepare wrote normalized pack artifacts to %s", cache)
