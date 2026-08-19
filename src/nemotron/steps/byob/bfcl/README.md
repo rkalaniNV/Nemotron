@@ -102,12 +102,28 @@ Start from the bundled packs under `../data/`:
 
 Artifacts are written to `output_dir/expt_name/`:
 
-- `benchmark_raw.parquet`: replay- and schema-valid rows before publication
-  surface filtering.
+- `benchmark_raw.parquet`: every schema-valid, replay-valid row, before Stage 10
+  drops and before Stage 11 deduplication and balancing.
 - `benchmark.parquet`: published benchmark rows.
 - `run_manifest.json`: lineage, fingerprints, stage counts, and artifact hashes.
+- `exports/bfcl_json/`: optional BFCL question/answer JSONL pair.
+- `exports/nemo_evaluator_bundle/`: optional six-file W5 adapter input bundle.
+- `exports/export_validation_report.json`: read-back equivalence evidence when
+  at least one compatibility export is enabled.
 - `stage_cache/`: normalized inputs and one table per generation stage, keyed by
   `task_id`.
+
+Both parquets carry the same schema, and the difference between them is a
+selection, never a rewrite. `publication_contract` (`1.0`) re-derives the
+publication set from the stage decisions, reads both files back from disk, and
+refuses the run unless the published rows are byte-identical to their raw
+counterparts across every column — `PUBLICATION_RESTATED_FIELDS` is empty, so a
+row that ships is exactly the row the audit table records. Publication order is
+the Stage 11 selection rank when deduplication ran, and the raw order otherwise.
+`held_out_hit` is `false` on every published row once a held-out policy has been
+evaluated, and `null` when no policy was declared. The manifest's `publication`
+section reports both row counts, both content hashes, which surface gate
+decided, and which ordering applies.
 
 ## Configuration
 
@@ -119,6 +135,16 @@ Start from `config/default.yaml` for a new pack. The main settings are:
   `difficulty_mix`, `turn_mix`, and `tool_call_count_mix`
 - `surface_generation.language`
 - `lineage.policy`
+- `exports.bfcl_json` and `exports.nemo_evaluator_bundle`
+
+```yaml
+exports:
+  bfcl_json: true
+  nemo_evaluator_bundle: true
+```
+
+Both flags default to `false`. Enabling either makes export read-back validation
+part of the Stage 12 publication transaction; the flag is never silently ignored.
 
 Week 4 contracts are parsed strictly even while their owning stages remain
 disabled. Enabled model roles require a non-secret `canonical_id`, and
@@ -342,6 +368,123 @@ evidence stops publication for the same reason. The manifest carries the policy
 lineage, scan counters, Stage-4 counters, and hashes of both artifacts, and
 marks audit dimension `B7` `na` when a declared policy reserves nothing.
 
+Compatibility exports are specified by versioned export contract `1.0`, with
+`bfcl_json` and `nemo_evaluator_bundle` carrying their own `schema_version`.
+The BFCL adapter pins the upstream `BFCL_v4_multi_turn` question/function and
+separate ground-truth JSONL envelopes; Nemotron metadata retains assertions,
+parallel groups, ordering policy, and provenance that upstream BFCL does not
+represent. This is data-format compatibility, not a claim that arbitrary oracle
+packs provide BFCL's domain-specific executable classes.
+
+Both writers read one deeply immutable canonical projection of the
+published parquet row. Tool definitions decode from canonical JSON text and each
+argument decodes from its own canonical JSON value in the Arrow map, then
+re-encodes byte-for-byte. The contract therefore distinguishes `"1"`, `1`,
+`true`, and `1.0`. It requires row-count and truth-field equivalence, source
+benchmark and validation-report hashes, and complete NeMo bundle references for
+the dataset schema, metadata, evaluator config, and system-prompt catalog.
+
+`export_projection` (`1.0`) is that single decode path: `benchmark.parquet` is
+read once, its schema is checked against the published schema, and every row
+becomes a canonical export object. A writer receives the projection, never a
+path, so no format can decode the parquet its own way. `project_published_benchmark`
+optionally binds the projection to the content hash and publication order the
+manifest reports, which stops an export built from a parquet that was replaced
+after Stage 12 verified it.
+
+The projection also derives, once, the structure a writer would otherwise
+reconstruct. Each assistant message that issues tool calls becomes one call
+group, checked against the rendered `messages` by name and argument: a group is
+parallel exactly when that message issues more than one call, its `turn_index` is
+the ordinal of the assistant message, and `user_turn_index` is the request it
+answers. `calls_by_user_turn` keeps an empty slot for a clarifying turn that
+triggers no call, so BFCL's per-user-turn ground truth cannot shift answers onto
+the wrong request. Projection-level provenance (pack, version, tier, prompts,
+languages, turn policies) is derived from every row rather than read off the
+first, so rows that disagree stop the export instead of being silently labelled
+after row zero.
+
+The `bfcl_json` writer turns that projection into two JSONL files under
+`exports/bfcl_json/`: the questions and, beside them in `possible_answer/`, the
+expected calls, joined by `id`. Four format decisions are fixed there. JSONL
+rather than a JSON array, so a harness streams the benchmark and retries a single
+task rather than a whole file. Two files rather than one, because a record that
+carries its own answer invites a runner to prompt the model with it. Parallel
+calls stay grouped in the Nemotron extension, since upstream's per-turn answer
+list is flat and cannot tell two simultaneous calls from two sequential ones.
+And the expected calls are the only answer exported: the recorded oracle results
+stay under `x-nemotron.messages` as provenance, never in `question` or
+`ground_truth`, so a scorer re-executes tools instead of diffing a model's output
+against a snapshot of one backend revision. Provenance likewise lives only in the
+extension, so rendering `question` cannot leak a pack version or a seed into the
+prompt. Bytes are deterministic — sorted keys, no incidental whitespace, `\n`
+endings, UTF-8 left unescaped so a Vietnamese surface stays readable — and the
+format's `content_hash` covers file names together with bytes, so a renamed file
+or a swapped question/answer pair changes the digest.
+
+The `nemo_evaluator_bundle` writer turns the same projection into six files under
+`exports/nemo_evaluator_bundle/`: `bundle.json` (the W5 adapter descriptor, which
+names the other files and pins the dataset's hash and record count),
+`dataset.jsonl` in publication order, `dataset.schema.json`, `metadata.json`,
+`evaluator.yaml`, and `system_prompts.json`. Three decisions differ from
+`bfcl_json`. `seed_messages` is the only model-input field and contains only
+leading system messages plus the first user turn. Gold assistant actions remain in
+`reference_trace`; `replay_steps` lets the W5 adapter release recorded tool results
+only after the candidate produced the corresponding expected call, then release
+the next user turn. This prevents a generic chat adapter from forwarding a full
+gold trace as the prompt. The dataset schema is generated from the record model
+rather than written by hand, so it cannot drift from the records beside it. And
+the declared metrics stop at `tool_selection` and `arguments`, plus
+`call_ordering` only when some task expects more than one call: `results` and
+`task_success` would need the pack's tools re-executed against oracle state, which
+no bundle file provides, and an ordering metric over single-call tasks would
+report a perfect score for something it never measured. The adapter task id is
+derived from `pack_id`; lossy normalization, including an entirely non-ASCII id,
+gets a deterministic hash suffix to avoid collisions. The verbatim `pack_id`
+remains in `metadata.json` and `bundle.json`.
+
+`evaluator.yaml` is an adapter input contract, not a standalone NeMo Evaluator
+Launcher run config. It explicitly declares that W5 must provide a registered
+environment, candidate endpoint, and tool resource service. Publishing a dataset
+bundle does not pretend those execution dependencies already exist.
+
+The whole bundle is encoded, digested, and validated in memory before any file is
+created, so a projection that cannot be expressed — an unresolvable prompt id, a
+row no evaluator record represents — leaves nothing behind to be mistaken for a
+bundle. The bundle directory is cleared first, because a file this run did not
+write would otherwise travel inside a bundle whose digest never covered it, and
+the bytes on disk are re-digested afterwards so a truncated write cannot publish a
+descriptor nobody re-checks. `content_hash` and `files` are bundle-relative like
+the descriptor, so archiving the directory elsewhere does not invalidate it.
+
+Both writers share one projection per run and write under `exports/`, which is
+removed before validation so a run that disables a format cannot inherit the tree
+a previous run left behind. Which formats can actually be written is declared once,
+as the writer registry Stage 12 dispatches through; config validation reads the same
+registry, so a format named in the contract but never wired to a writer is refused
+at startup instead of silently producing no file. A writer that fails takes the
+export tree and both parquet files with it, since a reader cannot tell a partial
+bundle from a complete one, and any later abort in Stage 12 discards the tree for
+the same reason.
+
+Writing alone does not certify the export. Stage 12 reads every enabled format
+back, checks its tree hash, row count, task order, canonical truth fields, and
+format-specific envelopes against the single published projection, then writes
+`exports/export_validation_report.json`. Any mismatch aborts publication.
+`run_manifest.json` records enabled and disabled formats, schema versions, row
+counts, content hashes, source benchmark hash, and the validation-report hash.
+
+Parquet files, exports, validation report, and manifest are built in one staging
+directory. Stage 12 promotes payloads only after all validation and drift checks
+pass, and moves `run_manifest.json` last as the commit marker. A failure removes
+the staging tree and leaves no final manifest or partially published benchmark.
+
+For recovery, never patch a generated export in place. A schema or unsupported
+call-layout error requires fixing the pack/template or using a matching consumer
+and rerunning Stage 12. A hash/equivalence error requires regenerating the whole
+publication. If `run_manifest.json` is absent, treat any adjacent parquet/export
+as unpublished and rerun; startup clears abandoned `.stage12-*` attempts.
+
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
 [`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md).
@@ -361,7 +504,7 @@ requirements, see
 | Evaluation and scoring | **Implementing** | Run a model or agent against the published benchmark and score tool selection, arguments, call ordering, results, and final task success. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Implementing** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
-| Additional exports | **Implementing** | Emit BFCL JSON and NeMo Evaluator bundles from the replay-validated benchmark. |
+| Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |
 | Stage resume | **Implementing** | Resume from a verified intermediate stage without accepting stale pack, endpoint, or config state. |
 
 The final evaluation interface, metric names, artifact schemas, and CLI stage

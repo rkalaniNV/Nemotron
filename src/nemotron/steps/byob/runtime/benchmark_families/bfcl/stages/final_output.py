@@ -7,24 +7,53 @@ import json
 import logging
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import uuid
 from collections import Counter, deque
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.bfcl_json_export import (
+    BfclJsonArtifact,
+    write_bfcl_json,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import (
     BYOB_ROOT,
     DEFAULT_BENCHMARK_SCHEMA_VERSION,
     BfclConfig,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
+    EXPORT_DIRECTORY,
+    EXPORT_FORMATS,
+    export_manifest_section,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_projection import (
+    CanonicalExportProjection,
+    project_published_benchmark,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_validation import (
+    EXPORT_VALIDATION_REPORT_FILE,
+    ExportArtifact,
+    validate_and_write_export_report,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.nemo_evaluator_export import (
+    NemoEvaluatorArtifact,
+    write_nemo_evaluator_bundle,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
     pack_fingerprint,
     project_model_facing_tools,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.publication_contract import (
+    plan_publication,
+    publication_manifest_section,
+    verify_written_benchmarks,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     benchmark_schema,
@@ -50,6 +79,27 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.held_out import 
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _write_bfcl_json_export(projection: CanonicalExportProjection, output_dir: Path) -> BfclJsonArtifact:
+    return write_bfcl_json(projection, output_dir)
+
+
+def _write_nemo_evaluator_export(
+    projection: CanonicalExportProjection, output_dir: Path
+) -> NemoEvaluatorArtifact:
+    return write_nemo_evaluator_bundle(projection, output_dir)
+
+
+# One place says which formats this pipeline can actually write. Config validation
+# reads the same mapping, so a format declared in the contract but never wired to a
+# writer is refused at startup instead of silently producing no file.
+EXPORT_WRITERS: dict[str, Callable[[CanonicalExportProjection, Path], ExportArtifact]] = {
+    "bfcl_json": _write_bfcl_json_export,
+    "nemo_evaluator_bundle": _write_nemo_evaluator_export,
+}
+if set(EXPORT_WRITERS) - set(EXPORT_FORMATS):  # pragma: no cover - import-time contract
+    raise RuntimeError("an export writer is registered for a format the export contract does not declare")
 
 
 def _pipeline_source_hash() -> str:
@@ -107,6 +157,47 @@ def _write_parquet_atomic(table: Any, path: Path, parquet: Any) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _discard(*paths: Path) -> None:
+    """Remove outputs from an attempt that must not be published.
+
+    Directories as well as files, so an abandoned attempt cannot leave an export
+    tree behind for the next reader to mistake for this run's output.
+    """
+    for path in paths:
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+
+
+def _commit_staged_publication(staging_dir: Path, output_dir: Path) -> Path:
+    """Promote a complete Stage 12 tree, writing the manifest commit marker last."""
+    manifest_name = "run_manifest.json"
+    artifact_names = ("benchmark_raw.parquet", "benchmark.parquet", EXPORT_DIRECTORY)
+    final_manifest = output_dir / manifest_name
+    # A reader treats the manifest as the commit marker. Remove an older marker
+    # before replacing any payload, even when this helper is called outside the
+    # top-level pipeline invalidation path.
+    final_manifest.unlink(missing_ok=True)
+    try:
+        for name in artifact_names:
+            source = staging_dir / name
+            destination = output_dir / name
+            _discard(destination)
+            if source.exists():
+                source.replace(destination)
+        (staging_dir / manifest_name).replace(final_manifest)
+    except Exception:
+        _discard(
+            final_manifest,
+            *(output_dir / name for name in artifact_names),
+        )
+        raise
+    finally:
+        _discard(staging_dir)
+    return output_dir / "benchmark.parquet"
+
+
 def _require_pack_fingerprint(
     pack: LoadedPack,
     expected: str,
@@ -118,8 +209,7 @@ def _require_pack_fingerprint(
     current = pack_fingerprint(pack.paths)
     if current == expected:
         return current
-    for path in cleanup:
-        path.unlink(missing_ok=True)
+    _discard(*cleanup)
     raise RuntimeError(f"oracle pack changed {phase}; refusing to publish content that validation did not certify")
 
 
@@ -152,8 +242,7 @@ def _require_endpoint_identity(
     )
     if outputs[0] == expected:
         return
-    for path in cleanup:
-        path.unlink(missing_ok=True)
+    _discard(*cleanup)
     raise RuntimeError(
         "endpoint identity changed during final output; refusing to publish "
         "artifacts from an uncertified oracle revision"
@@ -618,13 +707,17 @@ def run_final_output(
         validation_report.get("endpoint_metadata"),
     )
     schema = benchmark_schema()
-    raw_path = output_dir / "benchmark_raw.parquet"
 
     # Raw means executable/schema-valid. Publication additionally applies Stage 10
     # when enabled; the disabled path preserves the legacy deterministic guard gate.
+    guard_violations: dict[str, bool] | None = None
+    quality_decisions: dict[str, str] | None = None
     if surface_quality_records is None:
         if surface_quality_report is not None:
             raise ValueError("a surface-quality report requires surface-quality records")
+        guard_violations = {
+            str(row["task_id"]): bool(surfaces[str(row["task_id"])]["guard_violations"]) for row in rows
+        }
         published = [row for row in rows if not surfaces[str(row["task_id"])]["guard_violations"]]
     else:
         if surface_quality_report is None:
@@ -642,38 +735,36 @@ def run_final_output(
             raise ValueError(
                 f"surface-quality records must match replay-validated rows exactly (missing={missing}, extra={extra})"
             )
+        quality_decisions = {
+            str(row["task_id"]): str(quality_by_task[str(row["task_id"])]["decision"]) for row in rows
+        }
         published = [row for row in rows if quality_by_task[str(row["task_id"])]["decision"] == "kept"]
+    stage_eleven_decisions: list[Any] | None = None
     if dedup_balancing_decisions is not None:
         from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
             DedupBalancingDecision,
         )
 
-        decisions = [
-            value
-            if isinstance(value, DedupBalancingDecision)
-            else DedupBalancingDecision.model_validate(value)
+        stage_eleven_decisions = [
+            value if isinstance(value, DedupBalancingDecision) else DedupBalancingDecision.model_validate(value)
             for value in dedup_balancing_decisions
         ]
-        decision_by_task: dict[str, DedupBalancingDecision] = {}
-        for decision in decisions:
-            if decision.task_id in decision_by_task:
+        stage_eleven_by_task: dict[str, DedupBalancingDecision] = {}
+        for decision in stage_eleven_decisions:
+            if decision.task_id in stage_eleven_by_task:
                 raise ValueError(f"duplicate Stage 11 decision for task {decision.task_id!r}")
-            decision_by_task[decision.task_id] = decision
+            stage_eleven_by_task[decision.task_id] = decision
         stage_ten_ids = {str(row["task_id"]) for row in published}
-        if set(decision_by_task) != stage_ten_ids:
-            missing = sorted(stage_ten_ids - set(decision_by_task))
-            extra = sorted(set(decision_by_task) - stage_ten_ids)
+        if set(stage_eleven_by_task) != stage_ten_ids:
+            missing = sorted(stage_ten_ids - set(stage_eleven_by_task))
+            extra = sorted(set(stage_eleven_by_task) - stage_ten_ids)
             raise ValueError(
                 "Stage 11 decisions must match Stage 10 publication candidates exactly "
                 f"(missing={missing}, extra={extra})"
             )
         published = sorted(
-            (
-                row
-                for row in published
-                if decision_by_task[str(row["task_id"])].selected
-            ),
-            key=lambda row: decision_by_task[str(row["task_id"])].selection_rank,
+            (row for row in published if stage_eleven_by_task[str(row["task_id"])].selected),
+            key=lambda row: stage_eleven_by_task[str(row["task_id"])].selection_rank,
         )
         expected_selected = int(dedup_balancing_report["counts"]["selected"])
         if expected_selected != len(published):
@@ -723,6 +814,7 @@ def run_final_output(
         raise RuntimeError(f"BFCL final_output has no publication rows after {source}; {recovery}")
     held_out = held_out_policy(pack)
     held_out_scan_report: dict[str, Any] | None = None
+    held_out_hits: dict[str, bool] | None = None
     if held_out is not None:
         normalized_path = cache / "held_out_normalized.json"
         try:
@@ -750,11 +842,11 @@ def run_final_output(
         # Scan every executable row, not only the published ones: a reserved binding
         # anywhere means Stage 4 enforcement failed, and benchmark_raw.parquet ships
         # beside the manifest that would claim it did not.
-        decisions = scan_rows(held_out, rows, fixture_refs_by_task=fixture_refs_by_task)
+        held_out_decisions = scan_rows(held_out, rows, fixture_refs_by_task=fixture_refs_by_task)
         held_out_scan_report = write_scan_report(
             config,
             held_out,
-            decisions,
+            held_out_decisions,
             binding_report=binding_report,
             rows_published=len(published),
         )
@@ -764,12 +856,25 @@ def run_final_output(
         if stored_scan_report != held_out_scan_report:
             raise ValueError("held_out_scan.json does not match the Stage 12 scan")
         enforce_no_leak(config, held_out_scan_report)
-        decision_by_task = {decision.task_id: decision for decision in decisions}
+        held_out_by_task = {decision.task_id: decision for decision in held_out_decisions}
         for row in rows:
-            row["held_out_hit"] = decision_by_task[str(row["task_id"])].held_out_hit
-    _write_parquet_atomic(pa.Table.from_pylist(rows, schema=schema), raw_path, pq)
-    benchmark_path = output_dir / "benchmark.parquet"
-    _write_parquet_atomic(pa.Table.from_pylist(published, schema=schema), benchmark_path, pq)
+            row["held_out_hit"] = held_out_by_task[str(row["task_id"])].held_out_hit
+        held_out_hits = {task_id: bool(decision.held_out_hit) for task_id, decision in held_out_by_task.items()}
+
+    # Derived from the stage decisions rather than from ``published``: the plan and
+    # the filtered list agreeing is the check, and a plan copied from the list it is
+    # supposed to police would confirm any mistake that list already made.
+    publication_plan = plan_publication(
+        raw_task_ids=[str(row["task_id"]) for row in rows],
+        replay_validated_rows=int(stage_counts["replay_passed"]),
+        guard_violations=guard_violations,
+        surface_quality_decisions=quality_decisions,
+        dedup_decisions=stage_eleven_decisions,
+        held_out_hits=held_out_hits,
+    )
+    requested_exports = tuple(name for name in EXPORT_FORMATS if config.exports.get(name))
+    export_validation_report = None
+    export_validation_report_hash = None
 
     surface_rejections: dict[str, int] = {}
     for surface in surfaces.values():
@@ -790,7 +895,7 @@ def run_final_output(
         pack,
         current_pack_fingerprint,
         phase="while final output was being assembled",
-        cleanup=(raw_path, benchmark_path),
+        cleanup=(),
     )
     # Hash prepare/validation intermediates the published rows depend on, not only
     # the six stage tables — otherwise a tampered validation report would not show.
@@ -834,6 +939,49 @@ def run_final_output(
         gold_ineligibility_reasons.append("smoke_no_publication")
     if not stage_eleven_gold_eligible:
         gold_ineligibility_reasons.append("stage_eleven_unmet_targets")
+
+    # No final path is touched until every source artifact above has been read and
+    # hashed successfully. From here on, failures delete one private staging tree.
+    staging_dir = output_dir / f".stage12-{uuid.uuid4().hex}"
+    _discard(staging_dir)
+    staging_dir.mkdir(parents=True)
+    raw_path = staging_dir / "benchmark_raw.parquet"
+    benchmark_path = staging_dir / "benchmark.parquet"
+    try:
+        _write_parquet_atomic(pa.Table.from_pylist(rows, schema=schema), raw_path, pq)
+        _write_parquet_atomic(pa.Table.from_pylist(published, schema=schema), benchmark_path, pq)
+        publication_report = verify_written_benchmarks(
+            raw_path=raw_path,
+            publication_path=benchmark_path,
+            plan=publication_plan,
+        )
+
+        # Every enabled format re-encodes one projection of the file just verified,
+        # so the parquet is decoded once no matter how many writers run.
+        if requested_exports:
+            projection = project_published_benchmark(
+                benchmark_path,
+                expected_content_hash=publication_report.publication_content_hash,
+                expected_task_ids=publication_plan.published_task_ids,
+            )
+            export_artifacts: dict[str, ExportArtifact] = {}
+            for name in requested_exports:
+                export_artifacts[name] = EXPORT_WRITERS[name](projection, staging_dir)
+            export_validation_report, export_validation_report_hash = validate_and_write_export_report(
+                projection,
+                export_artifacts,
+                staging_dir,
+            )
+        exports_manifest = export_manifest_section(
+            enabled={name: bool(config.exports.get(name)) for name in EXPORT_FORMATS},
+            report=export_validation_report,
+            validation_report_path=EXPORT_VALIDATION_REPORT_FILE if export_validation_report is not None else None,
+            validation_report_content_hash=export_validation_report_hash,
+        )
+    except Exception:
+        _discard(staging_dir)
+        raise
+
     manifest = {
         "schema_version": schema_version,
         # The timestamp is part of the id: two runs of the same config are different
@@ -916,6 +1064,8 @@ def run_final_output(
             ),
         },
         "held_out": manifest_section(held_out, held_out_scan_report),
+        "publication": publication_manifest_section(publication_report),
+        "exports": exports_manifest,
         "bias_targets": _jsonable(config.task_generation),
         "bias_applicability": _bias_applicability(pack),
         "stage_counts": {**stage_counts, "published": len(published)},
@@ -941,27 +1091,37 @@ def run_final_output(
             **stage_artifacts,
             "benchmark_raw_parquet": {"content_hash": _file_hash(raw_path)},
             "benchmark_parquet": {"content_hash": _file_hash(benchmark_path)},
+            **(
+                {
+                    "export_validation_report": {
+                        "content_hash": export_validation_report_hash,
+                    }
+                }
+                if export_validation_report_hash is not None
+                else {}
+            ),
         },
     }
     _require_pack_fingerprint(
         pack,
         current_pack_fingerprint,
         phase="before the final manifest was stamped",
-        cleanup=(raw_path, benchmark_path),
+        cleanup=(staging_dir,),
     )
-    manifest_path = output_dir / "run_manifest.json"
+    manifest_path = staging_dir / "run_manifest.json"
     _write_endpoint_manifest_atomic(
         json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         manifest_path,
         config=config,
         pack=pack,
         expected_endpoint_metadata=validation_report.get("endpoint_metadata"),
-        cleanup=(raw_path, benchmark_path),
+        cleanup=(staging_dir,),
     )
+    final_benchmark_path = _commit_staged_publication(staging_dir, output_dir)
     logger.info(
         "BFCL final_output wrote %d rows (%d published) to %s",
         len(rows),
         len(published),
-        benchmark_path,
+        final_benchmark_path,
     )
-    return benchmark_path
+    return final_benchmark_path

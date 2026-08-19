@@ -5,11 +5,41 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.bfcl_json_export import (
+    BFCL_JSON_ANSWER_FILE,
+    BFCL_JSON_QUESTION_FILE,
+    BfclJsonArtifact,
+    read_bfcl_json,
+    write_bfcl_json,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
+    BfclJsonRecord,
+    NemoEvaluatorRecord,
+    export_tree_hash,
+    validate_export_equivalence,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_projection import (
+    ExportProjectionError,
+    ProjectionSource,
+    project_benchmark_rows,
+    project_published_benchmark,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.nemo_evaluator_export import (
+    NEMO_BUNDLE_FILE,
+    NEMO_BUNDLE_FILES,
+    NEMO_DATASET_FILE,
+    NEMO_EVALUATOR_ROOT,
+    NEMO_METADATA_FILE,
+    NemoEvaluatorArtifact,
+    read_nemo_evaluator_bundle,
+    write_nemo_evaluator_bundle,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     decode_arguments,
@@ -510,6 +540,519 @@ def test_banking_covers_every_supported_policy_edge(banking_run) -> None:
     assert any(set(row["required_tools"]) < set(row["tools_present"]) for row in banking_run)
 
 
+def _assert_exports_preserve_the_published_benchmark(rows: list[dict[str, Any]]) -> None:
+    # Decoded through the projection, not row by row: the writers below are the
+    # first consumers of the single decode path, so a projection that cannot
+    # describe a real published row fails here rather than in a later exporter.
+    projection = project_benchmark_rows(
+        rows,
+        source=ProjectionSource(
+            file="benchmark.parquet",
+            content_hash="sha256:" + "0" * 64,
+            rows=len(rows),
+        ),
+    )
+    canonical = list(projection.rows)
+    bfcl = [BfclJsonRecord.from_canonical(row) for row in canonical]
+    assert projection.task_ids == tuple(row["task_id"] for row in rows)
+    for row, plan in zip(canonical, projection.plans, strict=True):
+        assert plan.call_count == len(row.expected_tool_calls)
+        assert plan.is_multi_turn == row.is_multi_turn
+        assert sum(len(group.calls) for group in plan.groups) == row.num_tool_calls
+    assert validate_export_equivalence(canonical, bfcl) == []
+    assert validate_export_equivalence(canonical, [NemoEvaluatorRecord.from_canonical(row) for row in canonical]) == []
+    for source, record, plan in zip(canonical, bfcl, projection.plans, strict=True):
+        question = record.question_record(plan.call_group_payload)
+        ground_truth = record.ground_truth_record(plan.calls_by_user_turn)
+        assert question["id"] == source.task_id == ground_truth["id"]
+        assert len(question["question"]) == sum(message.role == "user" for message in source.messages)
+        assert len(ground_truth["ground_truth"]) == len(question["question"])
+        assert question["x-nemotron"]["success_assertions"] == list(source.success_assertions)
+
+
+def _assert_publication_only_selects_from_raw(output_dir: Path) -> dict[str, Any]:
+    """Hold a real run to the raw/publication semantics, without the contract's help.
+
+    The pipeline already ran :mod:`publication_contract` over these files, so
+    re-running it here would only confirm that the check agrees with itself.
+    These assertions restate the acceptance criteria directly.
+    """
+    import pyarrow.parquet as pq
+
+    raw_table = pq.read_table(output_dir / "benchmark_raw.parquet")
+    published_table = pq.read_table(output_dir / "benchmark.parquet")
+    assert published_table.schema.equals(raw_table.schema)
+
+    raw_rows = raw_table.to_pylist()
+    published_rows = published_table.to_pylist()
+    raw_by_task = {row["task_id"]: row for row in raw_rows}
+    assert len(raw_by_task) == len(raw_rows)
+    published_ids = [row["task_id"] for row in published_rows]
+    assert len(set(published_ids)) == len(published_ids)
+    assert set(published_ids) <= set(raw_by_task)
+
+    for row in published_rows:
+        assert json.dumps(row, sort_keys=True, default=str) == json.dumps(
+            raw_by_task[row["task_id"]], sort_keys=True, default=str
+        )
+        assert row["held_out_hit"] in (None, False)
+
+    manifest = json.loads(
+        (output_dir / "run_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["stage_counts"]["replay_passed"] == len(raw_rows)
+    assert manifest["stage_counts"]["published"] == len(published_rows)
+    section = manifest["publication"]
+    assert section["raw"]["rows"] == len(raw_rows)
+    assert section["published"]["rows"] == len(published_rows)
+    assert section["restated_fields"] == []
+    assert section["verified"] is True
+    return manifest
+
+
+def test_the_tiny_publication_is_a_selection_of_its_raw_table(tiny_run) -> None:
+    _, output_dir = tiny_run
+
+    manifest = _assert_publication_only_selects_from_raw(output_dir)
+
+    assert manifest["publication"]["published"]["ordering"] == "raw_order"
+
+
+def test_stage_eleven_publishes_in_selection_rank_order(third_pack_run) -> None:
+    _, output_dir = third_pack_run
+    import pyarrow.parquet as pq
+
+    manifest = _assert_publication_only_selects_from_raw(output_dir)
+    published = manifest["publication"]["published"]
+    assert published["surface_gate"] == "surface_quality"
+    assert published["dedup_balancing_applied"] is True
+    assert published["ordering"] == "selection_rank"
+
+    decisions = pq.read_table(output_dir / "stage_cache" / "balanced_tasks.parquet").to_pylist()
+    ranked = sorted(
+        (decision for decision in decisions if decision["selected"]),
+        key=lambda decision: decision["selection_rank"],
+    )
+    published_ids = [row["task_id"] for row in pq.read_table(output_dir / "benchmark.parquet").to_pylist()]
+    assert published_ids == [decision["task_id"] for decision in ranked]
+
+
+def _assert_projection_is_bound_to_the_published_file(output_dir: Path) -> None:
+    """Project the real parquet and check the projection cites what it read."""
+    manifest = json.loads(
+        (output_dir / "run_manifest.json").read_text(encoding="utf-8")
+    )
+    published_hash = manifest["publication"]["published"]["content_hash"]
+    benchmark_path = output_dir / "benchmark.parquet"
+
+    projection = project_published_benchmark(
+        benchmark_path,
+        expected_content_hash=published_hash,
+        expected_task_ids=[row["task_id"] for row in _published_rows(benchmark_path)],
+    )
+
+    assert projection.source.content_hash == published_hash
+    assert projection.source.rows == len(projection.rows) == manifest["stage_counts"]["published"]
+    assert projection.provenance.pack_id == manifest["pack"]["pack_id"]
+    assert projection.provenance.pack_version == manifest["pack"]["version"]
+    assert projection.provenance.tier == manifest["tier"]
+    assert set(projection.provenance.system_prompt_ids) == {row.system_prompt_id for row in projection.rows}
+    for row in projection.rows:
+        plan = projection.plan(row.task_id)
+        assert plan.call_count == len(row.expected_tool_calls)
+        # Every group is one assistant message, so the groups account for exactly
+        # the calls the conversation issues.
+        assert [call.trace_position for group in plan.groups for call in group.calls] == [
+            call.trace_position for call in row.expected_tool_calls
+        ]
+
+
+def _published_rows(benchmark_path: Path) -> list[dict[str, Any]]:
+    import pyarrow.parquet as pq
+
+    return pq.read_table(benchmark_path).to_pylist()
+
+
+def test_the_tiny_projection_cites_the_file_it_decoded(tiny_run) -> None:
+    _, output_dir = tiny_run
+
+    _assert_projection_is_bound_to_the_published_file(output_dir)
+
+
+def test_a_projection_refuses_a_benchmark_replaced_after_publication(tiny_run) -> None:
+    _, output_dir = tiny_run
+
+    with pytest.raises(ExportProjectionError, match="changed after publication"):
+        project_published_benchmark(
+            output_dir / "benchmark.parquet",
+            expected_content_hash="sha256:" + "0" * 64,
+        )
+
+
+def test_a_projection_refuses_rows_that_are_not_the_published_order(tiny_run) -> None:
+    _, output_dir = tiny_run
+    benchmark_path = output_dir / "benchmark.parquet"
+    reversed_ids = [row["task_id"] for row in reversed(_published_rows(benchmark_path))]
+
+    with pytest.raises(ExportProjectionError, match="in publication order"):
+        project_published_benchmark(benchmark_path, expected_task_ids=reversed_ids)
+
+
+def test_stage_eleven_output_projects_with_its_selection_order(third_pack_run) -> None:
+    _, output_dir = third_pack_run
+
+    _assert_projection_is_bound_to_the_published_file(output_dir)
+
+
+def test_the_banking_benchmark_writes_a_complete_bfcl_json_export(banking_run, tmp_path: Path) -> None:
+    # The banking pack covers all nine turn policies and Vietnamese surfaces, so
+    # this is the broadest evidence that the writer handles real published rows.
+    projection = project_benchmark_rows(
+        banking_run,
+        source=ProjectionSource(file="benchmark.parquet", content_hash="sha256:" + "0" * 64, rows=len(banking_run)),
+    )
+
+    artifact = write_bfcl_json(projection, tmp_path)
+    questions, answers = read_bfcl_json(tmp_path, artifact)
+
+    assert artifact.rows == len(banking_run)
+    assert [record["id"] for record in questions] == [row["task_id"] for row in banking_run]
+    assert [record["id"] for record in answers] == [row["task_id"] for row in banking_run]
+    for question, answer, row in zip(questions, answers, banking_run, strict=True):
+        user_turns = sum(message["role"] == "user" for message in row["messages"])
+        assert len(question["question"]) == user_turns
+        assert len(answer["ground_truth"]) == user_turns
+        assert sum(len(turn) for turn in answer["ground_truth"]) == row["num_tool_calls"]
+        assert sum(len(group["calls"]) for group in question["x-nemotron"]["call_groups"]) == row["num_tool_calls"]
+    # Vietnamese surfaces must stay readable rather than escaped in the file.
+    assert "\\u" not in (tmp_path / artifact.question_file).read_text(encoding="utf-8")
+
+
+def test_the_bfcl_json_export_is_byte_identical_across_two_writes(tiny_run, tmp_path: Path) -> None:
+    _, output_dir = tiny_run
+    projection = project_published_benchmark(output_dir / "benchmark.parquet")
+
+    first = write_bfcl_json(projection, tmp_path / "first")
+    second = write_bfcl_json(projection, tmp_path / "second")
+
+    assert first.content_hash == second.content_hash
+    assert first.source.content_hash == projection.source.content_hash
+
+
+def test_enabling_bfcl_json_writes_the_export_from_the_pipeline(tmp_path: Path) -> None:
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_data["exports"]["bfcl_json"] = True
+    config_path = tmp_path / "bfcl-json.yaml"
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+
+    benchmark_path = generate_bfcl(config_path)
+    output_dir = benchmark_path.parent
+    projection = project_published_benchmark(benchmark_path)
+    artifact = BfclJsonArtifact(
+        rows=len(projection.rows),
+        content_hash=export_tree_hash(
+            output_dir,
+            (BFCL_JSON_QUESTION_FILE, BFCL_JSON_ANSWER_FILE),
+        ),
+        source=projection.source,
+    )
+    questions, answers = read_bfcl_json(output_dir, artifact)
+
+    assert [record["id"] for record in questions] == list(projection.task_ids)
+    assert [record["id"] for record in answers] == list(projection.task_ids)
+
+
+def test_the_banking_benchmark_writes_a_complete_evaluator_bundle(banking_run, tmp_path: Path) -> None:
+    projection = project_benchmark_rows(
+        banking_run,
+        source=ProjectionSource(file="benchmark.parquet", content_hash="sha256:" + "0" * 64, rows=len(banking_run)),
+    )
+
+    artifact = write_nemo_evaluator_bundle(projection, tmp_path)
+    bundle, records = read_nemo_evaluator_bundle(tmp_path, artifact)
+
+    assert artifact.rows == len(banking_run)
+    assert bundle.record_count == len(banking_run)
+    assert [record["task_id"] for record in records] == [row["task_id"] for row in banking_run]
+    catalog = json.loads((tmp_path / artifact.root / bundle.system_prompt_file).read_text(encoding="utf-8"))
+    for record, row in zip(records, banking_run, strict=True):
+        # The whole rendered trace, turn for turn: a bundle record is replayed, so a
+        # dropped tool result would leave a multi-turn task unable to reach its end.
+        assert [(message["role"], message["content"]) for message in record["reference_trace"]] == [
+            (message["role"], message["content"]) for message in row["messages"]
+        ]
+        assert all(message["role"] in {"system", "user"} for message in record["seed_messages"])
+        assert len(record["expected_tool_calls"]) == row["num_tool_calls"]
+        assert catalog[row["system_prompt_id"]]
+    # The banking pack declares a multi_tool template, so ordering is measurable.
+    assert "call_ordering" in bundle.scoring.metrics
+    assert "\\u" not in (tmp_path / artifact.root / bundle.dataset_file).read_text(encoding="utf-8")
+
+
+def test_the_evaluator_bundle_is_byte_identical_across_two_writes(tiny_run, tmp_path: Path) -> None:
+    _, output_dir = tiny_run
+    projection = project_published_benchmark(output_dir / "benchmark.parquet")
+
+    first = write_nemo_evaluator_bundle(projection, tmp_path / "first")
+    second = write_nemo_evaluator_bundle(projection, tmp_path / "second")
+
+    assert first.content_hash == second.content_hash
+    assert first.source.content_hash == projection.source.content_hash
+
+
+def test_enabling_both_exports_writes_both_trees_from_one_projection(tmp_path: Path) -> None:
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_data["exports"]["bfcl_json"] = True
+    config_data["exports"]["nemo_evaluator_bundle"] = True
+    config_path = tmp_path / "both-exports.yaml"
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+
+    benchmark_path = generate_bfcl(config_path)
+    output_dir = benchmark_path.parent
+    projection = project_published_benchmark(benchmark_path)
+    artifact = NemoEvaluatorArtifact(
+        rows=len(projection.rows),
+        # Bundle-relative, like the descriptor: a moved bundle keeps its digest.
+        content_hash=export_tree_hash(output_dir / NEMO_EVALUATOR_ROOT, NEMO_BUNDLE_FILES),
+        source=projection.source,
+    )
+    bundle, records = read_nemo_evaluator_bundle(output_dir, artifact)
+
+    assert [record["task_id"] for record in records] == list(projection.task_ids)
+    assert bundle.source.benchmark_content_hash == projection.source.content_hash
+    assert (output_dir / BFCL_JSON_QUESTION_FILE).is_file()
+    manifest = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    report_path = output_dir / manifest["exports"]["validation_report"]["path"]
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert manifest["exports"]["status"] == report["status"] == "passed"
+    assert manifest["exports"]["benchmark_rows"] == report["benchmark_rows"] == len(projection.rows)
+    assert set(manifest["exports"]["formats"]) == {"bfcl_json", "nemo_evaluator_bundle"}
+    assert all(manifest["exports"]["formats"][name]["enabled"] for name in manifest["exports"]["formats"])
+    assert not list(output_dir.glob(".stage12-*"))
+
+    first_hashes = {
+        name: details["content_hash"] for name, details in manifest["exports"]["formats"].items()
+    }
+    second_path = generate_bfcl(config_path)
+    second_manifest = json.loads((second_path.parent / "run_manifest.json").read_text(encoding="utf-8"))
+    assert {
+        name: details["content_hash"]
+        for name, details in second_manifest["exports"]["formats"].items()
+    } == first_hashes
+
+
+def test_a_disabled_export_does_not_inherit_a_previous_runs_tree(tmp_path: Path) -> None:
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_data["exports"]["nemo_evaluator_bundle"] = True
+    enabled_path = tmp_path / "bundle-on.yaml"
+    enabled_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+    benchmark_path = generate_bfcl(enabled_path)
+    output_dir = benchmark_path.parent
+    assert (output_dir / NEMO_EVALUATOR_ROOT / NEMO_BUNDLE_FILE).is_file()
+
+    config_data["exports"]["nemo_evaluator_bundle"] = False
+    disabled_path = tmp_path / "bundle-off.yaml"
+    disabled_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+    generate_bfcl(disabled_path)
+
+    # A stale bundle beside a manifest that never mentions it would be scored as
+    # though this run had produced it.
+    assert not (output_dir / NEMO_EVALUATOR_ROOT).exists()
+
+
+@pytest.mark.parametrize(
+    ("format_name", "partial_file"),
+    [
+        ("bfcl_json", Path(BFCL_JSON_QUESTION_FILE)),
+        ("nemo_evaluator_bundle", Path(NEMO_EVALUATOR_ROOT) / NEMO_DATASET_FILE),
+    ],
+)
+def test_export_failure_never_publishes_a_partial_stage_twelve_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    format_name: str,
+    partial_file: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import final_output
+
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_data["exports"][format_name] = True
+    config_path = tmp_path / "failing-export.yaml"
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+    output_dir = tmp_path / "output" / "bfcl_tiny_library_validation"
+    output_dir.mkdir(parents=True)
+    for name in ("run_manifest.json", "benchmark_raw.parquet", "benchmark.parquet"):
+        (output_dir / name).write_text("stale", encoding="utf-8")
+
+    def fail_after_one_file(_projection, stage: Path):  # type: ignore[no-untyped-def]
+        partial = stage / partial_file
+        partial.parent.mkdir(parents=True)
+        partial.write_text("partial", encoding="utf-8")
+        raise RuntimeError("forced export failure")
+
+    monkeypatch.setitem(final_output.EXPORT_WRITERS, format_name, fail_after_one_file)
+    with pytest.raises(RuntimeError, match="forced export failure"):
+        generate_bfcl(config_path)
+
+    assert not (output_dir / "run_manifest.json").exists()
+    assert not (output_dir / "benchmark_raw.parquet").exists()
+    assert not (output_dir / "benchmark.parquet").exists()
+    assert not (output_dir / "exports").exists()
+    assert not list(output_dir.glob(".stage12-*"))
+
+
+def test_tampered_export_is_rejected_before_the_manifest_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import final_output
+
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
+    config_data["output_dir"] = str(tmp_path / "output")
+    config_data["exports"]["nemo_evaluator_bundle"] = True
+    config_path = tmp_path / "tampered-export.yaml"
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+
+    def write_then_tamper(projection, stage: Path):  # type: ignore[no-untyped-def]
+        artifact = write_nemo_evaluator_bundle(projection, stage)
+        metadata = stage / artifact.root / NEMO_METADATA_FILE
+        payload = json.loads(metadata.read_text(encoding="utf-8"))
+        payload["tampered"] = True
+        metadata.write_text(json.dumps(payload), encoding="utf-8")
+        return artifact
+
+    monkeypatch.setitem(final_output.EXPORT_WRITERS, "nemo_evaluator_bundle", write_then_tamper)
+    with pytest.raises(RuntimeError, match="tree hash|no longer matches"):
+        generate_bfcl(config_path)
+
+    output_dir = tmp_path / "output" / "bfcl_tiny_library_validation"
+    assert not (output_dir / "run_manifest.json").exists()
+    assert not (output_dir / "benchmark.parquet").exists()
+    assert not (output_dir / "exports").exists()
+    assert not list(output_dir.glob(".stage12-*"))
+
+
+def test_promotion_failure_removes_every_final_payload_and_staging_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import final_output
+
+    output_dir = tmp_path / "output"
+    staging_dir = output_dir / ".stage12-test"
+    staging_dir.mkdir(parents=True)
+    output_dir.mkdir(exist_ok=True)
+    for name in ("benchmark_raw.parquet", "benchmark.parquet", "run_manifest.json"):
+        (staging_dir / name).write_text(f"new {name}", encoding="utf-8")
+        (output_dir / name).write_text(f"old {name}", encoding="utf-8")
+    (staging_dir / "exports").mkdir()
+    (staging_dir / "exports" / "file").write_text("new export", encoding="utf-8")
+    (output_dir / "exports").mkdir()
+    (output_dir / "exports" / "file").write_text("old export", encoding="utf-8")
+
+    replace = Path.replace
+
+    def fail_second_promotion(path: Path, target: Path):  # type: ignore[no-untyped-def]
+        if path == staging_dir / "benchmark.parquet":
+            raise OSError("forced promotion failure")
+        return replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_second_promotion)
+    with pytest.raises(OSError, match="forced promotion failure"):
+        final_output._commit_staged_publication(staging_dir, output_dir)
+
+    assert not staging_dir.exists()
+    assert not (output_dir / "run_manifest.json").exists()
+    assert not (output_dir / "benchmark_raw.parquet").exists()
+    assert not (output_dir / "benchmark.parquet").exists()
+    assert not (output_dir / "exports").exists()
+
+
+def test_pack_and_endpoint_drift_remove_staged_payloads_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import isolation
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import final_output
+
+    pack_stage = tmp_path / "pack-stage"
+    pack_stage.mkdir()
+    (pack_stage / "payload").write_text("partial", encoding="utf-8")
+    pack = SimpleNamespace(paths={})
+    monkeypatch.setattr(final_output, "pack_fingerprint", lambda _paths: "changed")
+    with pytest.raises(RuntimeError, match="oracle pack changed"):
+        final_output._require_pack_fingerprint(
+            pack,  # type: ignore[arg-type]
+            "validated",
+            phase="before commit",
+            cleanup=(pack_stage,),
+        )
+    assert not pack_stage.exists()
+
+    endpoint_stage = tmp_path / "endpoint-stage"
+    endpoint_stage.mkdir()
+    (endpoint_stage / "payload").write_text("partial", encoding="utf-8")
+    runtime = SimpleNamespace(
+        episode_timeout_s=1.0,
+        worker="process",
+        clock="2026-01-01T00:00:00Z",
+        import_timeout_s=1.0,
+        tool_timeout_s=1.0,
+    )
+    config = SimpleNamespace(oracle_runtime=runtime, random_seed=0)
+    endpoint_pack = SimpleNamespace(endpoint_config={"protocol_version": "bfcl-oracle-http-v1"})
+
+    class ChangedEndpointWorker:
+        def __init__(self, **_kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def run_episode(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return [{"oracle_id": "changed"}]
+
+    monkeypatch.setattr(isolation, "ProcessWorker", ChangedEndpointWorker)
+    with pytest.raises(RuntimeError, match="endpoint identity changed"):
+        final_output._require_endpoint_identity(
+            config,  # type: ignore[arg-type]
+            endpoint_pack,  # type: ignore[arg-type]
+            {"oracle_id": "validated"},
+            cleanup=(endpoint_stage,),
+        )
+    assert not endpoint_stage.exists()
+
+
+def test_every_published_tiny_row_projects_through_the_export_contract(tiny_run) -> None:
+    rows, _ = tiny_run
+
+    _assert_exports_preserve_the_published_benchmark(rows)
+
+
+def test_the_banking_projection_keeps_parallel_calls_in_one_group(banking_run) -> None:
+    projection = project_benchmark_rows(
+        banking_run,
+        source=ProjectionSource(file="benchmark.parquet", content_hash="sha256:" + "0" * 64, rows=len(banking_run)),
+    )
+
+    parallel = [plan for plan in projection.plans if plan.parallel_groups]
+    assert parallel, "the banking pack declares a multi_tool template, so a parallel group must survive projection"
+    for plan in parallel:
+        for group in plan.parallel_groups:
+            # One assistant message issues them together; splitting the group into
+            # consecutive turns would turn parallel calling into sequential calling.
+            assert len({call.turn_index for call in group.calls}) == 1
+            assert len({call.call_group for call in group.calls}) == 1
+
+
+def test_every_published_banking_row_projects_through_the_export_contract(banking_run) -> None:
+    # The banking pack exercises all nine turn policies, so this is the broadest
+    # evidence available that the contract describes real published rows rather
+    # than the shape the tests happen to build.
+    _assert_exports_preserve_the_published_benchmark(banking_run)
+
+
 def test_banking_withheld_slot_stays_out_of_the_first_user_turn(banking_run) -> None:
     row = _row(banking_run, "bn_balance_withheld_account")
     account_id = decode_arguments(row["expected_tool_calls"][0]["arguments"])["account_id"]
@@ -629,6 +1172,9 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
     assert manifest["paraphrase_rejections"]["requested_candidates"] == 0
     assert manifest["paraphrase_rejections"]["rejected_candidates"] == 0
     assert manifest["trace_drop_rejections"] == {"count": 0, "by_reason": {}}
+    assert manifest["exports"]["evaluated"] is False
+    assert manifest["exports"]["status"] is None
+    assert all(not item["enabled"] for item in manifest["exports"]["formats"].values())
     for artifact in (
         "benchmark_raw_parquet",
         "benchmark_parquet",

@@ -46,3 +46,9 @@ task_generation:
 
 semantic_deduplication_config:
   enabled: false
+
+exports:
+  # Enable either writer to exercise Stage 12 compatibility publication. The
+  # reference smoke config keeps them off so its default run stays minimal.
+  bfcl_json: false
+  nemo_evaluator_bundle: false

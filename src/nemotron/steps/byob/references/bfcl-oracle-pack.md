@@ -570,6 +570,40 @@ remaining `REPLACE_ME_*` entries only matter once the corresponding role is enab
 Generation supports reference profiling, controlled paraphrasing, Stage 10
 surface-quality validation, and optional Stage 11 semantic deduplication and
 balancing. Stage 11 fails closed on backend/artifact errors and requires an
-explicit abort-or-non-gold policy for unmet targets. Generation still refuses
-settings for later work no stage performs, such as exports, so a run never
-claims guarantees nothing produced.
+explicit abort-or-non-gold policy for unmet targets. Stage 12 supports
+`exports.bfcl_json` and `exports.nemo_evaluator_bundle`; unknown export names and
+settings owned by later stages are refused rather than ignored.
+
+## Compatibility Exports and Recovery
+
+Both compatibility writers receive the same canonical projection of
+`benchmark.parquet`. Stage 12 reads enabled outputs back, checks row count, task
+order, tool definitions, expected calls, ordering policy, and content hashes, and
+writes `exports/export_validation_report.json`. `run_manifest.json` records every
+format as enabled or disabled and pins the report and export hashes.
+
+The NeMo bundle is input for the W5 native-function-calling adapter. Its
+`evaluator.yaml` describes seed/replay/scoring semantics but is not a standalone
+NeMo Evaluator 0.2.x task registration or Launcher config. Native tool calls need
+an installed/containerized harness plus a tool resource service.
+
+Stage 12 writes into `.stage12-*`, validates all payloads, then promotes parquet
+and exports before moving `run_manifest.json` last. Treat the manifest as the
+commit marker: without it, no adjacent parquet or export belongs to a published
+run.
+
+Recovery is fail-closed:
+
+- **Schema mismatch:** do not edit generated rows; remove final Stage 12 payloads
+  and regenerate with one code revision. Select consumers using the
+  `schema_version` values in the manifest.
+- **Unsupported call layout:** use the task id in the exception to fix the pack's
+  tool identifiers or conversation shape. The BFCL JSON adapter requires
+  Python-compatible function and argument names; the NeMo input contract requires
+  an unambiguous seed/replay plan.
+- **Hash or equivalence mismatch:** inspect
+  `exports/export_validation_report.json` when it exists, then regenerate the
+  whole publication. Never repair one exported file in place.
+- **Interrupted publication:** if `run_manifest.json` is absent, rerun
+  `stage=generate`. Startup removes abandoned `.stage12-*` directories and stale
+  final payloads before the next attempt.

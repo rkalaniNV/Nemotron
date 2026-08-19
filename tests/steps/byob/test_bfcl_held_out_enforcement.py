@@ -12,9 +12,16 @@ import pytest
 import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl import pipeline
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.bfcl_json_export import (
+    BFCL_JSON_QUESTION_FILE,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.held_out_contract import (
     HeldOutPolicy,
     fixture_ref,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.nemo_evaluator_export import (
+    NEMO_DATASET_FILE,
+    NEMO_EVALUATOR_ROOT,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import expand as expand_stage
@@ -127,6 +134,34 @@ def test_stage_twelve_scans_every_row_and_stamps_a_checked_result(held_out_run) 
     assert scan["counts"]["rows_scanned"] >= len(rows)
     assert scan["counts"]["rows_published"] == len(rows)
     assert scan["stage_four"]["blocked_templates"] == [HELD_OUT_TEMPLATE]
+
+
+def test_held_out_enforcement_and_both_exports_share_the_same_safe_task_set(tmp_path: Path) -> None:
+    import pyarrow.parquet as pq
+
+    pack = _prepare_pack(tmp_path, held_out=_default_policy())
+    config_path = _write_config(tmp_path, pack, "held-out-exports.yaml")
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["exports"] = {"bfcl_json": True, "nemo_evaluator_bundle": True}
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    benchmark_path = generate_bfcl(config_path)
+    rows = pq.read_table(benchmark_path).to_pylist()
+    expected_ids = [str(row["task_id"]) for row in rows]
+    bfcl_ids = [
+        json.loads(line)["id"]
+        for line in (benchmark_path.parent / BFCL_JSON_QUESTION_FILE).read_text(encoding="utf-8").splitlines()
+    ]
+    nemo_ids = [
+        json.loads(line)["task_id"]
+        for line in (benchmark_path.parent / NEMO_EVALUATOR_ROOT / NEMO_DATASET_FILE)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    assert all(row["held_out_hit"] is False for row in rows)
+    assert all(row["template_id"] != HELD_OUT_TEMPLATE for row in rows)
+    assert expected_ids == bfcl_ids == nemo_ids
 
 
 def test_the_manifest_reports_enforcement_and_hashes_its_evidence(held_out_run) -> None:

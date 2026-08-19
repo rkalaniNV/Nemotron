@@ -18,3 +18,8 @@ requires every validation check to pass with `oracle_runtime.worker: process`.
 Then run `stage=generate`, or use `stage=all`, to expand templates, render the
 conversation, validate the expected trace, replay it twice, and write the parquet
 artifacts plus `run_manifest.json`.
+
+Set `exports.bfcl_json` and/or `exports.nemo_evaluator_bundle` to emit optional
+compatibility trees from the published parquet. Stage 12 reads them back for
+equivalence and writes `exports/export_validation_report.json` before committing
+`run_manifest.json`; the NeMo bundle remains input for the W5 native-tool adapter.
