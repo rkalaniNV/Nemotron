@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import EXPORT_FORMATS
 from nemotron.steps.byob.runtime.benchmark_families.registry import list_families
 
 BFCL_CONFIG_DIR = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob" / "bfcl" / "config"
@@ -2186,6 +2187,26 @@ def test_generate_refuses_settings_it_would_otherwise_ignore(tmp_path: Path) -> 
 
     batched = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "batch.yaml", ndd_batch_size=8))
     assert _unsupported_requests(batched) == []
+
+
+def test_every_declared_export_format_is_supported(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import _unsupported_requests
+
+    for index, name in enumerate(EXPORT_FORMATS):
+        config = BfclConfig.from_yaml(_write_tiny_config(tmp_path, f"export-{index}.yaml", exports={name: True}))
+        assert _unsupported_requests(config) == []
+
+    both = BfclConfig.from_yaml(
+        _write_tiny_config(tmp_path, "exports-all.yaml", exports=dict.fromkeys(EXPORT_FORMATS, True))
+    )
+    assert _unsupported_requests(both) == []
+
+
+def test_an_unknown_export_name_is_never_silently_ignored(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="exports has unknown keys: bfcl_jsno"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(tmp_path, "export-typo.yaml", exports={"bfcl_jsno": True})
+        )
 
 
 def test_generate_revalidates_a_hand_edited_gold_report(tmp_path: Path) -> None:

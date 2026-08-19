@@ -15,11 +15,19 @@ description = "Generated BFCL benchmark parquet with expected_tool_calls, messag
 
 [[produces]]
 type = "bfcl_run_manifest"
-description = "run_manifest.json recording lineage, oracle clock, generation mode, and a content hash per stage artifact."
+description = "run_manifest.json recording lineage, oracle clock, generation mode, publication hashes, and enabled/disabled compatibility export status."
 
 [[produces]]
 type = "bfcl_stage_cache"
 description = "Task-indexed generation parquets under stage_cache/ plus content-addressed reference_samples, model I/O caches, and rejection reports."
+
+[[produces]]
+type = "bfcl_compatibility_exports"
+description = "Optional BFCL JSONL and NeMo Evaluator input bundles under exports/, both derived from the canonical published parquet projection."
+
+[[produces]]
+type = "bfcl_export_validation_report"
+description = "exports/export_validation_report.json proving enabled export row counts, order, truth fields, and hashes equal benchmark.parquet."
 
 [[parameters]]
 name = "family"
@@ -55,6 +63,11 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 [[strategies]]
 when = "You want the smallest end-to-end function-calling run to check plumbing"
 then = "Run config/tiny.yaml with stage=all against data/tiny_oracle_pack: it covers single-turn, confirmation, parallel call_group, and irrelevant shapes with no model calls."
+skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[strategies]]
+when = "You need BFCL JSONL or a NeMo Evaluator input bundle beside the published parquet"
+then = "Enable exports.bfcl_json and/or exports.nemo_evaluator_bundle. Stage 12 derives both from one canonical projection, reads them back, writes exports/export_validation_report.json, and publishes run_manifest.json last. The NeMo bundle is W5 adapter input, not a standalone Launcher task registration."
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[errors]]
@@ -151,7 +164,27 @@ recovery = "Declare assistant_turn_templates for the non-tool milestones the tem
 
 [[errors]]
 name = "unsupported_config_feature"
-recovery = "stage=generate refuses a config that asks for work no stage performs (semantic_deduplication_config, an export, unsupported balancing controls, eval/translation orchestration, shared MCQ model fields, or an unrecognized surface_generation key) instead of ignoring it. Disable or remove the listed settings, or implement the owning stage."
+recovery = "stage=generate refuses a config that asks for work no stage performs (an unknown export name, unsupported balancing controls, eval/translation orchestration, shared MCQ model fields, or an unrecognized surface_generation key) instead of ignoring it. Disable or remove the listed setting, or register its owning stage/writer."
+
+[[errors]]
+name = "export_schema_mismatch"
+recovery = "The published parquet or an export record does not match the pinned W4.5 schema. Do not edit generated files. Remove benchmark_raw.parquet, benchmark.parquet, exports/, and run_manifest.json, then rerun stage=generate with one code revision. Consumers must select adapters by the schema_version recorded in run_manifest.json."
+
+[[errors]]
+name = "unsupported_export_call_layout"
+recovery = "A canonical row cannot be represented by the selected compatibility format, for example because a BFCL function/argument name is not a Python identifier or one evaluator record has an ambiguous prompt/replay layout. Read the task id in the exception, fix the pack tool schema or conversation template, and regenerate; Stage 12 leaves no final manifest."
+
+[[errors]]
+name = "export_hash_or_equivalence_mismatch"
+recovery = "An export changed after encoding or failed read-back equivalence against benchmark.parquet. Inspect exports/export_validation_report.json when present, discard all final Stage 12 payloads, and rerun. Never repair one JSONL/bundle file in place because run_manifest.json pins the whole tree."
+
+[[errors]]
+name = "export_publication_interrupted"
+recovery = "run_manifest.json is the commit marker. If it is absent, benchmark parquet or exports beside it are not published even if files exist. Rerun stage=generate; startup removes abandoned .stage12-* trees and Stage 12 replaces all final payloads before writing the manifest last."
+
+[[errors]]
+name = "nemo_evaluator_adapter_required"
+recovery = "evaluator.yaml inside nemo_evaluator_bundle is a W5 adapter contract, not a standalone NeMo Evaluator Launcher config. Native function calling needs an installed/containerized harness with task registration plus a tool resource service; do not pass the bundle directory directly to the 0.2.x Launcher."
 
 [reference]
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"

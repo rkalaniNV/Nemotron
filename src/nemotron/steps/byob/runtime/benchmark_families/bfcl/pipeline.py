@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import partial
@@ -95,6 +96,9 @@ _FINAL_ARTIFACTS = (
     "benchmark_raw.parquet",
     "benchmark_raw.parquet.tmp",
 )
+# The whole export tree, so a run that disables a format cannot inherit the one a
+# previous run left behind and publish it beside a manifest that never mentions it.
+_FINAL_EXPORT_DIRECTORIES = ("exports",)
 # Derived Stage 10 outputs, rewritten whenever the stage runs. A previous run must not
 # leave them behind for a run that disables the stage, or for one that aborts on pack
 # drift: either way the next manifest would hash a verdict this run never reached.
@@ -124,8 +128,12 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     Generation refuses these instead of ignoring them, so a run never reports
     lineage or quality guarantees that no stage actually applied.
     """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.final_output import EXPORT_WRITERS
+
     requested: list[str] = []
-    requested.extend(f"exports.{name}" for name, on in sorted(config.exports.items()) if on)
+    requested.extend(
+        f"exports.{name}" for name, on in sorted(config.exports.items()) if on and name not in EXPORT_WRITERS
+    )
     supported_task_generation = {"tasks_per_category"}
     if config.semantic_deduplication_config.get("enabled"):
         supported_task_generation.update(
@@ -229,6 +237,10 @@ def _invalidate_final_outputs(config: BfclConfig) -> None:
     output_dir = Path(config.output_dir) / config.expt_name
     for name in _FINAL_ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
+    for name in _FINAL_EXPORT_DIRECTORIES:
+        shutil.rmtree(output_dir / name, ignore_errors=True)
+    for staging_dir in output_dir.glob(".stage12-*"):
+        shutil.rmtree(staging_dir, ignore_errors=True)
     cache = stage_cache_dir(config)
     for name in (*_SURFACE_QUALITY_ARTIFACTS, *_DEDUP_BALANCING_ARTIFACTS, *_HELD_OUT_ARTIFACTS):
         (cache / name).unlink(missing_ok=True)
