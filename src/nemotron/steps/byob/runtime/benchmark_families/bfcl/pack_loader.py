@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -57,20 +58,32 @@ def _as_path(pack_root: Path, value: str | Path | None) -> Path | None:
 
 def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
     """Resolve pack file paths from manifest + config overrides."""
-    manifest_path = assert_pack_allowed(
-        config.oracle_pack.manifest_path,
-        config.oracle_runtime.allowed_roots,
-    )
+    return resolve_declared_pack_paths(config.oracle_pack, config.oracle_runtime.allowed_roots)
+
+
+def resolve_declared_pack_paths(
+    ref: OraclePackRef,
+    allowed_roots: Sequence[Path],
+) -> ResolvedPackPaths:
+    """Resolve one pack's files from its manifest plus the declared overrides.
+
+    Split out from :func:`resolve_pack_paths` so that a later consumer — an eval
+    run verifying the pack a published benchmark was generated from — resolves
+    the pack through this exact logic instead of reimplementing it. There is one
+    definition of which files a pack consists of, and therefore one definition of
+    what its fingerprint covers.
+    """
+    allowed_roots = tuple(allowed_roots)
+    manifest_path = assert_pack_allowed(ref.manifest_path, allowed_roots)
     pack_root = manifest_path.parent
     # Ensure the whole pack tree is under allowlist (not just the manifest file).
-    assert_pack_allowed(pack_root, config.oracle_runtime.allowed_roots)
+    assert_pack_allowed(pack_root, allowed_roots)
 
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     if not isinstance(manifest, dict):
         raise ValueError(f"manifest must be a mapping: {manifest_path}")
 
     paths_block = manifest.get("paths") or {}
-    ref: OraclePackRef = config.oracle_pack
     if ref.backend_path is not None and ref.endpoint_config_path is not None:
         raise ValueError("oracle_pack cannot declare both backend_path and endpoint_config_path")
     if paths_block.get("backend") and paths_block.get("endpoint"):
@@ -84,20 +97,20 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
         else:
             path = pack_root / default_name
         assert path is not None
-        return assert_pack_allowed(path, config.oracle_runtime.allowed_roots)
+        return assert_pack_allowed(path, allowed_roots)
 
     tools_path = pick(None, "tools", "tools.json")
     fixtures_path = None
     fixtures_candidate = pack_root / "fixtures.json"
     if ref.fixtures_path is not None:
-        fixtures_path = assert_pack_allowed(ref.fixtures_path, config.oracle_runtime.allowed_roots)
+        fixtures_path = assert_pack_allowed(ref.fixtures_path, allowed_roots)
     elif paths_block.get("fixtures"):
         fixtures_path = assert_pack_allowed(
             _as_path(pack_root, paths_block["fixtures"]),  # type: ignore[arg-type]
-            config.oracle_runtime.allowed_roots,
+            allowed_roots,
         )
     elif fixtures_candidate.exists():
-        fixtures_path = assert_pack_allowed(fixtures_candidate, config.oracle_runtime.allowed_roots)
+        fixtures_path = assert_pack_allowed(fixtures_candidate, allowed_roots)
 
     templates_path = pick(ref.task_templates_path, "templates", "task_templates.yaml")
     assertions_path = pick(ref.assertions_path, "assertions", "assertions.py")
@@ -106,7 +119,7 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
     if manifest.get("system_prompt_path"):
         system_prompt_path = assert_pack_allowed(
             _as_path(pack_root, manifest["system_prompt_path"]),  # type: ignore[arg-type]
-            config.oracle_runtime.allowed_roots,
+            allowed_roots,
         )
         if not system_prompt_path.exists():
             raise FileNotFoundError(f"missing system prompt file: {system_prompt_path}")
@@ -116,7 +129,7 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
             raise ValueError("manifest held_out must be a non-empty path string")
         held_out_path = assert_pack_allowed(
             _as_path(pack_root, manifest["held_out"]),  # type: ignore[arg-type]
-            config.oracle_runtime.allowed_roots,
+            allowed_roots,
         )
         if not held_out_path.is_file():
             raise FileNotFoundError(f"missing held-out policy file: {held_out_path}")
@@ -124,24 +137,24 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
     backend_path = None
     endpoint_config_path = None
     if ref.backend_path is not None:
-        backend_path = assert_pack_allowed(ref.backend_path, config.oracle_runtime.allowed_roots)
+        backend_path = assert_pack_allowed(ref.backend_path, allowed_roots)
     elif ref.endpoint_config_path is not None:
-        endpoint_config_path = assert_pack_allowed(ref.endpoint_config_path, config.oracle_runtime.allowed_roots)
+        endpoint_config_path = assert_pack_allowed(ref.endpoint_config_path, allowed_roots)
     elif paths_block.get("backend"):
         backend_path = assert_pack_allowed(
             _as_path(pack_root, paths_block["backend"]),  # type: ignore[arg-type]
-            config.oracle_runtime.allowed_roots,
+            allowed_roots,
         )
     elif paths_block.get("endpoint"):
         endpoint_config_path = assert_pack_allowed(
             _as_path(pack_root, paths_block["endpoint"]),  # type: ignore[arg-type]
-            config.oracle_runtime.allowed_roots,
+            allowed_roots,
         )
     elif (pack_root / "backend.py").exists():
-        backend_path = assert_pack_allowed(pack_root / "backend.py", config.oracle_runtime.allowed_roots)
+        backend_path = assert_pack_allowed(pack_root / "backend.py", allowed_roots)
     elif (pack_root / "endpoint_config.yaml").exists():
         endpoint_config_path = assert_pack_allowed(
-            pack_root / "endpoint_config.yaml", config.oracle_runtime.allowed_roots
+            pack_root / "endpoint_config.yaml", allowed_roots
         )
 
     if (backend_path is None) == (endpoint_config_path is None):
@@ -152,7 +165,7 @@ def resolve_pack_paths(config: BfclConfig) -> ResolvedPackPaths:
             raise FileNotFoundError(f"missing endpoint config: {endpoint_config_path}")
         endpoint_ca_bundle_path = load_endpoint_config(
             endpoint_config_path,
-            allowed_roots=config.oracle_runtime.allowed_roots,
+            allowed_roots=allowed_roots,
         ).ca_bundle_path
     elif backend_path is not None and not backend_path.is_file():
         raise FileNotFoundError(f"missing backend module: {backend_path}")

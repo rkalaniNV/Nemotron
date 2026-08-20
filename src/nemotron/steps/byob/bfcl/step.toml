@@ -29,6 +29,10 @@ description = "Optional BFCL JSONL and NeMo Evaluator input bundles under export
 type = "bfcl_export_validation_report"
 description = "exports/export_validation_report.json proving enabled export row counts, order, truth fields, and hashes equal benchmark.parquet."
 
+[[produces]]
+type = "bfcl_source_verification_report"
+description = "source_verification_report.json in the eval output tree proving the evaluated source is the committed publication: manifest hash, both table hashes, publication semantics, task index, and oracle pack fingerprint."
+
 [[parameters]]
 name = "family"
 description = "Benchmark family implementation to run."
@@ -69,6 +73,16 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 when = "You need BFCL JSONL or a NeMo Evaluator input bundle beside the published parquet"
 then = "Enable exports.bfcl_json and/or exports.nemo_evaluator_bundle. Stage 12 derives both from one canonical projection, reads them back, writes exports/export_validation_report.json, and publishes run_manifest.json last. The NeMo bundle is W5 adapter input, not a standalone Launcher task registration."
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[strategies]]
+when = "You need to evaluate candidate models against a published BFCL benchmark"
+then = "Start from config/eval.default.yaml (schema 1.1). It reads run_manifest.json rather than a bare parquet, pins the scoring contract in references/bfcl-eval-scoring-contract.md by content hash, and requires an immutable model commit or weights digest per candidate. Executable mode also pins a matching oracle-pack manifest plus backend.py or endpoint config; oracle.kind alone is not executable. The result resolves into one eval_config_hash. Keep it in its own file: eval inputs are excluded from every generation lineage hash, so scoring a new candidate never changes the identity of the benchmark. The eval runner itself lands in W5.4; until then stage=generate refuses eval_config_path and inline eval blocks instead of ignoring them."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to prove the benchmark you are about to score is the one that was published"
+then = "Call verify_eval_source(config) before any candidate token is spent. It re-reads run_manifest.json and holds it to the hash the eval config resolved, hashes benchmark_raw.parquet and benchmark.parquet against every declaration in the manifest, replays the W4.5 publication contract over both tables, decodes the published rows under this build's benchmark schema into a unique addressable task index, and for executable mode recomputes the oracle pack fingerprint and probes the backend interface in a throwaway worker. It returns a VerifiedEvalSource handle — the only way a runner receives paths — and write_source_verification_report puts the evidence in outputs.output_dir. Call assert_source_unchanged immediately before execution: verification and use are separated in time, and that gap is where a source gets replaced."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[errors]]
 name = "missing_family_pin"
@@ -185,6 +199,74 @@ recovery = "run_manifest.json is the commit marker. If it is absent, benchmark p
 [[errors]]
 name = "nemo_evaluator_adapter_required"
 recovery = "evaluator.yaml inside nemo_evaluator_bundle is a W5 adapter contract, not a standalone NeMo Evaluator Launcher config. Native function calling needs an installed/containerized harness with task registration plus a tool resource service; do not pass the bundle directory directly to the 0.2.x Launcher."
+
+[[errors]]
+name = "eval_config_schema_invalid"
+recovery = "eval_config.yaml must be schema_version \"1.1\" with config_status: resolved, every section closed, and every setting stated. Quoted booleans and numbers, unknown keys, missing limits, empty or repeated eval.mode entries, and leftover REPLACE_ME_* values are refused rather than defaulted. Fix the field named in the error."
+
+[[errors]]
+name = "eval_config_path_invalid"
+recovery = "source_run_manifest must name run_manifest.json from a completed stage=generate run, not a parquet: the manifest is the commit marker and names the table it published. A translation manifest must reference the same source run. Executable mode requires source_oracle paths whose kind and pack identity match the source run. outputs.output_dir must be a directory outside the generation publication tree, and resolved eval config files may only be written below it."
+
+[[errors]]
+name = "candidate_identity_invalid"
+recovery = "Each candidate needs a unique filesystem-safe alias and a distinct canonical model identity. Weight identity is model_identity (source, model, revision or weights_digest); provider and model only name the serving route. Use one candidate per set of weights."
+
+[[errors]]
+name = "candidate_revision_mutable"
+recovery = "A branch or tag such as main, master, latest, refs/heads/*, release-2026, or v1 can move and score different weights on a later run. Without a weights digest, pin a full 40–64 hexadecimal commit id. Otherwise set model_identity.weights_digest to sha256:<64 hex>."
+
+[[errors]]
+name = "secret_in_eval_config"
+recovery = "Never write a credential into eval_config.yaml or embed one in base_url. Name the environment variable with candidates[].api.api_key_env and export the value in the runner's environment. String values are redacted from config diagnostics. If a literal key reached the file, rotate it: the loader refuses the config but the file was already on disk."
+
+[[errors]]
+name = "eval_publication_policy_violation"
+recovery = "publication.requested: true requires every locked gate: argument_matching schema_then_canonical, respect_call_order, respect_call_group, allow_llm_repair false, task_success all_applicable_gates, contamination enforce/fail_run/common_intersection, and all outputs artifacts enabled. Executable publication additionally requires a gold-eligible source run. Restore the gate, or set publication.requested: false and read non_publication_reasons."
+
+[[errors]]
+name = "eval_source_manifest_invalid"
+recovery = "The file named by source_run_manifest is not a Stage 12 commit marker: it is absent, unreadable, not named run_manifest.json, missing a required publication field, or declares a benchmark schema this build cannot read. A parquet without its manifest is an unpublished artifact. Rerun stage=generate, or evaluate with the pipeline revision that published the run."
+
+[[errors]]
+name = "eval_source_manifest_drift"
+recovery = "run_manifest.json, its run id, or its schema version changed between eval config resolution and verification. Re-resolve the eval config against the current publication and verify again; a manifest that moves mid-run means two different benchmarks would be reported as one score."
+
+[[errors]]
+name = "eval_source_benchmark_hash_mismatch"
+recovery = "A benchmark table's bytes do not match the hash the publication declares, or the file is a symlink or missing from the publication tree. Do not repair the table: a parquet that changed after publication is a different benchmark whatever its file name says. Evaluate the tree the manifest describes, or regenerate."
+
+[[errors]]
+name = "eval_source_benchmark_schema_mismatch"
+recovery = "The parquet on disk is not written with the benchmark schema this build reads, or a row cannot be decoded by the canonical projection. Regenerate with this pipeline revision. Skipping the row is not an option because it would silently change the task set."
+
+[[errors]]
+name = "eval_source_publication_invalid"
+recovery = "benchmark_raw.parquet and benchmark.parquet do not stand in the W4.5 relationship: the published table is not a selection of raw rows, a published row restates a truth field, a held-out row shipped, the declared row counts disagree with the tables, or the manifest contradicts itself about whether held-out was evaluated. Regenerate the benchmark; the audit table can no longer explain a score."
+
+[[errors]]
+name = "eval_source_task_index_invalid"
+recovery = "The published rows do not form an addressable task set: a duplicate task id, or an id that cannot be a path component or a log token (path separators, whitespace, control characters, a leading dash or dot, a reserved directory name). Task ids derive from pack_id and template_id, so fix those in the pack and regenerate."
+
+[[errors]]
+name = "eval_source_oracle_pack_drift"
+recovery = "The oracle pack changed after the source run was generated: the pack manifest, the execution resource, or any file in the pack tree no longer matches the fingerprint recorded in run_manifest.json. Restore the pack revision the benchmark was generated from — a helper module the backend imports changes what the oracle does, so the whole tree counts."
+
+[[errors]]
+name = "eval_source_oracle_resource_mismatch"
+recovery = "The declared oracle is not the one the source run executed: the kind disagrees with the manifest, the pack identity disagrees, the resource is not the backend or endpoint config the pack's own manifest.yaml selects, the endpoint pins a different oracle identity than endpoint_metadata records, or the backend cannot be imported or does not expose list_tools/reset/call_tool/get_state. Declare the executed resource in the pack manifest; a resource chosen only by the eval config could execute code the source run never ran."
+
+[[errors]]
+name = "eval_source_translation_lineage_invalid"
+recovery = "A translated benchmark does not derive from this source run without changing its truth: the manifest changed after resolution, it names another run, it omits language/benchmark/task_ids_hash, its table does not match its declared hash, it adds, drops, or reorders rows, or it restates a preserved field. Translate only the conversation, intent, system prompt, and row metadata; every field a scorer compares must survive translation unchanged."
+
+[[errors]]
+name = "eval_source_changed_during_eval"
+recovery = "The source moved after it was verified, so the run would score two benchmarks. Stop writing into the publication tree during an evaluation — a re-run of generation into the same directory is the usual cause — then verify again from a clean tree."
+
+[[errors]]
+name = "unsupported_eval_mode"
+recovery = "eval.mode is a non-empty list drawn from [trace, executable] with no repeats; the canonical order is trace then executable. Executable mode needs a source run whose manifest declares an oracle."
 
 [reference]
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"

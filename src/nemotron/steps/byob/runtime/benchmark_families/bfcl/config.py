@@ -50,9 +50,16 @@ _TOP_LEVEL_KEYS = frozenset(
         "generation_model_config",
         "judge_model_config",
         "eval_config_path",
+        "eval",
         "translation_config_path",
     }
 )
+# Eval inputs a generation config may carry for the eval entry point to read.
+# They are excluded from every generation lineage hash: swapping a candidate model
+# or a decoding temperature changes what was *evaluated*, never what was
+# generated, and a benchmark whose identity moved because of an eval edit could
+# not be compared against its own earlier scores.
+EVAL_REFERENCE_KEYS = frozenset({"eval_config_path", "eval"})
 _ORACLE_PACK_KEYS = frozenset(
     {
         "manifest_path",
@@ -400,6 +407,11 @@ class BfclConfig:
     generation_model_config: dict[str, Any] | None = None
     judge_model_config: dict[str, Any] | None = None
     eval_config_path: str | None = None
+    # Legacy inline eval block, kept raw. It is normalized by
+    # ``bfcl.eval.config.load_eval_config_for_generation`` into the same
+    # ``BfclEvalConfig`` a standalone file produces, so there is one validator
+    # rather than a second dialect. Never read by a generation stage.
+    inline_eval: dict[str, Any] | None = field(default=None, repr=False)
     translation_config_path: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -848,6 +860,21 @@ class BfclConfig:
         if profile_role_enabled and reference_benchmark is None:
             raise ValueError("reference_benchmark must be configured when lineage.roles.profile is enabled")
 
+        # Eval inputs are carried, not interpreted: the eval entry point owns their
+        # contract. Two of them in one file is refused here rather than resolved by
+        # precedence, because only one of the two could have been the config that ran.
+        eval_config_path = data.get("eval_config_path")
+        if eval_config_path is not None and (not isinstance(eval_config_path, str) or not eval_config_path.strip()):
+            raise ValueError("eval_config_path must be a non-empty path string when present")
+        inline_eval = data.get("eval")
+        if inline_eval is not None and not isinstance(inline_eval, dict):
+            raise ValueError("eval must be a mapping when present; it is a legacy inline eval config")
+        if inline_eval is not None and eval_config_path is not None:
+            raise ValueError(
+                "eval_config_path and an inline eval block cannot both be set; keep eval_config_path so "
+                "candidate edits stay out of generation lineage"
+            )
+
         return cls(
             family="bfcl",
             expt_name=str(data["expt_name"]),
@@ -869,7 +896,8 @@ class BfclConfig:
             reference_benchmark=reference_benchmark,
             generation_model_config=data.get("generation_model_config"),
             judge_model_config=data.get("judge_model_config"),
-            eval_config_path=data.get("eval_config_path"),
+            eval_config_path=eval_config_path,
+            inline_eval=inline_eval,
             translation_config_path=data.get("translation_config_path"),
             raw=data,
         )

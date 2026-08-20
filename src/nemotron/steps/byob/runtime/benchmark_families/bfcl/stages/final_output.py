@@ -25,6 +25,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.bfcl_json_export import
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import (
     BYOB_ROOT,
     DEFAULT_BENCHMARK_SCHEMA_VERSION,
+    EVAL_REFERENCE_KEYS,
     BfclConfig,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
@@ -325,15 +326,26 @@ def _config_roots(config: BfclConfig) -> tuple[tuple[str, Path], ...]:
     return tuple(roots)
 
 
+def _without_eval_reference(payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop the eval inputs a generation config only carries.
+
+    Generation lineage answers "what produced these rows". A candidate model, its
+    revision, or an eval config's location answers "who was scored on them", and
+    letting either move the generation hash would make a benchmark look like a
+    different benchmark every time someone evaluated a new model on it.
+    """
+    return {key: value for key, value in payload.items() if key not in EVAL_REFERENCE_KEYS and key != "inline_eval"}
+
+
 def _resolved_config(config: BfclConfig) -> dict[str, Any]:
     payload = asdict(config)
     payload.pop("raw", None)
-    return _jsonable(payload, roots=_config_roots(config))
+    return _jsonable(_without_eval_reference(payload), roots=_config_roots(config))
 
 
 def _generation_config(config: BfclConfig) -> dict[str, Any]:
     """Portable view of the YAML input, so two hosts with the same logical config match."""
-    return _jsonable(config.raw or {}, roots=_config_roots(config))
+    return _jsonable(_without_eval_reference(dict(config.raw or {})), roots=_config_roots(config))
 
 
 def generation_mode(config: BfclConfig) -> str:
