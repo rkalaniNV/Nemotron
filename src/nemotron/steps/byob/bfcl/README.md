@@ -146,6 +146,10 @@ exports:
 Both flags default to `false`. Enabling either makes export read-back validation
 part of the Stage 12 publication transaction; the flag is never silently ignored.
 
+Evaluation settings do not live here. They belong in their own `eval_config.yaml`
+(see [Evaluation Config](#evaluation-config)), so that changing a candidate model
+cannot change the identity of the generated benchmark.
+
 Week 4 contracts are parsed strictly even while their owning stages remain
 disabled. Enabled model roles require a non-secret `canonical_id`, and
 `strict_separation` requires every enabled role to use a distinct identity.
@@ -485,9 +489,151 @@ and rerunning Stage 12. A hash/equivalence error requires regenerating the whole
 publication. If `run_manifest.json` is absent, treat any adjacent parquet/export
 as unpublished and rerun; startup clears abandoned `.stage12-*` attempts.
 
+## Evaluation Config
+
+Evaluation is a separate run over a benchmark that was already published, and its
+input is `eval_config.yaml` (schema `1.1`). Start from
+[`config/eval.default.yaml`](config/eval.default.yaml); the loader lives in
+`runtime/benchmark_families/bfcl/eval/`. It parses, resolves, and hashes the
+config. No candidate model is contacted, so an invalid config fails before a
+single token is paid for.
+
+The config names a `source_run_manifest`, never a bare parquet: `run_manifest.json`
+is Stage 12's commit marker, so a directory holding a benchmark without one holds
+unpublished bytes. Which table to read, whether the run is gold-eligible, and
+which oracle kind produced it come from that manifest rather than being restated
+by the operator, so the two cannot disagree. `executable` mode additionally
+requires `source_oracle`: the exact pack manifest and concrete `backend.py` or
+endpoint config. Both must exist, their pack id/version and kind must match the
+source run, and their bytes enter `eval_config_hash`. A manifest's `oracle.kind`
+alone is only lineage; it is not an executable resource. Relative paths resolve
+from the eval config's own directory.
+
+Nothing defaults. Every scoring gate, runtime limit, and decoding parameter is
+stated, because each one changes what the number means: a model cut off at two
+turns did not answer the same question as one given ten. Quoted booleans and
+numbers are refused rather than coerced, since a `"false"` that becomes `true`
+would silently switch off a correctness gate.
+
+A candidate separates two identities. `provider`, `model`, and `api.base_url` name
+the route a request takes; `model_identity` names the weights that answered, and
+must pin an immutable `revision` or a `weights_digest`. Branch-style refs such as
+`main` or `refs/heads/*` are refused, and without a digest the revision must be a
+full 40–64 hexadecimal commit id; an arbitrary branch or tag cannot prove
+immutability. Model and revision remain case-sensitive for registries that
+distinguish case. Two candidates may not share an alias or resolve to the same
+canonical weight identity. Credentials never appear: `api.api_key_env` names an
+environment variable, a literal key anywhere in the file is refused, validation
+diagnostics never echo string values, and a missing variable is an execution
+failure rather than a config error.
+
+`scoring.contract` points at
+[`../references/bfcl-eval-scoring-contract.md`](../references/bfcl-eval-scoring-contract.md)
+and is content-hashed, so editing what "argument match" means changes the config's
+identity. Publication requires the locked gates — `schema_then_canonical`
+argument matching, call order and grouping respected, no LLM repair,
+`all_applicable_gates` task success, contamination enforced with `fail_run` on a
+common intersection, and every artifact written. Relaxing any of them is allowed
+only with `publication.requested: false`, and the config then reports each
+weakened field in `non_publication_reasons`. Executable publication additionally
+requires a gold-eligible source run, since only gold rows were validated against a
+real oracle. `outputs.output_dir` must sit outside the generation publication tree,
+must be a directory when it already exists, and
+`write_resolved_eval_config()` only writes below it. An eval run therefore cannot
+overwrite `run_manifest.json` or the benchmark it scores.
+
+Resolution ends in one `eval_config_hash` over the config's *meaning*: referenced
+files enter as content hashes, candidates are ordered by alias, modes are
+canonically ordered, and absolute paths, output locations, and secret values are
+absent. Moving the checkout leaves the hash alone; changing a candidate, a
+revision, an inference parameter, a limit, the scoring contract, or the source run
+changes it. `write_resolved_eval_config()` writes the same content as an auditable
+`resolved_eval_config.json`, with resolved paths kept outside the hashed payload;
+relative writer paths resolve below `outputs.output_dir`.
+
+An eval config may also be referenced from the generation config through
+`eval_config_path`, or inlined as a legacy `eval` block; both go through the same
+validator, and carrying both is refused as ambiguous. Either way the eval input is
+excluded from `generation_config_hash` and `resolved_config_hash`: evaluating a new
+candidate must not change the identity of the benchmark it was scored on. Until the
+eval runner lands, `stage=generate` refuses both keys rather than accepting a
+setting no stage of that run applies.
+
+## Source Verification
+
+The eval config records what an operator *named*. `verify_eval_source()` reads it
+back from disk and holds it to that record, before any candidate token is spent.
+It is the only way a runner obtains a source: there is no constructor for a
+`VerifiedEvalSource` that skips verification, so "the runner scored an
+unpublished parquet" is not a reachable state.
+
+What it proves, in order:
+
+1. `run_manifest.json` is a Stage 12 commit marker — correctly named, carrying
+   every publication field, declaring a schema this build reads — and its bytes
+   still hash to what the config resolved. Structure is checked before identity,
+   because "this is not a manifest" and "this is a different manifest" call for
+   different fixes.
+2. Both tables hash to what the publication declares, in all three places that
+   declare them: the `publication` section, the `artifacts` section, and the
+   resolved eval config. A symlink is refused; a link can be re-pointed at
+   another benchmark without changing anything the manifest records.
+3. The two tables stand in the relationship `publication_contract` (`1.0`)
+   defines, replayed here over the files on disk: the published table *selects*
+   raw rows without rewriting truth, in the declared order, and ships no held-out
+   row.
+4. Every published row decodes under this build's benchmark schema into a unique,
+   addressable task index. A row the evaluator cannot decode is not skipped,
+   because skipping it would change the task set. Task ids must survive being a
+   path component and a log token; non-ASCII letters are fine, path separators,
+   control characters, and reserved names are not.
+5. For `executable` mode, the oracle pack still fingerprints to what generation
+   certified across every file in its tree — a helper module the backend imports
+   changes what the oracle does — and the resource that will run is the one the
+   *pack's own manifest* selects, never an eval-side override. A Python backend is
+   imported in a throwaway process worker to confirm it exposes `list_tools`,
+   `reset`, `call_tool`, and `get_state`; an endpoint pack's pinned oracle
+   identity must equal the `endpoint_metadata` the source run recorded.
+
+None of these are reimplementations. Publication semantics come from
+`publication_contract`, row decoding from `export_projection`, the pack file set
+and fingerprint from `pack_loader`, and endpoint identity from `endpoint`. A
+verifier that re-derived any of them could disagree with the pipeline that wrote
+the artifact, and then the disagreement would be the bug.
+
+Two things are deliberately out of scope. No live endpoint is contacted: that
+would make offline trace-only evaluation impossible, and an endpoint's *current*
+identity is an execution-time question. And no oracle task is replayed —
+verification proves the backend can be driven at all; replay is the runner's job.
+
+A translated benchmark is verified against its source rather than trusted. It
+must derive from this run, declare its language, table, and task-id hash, match
+its declared bytes, carry exactly the source task ids in publication order, and
+leave every truth field byte-identical under canonical JSON. Translation may
+change the conversation, the stated intent, the system prompt, and row metadata;
+anything a scorer compares against must survive unchanged, since a translation a
+candidate can pass while failing the source is not a translation of this
+benchmark.
+
+A pass writes `source_verification_report.json` into `outputs.output_dir`,
+atomically, listing each check that actually passed. A failure writes
+`source_verification_failure.json` instead — a different file name, so no reader
+can mistake a diagnosis for a pass by seeing which artifact is present. The
+report's `verification_identity` hashes hashes, row counts, task ids, and pack
+fingerprints, and no path or timestamp: moving an intact publication tree must
+not change what was verified, and changing one byte inside it must.
+
+Finally, `assert_source_unchanged()` runs immediately before execution.
+Verification and use are separated in time, and that gap is exactly where a
+source gets replaced — a re-run of generation into the same directory, a pack
+edited to make a failing task pass. Every recorded hash is recomputed, the pack
+fingerprint included, so a run can never span two sources and report one score.
+
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
-[`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md).
+[`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md). For what
+a score means, see
+[`../references/bfcl-eval-scoring-contract.md`](../references/bfcl-eval-scoring-contract.md).
 
 ## Planned Pipeline Completion
 
@@ -501,7 +647,7 @@ requirements, see
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Implementing** | Run a model or agent against the published benchmark and score tool selection, arguments, call ordering, results, and final task success. |
+| Evaluation and scoring | **Implementing** | Config contract (`eval_config.yaml` `1.1`) is parsed, resolved, and hashed, and the named source is verified against the committed publication (`source_verification` `1.0`) before any token is spent; the runner that scores tool selection, arguments, call ordering, results, and task success is still pending. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Implementing** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |

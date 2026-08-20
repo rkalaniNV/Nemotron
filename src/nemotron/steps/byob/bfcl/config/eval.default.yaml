@@ -1,0 +1,103 @@
+# BFCL eval config template (schema 1.1).
+#
+# Evaluation is a separate run over a benchmark that was already published: it
+# reads run_manifest.json, never a bare parquet, because the manifest is Stage 12's
+# commit marker. Copy this file, fill in every REPLACE_ME_* value, set
+# config_status: resolved, and keep it out of the generation output tree.
+#
+# Nothing here falls back to a provider or pipeline default. Every gate, limit, and
+# decoding parameter is stated, because each one changes what the resulting number
+# means — and all of them together are what eval_config_hash stands for.
+#
+# Credentials are never written here. api_key_env names the environment variable
+# the runner reads; a literal key in this file is refused by the loader.
+
+schema_version: "1.1"
+config_status: template
+
+# The published generation run under evaluation. Relative paths resolve from this
+# file's own directory.
+source_run_manifest: REPLACE_ME_SOURCE_RUN_MANIFEST_JSON
+# Required for executable mode. `oracle.kind` in run_manifest.json is only a
+# lineage label; it does not locate a backend or endpoint for a later process.
+# Point these at the exact pack and execution resource used by generation:
+#
+# source_oracle:
+#   kind: python  # or endpoint
+#   pack_manifest: REPLACE_ME_ORACLE_PACK_MANIFEST
+#   resource: REPLACE_ME_BACKEND_PY_OR_ENDPOINT_CONFIG
+source_oracle: null
+# Set only when scoring a translated benchmark derived from the same source run.
+# Verification requires the translation manifest to declare language, benchmark
+# (file, rows, content_hash), and task_ids_hash, to carry exactly the source task
+# ids in publication order, and to leave every truth field unchanged.
+translation_manifest: null
+
+eval:
+  # trace scores the calls the model proposed; executable additionally replays them
+  # against the oracle pack and evaluates the pack's assertions.
+  mode: [trace]
+
+scoring:
+  # Content-hashed: editing the contract changes eval_config_hash, because two runs
+  # that disagree on what "argument match" means are not the same evaluation.
+  contract: ../../references/bfcl-eval-scoring-contract.md
+  argument_matching: schema_then_canonical
+  insert_declared_defaults: true
+  respect_call_order: true
+  respect_call_group: true
+  allow_llm_repair: false
+  task_success: all_applicable_gates
+
+limits:
+  max_turns: 5
+  tool_timeout_s: 10.0
+  candidate_timeout_s: 60.0
+  episode_timeout_s: 300.0
+  max_parallel_tasks: 1
+  max_retries: 2
+
+candidates:
+  - alias: candidate_a
+    # Serving route: where the request goes.
+    model: REPLACE_ME_SERVING_ROUTE
+    provider: nvidia
+    provider_api_version: v1
+    api:
+      base_url: REPLACE_ME_BASE_URL
+      api_key_env: NVIDIA_API_KEY
+    # Weight identity: what answered. A branch name such as main is refused, since
+    # the same config would score different weights next month.
+    model_identity:
+      source: huggingface
+      model: REPLACE_ME_ORG/REPLACE_ME_MODEL
+      revision: REPLACE_ME_IMMUTABLE_COMMIT
+      weights_digest: null
+    inference:
+      temperature: 0.0
+      top_p: 1.0
+      max_tokens: 1024
+      seed: 42
+      tool_choice: auto
+
+contamination:
+  # Held-out overlap is a validity precondition, not a scoring dimension: a
+  # violation aborts the run, and every candidate answers the same task set.
+  enforce: true
+  on_violation: fail_run
+  comparison_set: common_intersection
+
+publication:
+  requested: true
+  require_same_task_ids: true
+
+outputs:
+  # Must be outside the generation publication tree; an eval run may never write
+  # beside run_manifest.json or the benchmark it scores. Source verification
+  # writes source_verification_report.json here on success, and
+  # source_verification_failure.json instead when it refuses the source.
+  output_dir: REPLACE_ME_EVAL_OUTPUT_DIR
+  write_task_results: true
+  write_eval_manifest: true
+  cache_candidate_responses: true
+  cache_tool_results: true

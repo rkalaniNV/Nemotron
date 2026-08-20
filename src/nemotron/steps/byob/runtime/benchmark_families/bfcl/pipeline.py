@@ -152,8 +152,13 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     )
     # Asking for work a disabled stage would have done. Reading these is what keeps
     # "refuse, do not ignore" true for the whole config and not just the gate flags.
+    # Evaluation is a separate run over a published benchmark: the eval config is
+    # parsed and hashed by bfcl.eval, and generation refuses it until the W5 runner
+    # is wired rather than accepting a config no stage of this run will honor.
     if config.eval_config_path is not None:
         requested.append("eval_config_path")
+    if config.inline_eval is not None:
+        requested.append("eval")
     if config.translation_config_path is not None:
         requested.append("translation_config_path")
     # Shared BYOB fields that BFCL loads for schema compatibility but never applies.
