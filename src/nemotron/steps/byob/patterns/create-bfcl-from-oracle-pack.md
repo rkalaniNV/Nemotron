@@ -40,7 +40,18 @@ source back before any candidate is contacted: the manifest still hashes to what
 was resolved, both tables match every hash the publication declares, the
 published table is an unmodified selection of the raw table with no held-out row,
 the rows decode into a unique task set, and an executable run's oracle pack still
-fingerprints to what generation certified. It writes
+fingerprints to what generation certified. It also records every model that read
+a published row — the profile, paraphrase, and surface-judge roles, plus the
+translator of a translated benchmark — with the rows each one read. It writes
 `source_verification_report.json` into the eval output directory, and
 `assert_source_unchanged()` re-pins everything immediately before execution so a
 run cannot span two sources.
+
+`evaluate_contamination()` then gates the candidates against that inventory and
+returns the task set each one is authorized to answer. A candidate that turns out
+to be the model that paraphrased, judged, or translated the rows is refused under
+the locked policy; a comparison that cannot tell the two apart is recorded and
+blocks publication rather than being guessed either way. Under
+`common_intersection` every candidate answers the same rows, so two numbers are
+comparable by construction. The decision lands in `contamination_report.json`,
+and `assert_plan_unchanged()` re-derives it immediately before the first request.

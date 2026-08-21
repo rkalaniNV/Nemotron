@@ -1,4 +1,4 @@
-"""W5.2: the source an evaluation reads is the publication Stage 12 committed.
+"""Verify that evaluation reads the committed benchmark publication.
 
 Every fixture here builds a real publication tree — two parquets written with the
 benchmark schema, a manifest that declares them, and a resolvable oracle pack —
@@ -245,6 +245,46 @@ def _write_pack(pack_dir: Path, *, endpoint: bool = False, extra_backend: bool =
     return resource
 
 
+def _disabled_roles() -> dict[str, Any]:
+    """The ``models`` block Stage 12 writes when no lineage role is enabled."""
+    return {
+        role: {
+            "alias": None,
+            "provider": None,
+            "model_identity": None,
+            "canonical_id": None,
+            "config_hash": None,
+            "enabled": False,
+        }
+        for role in ("profile", "paraphrase", "surface_judge")
+    }
+
+
+def _enabled_role(
+    canonical_id: str,
+    *,
+    provider: str = "nvidia",
+    model: str = "org/surface-model",
+    source: str | None = None,
+    revision: str | None = None,
+    weights_digest: str | None = None,
+) -> dict[str, Any]:
+    """One enabled role, shaped exactly as ``_model_role`` records it."""
+    return {
+        "alias": "surface",
+        "provider": provider,
+        "model_identity": {
+            "source": source,
+            "model": model,
+            "revision": revision,
+            "weights_digest": weights_digest,
+        },
+        "canonical_id": canonical_id,
+        "config_hash": _hash(b"role-config"),
+        "enabled": True,
+    }
+
+
 @dataclass
 class Publication:
     """A publication tree plus the pack it was generated from."""
@@ -291,6 +331,7 @@ def _publish(
     ordering: str = "raw_order",
     manifest_overrides: dict[str, Any] | None = None,
     published_hash: str | None = None,
+    models: dict[str, Any] | None = None,
 ) -> Publication:
     """Write a publication tree that verification is expected to accept."""
     root = tmp_path / name
@@ -333,6 +374,7 @@ def _publish(
                 else None
             ),
         },
+        "models": models if models is not None else _disabled_roles(),
         "held_out": {"contract_version": "1.0", "source": None, "evaluated": held_out_evaluated},
         "publication": {
             "schema_version": PUBLICATION_CONTRACT_VERSION,
@@ -487,12 +529,14 @@ def test_a_committed_publication_verifies_trace_only(tmp_path: Path) -> None:
     assert source.task_index.gold_task_ids == source.task_ids
     assert source.task_index.turn_policy_counts == {"single_turn": 1}
     assert source.verification_identity.startswith("sha256:")
+    assert source.exposures == ()
     assert {check.name for check in source.checks} == {
         "commit_marker",
         "published_bytes",
         "publication_semantics",
         "task_index",
         "oracle_pack",
+        "model_exposure",
     }
     assert all(check.status == "passed" for check in source.checks)
 
@@ -1001,7 +1045,7 @@ def test_a_translation_of_another_run_is_refused(tmp_path: Path) -> None:
 
 def test_a_translation_with_a_conflicting_source_manifest_hash_is_refused(tmp_path: Path) -> None:
     publication = _publish(tmp_path)
-    # The run id is correct, so W5.1 can resolve the config. W5.2 must still
+    # The run id is correct, so config resolution succeeds. Source verification must still
     # reject the second lineage reference instead of accepting contradictory
     # statements about which publication was translated.
     manifest_path = _translation(

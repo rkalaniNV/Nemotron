@@ -1,4 +1,4 @@
-"""W5.1: the eval config contract, before any candidate model is contacted."""
+"""The eval config contract, resolved before any candidate is contacted."""
 
 from __future__ import annotations
 

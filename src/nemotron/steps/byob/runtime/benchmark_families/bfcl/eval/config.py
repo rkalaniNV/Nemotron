@@ -16,10 +16,11 @@ an invalid evaluation start spending tokens:
    :class:`~...schemas.BfclEvalConfig`, whose validators own every cross-field
    rule (candidate identity, publication gates, mode coherence).
 
-What W5.1 deliberately does *not* do: verify that the benchmark parquet still
-matches the hash its manifest claims (W5.2), compute contamination overlap
-(W5.3), or contact a candidate endpoint. A missing ``NVIDIA_API_KEY`` is not a
-config error either — the config names the variable, and execution reads it.
+Config resolution deliberately does *not* verify that the benchmark parquet still
+matches the hash its manifest claims, compute contamination overlap, or contact a
+candidate endpoint. Those are source verification, authorization, and runtime
+concerns. A missing ``NVIDIA_API_KEY`` is not a config error either — the config
+names the variable, and execution reads it.
 """
 
 from __future__ import annotations
@@ -164,7 +165,7 @@ _SECRET_VALUE_PREFIXES: Final = (
 _PLACEHOLDER: Final = "REPLACE_ME_"
 
 # Artifacts that identify a generation publication tree. Eval output may not land
-# in a directory holding any of them: Stage 12 owns those bytes, and an eval run
+# in a directory holding any of them: publication owns those bytes, and an eval run
 # that writes beside them makes it impossible to say which run published what.
 _PUBLICATION_ARTIFACTS: Final = (
     "run_manifest.json",
@@ -468,10 +469,10 @@ def _resolve_source(data: Mapping[str, Any], base_dir: Path) -> EvalSource:
     benchmark_path = _existing_file(
         manifest_path.parent / published_file,
         f"{field}.publication.published.file",
-        recovery="keep the published table beside its manifest; an eval run reads the tree Stage 12 committed",
+        recovery="keep the published table beside its manifest; evaluation reads the committed publication tree",
     )
-    # The hash comes from the manifest, not from re-reading the parquet: W5.1 pins
-    # what the run *claims* and W5.2 owns proving the bytes still match it.
+    # The hash comes from the manifest, not from re-reading the parquet: config
+    # resolution pins what the run claims and source verification proves the bytes.
     benchmark = _model(
         EvalFileRef,
         {"path": benchmark_path, "content_hash": benchmark_claimed_hash},
@@ -578,7 +579,7 @@ def _resolve_oracle_resource(
             "source_run_manifest.pack",
             "does not carry source pack identity",
             expected="pack_id, version, and content_hash",
-            recovery="point at run_manifest.json from a completed BFCL Stage 12 publication",
+            recovery="point at run_manifest.json from a completed BFCL publication",
         )
     pack_id = pack.get("pack_id")
     pack_version = pack.get("version")

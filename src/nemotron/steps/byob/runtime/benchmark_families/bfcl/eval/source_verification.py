@@ -1,21 +1,25 @@
-"""Prove that an eval config's source is the publication Stage 12 committed (W5.2).
+"""Prove that an eval config names the committed benchmark publication.
 
-W5.1 recorded what the operator *named*. This module reads it back from disk and
-holds it to that record, before a single candidate token is paid for:
+Config resolution recorded what the operator *named*. This module reads it back
+from disk and holds it to that record before a candidate token is paid for:
 
-1. ``run_manifest.json`` is a Stage 12 commit marker, and its bytes still hash to
+1. ``run_manifest.json`` is the publication commit marker, and its bytes still hash to
    what the config resolved. Without a manifest, a parquet beside it is an
    unpublished artifact, not a benchmark.
 2. Both benchmark tables hash to what the publication declares — in three
    independent places (the publication section, the artifact section, and the
    resolved config), which must all agree.
-3. The two tables stand in the relationship W4.5 defines: publication *selects*
+3. The two tables satisfy the publication contract: publication *selects*
    raw rows, it does not rewrite them, and no held-out row ships.
 4. The published parquet decodes under the benchmark schema this build reads,
    into a unique, addressable task set.
 5. For ``executable`` mode, the oracle pack still fingerprints to what generation
    certified, and the resource that will be executed is the one the pack's own
    manifest selects.
+6. Every model that read a published row while it was being built is named, with
+   the rows it read. This is the inventory the contamination gate uses, and it
+   is collected here because "which models shaped this benchmark" is a fact
+   about the source, provable from the same manifest and the same rows.
 
 Nothing here is a second implementation of those contracts. The publication
 semantics come from :mod:`...publication_contract`, the row decode from
@@ -49,6 +53,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import (
     OraclePackRef,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import load_endpoint_config
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
+    ModelIdentityClaim,
+    VerifiedModelExposure,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
     BfclEvalConfig,
     EvalLimits,
@@ -72,6 +80,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract im
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_errors import (
     BenchmarkHashMismatchError,
     BenchmarkSchemaMismatchError,
+    ModelExposureError,
     OraclePackDriftError,
     OracleResourceMismatchError,
     PublicationSemanticsError,
@@ -91,8 +100,8 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_projection impor
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import PackTrustError, ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     ResolvedPackPaths,
-    pack_fingerprint,
     pack_files,
+    pack_fingerprint,
     resolve_declared_pack_paths,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.publication_contract import (
@@ -106,7 +115,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import bench
 
 RUN_MANIFEST_FILE: Final = "run_manifest.json"
 
-# What every Stage 12 manifest carries. A document missing one of these is not a
+# What every publication manifest carries. A document missing one is not a
 # commit marker this evaluator can reason about: each one is either lineage a
 # score has to cite, or a declaration verification checks against the bytes.
 REQUIRED_MANIFEST_FIELDS: Final = (
@@ -116,6 +125,7 @@ REQUIRED_MANIFEST_FIELDS: Final = (
     "gold_eligible",
     "held_out",
     "lineage_policy",
+    "models",
     "oracle",
     "oracle_clock",
     "pack",
@@ -125,6 +135,12 @@ REQUIRED_MANIFEST_FIELDS: Final = (
     "schema_version",
     "tier",
 )
+
+# The roles a generation run can drive a model in, exactly as publication records
+# them. The key set is checked for equality rather than membership: a newer
+# pipeline that adds a role would otherwise have its exposure silently dropped
+# here, and a dropped exposure reads as "this candidate is clean".
+GENERATION_EXPOSURE_ROLES: Final = ("profile", "paraphrase", "surface_judge")
 
 # The symbols a Python oracle backend must expose for the runner to drive it.
 BACKEND_INTERFACE: Final = ("call_tool", "get_state", "list_tools", "reset")
@@ -265,6 +281,7 @@ def verify_eval_source(config: BfclEvalConfig, *, probe_oracle: bool = True) -> 
     benchmark, raw_benchmark = _benchmark_artifacts(config, publication, raw_path, published_path, projection)
     oracle = _verify_oracle(config, manifest, checks, probe=probe_oracle)
     translation = _verify_translation(config, manifest, projection, index, checks)
+    exposures = _build_exposure_inventory(manifest, projection, index, translation, checks)
     executable = config.settings.executable
     try:
         return VerifiedEvalSource(
@@ -283,6 +300,7 @@ def verify_eval_source(config: BfclEvalConfig, *, probe_oracle: bool = True) -> 
             task_index=index,
             oracle=oracle,
             translation=translation,
+            exposures=exposures,
             modes=config.settings.modes,
             claim_scope="trace_and_executable" if executable else "trace_only",
             checks=tuple(checks),
@@ -306,7 +324,7 @@ def _verify_commit_marker(config: BfclEvalConfig, checks: list[SourceCheck]) -> 
             f"is not named {RUN_MANIFEST_FILE}",
             actual=path.name,
             expected=f"a file named {RUN_MANIFEST_FILE}",
-            recovery=f"point at the {RUN_MANIFEST_FILE} Stage 12 wrote; a renamed copy is not a commit marker",
+            recovery=f"point at the published {RUN_MANIFEST_FILE}; a renamed copy is not a commit marker",
         )
     if not path.is_file():
         raise SourceManifestDriftError(
@@ -471,7 +489,7 @@ def _verify_published_bytes(
     ):
         raise PublicationSemanticsError(
             "source_run_manifest.publication.verified",
-            "records that Stage 12 did not verify its own tables",
+            "records that publication did not verify its own tables",
             actual=False,
             expected="true",
             recovery="regenerate the benchmark; an unverified publication is not evaluable output",
@@ -664,12 +682,12 @@ def _verify_publication_semantics(
     published_path: Path,
     checks: list[SourceCheck],
 ) -> CanonicalExportProjection:
-    """Hold both tables to the W4.5 contract, then decode the published rows.
+    """Hold both tables to the publication contract, then decode published rows.
 
     The plan is built from the manifest's own declarations — which gate ran,
-    whether Stage 11 ordered the rows — and the task ids read off disk. What the
-    W4.5 contract then proves is the part an eval run depends on: every published
-    row is a raw row, unchanged, and no held-out row shipped.
+    whether selection ranking ordered the rows — and the task ids read off disk.
+    The publication contract then proves the part an eval run depends on: every
+    published row is a raw row, unchanged, and no held-out row shipped.
     """
     raw_ids = _task_id_column(raw_path, publication.raw_file)
     published_ids = _task_id_column(published_path, publication.published_file)
@@ -1294,7 +1312,7 @@ def _verify_translation(
                 f"{artifact}.{field}",
                 "is absent, so the translation does not declare what it produced",
                 expected="language, benchmark (file, rows, content_hash), and task_ids_hash",
-                recovery="regenerate the translation with a pipeline that writes the W5.2 translation contract; "
+                recovery="regenerate the translation with a pipeline that writes the source translation contract; "
                 "an evaluation must never silently fall back to the source benchmark",
             )
     language = _translation_text(document["language"], f"{artifact}.language")
@@ -1304,7 +1322,7 @@ def _verify_translation(
             f"{artifact}.benchmark",
             "is not a mapping",
             expected="a mapping with file, rows, and content_hash",
-            recovery="regenerate the translation with a pipeline that writes the W5.2 translation contract",
+            recovery="regenerate the translation with a pipeline that writes the source translation contract",
         )
     missing_benchmark_fields = sorted({"file", "rows", "content_hash"} - set(declared_benchmark))
     if missing_benchmark_fields:
@@ -1312,7 +1330,7 @@ def _verify_translation(
             f"{artifact}.benchmark",
             f"is missing required field(s): {', '.join(missing_benchmark_fields)}",
             expected="file, rows, and content_hash",
-            recovery="regenerate the translation with a pipeline that writes the W5.2 translation contract",
+            recovery="regenerate the translation with a pipeline that writes the source translation contract",
         )
     declared_rows = declared_benchmark.get("rows")
     if type(declared_rows) is not int or declared_rows < 0:
@@ -1389,6 +1407,7 @@ def _verify_translation(
             recovery="regenerate the translation from this source publication",
         )
     _require_preserved_truth(projection.rows, translated.rows)
+    translator = _translator_identity(document, artifact)
 
     checks.append(
         SourceCheck(
@@ -1413,7 +1432,49 @@ def _verify_translation(
             schema_fingerprint=benchmark_schema_fingerprint(config.source.benchmark_schema_version),
         ),
         task_ids_hash=index.task_ids_hash,
+        translator=translator,
     )
+
+
+def _translator_identity(document: Mapping[str, Any], artifact: str) -> ModelIdentityClaim | None:
+    """Read the optional ``model`` block naming the translator.
+
+    A translation run reads every row it rewrites, so its model is an exposure.
+    The block is optional because a translation may come from outside this
+    pipeline, and refusing those outright would be a worse outcome than
+    evaluating them un-publishably: an absent block leaves the translator
+    unidentified, which the contamination gate treats as unresolved rather than
+    as clean. A block that is present must be usable, though — an empty mapping
+    is a manifest that meant to declare something and declared nothing.
+    """
+    if "model" not in document:
+        return None
+    declared = document["model"]
+    if not isinstance(declared, Mapping):
+        raise TranslationLineageError(
+            f"{artifact}.model",
+            "is not a mapping, so the translating model cannot be identified",
+            expected="a mapping with provider, model, source, revision, weights_digest, or canonical_id",
+            recovery="declare the translating model, or omit the block entirely and accept that the translation "
+            "cannot be published against a candidate it may share weights with",
+        )
+    claim = ModelIdentityClaim(
+        provider=_optional_text(declared.get("provider")),
+        served_model=_optional_text(declared.get("model")),
+        weight_source=_optional_text(declared.get("source")),
+        weight_model=_optional_text(declared.get("model")),
+        revision=_optional_text(declared.get("revision")),
+        weights_digest=_optional_text(declared.get("weights_digest")),
+        label=_optional_text(declared.get("canonical_id")),
+    )
+    if not claim.names_a_model:
+        raise TranslationLineageError(
+            f"{artifact}.model",
+            "declares a translating model without naming it",
+            expected="at least one of provider, model, or canonical_id",
+            recovery="name the model that produced the translation, or remove the block",
+        )
+    return claim
 
 
 def _translation_text(value: Any, artifact: str) -> str:
@@ -1423,7 +1484,7 @@ def _translation_text(value: Any, artifact: str) -> str:
             "is missing or is not a non-empty string",
             actual=value,
             expected="a non-empty string",
-            recovery="regenerate the translation with a pipeline that writes the W5.2 translation contract",
+            recovery="regenerate the translation with a pipeline that writes the source translation contract",
         )
     return value.strip()
 
@@ -1456,6 +1517,229 @@ def _require_preserved_truth(
             )
 
 
+def _build_exposure_inventory(
+    manifest: Mapping[str, Any],
+    projection: CanonicalExportProjection,
+    index: SourceTaskIndex,
+    translation: VerifiedTranslationSource | None,
+    checks: list[SourceCheck],
+) -> tuple[VerifiedModelExposure, ...]:
+    """Record which models read these rows, and which rows each one read.
+
+    This is contamination analysis input, collected here because it is a fact about the source:
+    the contamination gate decides what an exposure means, but it must not have
+    to re-parse a manifest to find out that one happened.
+
+    Scope is taken from the rows wherever the benchmark schema records it — a
+    profile that shaped no published surface and a paraphraser that wrote three
+    of fifty rows are both narrower than "the whole benchmark", and excluding
+    fifty rows for three rows' worth of exposure would throw away a benchmark
+    for no gain. Where the schema records nothing, the scope is every published
+    row, because a judge read the whole surface it gated.
+    """
+    models = _mapping(
+        manifest["models"],
+        "source_run_manifest.models",
+        recovery="point at a run_manifest.json written by this pipeline; a publication that does not say which "
+        "models shaped it cannot clear any candidate",
+    )
+    if set(models) != set(GENERATION_EXPOSURE_ROLES):
+        raise ModelExposureError(
+            "source_run_manifest.models",
+            f"declares roles {sorted(models)} rather than the ones this build knows",
+            expected=f"exactly {', '.join(GENERATION_EXPOSURE_ROLES)}",
+            recovery="evaluate with the pipeline revision that published the run; a role this build does not "
+            "read would be treated as a model that never saw the benchmark",
+        )
+
+    rows = projection.rows
+    exposures: list[VerifiedModelExposure] = []
+    paraphrased_rows: set[str] = set()
+    profile_shaped_rows = tuple(row.task_id for row in rows if row.metadata.get("profile_hash"))
+    # Held against the rows whether or not the role is enabled: a manifest that
+    # claims a profile shaped surfaces it cannot point at, or disclaims one the
+    # rows carry, is not a record this gate can clear a candidate against.
+    _cross_check_profile_influence(manifest, bool(profile_shaped_rows))
+    enabled_roles: set[str] = set()
+    for role in GENERATION_EXPOSURE_ROLES:
+        entry = _mapping(
+            models[role],
+            f"source_run_manifest.models.{role}",
+            recovery="point at a run_manifest.json written by this pipeline",
+        )
+        if not _boolean(
+            entry.get("enabled"),
+            f"source_run_manifest.models.{role}.enabled",
+            recovery="point at a run_manifest.json written by this pipeline",
+        ):
+            continue
+        enabled_roles.add(role)
+        claim = _role_identity(role, entry)
+        if role == "profile":
+            task_ids = profile_shaped_rows
+            scope = "profile_shaped_rows"
+        elif role == "paraphrase":
+            task_ids = tuple(row.task_id for row in rows if _paraphrased_by(row, claim.label))
+            scope = "paraphrased_rows"
+            paraphrased_rows.update(task_ids)
+        else:
+            task_ids = _judged_rows(manifest, index)
+            scope = "all_published_rows"
+        if not task_ids:
+            # The role ran, but nothing it produced survived into the published
+            # table. It read no published row, so it cannot have leaked one.
+            continue
+        exposures.append(
+            VerifiedModelExposure(
+                role=role,
+                scope=scope,
+                identity=claim,
+                task_ids=task_ids,
+                evidence=f"run_manifest.json models.{role}",
+            )
+        )
+
+    _require_paraphrase_attribution(rows, paraphrased_rows)
+    if profile_shaped_rows and "profile" not in enabled_roles:
+        raise ModelExposureError(
+            "benchmark.metadata.profile_hash",
+            f"records that a reference profile shaped {len(profile_shaped_rows)} row(s), but the manifest "
+            "declares no profile model",
+            expected="a models.profile entry naming the model whose style the rows carry",
+            recovery="regenerate the benchmark; a style no model is named for cannot be checked against a "
+            "candidate, and would be scored as if the candidate had never seen these surfaces",
+        )
+    if translation is not None:
+        exposures.append(
+            VerifiedModelExposure(
+                role="translator",
+                scope="translated_rows",
+                identity=translation.translator,
+                task_ids=index.task_ids,
+                evidence=f"{translation.manifest_path.name} model",
+            )
+        )
+    checks.append(
+        SourceCheck(
+            name="model_exposure",
+            detail=(
+                ", ".join(
+                    f"{exposure.role} read {len(exposure.task_ids)} row(s) as {exposure.display_name}"
+                    for exposure in exposures
+                )
+                if exposures
+                else "no model read the published rows: every declared role was disabled or shaped nothing"
+            ),
+        )
+    )
+    return tuple(exposures)
+
+
+def _role_identity(role: str, entry: Mapping[str, Any]) -> ModelIdentityClaim:
+    """Read one enabled generation role as an identity claim.
+
+    A generation config is not required to pin a revision or a digest — it only
+    had to name what it called — so a claim built here is often weaker than a
+    candidate's. What it may never be is empty: a role that ran without
+    recording any name at all would compare as "unknown" against every
+    candidate, and the operator would have no field to go and fix.
+    """
+    identity = entry.get("model_identity")
+    fields = identity if isinstance(identity, Mapping) else {}
+    claim = ModelIdentityClaim(
+        provider=_optional_text(entry.get("provider")),
+        served_model=_optional_text(fields.get("model")),
+        weight_source=_optional_text(fields.get("source")),
+        weight_model=_optional_text(fields.get("model")),
+        revision=_optional_text(fields.get("revision")),
+        weights_digest=_optional_text(fields.get("weights_digest")),
+        label=_optional_text(entry.get("canonical_id")),
+    )
+    if not claim.names_a_model:
+        raise ModelExposureError(
+            f"source_run_manifest.models.{role}",
+            "is enabled but names no model, so no candidate can be told apart from it",
+            expected="provider, model_identity.model, or canonical_id",
+            recovery="regenerate the benchmark with lineage.roles configured, or evaluate a publication whose "
+            "manifest records the models that built it",
+        )
+    return claim
+
+
+def _optional_text(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _paraphrased_by(row: CanonicalExportRow, label: str | None) -> bool:
+    """Whether this row's surface was written by the model that declares ``label``.
+
+    Publication normalizes the role's canonical id while the row keeps the case the
+    pack config used, so the two are compared case-insensitively. A role with no
+    canonical id at all claims every paraphrased row, which over-attributes
+    rather than losing one.
+    """
+    written_by = row.paraphrase_model_canonical
+    if not written_by:
+        return False
+    return label is None or written_by.strip().casefold() == label.strip().casefold()
+
+
+def _judged_rows(manifest: Mapping[str, Any], index: SourceTaskIndex) -> tuple[str, ...]:
+    """Every published row, unless the manifest records that no surface gate ran.
+
+    ``models.surface_judge.enabled`` says a judge was configured;
+    ``surface_quality_validation.enabled`` says it actually scored surfaces. A
+    manifest that records neither is read as "it ran", because an evaluation may
+    not clear a candidate on the strength of a field the publication omitted.
+
+    Every published row is the exact scope, not a conservative one. Surface-quality validation
+    withholds a surface from the judge only when a deterministic guard already
+    failed it, and a surface a guard failed is dropped before publication — so a
+    row that reached the published table is a row the judge read.
+    """
+    validation = manifest.get("surface_quality_validation")
+    if isinstance(validation, Mapping) and type(validation.get("enabled")) is bool:
+        if not validation["enabled"]:
+            return ()
+    return index.task_ids
+
+
+def _cross_check_profile_influence(manifest: Mapping[str, Any], shaped_rows: bool) -> None:
+    """Hold ``profile_influenced_surface`` to what the published rows record."""
+    declared = manifest.get("profile_influenced_surface")
+    if type(declared) is bool and declared != shaped_rows:
+        raise ModelExposureError(
+            "source_run_manifest.profile_influenced_surface",
+            f"declares {declared}, but the published rows record the opposite",
+            actual=declared,
+            expected="the same verdict the rows' profile_hash carries",
+            recovery="regenerate the benchmark; a manifest that disagrees with its own rows about which model "
+            "shaped them cannot establish what a candidate has already seen",
+        )
+
+
+def _require_paraphrase_attribution(
+    rows: Sequence[CanonicalExportRow],
+    attributed: set[str],
+) -> None:
+    """Refuse a row written by a model the manifest does not declare."""
+    unattributed = sorted(
+        {
+            str(row.paraphrase_model_canonical)
+            for row in rows
+            if row.paraphrase_model_canonical and row.task_id not in attributed
+        }
+    )
+    if unattributed:
+        raise ModelExposureError(
+            "benchmark.paraphrase_model_canonical",
+            f"names model(s) {unattributed[:3]} that no enabled role in the manifest declares",
+            expected="every paraphrased row attributed to a model the manifest records",
+            recovery="regenerate the benchmark; a row whose author is not in the manifest cannot be checked "
+            "against a candidate, and would be scored as if no model had written it",
+        )
+
+
 def source_verification_report(
     source: VerifiedEvalSource,
     *,
@@ -1474,12 +1758,17 @@ def write_source_verification_report(
 ) -> tuple[Path, str]:
     """Write the passing report into the eval output tree, atomically.
 
-    Returns the path and the content hash, which W5.4 records in the eval
+    Returns the path and content hash that the candidate runtime records in the evaluation
     manifest: a score that cannot name the source verification it ran under is
     not auditable.
     """
     report = source_verification_report(source, verified_at=verified_at)
-    return _write_eval_artifact(config, SOURCE_VERIFICATION_REPORT_FILE, report.as_document())
+    return write_eval_artifact(
+        config,
+        SOURCE_VERIFICATION_REPORT_FILE,
+        report.as_document(),
+        supersedes=SOURCE_VERIFICATION_FAILURE_FILE,
+    )
 
 
 def write_source_failure_diagnostic(
@@ -1499,11 +1788,28 @@ def write_source_failure_diagnostic(
             else {"code": "eval_source_invalid", "problem": type(error).__name__}
         ),
     }
-    return _write_eval_artifact(config, SOURCE_VERIFICATION_FAILURE_FILE, document)
+    return write_eval_artifact(
+        config,
+        SOURCE_VERIFICATION_FAILURE_FILE,
+        document,
+        supersedes=SOURCE_VERIFICATION_REPORT_FILE,
+    )
 
 
-def _write_eval_artifact(config: BfclEvalConfig, name: str, document: Mapping[str, Any]) -> tuple[Path, str]:
-    """Write one eval artifact into ``outputs.output_dir`` and nowhere else."""
+def write_eval_artifact(
+    config: BfclEvalConfig,
+    name: str,
+    document: Mapping[str, Any],
+    *,
+    supersedes: str | None = None,
+) -> tuple[Path, str]:
+    """Write one eval artifact into ``outputs.output_dir`` and nowhere else.
+
+    ``supersedes`` names the opposite verdict for the same decision — a failure
+    diagnostic for a report, or the other way round. Passing it is what keeps a
+    stale pass from sitting beside a fresh failure, which is the one way a reader
+    of these files can be actively misled.
+    """
     output_dir = config.outputs.output_dir.resolve()
     publication_dir = config.source.publication_dir.resolve()
     if output_dir == publication_dir or publication_dir in output_dir.parents or output_dir in publication_dir.parents:
@@ -1518,17 +1824,13 @@ def _write_eval_artifact(config: BfclEvalConfig, name: str, document: Mapping[st
     target = output_dir / name
     payload = json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     temporary = target.with_suffix(f"{target.suffix}.tmp")
-    opposite_name = {
-        SOURCE_VERIFICATION_REPORT_FILE: SOURCE_VERIFICATION_FAILURE_FILE,
-        SOURCE_VERIFICATION_FAILURE_FILE: SOURCE_VERIFICATION_REPORT_FILE,
-    }.get(name)
     try:
         temporary.write_text(payload, encoding="utf-8")
         # A crash may leave no verdict, but must never leave a stale passing
         # report beside a newer failure (or vice versa). Remove the old verdict
         # only after the replacement bytes are durable enough to promote.
-        if opposite_name is not None:
-            (output_dir / opposite_name).unlink(missing_ok=True)
+        if supersedes is not None:
+            (output_dir / supersedes).unlink(missing_ok=True)
         temporary.replace(target)
     finally:
         temporary.unlink(missing_ok=True)

@@ -30,7 +30,10 @@ source_oracle: null
 # Set only when scoring a translated benchmark derived from the same source run.
 # Verification requires the translation manifest to declare language, benchmark
 # (file, rows, content_hash), and task_ids_hash, to carry exactly the source task
-# ids in publication order, and to leave every truth field unchanged.
+# ids in publication order, and to leave every truth field unchanged. An optional
+# `model` block (provider, model, source, revision, weights_digest, canonical_id)
+# names the translator; without it the translator stays unidentified and the run
+# is not publishable, because the candidate cannot be told apart from it.
 translation_manifest: null
 
 eval:
@@ -50,11 +53,16 @@ scoring:
   task_success: all_applicable_gates
 
 limits:
+  # Assistant turns per episode. A task whose trace needs more turns than this
+  # fails on the budget rather than on the model, so raise it before comparing
+  # scores across benchmarks with longer conversations.
   max_turns: 5
   tool_timeout_s: 10.0
   candidate_timeout_s: 60.0
   episode_timeout_s: 300.0
   max_parallel_tasks: 1
+  # Total HTTP attempts are 1 + max_retries. Only transient transport/408/429/5xx
+  # failures retry, and all attempts must fit inside candidate_timeout_s.
   max_retries: 2
 
 candidates:
@@ -68,6 +76,11 @@ candidates:
       api_key_env: NVIDIA_API_KEY
     # Weight identity: what answered. A branch name such as main is refused, since
     # the same config would score different weights next month.
+    # This is also what the contamination gate compares against the models that
+    # built the benchmark. Set weights_digest whenever the generation roles
+    # recorded one, under the same algorithm: two comparable digests settle the
+    # comparison, while two model names that normalize alike leave it unresolved
+    # and block publication.
     model_identity:
       source: huggingface
       model: REPLACE_ME_ORG/REPLACE_ME_MODEL
@@ -79,10 +92,24 @@ candidates:
       max_tokens: 1024
       seed: 42
       tool_choice: auto
+      # Optional endpoint-only request fields live under the exact
+      # <provider>.<provider_api_version> namespace, for example:
+      # provider_extensions:
+      #   nvidia.v1:
+      #     repetition_penalty: 1.05
+      # Extensions cannot replace model/messages/tools or standard sampling fields.
+      provider_extensions: {}
 
 contamination:
   # Held-out overlap is a validity precondition, not a scoring dimension: a
   # violation aborts the run, and every candidate answers the same task set.
+  #
+  # A candidate collides when it is the model that profiled, paraphrased, judged,
+  # or translated rows it would be scored on. on_violation: exclude_row drops only
+  # those rows instead of aborting, and comparison_set: per_candidate lets each
+  # candidate keep its own set; both are debug-only. A comparison that cannot
+  # settle whether the candidate is the exposed model is never guessed: it is
+  # recorded, and it blocks publication.
   enforce: true
   on_violation: fail_run
   comparison_set: common_intersection
@@ -95,9 +122,16 @@ outputs:
   # Must be outside the generation publication tree; an eval run may never write
   # beside run_manifest.json or the benchmark it scores. Source verification
   # writes source_verification_report.json here on success, and
-  # source_verification_failure.json instead when it refuses the source.
+  # source_verification_failure.json instead when it refuses the source; the
+  # contamination gate writes contamination_report.json or
+  # contamination_failure.json the same way.
   output_dir: REPLACE_ME_EVAL_OUTPUT_DIR
   write_task_results: true
   write_eval_manifest: true
+  # Candidate transport writes a hash-verified request, every HTTP attempt, and
+  # one completion marker to candidate_io_cache.jsonl. A committed completion replays without
+  # credentials or network; an interrupted sequence fails closed.
   cache_candidate_responses: true
+  # Conversation driving replays the tool results the benchmark recorded rather
+  # than executing a tool, so a whole episode can be re-derived from this cache.
   cache_tool_results: true

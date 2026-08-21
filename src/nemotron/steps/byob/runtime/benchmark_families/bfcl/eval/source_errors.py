@@ -1,4 +1,4 @@
-"""Typed failures for source verification (W5.2).
+"""Typed failures for evaluation source verification.
 
 A config error says the operator wrote something invalid. These errors say
 something else: the *source* an already-valid config points at is not the
@@ -106,7 +106,7 @@ class BenchmarkSchemaMismatchError(SourceVerificationError):
 
 
 class PublicationSemanticsError(SourceVerificationError):
-    """The raw and published tables do not stand in the relationship W4.5 defines."""
+    """The raw and published tables do not satisfy the publication contract."""
 
     code = "eval_source_publication_invalid"
 
@@ -115,6 +115,19 @@ class SourceTaskIndexError(SourceVerificationError):
     """The published rows cannot be indexed into a task set an eval run can address."""
 
     code = "eval_source_task_index_invalid"
+
+
+class ModelExposureError(SourceVerificationError):
+    """The publication cannot say which models read its rows.
+
+    This is a source failure rather than a contamination one: the contamination
+    contamination gate decides what an exposure *means*, but it can only do that if the
+    publication declared every model that shaped the rows it ships. A manifest
+    that omits a role, names a model for no role, or contradicts its own rows
+    leaves a gap that would read as "no contamination found".
+    """
+
+    code = "eval_source_model_exposure_invalid"
 
 
 class OraclePackDriftError(SourceVerificationError):

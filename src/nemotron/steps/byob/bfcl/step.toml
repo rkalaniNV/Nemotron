@@ -33,6 +33,14 @@ description = "exports/export_validation_report.json proving enabled export row 
 type = "bfcl_source_verification_report"
 description = "source_verification_report.json in the eval output tree proving the evaluated source is the committed publication: manifest hash, both table hashes, publication semantics, task index, and oracle pack fingerprint."
 
+[[produces]]
+type = "bfcl_contamination_report"
+description = "contamination_report.json in the eval output tree naming which models read which published rows, which candidates could not be separated from them, and the task set each candidate is authorized to answer."
+
+[[produces]]
+type = "bfcl_candidate_io_cache"
+description = "candidate_io_cache.jsonl in the eval output tree: append-only, hash-verified native function-calling requests, every HTTP attempt, and a completion marker used for network-free replay."
+
 [[parameters]]
 name = "family"
 description = "Benchmark family implementation to run."
@@ -76,12 +84,27 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
 when = "You need to evaluate candidate models against a published BFCL benchmark"
-then = "Start from config/eval.default.yaml (schema 1.1). It reads run_manifest.json rather than a bare parquet, pins the scoring contract in references/bfcl-eval-scoring-contract.md by content hash, and requires an immutable model commit or weights digest per candidate. Executable mode also pins a matching oracle-pack manifest plus backend.py or endpoint config; oracle.kind alone is not executable. The result resolves into one eval_config_hash. Keep it in its own file: eval inputs are excluded from every generation lineage hash, so scoring a new candidate never changes the identity of the benchmark. The eval runner itself lands in W5.4; until then stage=generate refuses eval_config_path and inline eval blocks instead of ignoring them."
+then = "Start from config/eval.default.yaml (schema 1.1). It reads run_manifest.json rather than a bare parquet, pins the scoring contract in references/bfcl-eval-scoring-contract.md by content hash, and requires an immutable model commit or weights digest per candidate. Executable mode also pins a matching oracle-pack manifest plus backend.py or endpoint config; oracle.kind alone is not executable. The result resolves into one eval_config_hash. Keep it in its own file: eval inputs are excluded from every generation lineage hash, so scoring a new candidate never changes the identity of the benchmark. Native candidate transport and deterministic conversation driving are available; deterministic scoring and live oracle execution are separate capabilities. stage=generate refuses eval_config_path and inline eval blocks because generation does not consume evaluation settings."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[strategies]]
 when = "You need to prove the benchmark you are about to score is the one that was published"
-then = "Call verify_eval_source(config) before any candidate token is spent. It re-reads run_manifest.json and holds it to the hash the eval config resolved, hashes benchmark_raw.parquet and benchmark.parquet against every declaration in the manifest, replays the W4.5 publication contract over both tables, decodes the published rows under this build's benchmark schema into a unique addressable task index, and for executable mode recomputes the oracle pack fingerprint and probes the backend interface in a throwaway worker. It returns a VerifiedEvalSource handle — the only way a runner receives paths — and write_source_verification_report puts the evidence in outputs.output_dir. Call assert_source_unchanged immediately before execution: verification and use are separated in time, and that gap is where a source gets replaced."
+then = "Call verify_eval_source(config) before any candidate token is spent. It re-reads run_manifest.json and holds it to the hash the eval config resolved, hashes benchmark_raw.parquet and benchmark.parquet against every declaration in the manifest, applies the publication contract to both tables, decodes the published rows under this build's benchmark schema into a unique addressable task index, and for executable mode recomputes the oracle pack fingerprint and probes the backend interface in a throwaway worker. It returns a VerifiedEvalSource handle — the only way a runner receives paths — and write_source_verification_report puts the evidence in outputs.output_dir. Call assert_source_unchanged immediately before execution: verification and use are separated in time, and that gap is where a source gets replaced."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to know whether a candidate already saw the tasks it is about to be scored on"
+then = "Call evaluate_contamination(config, source) after verification. Source verification records every model that read a published row — the profile, paraphrase, and surface_judge roles from run_manifest.json models.*, plus the translator when a translation is evaluated — together with the exact rows each one read. The gate compares each candidate against that inventory on both axes it can: weights digest, operator canonical id, serving route, then normalized model name plus revision. A match is a violation; a comparison that cannot settle the question is recorded as unresolved and is never guessed either way. fail_run refuses the run, exclude_row drops only the rows the exposure covers, and unresolved evidence blocks publication without shrinking a debug task set. The result is an EligibleEvalPlan whose common task set every candidate answers under common_intersection, plus contamination_report.json. Call assert_plan_unchanged before the first request."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to send one authorized native function-calling turn to a candidate endpoint"
+then = "Build a CandidateRequest with build_candidate_request(), then call NativeFunctionCallingClient.complete(). It sends ordered messages and OpenAI-compatible tools with pinned sampling fields, reads credentials only from api_key_env, streams the bounded response, and preserves message.tool_calls plus raw arguments without repair. Only transient endpoint failures retry. candidate_io_cache.jsonl records the request, every attempt, and one completion; a completion replays without credentials or network, while an interrupted sequence fails closed. The client transports one assistant turn; conversation advancement, tool execution, and scoring are separate responsibilities."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to run a whole multi-turn task against a candidate without leaking the answer"
+then = "Project source.evaluation_benchmark with its expected content hash and source.task_ids, then call build_conversation_script(projection, task_id, source=source) and run_candidate_episode() with the plan, client, and ContinuationGate. The builder refuses a projection whose hash, row count, or task sequence differs from the verified source; the driver also requires the candidate's canonical weights identity to equal the identity the contamination plan authorized. The prompt starts as the system prompts plus the first user request; only the candidate's own turns, released tool results, and scripted user requests may enter. An intermediate text turn must reproduce the published text before it unlocks a hidden user answer. A recorded result is released only to a matching type=function call with a unique non-empty id, addressed to that candidate id. Everything the model can cause — wrong tool, wrong or unparseable arguments, ambiguous call ids, an unreachable endpoint, or a spent budget — comes back as a CandidateEpisode status. The conversation driver releases recorded results only; tool execution and scoring are separate responsibilities."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[errors]]
@@ -182,7 +205,7 @@ recovery = "stage=generate refuses a config that asks for work no stage performs
 
 [[errors]]
 name = "export_schema_mismatch"
-recovery = "The published parquet or an export record does not match the pinned W4.5 schema. Do not edit generated files. Remove benchmark_raw.parquet, benchmark.parquet, exports/, and run_manifest.json, then rerun stage=generate with one code revision. Consumers must select adapters by the schema_version recorded in run_manifest.json."
+recovery = "The published parquet or an export record does not match the pinned publication schema. Do not edit generated files. Remove benchmark_raw.parquet, benchmark.parquet, exports/, and run_manifest.json, then rerun stage=generate with one code revision. Consumers must select adapters by the schema_version recorded in run_manifest.json."
 
 [[errors]]
 name = "unsupported_export_call_layout"
@@ -242,7 +265,7 @@ recovery = "The parquet on disk is not written with the benchmark schema this bu
 
 [[errors]]
 name = "eval_source_publication_invalid"
-recovery = "benchmark_raw.parquet and benchmark.parquet do not stand in the W4.5 relationship: the published table is not a selection of raw rows, a published row restates a truth field, a held-out row shipped, the declared row counts disagree with the tables, or the manifest contradicts itself about whether held-out was evaluated. Regenerate the benchmark; the audit table can no longer explain a score."
+recovery = "benchmark_raw.parquet and benchmark.parquet do not satisfy the publication contract: the published table is not a selection of raw rows, a published row restates a truth field, a held-out row shipped, the declared row counts disagree with the tables, or the manifest contradicts itself about whether held-out was evaluated. Regenerate the benchmark; the audit table can no longer explain a score."
 
 [[errors]]
 name = "eval_source_task_index_invalid"
@@ -263,6 +286,66 @@ recovery = "A translated benchmark does not derive from this source run without 
 [[errors]]
 name = "eval_source_changed_during_eval"
 recovery = "The source moved after it was verified, so the run would score two benchmarks. Stop writing into the publication tree during an evaluation — a re-run of generation into the same directory is the usual cause — then verify again from a clean tree."
+
+[[errors]]
+name = "eval_source_model_exposure_invalid"
+recovery = "The publication cannot say which models read its rows: run_manifest.json omits the models block, declares a role this build does not read, enables a role without naming any model, disagrees with its own rows about profile_influenced_surface, or ships a row whose paraphrase_model_canonical or profile_hash no enabled role accounts for. A gap here reads as \"no contamination found\", so it is refused. Regenerate the benchmark with lineage.roles configured, or evaluate with the pipeline revision that published the run."
+
+[[errors]]
+name = "eval_contamination_candidate_exposed"
+recovery = "One or more candidates are the same model that profiled, paraphrased, judged, or translated rows they would be scored on, so the score would measure recall of their own output. The subject names every contaminated candidate, so fix them together rather than re-running per candidate. Evaluate a different candidate, regenerate the benchmark with surface models that are not under evaluation, or set contamination.on_violation: exclude_row and accept a score over the remaining rows (which is not publishable)."
+
+[[errors]]
+name = "eval_contamination_unresolved"
+recovery = "A candidate and an exposed model cannot be told apart from what either side pinned, and publication.requested is true. Pin candidates[].model_identity.weights_digest and record the same identity for the generation role, or pin an immutable revision on both sides. Otherwise set publication.requested: false: the run then proceeds with the unresolved evidence recorded in contamination_report.json and non_publication_reasons."
+
+[[errors]]
+name = "eval_contamination_empty_task_set"
+recovery = "Excluding what a candidate already read leaves nothing to score, or no published row is answerable by every candidate. This is a benchmark-and-candidate mismatch, not a tuning problem: evaluate the candidate against a benchmark it did not help build, regenerate with a different surface model, or fall back to contamination.comparison_set: per_candidate with publication.requested: false and read the per-candidate task sets."
+
+[[errors]]
+name = "eval_contamination_task_set_inconsistent"
+recovery = "The gated task sets cannot form a comparable plan: eligible and excluded rows overlap, a candidate does not carry the common set in publication order, or two candidates share an alias. Re-verify the source and re-run the gate; a hand-edited plan is not an authorization."
+
+[[errors]]
+name = "eval_contamination_plan_drift"
+recovery = "The eligible-task plan is not the one the run was authorized with: it was gated against another eval config or another verified source, it no longer resolves to the decision the config and source produce, or it is a plan the gate would refuse to produce at all. Verify the source and gate the candidates together, immediately before execution. Scoring under a changed plan reports one number for two different task sets."
+
+[[errors]]
+name = "eval_candidate_credentials_missing"
+recovery = "The candidate api_key_env does not resolve to a non-empty credential. Export that environment variable in the eval runner environment. Do not put the key in eval_config.yaml; replay from a completed candidate cache intentionally needs no credential."
+
+[[errors]]
+name = "eval_candidate_request_invalid"
+recovery = "The native request is empty, belongs to another candidate/endpoint, or contains a provider extension that replaces a pinned standard field. Rebuild it from the same EvalCandidate, authorized task, ordered model-facing messages, and model-facing tools."
+
+[[errors]]
+name = "eval_candidate_response_invalid"
+recovery = "HTTP 200 did not contain one OpenAI-compatible chat completion choice. This is recorded as malformed model output and is not retried or repaired. Fix the endpoint compatibility; malformed function argument JSON is preserved separately for deterministic scoring."
+
+[[errors]]
+name = "eval_candidate_cache_invalid"
+recovery = "candidate_io_cache.jsonl is truncated, hash-invalid, conflicting, or holds an unfinished request without a completion marker. A cancelled call leaves exactly that state on purpose, so an interruption is never replayed as the model's answer. Preserve the file as evidence and use a new eval output directory, or restore the cache from the eval artifact that committed it. Never skip or replace an immutable observation."
+
+[[errors]]
+name = "eval_candidate_retry_exhausted"
+recovery = "Every allowed transient attempt failed before the candidate deadline. Check endpoint health and rate limits, then start or resume under the cache policy. Authentication and malformed model output do not retry."
+
+[[errors]]
+name = "eval_conversation_script_invalid"
+recovery = "A published row is not a conversation this driver can replay: it does not open with system prompts and a user request, a recorded tool result answers a call other than the one it follows, the messages and expected_tool_calls do not account for each other, or the conversation and its call-group plan disagree about turns. Do not edit the parquet — regenerate from a pipeline run whose stage 7 replay produced the conversation."
+
+[[errors]]
+name = "eval_conversation_unauthorized"
+recovery = "An episode was driven outside its authorization: the task is not one the contamination gate assigned this candidate, the alias now names different weights, or the canonical projection's hash, row count, or task sequence differs from the VerifiedEvalSource. Re-project source.evaluation_benchmark under its expected hash and source.task_ids, build the script with source=source, and drive the exact EvalCandidate contract passed to the gate."
+
+[[errors]]
+name = "eval_conversation_answer_key_leak"
+recovery = "A prompt held an assistant or tool message that the candidate did not produce and the driver did not release. This is unrecoverable for the run: numbers from a model that was shown the answer are not measurements. Discard the run's episodes and add prompt material only through append_candidate_turn, append_tool_results, or append_user_turn."
+
+[[errors]]
+name = "eval_conversation_transition_invalid"
+recovery = "The driver was asked for a move its own state forbids: echoing a tool call whose id is absent or ambiguous, whose type is not function, or whose name or argument string is missing; releasing a recorded result with no call to answer; or injecting a non-user message as the next request. End the episode with the matching status instead of repairing the model's output."
 
 [[errors]]
 name = "unsupported_eval_mode"

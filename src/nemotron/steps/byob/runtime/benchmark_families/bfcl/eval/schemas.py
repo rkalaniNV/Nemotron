@@ -218,9 +218,9 @@ class EvalOracleResource(_Strict):
 class EvalSource(_Strict):
     """The published generation run this evaluation reads.
 
-    The config names a ``run_manifest.json``, never a parquet: the manifest is
-    Stage 12's commit marker, so a directory that holds a benchmark without one
-    holds an unpublished artifact. Everything else — which table to read, whether
+    The config names a ``run_manifest.json``, never a parquet: the publication
+    manifest is the commit marker, so a directory that holds a benchmark without
+    one holds an unpublished artifact. Everything else — which table to read, whether
     the run is gold-eligible, whether an oracle exists — is taken from the
     manifest instead of restated by the operator, so the two cannot disagree.
     """
@@ -591,9 +591,9 @@ class EvalCandidate(_Strict):
 class ContaminationPolicy(_Strict):
     """What happens when a candidate turns out to have seen a task.
 
-    W5.1 only pins the policy. Detecting a collision and computing the comparable
-    task set is W5.3; this model exists so a run cannot reach that stage with a
-    policy that would quietly drop the evidence.
+    Config resolution only pins the policy. The contamination gate detects
+    collisions and computes the comparable task set; this model prevents it from
+    receiving a policy that would quietly drop the evidence.
     """
 
     enforce: StrictBool

@@ -88,6 +88,7 @@ byob = [
     "sacrebleu>=2.6.0,<3.0.0; python_version>='3.11'",
     "iso639-lang>=2.6.0,<3.0.0; python_version>='3.11'",
     "bcp47>=0.1.0; python_version>='3.11' and python_version<'3.14'",
+    "httpx",
 ]
 byob-gpu = [
     "torch>=2.10,<2.11; python_version>='3.11'",
