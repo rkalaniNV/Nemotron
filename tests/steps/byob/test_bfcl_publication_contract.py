@@ -157,7 +157,7 @@ def _guard_plan(raw_ids: list[str], published: list[str]) -> PublicationPlan:
 
 
 def test_the_contract_forbids_publication_from_restating_any_column() -> None:
-    # Locking this to empty is the whole point of W4.5.2: publication selects
+    # Locking this to empty is central to the publication contract: publication selects
     # rows, and a field listed here would be one the audit table cannot explain.
     assert PUBLICATION_RESTATED_FIELDS == frozenset()
 

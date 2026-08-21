@@ -594,6 +594,15 @@ What it proves, in order:
    imported in a throwaway process worker to confirm it exposes `list_tools`,
    `reset`, `call_tool`, and `get_state`; an endpoint pack's pinned oracle
    identity must equal the `endpoint_metadata` the source run recorded.
+6. Every model that read a published row while it was being built is named,
+   together with the rows it read: the `profile`, `paraphrase`, and
+   `surface_judge` roles from `models.*`, and the translator when a translation
+   is evaluated. Scope comes from the rows wherever the schema records it — a
+   profile that shaped nothing and a paraphraser that wrote three of fifty rows
+   are both narrower than "the whole benchmark". A manifest that omits the block,
+   declares a role this build does not read, enables a role without naming a
+   model, or ships a paraphrased or profile-shaped row no role accounts for is
+   refused, because a gap in this inventory reads as "no contamination found".
 
 None of these are reimplementations. Publication semantics come from
 `publication_contract`, row decoding from `export_projection`, the pack file set
@@ -629,29 +638,176 @@ source gets replaced — a re-run of generation into the same directory, a pack
 edited to make a failing task pass. Every recorded hash is recomputed, the pack
 fingerprint included, so a run can never span two sources and report one score.
 
+## Contamination Gate
+
+Verification says which benchmark is being scored. `evaluate_contamination()`
+decides *who may answer which rows of it*, and returns an `EligibleEvalPlan` —
+the second and last handle a runner is given. Asking a candidate a task the gate
+excluded is not a reachable state, because the only task list the runner has is
+the one on the plan.
+
+Each candidate is compared against each exposure on the axes the two artifacts
+actually carry. A generation config only had to name what it *called*: a serving
+route and an operator `canonical_id`, with weight identity optional. An eval
+config must pin an immutable revision or a weights digest. Neither identity is a
+superset of the other, so the comparison weighs evidence strongest first — two
+comparable weights digests settle it either way, then an equal operator label,
+then an equal serving route, then a normalized model name plus revision — and
+returns one of three verdicts:
+
+| Verdict | Meaning | Effect |
+| --- | --- | --- |
+| `different` | The candidate is provably other weights | Nothing; not recorded |
+| `match` | The candidate is the model that read those rows | Violation |
+| `unknown` | Neither side pinned enough to tell | Recorded as evidence |
+
+The asymmetry is deliberate. Config validation compares candidates *to each
+other* and keeps identifiers case-sensitive, because collapsing two case-variants
+would hide a real difference between two candidates. Here the dangerous mistake
+is the opposite one, so every comparison is case-insensitive and model names are matched on a
+normalized form that drops the registry prefix and punctuation. An `unknown`
+verdict costs an operator a pinned identity; a wrong `different` verdict costs the
+benchmark its validity. Two digests are only allowed to establish a separation
+when they measure the same thing: the generation side's digest is whatever the
+pack config wrote, so one recorded without its `sha256:` prefix is still the same
+digest, and two under different algorithms settle nothing. Every candidate is
+compared before any is refused, so one run names all of them.
+
+Then the policy applies, and it only ever narrows:
+
+- `fail_run` refuses the run on a `match`. That is the locked publication
+  setting: a publishable comparison either has no collision or does not happen.
+- `exclude_row` drops exactly the rows the exposure covers, and only those. The
+  remaining score is honest but covers less than the benchmark, so it is recorded
+  as `contamination.excluded_rows:<alias>` and is not publishable.
+- `unknown` evidence does neither. It never shrinks a task set on suspicion, and
+  it never aborts a debug run. What it always does is block publication — and
+  when `publication.requested` is true the refusal happens here rather than
+  producing a number that cannot be published.
+
+Intersection is last. Under `common_intersection` every candidate answers the rows
+all of them may answer, in publication order, so two scores are comparable by
+construction rather than by convention; under `per_candidate` each keeps its own
+set, which is why the config contract refuses to call such a run publishable. If
+contamination empties either set, the run stops: a benchmark whose surface models
+are the candidates cannot be salvaged by scoring zero rows.
+
+A pass writes `contamination_report.json` into `outputs.output_dir`, naming every
+exposure, every collision with its task ids, and each candidate's eligible,
+excluded, and evaluated rows; a refusal writes `contamination_failure.json` and
+removes the stale pass, and the other way round. `plan_identity` hashes the whole
+decision and no path or timestamp, and candidates are ordered by alias, so
+reordering two candidates in the YAML does not fork the hash. `assert_plan_unchanged()`
+re-pins the source and re-derives the decision immediately before the first
+request, so a plan that was widened between authorization and execution — a
+candidate added, an exclusion dropped, a policy relaxed — cannot be the plan a
+runner acts on.
+
+## Native Function-Calling Client
+
+`NativeFunctionCallingClient` is the native transport primitive for one assistant
+turn. `build_candidate_request()` sends the ordered model-facing `messages` and
+OpenAI-compatible `tools` with every pinned inference parameter; provider-only
+fields may enter only through the namespace matching `provider` and
+`provider_api_version`, and may not replace a standard field. Credentials are
+read from `api_key_env` after cache lookup, so replay needs no secret and no
+credential value enters a request hash, diagnostic, or artifact.
+
+The response parser preserves provider order, call ids, function names, and each
+raw argument value. JSON arguments are parsed exactly once. Invalid JSON, a JSON
+array where an object was required, a missing argument string, and a wrong JSON
+type remain distinct model observations; none is repaired, coerced, retried, or
+sent to another LLM. Envelope failures under HTTP 200 are likewise model output,
+not transient infrastructure errors.
+
+Transport retries only timeouts, connection failures, `408`, `429`, and selected
+`5xx` responses, within `limits.max_retries` and the logical candidate deadline.
+Backoff jitter is derived from the request hash and `Retry-After` is honored only
+inside that deadline. Response bodies are streamed under a fixed size bound.
+`candidate_io_cache.jsonl` appends a hash-verified request record, every HTTP
+attempt, and a completion marker. A completion replays without network access;
+an interrupted sequence is preserved as crash evidence and fails closed rather
+than silently calling the model again. Cancelling a run records the abandoned
+attempt but never a completion, so a resumed run cannot read an interruption as
+the model's answer. Each record is verified once, when it first appears, and a
+completion cites its attempts by hash, so one response body is stored once
+however many records refer to it.
+
+The native client neither chooses the next user turn nor executes or scores a tool call.
+
+## Deterministic Evaluation Conversation Driver
+
+`run_candidate_episode()` is the orchestrator that strings those turns into
+one episode. `build_conversation_script()` selects a row and its conversation plan
+from a canonical projection only after the projection's content hash, row count,
+and complete task sequence match a `VerifiedEvalSource`. No caller-supplied
+identity can stamp a stale row as current, and every candidate replays the
+identical source-bound conversation.
+
+A candidate sees only what it has earned. The prompt starts as the leading system
+messages and the first user request; from there the only material that may enter
+is an assistant turn the candidate itself produced, a recorded tool result the
+driver decided to release, and a scripted user request. The conversation object
+exposes no general append method, and re-audits provenance before every send, so a
+gold assistant turn cannot reach a provider.
+
+A recorded tool result is released only to a call that matches the trace, and is
+addressed to the id the candidate's own call carried. Matching is an injected
+`ContinuationGate`; `CanonicalCallMatchGate` implements the pinned publication
+comparison, including declared-default insertion, so a model that spells out a
+default — including one in a nested object, array, local `$ref`, or `allOf` —
+is neither rewarded nor punished. Within one assistant turn a
+`call_order: any` row accepts a permutation and each result still goes to the call
+it actually answers; `strict` requires trace positions, while `prefix` orders only
+the configured number of required-tool first appearances and matches the
+remainder as a set. Ordering *across* turns is not negotiable in trace replay,
+because a recorded result is only meaningful at the point the trace reached it.
+
+An intermediate text-only turn advances only when it reproduces the text the
+published trace recorded. This deliberately fail-closed rule prevents arbitrary
+prose from unlocking a hidden slot or confirmation; terminal text is retained as
+an observation for scoring instead. Tool calls must declare type `function` and
+carry unique non-empty ids — missing types are not repaired, and ambiguous ids
+never receive recorded results. Before execution, the candidate's canonical
+weights identity must still equal the identity the contamination plan authorized;
+reusing an alias for different weights is refused.
+
+An episode returns rather than raises for everything the model can cause — a wrong
+tool, wrong arguments, unparseable arguments, a call with no id, an unreachable
+endpoint, a malformed envelope, an exhausted turn budget or episode budget — each
+as a distinct `status` on a `CandidateEpisode`, alongside the ordered events and
+every observed turn. An unauthorized task or a row that is not a replayable
+conversation raises instead, because those are bugs in the run rather than facts
+about the model. Cancellation propagates without producing an episode, matching the
+client: an interruption is not an observation.
+
+The conversation driver derives no number and executes no tool. The results it
+releases are the ones benchmark generation replay recorded, so an answer cannot
+depend on a live fixture. The trace parser/scorer and executable oracle runner are
+separate components.
+
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
 [`../references/bfcl-oracle-pack.md`](../references/bfcl-oracle-pack.md). For what
 a score means, see
 [`../references/bfcl-eval-scoring-contract.md`](../references/bfcl-eval-scoring-contract.md).
 
-## Planned Pipeline Completion
+## Capability Matrix
 
-> **Status: Implementing.** Reference profiling and controlled paraphrasing are
-> available. Remaining capabilities stay gated and are rejected rather than
-> silently ignored.
+Unsupported capabilities stay gated and are rejected rather than silently
+ignored.
 
-| Capability | Status | Planned purpose |
+| Capability | Availability | Responsibility |
 | --- | --- | --- |
 | Reference profiling | **Implemented** | Normalize content-addressed style samples and create a cached profile without exposing oracle truth. |
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Implementing** | Config contract (`eval_config.yaml` `1.1`) is parsed, resolved, and hashed, and the named source is verified against the committed publication (`source_verification` `1.0`) before any token is spent; the runner that scores tool selection, arguments, call ordering, results, and task success is still pending. |
+| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), and deterministic conversation driving (`conversation` `1.0`) are available. Deterministic scoring and executable oracle replay are not exposed by this runtime. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
-| Translation and localization | **Implementing** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
+| Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |
-| Stage resume | **Implementing** | Resume from a verified intermediate stage without accepting stale pack, endpoint, or config state. |
+| Stage resume | **Partial** | Resume from a verified intermediate artifact without accepting stale pack, endpoint, or config state. |
 
 The final evaluation interface, metric names, artifact schemas, and CLI stage
 names may change while implementation is in progress. Until they are promoted

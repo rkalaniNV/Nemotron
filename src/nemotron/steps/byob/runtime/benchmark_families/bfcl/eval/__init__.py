@@ -1,17 +1,62 @@
-"""BFCL evaluation: config contract and source verification first, scoring later.
+"""BFCL evaluation contracts and runtime primitives.
 
-W5.1 defines the ``eval_config.yaml`` contract; W5.2 proves the source it names
-is the publication Stage 12 committed. Nothing here contacts a candidate model
-or scores a trace: an invalid config, or a source that drifted, must fail before
-a single token is paid for.
+The configuration contract pins the source, candidates, policies, and limits.
+Source verification proves the publication bytes and records model exposure.
+The contamination gate turns that evidence into candidate-specific task
+authorization. The native client preserves every OpenAI-compatible request,
+attempt, and response, while the conversation driver replays authorized episodes
+and releases recorded tool results only to calls that earned them.
 
-A runner receives a :class:`VerifiedEvalSource` from :func:`verify_eval_source`
-rather than paths out of a YAML file, so reading an unpublished benchmark is not
-a state the code can reach.
+Only :class:`NativeFunctionCallingClient` contacts a candidate, and only
+:func:`run_candidate_episode` decides what it is asked next. Neither scores a
+trace or executes a live tool; those concerns belong to separate runtime
+components.
+
+A runner receives two handles rather than paths and policies out of a YAML file:
+a :class:`VerifiedEvalSource` from :func:`verify_eval_source`, and an
+:class:`EligibleEvalPlan` from :func:`evaluate_contamination`. Reading an
+unpublished benchmark, or asking a candidate a task the gate excluded, are not
+states the code can reach.
 """
 
 from __future__ import annotations
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.call_matching import (
+    CanonicalCallMatchGate,
+    ContinuationGate,
+    TurnMatch,
+    apply_declared_defaults,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_cache import (
+    CandidateIOCache,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_client import (
+    NativeFunctionCallingClient,
+    build_candidate_request,
+    parse_candidate_response,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_contract import (
+    CANDIDATE_CLIENT_CONTRACT_VERSION,
+    CANDIDATE_IO_CACHE_FILE,
+    ArgumentStatus,
+    CallStatus,
+    CandidateAttempt,
+    CandidateCallOutcome,
+    CandidateRequest,
+    CandidateResponse,
+    CandidateToolCall,
+    parse_function_arguments,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_errors import (
+    CandidateCacheConflictError,
+    CandidateCacheError,
+    CandidateClientError,
+    CandidateCredentialMissingError,
+    CandidateProviderExtensionError,
+    CandidateRequestError,
+    CandidateResponseError,
+    describe_candidate_client_error,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.config import (
     EVAL_CONFIG_TOP_LEVEL_KEYS,
     describe_eval_config_error,
@@ -22,6 +67,62 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.config import (
     resolved_eval_config_document,
     write_resolved_eval_config,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.contamination import (
+    assert_plan_unchanged,
+    contamination_report,
+    evaluate_contamination,
+    write_contamination_failure,
+    write_contamination_report,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.contamination_contract import (
+    CONTAMINATION_CONTRACT_VERSION,
+    CONTAMINATION_FAILURE_FILE,
+    CONTAMINATION_REPORT_FILE,
+    CandidateEligibility,
+    CollisionVerdict,
+    CommonEvaluationTaskSet,
+    ComparisonSet,
+    ContaminationCollision,
+    ContaminationReport,
+    EligibleEvalPlan,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.contamination_errors import (
+    CandidateContaminationError,
+    ContaminationError,
+    ContaminationPlanDriftError,
+    EmptyEvaluationTaskSetError,
+    TaskSetConsistencyError,
+    UnresolvedContaminationError,
+    describe_contamination_error,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_contract import (
+    CONVERSATION_CONTRACT_VERSION,
+    CandidateEpisode,
+    ConversationScript,
+    EpisodeEvent,
+    EpisodeStatus,
+    EventKind,
+    ObservedTurn,
+    ScriptedCall,
+    ScriptedTurn,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_driver import (
+    run_candidate_episode,
+    turn_request_id,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_errors import (
+    ConversationAuthorizationError,
+    ConversationDriverError,
+    ConversationLeakageError,
+    ConversationScriptError,
+    ConversationTransitionError,
+    describe_conversation_error,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_projection import (
+    ModelFacingConversation,
+    build_conversation_script,
+    released_results,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
     CandidateIdentityError,
     EvalConfigError,
@@ -31,6 +132,17 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
     PublicationPolicyError,
     SecretInConfigError,
     UnsupportedEvalModeError,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
+    MODEL_IDENTITY_CONTRACT_VERSION,
+    ExposureRole,
+    ExposureScope,
+    IdentityVerdict,
+    ModelIdentityClaim,
+    VerifiedModelExposure,
+    candidate_identity_claim,
+    compare_model_identity,
+    normalize_model_token,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
     EVAL_CONFIG_SCHEMA_VERSION,
@@ -72,6 +184,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract im
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_errors import (
     BenchmarkHashMismatchError,
     BenchmarkSchemaMismatchError,
+    ModelExposureError,
     OraclePackDriftError,
     OracleResourceMismatchError,
     PublicationSemanticsError,
@@ -85,21 +198,32 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_errors impo
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_verification import (
     BACKEND_INTERFACE,
+    GENERATION_EXPOSURE_ROLES,
     REQUIRED_MANIFEST_FIELDS,
     assert_source_unchanged,
     benchmark_schema_fingerprint,
     source_verification_report,
     verify_eval_source,
+    write_eval_artifact,
     write_source_failure_diagnostic,
     write_source_verification_report,
 )
 
 __all__ = [
+    "ArgumentStatus",
     "BACKEND_INTERFACE",
+    "CANDIDATE_CLIENT_CONTRACT_VERSION",
+    "CANDIDATE_IO_CACHE_FILE",
+    "CONTAMINATION_CONTRACT_VERSION",
+    "CONTAMINATION_FAILURE_FILE",
+    "CONTAMINATION_REPORT_FILE",
+    "CONVERSATION_CONTRACT_VERSION",
     "EVAL_CONFIG_SCHEMA_VERSION",
     "EVAL_CONFIG_TOP_LEVEL_KEYS",
     "EVAL_MODES",
+    "GENERATION_EXPOSURE_ROLES",
     "LOCKED_PUBLICATION_SCORING",
+    "MODEL_IDENTITY_CONTRACT_VERSION",
     "MUTABLE_REVISIONS",
     "REQUIRED_MANIFEST_FIELDS",
     "SOURCE_VERIFICATION_CONTRACT_VERSION",
@@ -110,11 +234,47 @@ __all__ = [
     "BenchmarkSchemaMismatchError",
     "BfclEvalConfig",
     "CandidateApi",
+    "CandidateAttempt",
+    "CandidateCacheConflictError",
+    "CandidateCacheError",
+    "CandidateCallOutcome",
+    "CandidateClientError",
+    "CandidateContaminationError",
+    "CandidateCredentialMissingError",
+    "CandidateEligibility",
+    "CandidateEpisode",
     "CandidateIdentityError",
     "CandidateInference",
     "CandidateModelIdentity",
+    "CandidateProviderExtensionError",
+    "CandidateRequest",
+    "CandidateRequestError",
+    "CandidateResponse",
+    "CandidateResponseError",
+    "CandidateToolCall",
+    "CandidateIOCache",
+    "CanonicalCallMatchGate",
     "ClaimScope",
+    "CollisionVerdict",
+    "CallStatus",
+    "CommonEvaluationTaskSet",
+    "ComparisonSet",
+    "ContaminationCollision",
+    "ContaminationError",
+    "ContaminationPlanDriftError",
     "ContaminationPolicy",
+    "ContaminationReport",
+    "ContinuationGate",
+    "ConversationAuthorizationError",
+    "ConversationDriverError",
+    "ConversationLeakageError",
+    "ConversationScript",
+    "ConversationScriptError",
+    "ConversationTransitionError",
+    "EligibleEvalPlan",
+    "EmptyEvaluationTaskSetError",
+    "EpisodeEvent",
+    "EpisodeStatus",
     "EvalCandidate",
     "EvalConfigError",
     "EvalConfigPathError",
@@ -128,11 +288,22 @@ __all__ = [
     "EvalScoringConfig",
     "EvalSettings",
     "EvalSource",
+    "EventKind",
+    "ExposureRole",
+    "ExposureScope",
+    "IdentityVerdict",
+    "ModelExposureError",
+    "ModelFacingConversation",
+    "ModelIdentityClaim",
     "MutableCandidateRevisionError",
+    "NativeFunctionCallingClient",
+    "ObservedTurn",
     "OraclePackDriftError",
     "OracleResourceMismatchError",
     "PublicationPolicyError",
     "PublicationSemanticsError",
+    "ScriptedCall",
+    "ScriptedTurn",
     "SecretInConfigError",
     "SourceChangedDuringEvalError",
     "SourceCheck",
@@ -142,25 +313,49 @@ __all__ = [
     "SourceTaskIndexError",
     "SourceVerificationError",
     "SourceVerificationReport",
+    "TaskSetConsistencyError",
     "TranslationLineageError",
+    "TurnMatch",
+    "UnresolvedContaminationError",
     "UnsupportedEvalModeError",
     "VerifiedBenchmarkArtifact",
     "VerifiedEndpointIdentity",
     "VerifiedEvalSource",
+    "VerifiedModelExposure",
     "VerifiedOracleSource",
     "VerifiedPublication",
     "VerifiedTranslationSource",
+    "apply_declared_defaults",
+    "assert_plan_unchanged",
     "assert_source_unchanged",
     "benchmark_schema_fingerprint",
+    "build_candidate_request",
+    "build_conversation_script",
+    "candidate_identity_claim",
+    "compare_model_identity",
+    "contamination_report",
+    "describe_contamination_error",
+    "describe_candidate_client_error",
+    "describe_conversation_error",
     "describe_eval_config_error",
     "describe_source_verification_error",
     "eval_config_reference",
+    "evaluate_contamination",
     "load_eval_config",
     "load_eval_config_for_generation",
     "load_eval_config_mapping",
+    "normalize_model_token",
+    "parse_candidate_response",
+    "parse_function_arguments",
+    "released_results",
     "resolved_eval_config_document",
+    "run_candidate_episode",
     "source_verification_report",
+    "turn_request_id",
     "verify_eval_source",
+    "write_contamination_failure",
+    "write_contamination_report",
+    "write_eval_artifact",
     "write_resolved_eval_config",
     "write_source_failure_diagnostic",
     "write_source_verification_report",

@@ -1,10 +1,11 @@
-"""What a verified evaluation source is (W5.2 contract, schema 1.0).
+"""What a verified evaluation source is (schema 1.0).
 
-W5.1 resolved an eval config: it recorded which publication tree the operator
+Config resolution recorded which publication tree the operator
 *named*, by content hash. This module defines the object that says the tree is
 still that publication, read back from disk — the manifest, both benchmark
-tables, the relationship between them, the addressable task set, and the oracle
-pack an executable run would replay against.
+tables, the relationship between them, the addressable task set, the oracle pack
+an executable run would replay against, and which models read the rows while
+they were being built.
 
 Three properties shape these models.
 
@@ -39,6 +40,10 @@ from pydantic import (
     model_validator,
 )
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
+    ModelIdentityClaim,
+    VerifiedModelExposure,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
     ContentHash,
     FrozenDict,
@@ -163,8 +168,9 @@ class VerifiedPublication(_Verified):
     """The relationship between ``benchmark_raw.parquet`` and ``benchmark.parquet``.
 
     The values are the ones the manifest declares; the proof that the two tables
-    on disk actually stand in this relationship is the W4.5 publication contract,
-    which verification runs against both files rather than reimplementing here.
+    on disk actually stand in this relationship is the publication contract,
+    which source verification runs against both files rather than reimplementing
+    here.
     """
 
     schema_version: Literal["1.0"] = SOURCE_VERIFICATION_CONTRACT_VERSION
@@ -214,10 +220,10 @@ class SourceTaskIndex(_Verified):
     """The addressable task set, in publication order.
 
     Order is preserved rather than sorted because it is meaningful: under
-    ``selection_rank`` it is the rank Stage 11 fixed, so a consumer that
+    ``selection_rank`` it is the rank deduplication and balancing fixed, so a consumer that
     evaluates the first N rows must get the same N rows the benchmark's own
     order gives. :attr:`task_ids_hash` therefore hashes the sequence, not a set,
-    and is the value W5.3 contamination and the W5.4 runner agree on.
+    and is the value contamination analysis and the candidate runner agree on.
     """
 
     schema_version: Literal["1.0"] = SOURCE_VERIFICATION_CONTRACT_VERSION
@@ -247,7 +253,10 @@ class SourceTaskIndex(_Verified):
             raise ValueError("every published row declares a turn policy, so the counts must cover all of them")
         # ``category`` and ``difficulty`` are nullable columns, so their counts
         # may cover fewer rows than the benchmark carries, but never more.
-        for label, counts in (("category_counts", self.category_counts), ("difficulty_counts", self.difficulty_counts)):
+        for label, counts in (
+            ("category_counts", self.category_counts),
+            ("difficulty_counts", self.difficulty_counts),
+        ):
             if sum(counts.values()) > len(self.task_ids):
                 raise ValueError(f"{label} counts more rows than the benchmark carries")
         return self
@@ -368,6 +377,11 @@ class VerifiedTranslationSource(_Verified):
     benchmark: VerifiedBenchmarkArtifact
     task_ids_hash: ContentHash
     preserved_fields: tuple[StrictStr, ...] = TRANSLATION_PRESERVED_FIELDS
+    # The model that rewrote every row's surface. ``None`` when the translation
+    # manifest does not name one: a translator that cannot be identified is not
+    # assumed to be a different model from the candidate, it is left unresolved
+    # for the contamination gate to refuse to publish.
+    translator: ModelIdentityClaim | None = None
 
     def semantic_payload(self) -> dict[str, Any]:
         return {
@@ -377,6 +391,7 @@ class VerifiedTranslationSource(_Verified):
             "benchmark": self.benchmark.semantic_payload(),
             "task_ids_hash": self.task_ids_hash,
             "preserved_fields": list(self.preserved_fields),
+            "translator": self.translator.semantic_payload() if self.translator is not None else None,
         }
 
 
@@ -405,6 +420,10 @@ class VerifiedEvalSource(_Verified):
     task_index: SourceTaskIndex
     oracle: VerifiedOracleSource | None = None
     translation: VerifiedTranslationSource | None = None
+    # Which models read these rows while the benchmark was being built. Carried
+    # here rather than re-read later so the contamination gate reasons about a
+    # typed, verified inventory instead of parsing the manifest a second time.
+    exposures: tuple[VerifiedModelExposure, ...] = ()
     modes: tuple[StrictStr, ...]
     claim_scope: ClaimScope
     checks: tuple[SourceCheck, ...] = ()
@@ -432,6 +451,18 @@ class VerifiedEvalSource(_Verified):
             raise ValueError("the task index does not cover the published rows exactly")
         if self.translation is not None and self.translation.source_run_id != self.source_run_id:
             raise ValueError("a translation of another run is not a translation of this source")
+        published = set(self.task_index.task_ids)
+        seen: set[tuple[str, str]] = set()
+        for exposure in self.exposures:
+            if (exposure.role, exposure.scope) in seen:
+                raise ValueError(f"role {exposure.role} declares the scope {exposure.scope} twice")
+            seen.add((exposure.role, exposure.scope))
+            if unknown := sorted(set(exposure.task_ids) - published):
+                raise ValueError(f"exposure {exposure.role} covers unpublished row(s) {unknown[:3]}")
+            if tuple(task_id for task_id in self.task_index.task_ids if task_id in set(exposure.task_ids)) != (
+                exposure.task_ids
+            ):
+                raise ValueError(f"exposure {exposure.role} must list its rows in publication order")
         return self
 
     @property
@@ -464,6 +495,7 @@ class VerifiedEvalSource(_Verified):
             "task_index": self.task_index.semantic_payload(),
             "oracle": self.oracle.semantic_payload() if self.oracle is not None else None,
             "translation": self.translation.semantic_payload() if self.translation is not None else None,
+            "exposures": [exposure.semantic_payload() for exposure in self.exposures],
             "modes": list(self.modes),
             "claim_scope": self.claim_scope,
         }
@@ -535,6 +567,7 @@ class SourceVerificationReport(_Verified):
             "translation": (
                 source.translation.semantic_payload() if source.translation is not None else None
             ),
+            "exposures": [exposure.as_document() for exposure in source.exposures],
             "modes": list(source.modes),
             "claim_scope": source.claim_scope,
             "checks": [check.as_document() for check in source.checks],

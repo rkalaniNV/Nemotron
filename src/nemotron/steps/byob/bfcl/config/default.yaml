@@ -5,8 +5,8 @@
 # The optional profile / paraphrase / surface-judge roles are disabled here so
 # this config runs end to end. A gold run may disable them: disabled roles are
 # recorded with null identity and make generation_mode template_only, which does
-# not change gold eligibility. Profile and paraphrase are available; features
-# whose owning stage is still pending are refused rather than silently skipped.
+# not change gold eligibility. Profile and paraphrase are available; settings
+# unsupported by the selected stage are refused rather than silently skipped.
 
 schema_version: "1.1"
 config_status: template

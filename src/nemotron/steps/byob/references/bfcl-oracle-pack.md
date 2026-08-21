@@ -697,7 +697,17 @@ obtain one without verification:
   run, declare its language, table, and task-id hash, match its declared bytes,
   carry exactly the source task ids in publication order, and leave every field a
   scorer reads byte-identical under canonical JSON. Only the conversation, the
-  intent, the system prompt, and row metadata may change.
+  intent, the system prompt, and row metadata may change. An optional `model`
+  block names the translator; without it the translator is unidentified, which
+  the contamination gate treats as unresolved rather than as clean.
+- **Every model that read a row is named.** The `models.*` roles the manifest
+  records — `profile`, `paraphrase`, `surface_judge` — are read together with the
+  rows each one touched: rows carrying a `profile_hash`, rows attributed to the
+  paraphraser's canonical id, and the whole published surface for a judge that
+  ran. A manifest that omits the block, names a role this build does not read,
+  enables a role without naming a model, contradicts its own rows about
+  `profile_influenced_surface`, or ships a paraphrased row no role claims is
+  refused: a gap in this inventory would read as "no contamination found".
 - **The evidence is written down.** A pass writes
   `source_verification_report.json` into `outputs.output_dir`, atomically, listing
   the checks that actually passed; a failure writes
@@ -711,6 +721,59 @@ obtain one without verification:
   replaced — a regeneration into the same directory, a pack edited to make a
   failing task pass.
 
-The eval runner itself is not wired yet. Until it is, `stage=generate` refuses
-`eval_config_path` and inline `eval` blocks instead of accepting settings no stage
-of that run applies.
+A verified source says which benchmark is being scored. `evaluate_contamination()`
+then decides who may answer which rows of it, and returns the second handle a
+runner is given:
+
+- **A collision is evidence, not a flag.** Each candidate is compared against each
+  exposure, and the result is recorded with the role, the model, and the exact
+  task ids. Comparison weighs the strongest available evidence first: two weights
+  digests settle it either way, then an equal operator canonical id, then an equal
+  serving route, then a normalized model name plus revision. Names are compared
+  case-insensitively with the registry prefix and punctuation removed, so a
+  registry naming difference cannot be mistaken for a different model.
+- **An unprovable separation is never guessed.** When neither side pinned enough
+  to decide, the comparison is `unknown`. It does not exclude rows on suspicion
+  and does not abort a debug run, but it always blocks publication — and when
+  `publication.requested` is true it is refused here rather than producing a
+  number that cannot be published.
+- **The policy only narrows.** `fail_run` refuses the run on a match;
+  `exclude_row` drops exactly the rows that exposure covered. If exclusion empties
+  a candidate's set, or leaves no row every candidate can answer, the run stops:
+  a benchmark whose surface models are the candidates cannot be salvaged by
+  scoring zero rows.
+- **The comparable set is decided here.** Under `common_intersection` every
+  candidate answers the rows all of them may answer, in publication order, so two
+  numbers are comparable by construction; `per_candidate` keeps each candidate's
+  own set and is debug-only. `plan_identity` hashes the whole decision with
+  candidates ordered by alias, and no path or timestamp.
+- **The decision is written down and re-pinned.** A pass writes
+  `contamination_report.json` into `outputs.output_dir` and removes any stale
+  `contamination_failure.json`, and the other way round.
+  `assert_plan_unchanged()` re-pins the source and re-derives the decision
+  immediately before the first request, so a plan widened after authorization
+  cannot be the plan a runner acts on.
+
+The native candidate client transports one authorized assistant turn. It sends
+only model-facing messages and OpenAI-compatible tools, preserves ordered
+`message.tool_calls` and raw arguments without repair, retries only transient
+transport failures, and writes a hash-verified request/attempt/completion
+sequence to `candidate_io_cache.jsonl`. Completed calls replay without network
+or credentials; an interrupted sequence fails closed. The client does not choose
+what to ask next.
+
+The conversation driver selects the row and call-group plan from a
+canonical projection whose hash, row count, and complete task sequence match the
+verified source, then replays the episode the pack's turn policy described. The
+model is asked one assistant turn at a time, and a tool result your pack's replay
+recorded is handed back only after a type=`function` call with a unique id matches
+the trace, addressed to that candidate id. An intermediate text turn must equal
+the published assistant text before the next user request is released. This
+fail-closed rule is what makes a `missing_slot` or `ask_confirm` policy safe: a
+model that calls straight through or emits unrelated prose never receives the
+slot value it failed to ask for. Nothing else from the row enters a prompt. The
+driver releases recorded results only; it executes no tool and derives no score.
+
+`stage=generate` refuses `eval_config_path` and inline `eval` blocks because
+generation does not consume evaluation settings. Candidate execution belongs to
+the evaluation runtime, not to benchmark publication.
