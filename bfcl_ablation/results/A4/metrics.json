@@ -1,0 +1,4637 @@
+{
+  "arm": "a4",
+  "arms": {
+    "human": {
+      "advisory": {
+        "crash": 0,
+        "crash_rate": 0.0,
+        "detected": 0,
+        "detection_rate": 0.0,
+        "episode_error": 0,
+        "false_accept": 26,
+        "false_acceptance_rate": 1.0,
+        "trials": 26
+      },
+      "by_assertion": {
+        "assert_account_balance_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 16,
+              "detection_rate": 0.7619,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.2381,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 0.4211,
+              "episode_error": 0,
+              "false_accept": 11,
+              "false_acceptance_rate": 0.5789,
+              "trials": 19
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 16,
+              "detection_rate": 0.7619,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.2381,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 0.5714,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.4286,
+              "trials": 14
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 24,
+          "detection_rate": 0.6,
+          "episode_error": 0,
+          "false_accept": 16,
+          "false_acceptance_rate": 0.4,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 40
+        },
+        "assert_card_limit_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.2857,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 0.7143,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.3636,
+              "episode_error": 0,
+              "false_accept": 7,
+              "false_acceptance_rate": 0.6364,
+              "trials": 11
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.2857,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 0.7143,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 8,
+          "detection_rate": 0.32,
+          "episode_error": 0,
+          "false_accept": 17,
+          "false_acceptance_rate": 0.68,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 25
+        },
+        "assert_dispute_opened": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 0.3333,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.6667,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.5,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 3
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 0.3333,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.6667,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.5,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 12,
+          "detection_rate": 0.5,
+          "episode_error": 0,
+          "false_accept": 12,
+          "false_acceptance_rate": 0.5,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 24
+        },
+        "assert_dispute_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.3333,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.5,
+              "trials": 12
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.3333,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.3333,
+              "trials": 9
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 12,
+          "detection_rate": 0.5714,
+          "episode_error": 0,
+          "false_accept": 9,
+          "false_acceptance_rate": 0.4286,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 21
+        },
+        "assert_no_tool_called": {
+          "by_class": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 4
+        },
+        "assert_only_corrected_amount_transferred": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 0.75,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.25,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 0.75,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.25,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 5,
+          "detection_rate": 0.4545,
+          "episode_error": 0,
+          "false_accept": 6,
+          "false_acceptance_rate": 0.5455,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 11
+        },
+        "assert_recent_transactions_listed": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 8,
+          "detection_rate": 0.5,
+          "episode_error": 0,
+          "false_accept": 8,
+          "false_acceptance_rate": 0.5,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 16
+        },
+        "assert_status_checked_from_listed_transaction": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1111,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 0.8889,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1111,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 0.8889,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 5,
+          "detection_rate": 0.2941,
+          "episode_error": 0,
+          "false_accept": 12,
+          "false_acceptance_rate": 0.7059,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 17
+        },
+        "assert_transaction_not_found": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.3333,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 3,
+          "detection_rate": 0.6,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.4,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 5
+        },
+        "assert_transaction_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.4,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.6,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.4,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.6,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 8,
+          "detection_rate": 0.4444,
+          "episode_error": 0,
+          "false_accept": 10,
+          "false_acceptance_rate": 0.5556,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_committed": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 0.8333,
+              "trials": 12
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 2
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 0.8333,
+              "trials": 12
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 2
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 8,
+          "detection_rate": 0.3636,
+          "episode_error": 0,
+          "false_accept": 14,
+          "false_acceptance_rate": 0.6364,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 22
+        },
+        "assert_transfer_fee_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 1.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 1.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 0.2222,
+          "episode_error": 0,
+          "false_accept": 14,
+          "false_acceptance_rate": 0.7778,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_rejected_for_funds": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 3,
+          "detection_rate": 0.3,
+          "episode_error": 0,
+          "false_accept": 7,
+          "false_acceptance_rate": 0.7,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 10
+        },
+        "assert_vietqr_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.4615,
+              "episode_error": 0,
+              "false_accept": 14,
+              "false_acceptance_rate": 0.5385,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 12,
+              "false_acceptance_rate": 0.5,
+              "trials": 24
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.4615,
+              "episode_error": 0,
+              "false_accept": 14,
+              "false_acceptance_rate": 0.5385,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.3333,
+              "trials": 18
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 24,
+          "detection_rate": 0.48,
+          "episode_error": 0,
+          "false_accept": 26,
+          "false_acceptance_rate": 0.52,
+          "gold_instances": 6,
+          "gold_passed": 6,
+          "trials": 50
+        }
+      },
+      "by_class": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 55,
+          "detection_rate": 0.3901,
+          "episode_error": 0,
+          "false_accept": 86,
+          "false_acceptance_rate": 0.6099,
+          "trials": 141
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 67,
+          "detection_rate": 0.5,
+          "episode_error": 0,
+          "false_accept": 67,
+          "false_acceptance_rate": 0.5,
+          "trials": 134
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 6,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "trials": 6
+        }
+      },
+      "by_class_strict": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 55,
+          "detection_rate": 0.3901,
+          "episode_error": 0,
+          "false_accept": 86,
+          "false_acceptance_rate": 0.6099,
+          "trials": 141
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 67,
+          "detection_rate": 0.6204,
+          "episode_error": 0,
+          "false_accept": 41,
+          "false_acceptance_rate": 0.3796,
+          "trials": 108
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 6,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "trials": 6
+        }
+      },
+      "by_operator": {
+        "drop_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 31,
+          "detection_rate": 0.9394,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0606,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 33
+        },
+        "duplicate_call_mutating": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 1,
+          "detection_rate": 0.1429,
+          "episode_error": 0,
+          "false_accept": 6,
+          "false_acceptance_rate": 0.8571,
+          "mutations_generated": 7,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 7,
+          "tasks_total": 33,
+          "trials": 7
+        },
+        "duplicate_call_readonly": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 26,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 24,
+          "op_class": "call_level",
+          "semantics": "advisory",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 26
+        },
+        "inject_extra_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 0.1176,
+          "episode_error": 0,
+          "false_accept": 30,
+          "false_acceptance_rate": 0.8824,
+          "mutations_generated": 33,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 33,
+          "tasks_total": 33,
+          "trials": 34
+        },
+        "perturb_numeric_large": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 0.125,
+          "episode_error": 0,
+          "false_accept": 28,
+          "false_acceptance_rate": 0.875,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 32
+        },
+        "perturb_numeric_plus_one": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 0.125,
+          "episode_error": 0,
+          "false_accept": 28,
+          "false_acceptance_rate": 0.875,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 32
+        },
+        "reorder_calls": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 1,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 1,
+          "tasks_total": 33,
+          "trials": 1
+        },
+        "state_reverted": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 6,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "mutations_generated": 6,
+          "op_class": "state_level",
+          "semantics": "strict",
+          "tasks_applicable": 6,
+          "tasks_total": 33,
+          "trials": 6
+        },
+        "swap_identity_argument": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 28,
+          "detection_rate": 0.8485,
+          "episode_error": 0,
+          "false_accept": 5,
+          "false_acceptance_rate": 0.1515,
+          "mutations_generated": 31,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 33
+        },
+        "swap_identity_result": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 19,
+          "detection_rate": 0.4318,
+          "episode_error": 0,
+          "false_accept": 25,
+          "false_acceptance_rate": 0.5682,
+          "mutations_generated": 41,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 26,
+          "tasks_total": 33,
+          "trials": 44
+        },
+        "swap_tool": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 31,
+          "detection_rate": 0.9394,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0606,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 33
+        }
+      },
+      "gold": {
+        "failing": [],
+        "instances": 34,
+        "pass_rate": 1.0,
+        "passed": 34
+      },
+      "target": "human"
+    },
+    "llm_blind": {
+      "advisory": {
+        "crash": 0,
+        "crash_rate": 0.0,
+        "detected": 8,
+        "detection_rate": 0.3077,
+        "episode_error": 0,
+        "false_accept": 18,
+        "false_acceptance_rate": 0.6923,
+        "trials": 26
+      },
+      "authoring": {
+        "arm": "a4_llm_blind",
+        "assertions": {
+          "assert_account_balance_reported": {
+            "errors": [],
+            "lines": 82,
+            "ok": true
+          },
+          "assert_card_limit_reported": {
+            "errors": [],
+            "lines": 94,
+            "ok": true
+          },
+          "assert_dispute_opened": {
+            "errors": [],
+            "lines": 121,
+            "ok": true
+          },
+          "assert_dispute_status_reported": {
+            "errors": [],
+            "lines": 103,
+            "ok": true
+          },
+          "assert_no_tool_called": {
+            "errors": [],
+            "lines": 27,
+            "ok": true
+          },
+          "assert_only_corrected_amount_transferred": {
+            "errors": [],
+            "lines": 96,
+            "ok": true
+          },
+          "assert_recent_transactions_listed": {
+            "errors": [],
+            "lines": 100,
+            "ok": true
+          },
+          "assert_status_checked_from_listed_transaction": {
+            "errors": [],
+            "lines": 116,
+            "ok": true
+          },
+          "assert_transaction_not_found": {
+            "errors": [],
+            "lines": 70,
+            "ok": true
+          },
+          "assert_transaction_status_reported": {
+            "errors": [],
+            "lines": 105,
+            "ok": true
+          },
+          "assert_transfer_committed": {
+            "errors": [],
+            "lines": 152,
+            "ok": true
+          },
+          "assert_transfer_fee_reported": {
+            "errors": [],
+            "lines": 96,
+            "ok": true
+          },
+          "assert_transfer_rejected_for_funds": {
+            "errors": [],
+            "lines": 127,
+            "ok": true
+          },
+          "assert_vietqr_status_reported": {
+            "errors": [],
+            "lines": 101,
+            "ok": true
+          }
+        },
+        "assertions_loc": 1426,
+        "authored": 14,
+        "disclosed": {
+          "backend_py": false,
+          "fixtures": true,
+          "human_assertions_py": false,
+          "one_observed_result_per_tool": [
+            "create_dispute",
+            "create_transfer",
+            "get_account_balance",
+            "get_card_limit",
+            "get_dispute_status",
+            "get_transaction_status",
+            "get_transfer_fee",
+            "get_vietqr_payment_status",
+            "list_recent_transactions"
+          ],
+          "one_task_dict_per_template": true,
+          "templates_naming_the_assertion": true,
+          "tool_schemas": true
+        },
+        "missing": [],
+        "requested": 14
+      },
+      "by_assertion": {
+        "assert_account_balance_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.5714,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 0.4286,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.6316,
+              "episode_error": 0,
+              "false_accept": 7,
+              "false_acceptance_rate": 0.3684,
+              "trials": 19
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.5714,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 0.4286,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.8571,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.1429,
+              "trials": 14
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 24,
+          "detection_rate": 0.6,
+          "episode_error": 0,
+          "false_accept": 16,
+          "false_acceptance_rate": 0.4,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 40
+        },
+        "assert_card_limit_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 0.7143,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.2857,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.3636,
+              "episode_error": 0,
+              "false_accept": 7,
+              "false_acceptance_rate": 0.6364,
+              "trials": 11
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 0.7143,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.2857,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 14,
+          "detection_rate": 0.56,
+          "episode_error": 0,
+          "false_accept": 11,
+          "false_acceptance_rate": 0.44,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 25
+        },
+        "assert_dispute_opened": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 0.75,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.25,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 3
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 0.75,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.25,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 21,
+          "detection_rate": 0.875,
+          "episode_error": 0,
+          "false_accept": 3,
+          "false_acceptance_rate": 0.125,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 24
+        },
+        "assert_dispute_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.5,
+              "trials": 12
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.3333,
+              "trials": 9
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 15,
+          "detection_rate": 0.7143,
+          "episode_error": 0,
+          "false_accept": 6,
+          "false_acceptance_rate": 0.2857,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 21
+        },
+        "assert_no_tool_called": {
+          "by_class": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 4
+        },
+        "assert_only_corrected_amount_transferred": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 0.3636,
+          "episode_error": 0,
+          "false_accept": 7,
+          "false_acceptance_rate": 0.6364,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 11
+        },
+        "assert_recent_transactions_listed": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.75,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.25,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 14,
+          "detection_rate": 0.875,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.125,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 16
+        },
+        "assert_status_checked_from_listed_transaction": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.3333,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 5,
+              "detection_rate": 0.625,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.375,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.3333,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 5,
+              "detection_rate": 0.8333,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.1667,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 11,
+          "detection_rate": 0.6471,
+          "episode_error": 0,
+          "false_accept": 6,
+          "false_acceptance_rate": 0.3529,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 17
+        },
+        "assert_transaction_not_found": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.3333,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 3,
+          "detection_rate": 0.6,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.4,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 5
+        },
+        "assert_transaction_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 14,
+          "detection_rate": 0.7778,
+          "episode_error": 0,
+          "false_accept": 4,
+          "false_acceptance_rate": 0.2222,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_committed": {
+          "by_class": {},
+          "by_class_strict": {},
+          "crash": 0,
+          "crash_rate": null,
+          "detected": 0,
+          "detection_rate": null,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": null,
+          "gold_instances": 2,
+          "gold_passed": 0,
+          "trials": 0
+        },
+        "assert_transfer_fee_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.4,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.5,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.6,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.4,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 10,
+          "detection_rate": 0.5556,
+          "episode_error": 0,
+          "false_accept": 8,
+          "false_acceptance_rate": 0.4444,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_rejected_for_funds": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 0.1667,
+              "episode_error": 0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.8333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 2,
+              "detection_rate": 0.5,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.5,
+              "trials": 4
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 3,
+          "detection_rate": 0.3,
+          "episode_error": 0,
+          "false_accept": 7,
+          "false_acceptance_rate": 0.7,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 10
+        },
+        "assert_vietqr_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 24,
+              "detection_rate": 0.9231,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.0769,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 18,
+              "detection_rate": 0.75,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.25,
+              "trials": 24
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 24,
+              "detection_rate": 0.9231,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.0769,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 0.3333,
+              "trials": 18
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 42,
+          "detection_rate": 0.84,
+          "episode_error": 0,
+          "false_accept": 8,
+          "false_acceptance_rate": 0.16,
+          "gold_instances": 6,
+          "gold_passed": 6,
+          "trials": 50
+        }
+      },
+      "by_class": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 97,
+          "detection_rate": 0.7519,
+          "episode_error": 0,
+          "false_accept": 32,
+          "false_acceptance_rate": 0.2481,
+          "trials": 129
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 78,
+          "detection_rate": 0.619,
+          "episode_error": 0,
+          "false_accept": 48,
+          "false_acceptance_rate": 0.381,
+          "trials": 126
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "trials": 4
+        }
+      },
+      "by_class_strict": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 97,
+          "detection_rate": 0.7519,
+          "episode_error": 0,
+          "false_accept": 32,
+          "false_acceptance_rate": 0.2481,
+          "trials": 129
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 70,
+          "detection_rate": 0.7,
+          "episode_error": 0,
+          "false_accept": 30,
+          "false_acceptance_rate": 0.3,
+          "trials": 100
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "trials": 4
+        }
+      },
+      "by_operator": {
+        "drop_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 29,
+          "detection_rate": 0.9355,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0645,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 31
+        },
+        "duplicate_call_mutating": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 3,
+          "detection_rate": 0.6,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.4,
+          "mutations_generated": 7,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 7,
+          "tasks_total": 33,
+          "trials": 5
+        },
+        "duplicate_call_readonly": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 8,
+          "detection_rate": 0.3077,
+          "episode_error": 0,
+          "false_accept": 18,
+          "false_acceptance_rate": 0.6923,
+          "mutations_generated": 24,
+          "op_class": "call_level",
+          "semantics": "advisory",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 26
+        },
+        "inject_extra_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 8,
+          "detection_rate": 0.25,
+          "episode_error": 0,
+          "false_accept": 24,
+          "false_acceptance_rate": 0.75,
+          "mutations_generated": 33,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 33,
+          "tasks_total": 33,
+          "trials": 32
+        },
+        "perturb_numeric_large": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 19,
+          "detection_rate": 0.6786,
+          "episode_error": 0,
+          "false_accept": 9,
+          "false_acceptance_rate": 0.3214,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 28
+        },
+        "perturb_numeric_plus_one": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 19,
+          "detection_rate": 0.6786,
+          "episode_error": 0,
+          "false_accept": 9,
+          "false_acceptance_rate": 0.3214,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 28
+        },
+        "reorder_calls": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 1,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "mutations_generated": 1,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 1,
+          "tasks_total": 33,
+          "trials": 1
+        },
+        "state_reverted": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "mutations_generated": 6,
+          "op_class": "state_level",
+          "semantics": "strict",
+          "tasks_applicable": 6,
+          "tasks_total": 33,
+          "trials": 4
+        },
+        "swap_identity_argument": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 29,
+          "detection_rate": 0.9355,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0645,
+          "mutations_generated": 31,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 31
+        },
+        "swap_identity_result": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 30,
+          "detection_rate": 0.7143,
+          "episode_error": 0,
+          "false_accept": 12,
+          "false_acceptance_rate": 0.2857,
+          "mutations_generated": 41,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 26,
+          "tasks_total": 33,
+          "trials": 42
+        },
+        "swap_tool": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 29,
+          "detection_rate": 0.9355,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0645,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 31
+        }
+      },
+      "gold": {
+        "failing": [
+          [
+            "assert_transfer_committed",
+            "bn_create_transfer_single"
+          ]
+        ],
+        "instances": 34,
+        "pass_rate": 0.9412,
+        "passed": 32
+      },
+      "target": "llm_blind"
+    },
+    "llm_feedback": {
+      "advisory": {
+        "crash": 0,
+        "crash_rate": 0.0,
+        "detected": 25,
+        "detection_rate": 0.9615,
+        "episode_error": 0,
+        "false_accept": 1,
+        "false_acceptance_rate": 0.0385,
+        "trials": 26
+      },
+      "authoring": {
+        "arm": "a4_llm_feedback",
+        "assertions": {
+          "assert_account_balance_reported": {
+            "errors": [],
+            "lines": 140,
+            "ok": true
+          },
+          "assert_card_limit_reported": {
+            "errors": [],
+            "lines": 100,
+            "ok": true
+          },
+          "assert_dispute_opened": {
+            "errors": [],
+            "lines": 128,
+            "ok": true
+          },
+          "assert_dispute_status_reported": {
+            "errors": [],
+            "lines": 103,
+            "ok": true
+          },
+          "assert_no_tool_called": {
+            "errors": [],
+            "lines": 30,
+            "ok": true
+          },
+          "assert_only_corrected_amount_transferred": {
+            "errors": [],
+            "lines": 154,
+            "ok": true
+          },
+          "assert_recent_transactions_listed": {
+            "errors": [],
+            "lines": 117,
+            "ok": true
+          },
+          "assert_status_checked_from_listed_transaction": {
+            "errors": [],
+            "lines": 143,
+            "ok": true
+          },
+          "assert_transaction_not_found": {
+            "errors": [],
+            "lines": 71,
+            "ok": true
+          },
+          "assert_transaction_status_reported": {
+            "errors": [],
+            "lines": 101,
+            "ok": true
+          },
+          "assert_transfer_committed": {
+            "errors": [],
+            "lines": 142,
+            "ok": true
+          },
+          "assert_transfer_fee_reported": {
+            "errors": [],
+            "lines": 113,
+            "ok": true
+          },
+          "assert_transfer_rejected_for_funds": {
+            "errors": [],
+            "lines": 147,
+            "ok": true
+          },
+          "assert_vietqr_status_reported": {
+            "errors": [],
+            "lines": 105,
+            "ok": true
+          }
+        },
+        "assertions_loc": 1630,
+        "authored": 14,
+        "disclosed": {
+          "backend_py": false,
+          "fixtures": true,
+          "human_assertions_py": false,
+          "one_observed_result_per_tool": [
+            "create_dispute",
+            "create_transfer",
+            "get_account_balance",
+            "get_card_limit",
+            "get_dispute_status",
+            "get_transaction_status",
+            "get_transfer_fee",
+            "get_vietqr_payment_status",
+            "list_recent_transactions"
+          ],
+          "one_task_dict_per_template": true,
+          "templates_naming_the_assertion": true,
+          "tool_schemas": true
+        },
+        "missing": [],
+        "requested": 14
+      },
+      "by_assertion": {
+        "assert_account_balance_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 20,
+              "detection_rate": 0.9524,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.0476,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 19,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 19
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 20,
+              "detection_rate": 0.9524,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.0476,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 14,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 14
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 39,
+          "detection_rate": 0.975,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.025,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 40
+        },
+        "assert_card_limit_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 0.7143,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.2857,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 0.7273,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 0.2727,
+              "trials": 11
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 0.7143,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 0.2857,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 0.75,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.25,
+              "trials": 8
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 18,
+          "detection_rate": 0.72,
+          "episode_error": 0,
+          "false_accept": 7,
+          "false_acceptance_rate": 0.28,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 25
+        },
+        "assert_dispute_opened": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 3
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 24,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 24
+        },
+        "assert_dispute_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 12,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 12
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 9,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 9
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 21,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 21
+        },
+        "assert_no_tool_called": {
+          "by_class": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 4
+        },
+        "assert_only_corrected_amount_transferred": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 0.6667,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.3333,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 9,
+          "detection_rate": 0.8182,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.1818,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 11
+        },
+        "assert_recent_transactions_listed": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 16,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 16
+        },
+        "assert_status_checked_from_listed_transaction": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 0.8889,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.1111,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 0.8889,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.1111,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 16,
+          "detection_rate": 0.9412,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0588,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 17
+        },
+        "assert_transaction_not_found": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 4,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 1,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 3,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 5,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 5
+        },
+        "assert_transaction_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 18,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_committed": {
+          "by_class": {},
+          "by_class_strict": {},
+          "crash": 0,
+          "crash_rate": null,
+          "detected": 0,
+          "detection_rate": null,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": null,
+          "gold_instances": 2,
+          "gold_passed": 0,
+          "trials": 0
+        },
+        "assert_transfer_fee_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 8,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 10,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 6,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 18,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_rejected_for_funds": {
+          "by_class": {},
+          "by_class_strict": {},
+          "crash": 0,
+          "crash_rate": null,
+          "detected": 0,
+          "detection_rate": null,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": null,
+          "gold_instances": 1,
+          "gold_passed": 0,
+          "trials": 0
+        },
+        "assert_vietqr_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 26,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 24,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 24
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 26,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 18,
+              "detection_rate": 1.0,
+              "episode_error": 0,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
+              "trials": 18
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 50,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "gold_instances": 6,
+          "gold_passed": 6,
+          "trials": 50
+        }
+      },
+      "by_class": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 115,
+          "detection_rate": 0.935,
+          "episode_error": 0,
+          "false_accept": 8,
+          "false_acceptance_rate": 0.065,
+          "trials": 123
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 119,
+          "detection_rate": 0.9754,
+          "episode_error": 0,
+          "false_accept": 3,
+          "false_acceptance_rate": 0.0246,
+          "trials": 122
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "trials": 4
+        }
+      },
+      "by_class_strict": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 115,
+          "detection_rate": 0.935,
+          "episode_error": 0,
+          "false_accept": 8,
+          "false_acceptance_rate": 0.065,
+          "trials": 123
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 94,
+          "detection_rate": 0.9792,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0208,
+          "trials": 96
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "trials": 4
+        }
+      },
+      "by_operator": {
+        "drop_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 29,
+          "detection_rate": 0.9667,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0333,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 30
+        },
+        "duplicate_call_mutating": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "mutations_generated": 7,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 7,
+          "tasks_total": 33,
+          "trials": 4
+        },
+        "duplicate_call_readonly": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 25,
+          "detection_rate": 0.9615,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0385,
+          "mutations_generated": 24,
+          "op_class": "call_level",
+          "semantics": "advisory",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 26
+        },
+        "inject_extra_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 30,
+          "detection_rate": 0.9677,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0323,
+          "mutations_generated": 33,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 33,
+          "tasks_total": 33,
+          "trials": 31
+        },
+        "perturb_numeric_large": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 24,
+          "detection_rate": 0.9231,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0769,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 26
+        },
+        "perturb_numeric_plus_one": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 24,
+          "detection_rate": 0.9231,
+          "episode_error": 0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.0769,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 26
+        },
+        "reorder_calls": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 1,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "mutations_generated": 1,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 1,
+          "tasks_total": 33,
+          "trials": 1
+        },
+        "state_reverted": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 4,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "mutations_generated": 6,
+          "op_class": "state_level",
+          "semantics": "strict",
+          "tasks_applicable": 6,
+          "tasks_total": 33,
+          "trials": 4
+        },
+        "swap_identity_argument": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 29,
+          "detection_rate": 0.9667,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0333,
+          "mutations_generated": 31,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 30
+        },
+        "swap_identity_result": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 38,
+          "detection_rate": 0.9268,
+          "episode_error": 0,
+          "false_accept": 3,
+          "false_acceptance_rate": 0.0732,
+          "mutations_generated": 41,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 26,
+          "tasks_total": 33,
+          "trials": 41
+        },
+        "swap_tool": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 30,
+          "detection_rate": 1.0,
+          "episode_error": 0,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 30
+        }
+      },
+      "gold": {
+        "failing": [
+          [
+            "assert_transfer_committed",
+            "bn_create_transfer_single"
+          ],
+          [
+            "assert_transfer_rejected_for_funds",
+            "bn_transfer_short_of_funds"
+          ]
+        ],
+        "instances": 34,
+        "pass_rate": 0.9118,
+        "passed": 31
+      },
+      "target": "llm_feedback"
+    },
+    "null_control": {
+      "advisory": {
+        "crash": 0,
+        "crash_rate": 0.0,
+        "detected": 0,
+        "detection_rate": 0.0,
+        "episode_error": 0,
+        "false_accept": 26,
+        "false_acceptance_rate": 1.0,
+        "trials": 26
+      },
+      "by_assertion": {
+        "assert_account_balance_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 21,
+              "false_acceptance_rate": 1.0,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 19,
+              "false_acceptance_rate": 1.0,
+              "trials": 19
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 21,
+              "false_acceptance_rate": 1.0,
+              "trials": 21
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 14,
+              "false_acceptance_rate": 1.0,
+              "trials": 14
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 40,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 40
+        },
+        "assert_card_limit_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 14,
+              "false_acceptance_rate": 1.0,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 11,
+              "false_acceptance_rate": 1.0,
+              "trials": 11
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 14,
+              "false_acceptance_rate": 1.0,
+              "trials": 14
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 25,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 25
+        },
+        "assert_dispute_opened": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 1.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 12,
+              "false_acceptance_rate": 1.0,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 1.0,
+              "trials": 3
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 1.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 12,
+              "false_acceptance_rate": 1.0,
+              "trials": 12
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 1.0,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 24,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 24
+        },
+        "assert_dispute_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 1.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 12,
+              "false_acceptance_rate": 1.0,
+              "trials": 12
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 1.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 1.0,
+              "trials": 9
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 21,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 3,
+          "gold_passed": 3,
+          "trials": 21
+        },
+        "assert_no_tool_called": {
+          "by_class": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 1.0,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 1.0,
+              "trials": 4
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 4,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 4,
+          "gold_passed": 4,
+          "trials": 4
+        },
+        "assert_only_corrected_amount_transferred": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 1.0,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 1.0,
+              "trials": 1
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 1.0,
+              "trials": 4
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 1.0,
+              "trials": 1
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 11,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 11
+        },
+        "assert_recent_transactions_listed": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 16,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 16
+        },
+        "assert_status_checked_from_listed_transaction": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 1.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 9,
+              "false_acceptance_rate": 1.0,
+              "trials": 9
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 17,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 17
+        },
+        "assert_transaction_not_found": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 1.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 1.0,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 1,
+              "false_acceptance_rate": 1.0,
+              "trials": 1
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 3,
+              "false_acceptance_rate": 1.0,
+              "trials": 3
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 5,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 5
+        },
+        "assert_transaction_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 1.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 1.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 18,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_committed": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 12,
+              "false_acceptance_rate": 1.0,
+              "trials": 12
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 1.0,
+              "trials": 2
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 12,
+              "false_acceptance_rate": 1.0,
+              "trials": 12
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            },
+            "state_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 2,
+              "false_acceptance_rate": 1.0,
+              "trials": 2
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 22,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 22
+        },
+        "assert_transfer_fee_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 1.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 8,
+              "false_acceptance_rate": 1.0,
+              "trials": 8
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 10,
+              "false_acceptance_rate": 1.0,
+              "trials": 10
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 18,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 2,
+          "gold_passed": 2,
+          "trials": 18
+        },
+        "assert_transfer_rejected_for_funds": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 1.0,
+              "trials": 4
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 6,
+              "false_acceptance_rate": 1.0,
+              "trials": 6
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 4,
+              "false_acceptance_rate": 1.0,
+              "trials": 4
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 10,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 1,
+          "gold_passed": 1,
+          "trials": 10
+        },
+        "assert_vietqr_status_reported": {
+          "by_class": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 26,
+              "false_acceptance_rate": 1.0,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 24,
+              "false_acceptance_rate": 1.0,
+              "trials": 24
+            }
+          },
+          "by_class_strict": {
+            "argument_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 26,
+              "false_acceptance_rate": 1.0,
+              "trials": 26
+            },
+            "call_level": {
+              "crash": 0,
+              "crash_rate": 0.0,
+              "detected": 0,
+              "detection_rate": 0.0,
+              "episode_error": 0,
+              "false_accept": 18,
+              "false_acceptance_rate": 1.0,
+              "trials": 18
+            }
+          },
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 50,
+          "false_acceptance_rate": 1.0,
+          "gold_instances": 6,
+          "gold_passed": 6,
+          "trials": 50
+        }
+      },
+      "by_class": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 141,
+          "false_acceptance_rate": 1.0,
+          "trials": 141
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 134,
+          "false_acceptance_rate": 1.0,
+          "trials": 134
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 6,
+          "false_acceptance_rate": 1.0,
+          "trials": 6
+        }
+      },
+      "by_class_strict": {
+        "argument_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 141,
+          "false_acceptance_rate": 1.0,
+          "trials": 141
+        },
+        "call_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 108,
+          "false_acceptance_rate": 1.0,
+          "trials": 108
+        },
+        "state_level": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 6,
+          "false_acceptance_rate": 1.0,
+          "trials": 6
+        }
+      },
+      "by_operator": {
+        "drop_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 33,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 33
+        },
+        "duplicate_call_mutating": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 7,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 7,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 7,
+          "tasks_total": 33,
+          "trials": 7
+        },
+        "duplicate_call_readonly": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 26,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 24,
+          "op_class": "call_level",
+          "semantics": "advisory",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 26
+        },
+        "inject_extra_call": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 34,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 33,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 33,
+          "tasks_total": 33,
+          "trials": 34
+        },
+        "perturb_numeric_large": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 32,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 32
+        },
+        "perturb_numeric_plus_one": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 32,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 30,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 22,
+          "tasks_total": 33,
+          "trials": 32
+        },
+        "reorder_calls": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 1,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 1,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 1,
+          "tasks_total": 33,
+          "trials": 1
+        },
+        "state_reverted": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 6,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 6,
+          "op_class": "state_level",
+          "semantics": "strict",
+          "tasks_applicable": 6,
+          "tasks_total": 33,
+          "trials": 6
+        },
+        "swap_identity_argument": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 33,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 31,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 33
+        },
+        "swap_identity_result": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 44,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 41,
+          "op_class": "argument_level",
+          "semantics": "strict",
+          "tasks_applicable": 26,
+          "tasks_total": 33,
+          "trials": 44
+        },
+        "swap_tool": {
+          "crash": 0,
+          "crash_rate": 0.0,
+          "detected": 0,
+          "detection_rate": 0.0,
+          "episode_error": 0,
+          "false_accept": 33,
+          "false_acceptance_rate": 1.0,
+          "mutations_generated": 31,
+          "op_class": "call_level",
+          "semantics": "strict",
+          "tasks_applicable": 29,
+          "tasks_total": 33,
+          "trials": 33
+        }
+      },
+      "gold": {
+        "failing": [],
+        "instances": 34,
+        "pass_rate": 1.0,
+        "passed": 34
+      },
+      "target": "null_control"
+    }
+  },
+  "assertions_loc": {
+    "human": 182
+  },
+  "authoring": {
+    "blind": {
+      "arm": "a4_llm_blind",
+      "assertions": {
+        "assert_account_balance_reported": {
+          "errors": [],
+          "lines": 82,
+          "ok": true
+        },
+        "assert_card_limit_reported": {
+          "errors": [],
+          "lines": 94,
+          "ok": true
+        },
+        "assert_dispute_opened": {
+          "errors": [],
+          "lines": 121,
+          "ok": true
+        },
+        "assert_dispute_status_reported": {
+          "errors": [],
+          "lines": 103,
+          "ok": true
+        },
+        "assert_no_tool_called": {
+          "errors": [],
+          "lines": 27,
+          "ok": true
+        },
+        "assert_only_corrected_amount_transferred": {
+          "errors": [],
+          "lines": 96,
+          "ok": true
+        },
+        "assert_recent_transactions_listed": {
+          "errors": [],
+          "lines": 100,
+          "ok": true
+        },
+        "assert_status_checked_from_listed_transaction": {
+          "errors": [],
+          "lines": 116,
+          "ok": true
+        },
+        "assert_transaction_not_found": {
+          "errors": [],
+          "lines": 70,
+          "ok": true
+        },
+        "assert_transaction_status_reported": {
+          "errors": [],
+          "lines": 105,
+          "ok": true
+        },
+        "assert_transfer_committed": {
+          "errors": [],
+          "lines": 152,
+          "ok": true
+        },
+        "assert_transfer_fee_reported": {
+          "errors": [],
+          "lines": 96,
+          "ok": true
+        },
+        "assert_transfer_rejected_for_funds": {
+          "errors": [],
+          "lines": 127,
+          "ok": true
+        },
+        "assert_vietqr_status_reported": {
+          "errors": [],
+          "lines": 101,
+          "ok": true
+        }
+      },
+      "assertions_loc": 1426,
+      "authored": 14,
+      "disclosed": {
+        "backend_py": false,
+        "fixtures": true,
+        "human_assertions_py": false,
+        "one_observed_result_per_tool": [
+          "create_dispute",
+          "create_transfer",
+          "get_account_balance",
+          "get_card_limit",
+          "get_dispute_status",
+          "get_transaction_status",
+          "get_transfer_fee",
+          "get_vietqr_payment_status",
+          "list_recent_transactions"
+        ],
+        "one_task_dict_per_template": true,
+        "templates_naming_the_assertion": true,
+        "tool_schemas": true
+      },
+      "missing": [],
+      "requested": 14
+    },
+    "feedback": {
+      "arm": "a4_llm_feedback",
+      "assertions": {
+        "assert_account_balance_reported": {
+          "errors": [],
+          "lines": 140,
+          "ok": true
+        },
+        "assert_card_limit_reported": {
+          "errors": [],
+          "lines": 100,
+          "ok": true
+        },
+        "assert_dispute_opened": {
+          "errors": [],
+          "lines": 128,
+          "ok": true
+        },
+        "assert_dispute_status_reported": {
+          "errors": [],
+          "lines": 103,
+          "ok": true
+        },
+        "assert_no_tool_called": {
+          "errors": [],
+          "lines": 30,
+          "ok": true
+        },
+        "assert_only_corrected_amount_transferred": {
+          "errors": [],
+          "lines": 154,
+          "ok": true
+        },
+        "assert_recent_transactions_listed": {
+          "errors": [],
+          "lines": 117,
+          "ok": true
+        },
+        "assert_status_checked_from_listed_transaction": {
+          "errors": [],
+          "lines": 143,
+          "ok": true
+        },
+        "assert_transaction_not_found": {
+          "errors": [],
+          "lines": 71,
+          "ok": true
+        },
+        "assert_transaction_status_reported": {
+          "errors": [],
+          "lines": 101,
+          "ok": true
+        },
+        "assert_transfer_committed": {
+          "errors": [],
+          "lines": 142,
+          "ok": true
+        },
+        "assert_transfer_fee_reported": {
+          "errors": [],
+          "lines": 113,
+          "ok": true
+        },
+        "assert_transfer_rejected_for_funds": {
+          "errors": [],
+          "lines": 147,
+          "ok": true
+        },
+        "assert_vietqr_status_reported": {
+          "errors": [],
+          "lines": 105,
+          "ok": true
+        }
+      },
+      "assertions_loc": 1630,
+      "authored": 14,
+      "disclosed": {
+        "backend_py": false,
+        "fixtures": true,
+        "human_assertions_py": false,
+        "one_observed_result_per_tool": [
+          "create_dispute",
+          "create_transfer",
+          "get_account_balance",
+          "get_card_limit",
+          "get_dispute_status",
+          "get_transaction_status",
+          "get_transfer_fee",
+          "get_vietqr_payment_status",
+          "list_recent_transactions"
+        ],
+        "one_task_dict_per_template": true,
+        "templates_naming_the_assertion": true,
+        "tool_schemas": true
+      },
+      "missing": [],
+      "requested": 14
+    },
+    "llm_calls": {
+      "cache_hits": 28,
+      "calls_made": 0
+    },
+    "model": "openai/gpt-oss-120b"
+  },
+  "env": {
+    "cwd": "/localhome/local-hndo/Nemotron",
+    "python": "3.12.7",
+    "repo_root": "/localhome/local-hndo/Nemotron"
+  },
+  "episodes_run": 899,
+  "mutations_generated": 265,
+  "operator_inventory": {
+    "drop_call": {
+      "mode": "reexecute",
+      "mutations": 31,
+      "op_class": "call_level",
+      "tasks": 29
+    },
+    "duplicate_call_mutating": {
+      "mode": "reexecute",
+      "mutations": 7,
+      "op_class": "call_level",
+      "tasks": 7
+    },
+    "duplicate_call_readonly": {
+      "mode": "reexecute",
+      "mutations": 24,
+      "op_class": "call_level",
+      "tasks": 22
+    },
+    "inject_extra_call": {
+      "mode": "reexecute",
+      "mutations": 33,
+      "op_class": "call_level",
+      "tasks": 33
+    },
+    "perturb_numeric_large": {
+      "mode": "trace",
+      "mutations": 30,
+      "op_class": "argument_level",
+      "tasks": 22
+    },
+    "perturb_numeric_plus_one": {
+      "mode": "trace",
+      "mutations": 30,
+      "op_class": "argument_level",
+      "tasks": 22
+    },
+    "reorder_calls": {
+      "mode": "reexecute",
+      "mutations": 1,
+      "op_class": "call_level",
+      "tasks": 1
+    },
+    "state_reverted": {
+      "mode": "state_reset",
+      "mutations": 6,
+      "op_class": "state_level",
+      "tasks": 6
+    },
+    "swap_identity_argument": {
+      "mode": "reexecute",
+      "mutations": 31,
+      "op_class": "argument_level",
+      "tasks": 29
+    },
+    "swap_identity_result": {
+      "mode": "trace",
+      "mutations": 41,
+      "op_class": "argument_level",
+      "tasks": 26
+    },
+    "swap_tool": {
+      "mode": "reexecute",
+      "mutations": 31,
+      "op_class": "call_level",
+      "tasks": 29
+    }
+  },
+  "pack": "src/nemotron/steps/byob/data/banking_vn_oracle_pack",
+  "plan_errors": [],
+  "tasks_gated": 33
+}

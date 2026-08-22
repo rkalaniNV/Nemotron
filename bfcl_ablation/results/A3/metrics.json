@@ -1,0 +1,2938 @@
+{
+  "arm": "a3",
+  "authoring_friction": {
+    "category_count": 6,
+    "loc_by_file": {
+      "TOTAL": 1390,
+      "assertions.py": 182,
+      "backend.py": 465,
+      "fixtures.json": 68,
+      "manifest.yaml": 28,
+      "run_config": 43,
+      "task_templates.yaml": 371,
+      "tools.json": 162,
+      "validation_cases.yaml": 71
+    },
+    "loc_per_template": 18.6,
+    "loc_total": 1390,
+    "policy_count": 6,
+    "template_count": 20
+  },
+  "backend_probe": {
+    "dependency_edges": [
+      {
+        "consumer": "get_dispute_status",
+        "parameter": "dispute_id",
+        "path": "dispute_id",
+        "producer": "create_dispute"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "create_dispute"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "rail",
+        "path": "rail",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "list_recent_transactions",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_account_balance"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_card_limit"
+      },
+      {
+        "consumer": "list_recent_transactions",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_card_limit"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "reason",
+        "path": "reason",
+        "producer": "get_dispute_status"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_dispute_status"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_dispute_status"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "list_recent_transactions",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_transfer_fee"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "rail",
+        "path": "rail",
+        "producer": "get_transfer_fee"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "transactions.0.account_id",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "transactions.0.amount_vnd",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "transactions.0.amount_vnd",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transactions.0.transaction_id",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transactions.0.transaction_id",
+        "producer": "list_recent_transactions"
+      }
+    ],
+    "tools_probed": [
+      "create_dispute",
+      "create_transfer",
+      "get_account_balance",
+      "get_card_limit",
+      "get_dispute_status",
+      "get_transaction_status",
+      "get_transfer_fee",
+      "get_vietqr_payment_status",
+      "list_recent_transactions"
+    ],
+    "tools_unprobed": []
+  },
+  "coverage": {
+    "distinct_slot_values": {
+      "balance_inquiry_card_independent.account_id": 1,
+      "balance_inquiry_card_independent.card_id": 4,
+      "balance_inquiry_clarify.account_ref": 1,
+      "dispute_check_status_missing_id.dispute_id": 1,
+      "dispute_nonexistent_transaction.transaction_id": 1,
+      "dispute_open_clarify_missing_info.request_type": 1,
+      "qr_payment_check_missing_txn.transaction_id": 1,
+      "transfer_clarify_missing_details.account_id": 5,
+      "txn_status_missing_account_id.account_id": 2,
+      "txn_status_missing_txn_id.transaction_id": 1,
+      "txn_status_not_found.transaction_id": 1,
+      "txn_status_single_turn.transaction_id": 1
+    },
+    "fixture_entities_bound": 11,
+    "fixture_entities_total": 50,
+    "fixtures": {
+      "accounts": {
+        "coverage": 0.625,
+        "entities_bound": 5,
+        "entities_never_bound": [
+          "ACC-006",
+          "ACC-007",
+          "ACC-008"
+        ],
+        "primary_key": "account_id",
+        "rows": 8
+      },
+      "cards": {
+        "coverage": 1.0,
+        "entities_bound": 4,
+        "entities_never_bound": [],
+        "primary_key": "card_id",
+        "rows": 4
+      },
+      "disputes": {
+        "coverage": 0.25,
+        "entities_bound": 1,
+        "entities_never_bound": [
+          "DSP-0002",
+          "DSP-0003",
+          "DSP-0004"
+        ],
+        "primary_key": "dispute_id",
+        "rows": 4
+      },
+      "fee_schedule": {
+        "coverage": null,
+        "entities_bound": 0,
+        "entities_never_bound": [],
+        "primary_key": null,
+        "rows": 6
+      },
+      "transactions": {
+        "coverage": 0.0625,
+        "entities_bound": 1,
+        "entities_never_bound": [
+          "TXN-1002",
+          "TXN-1003",
+          "TXN-1004",
+          "TXN-1005",
+          "TXN-1006",
+          "TXN-1007",
+          "TXN-1008",
+          "TXN-1009",
+          "TXN-1010",
+          "TXN-1011",
+          "TXN-1012",
+          "TXN-1013",
+          "TXN-1014",
+          "TXN-1015",
+          "TXN-1016"
+        ],
+        "primary_key": "transaction_id",
+        "rows": 16
+      },
+      "transfer_scenarios": {
+        "coverage": null,
+        "entities_bound": 0,
+        "entities_never_bound": [],
+        "primary_key": null,
+        "rows": 2
+      },
+      "transfers": {
+        "coverage": 0.0,
+        "entities_bound": 0,
+        "entities_never_bound": [
+          "TRF-0001",
+          "TRF-0002",
+          "TRF-0003",
+          "TRF-0004"
+        ],
+        "primary_key": "transfer_id",
+        "rows": 4
+      },
+      "vietqr_payments": {
+        "coverage": 0.0,
+        "entities_bound": 0,
+        "entities_never_bound": [
+          "VQ-1001",
+          "VQ-1002",
+          "VQ-1003",
+          "VQ-1004",
+          "VQ-1005",
+          "VQ-1006"
+        ],
+        "primary_key": "payment_ref",
+        "rows": 6
+      }
+    },
+    "tool_call_counts": {
+      "get_account_balance": 4,
+      "get_card_limit": 4,
+      "get_dispute_status": 1,
+      "get_transaction_status": 4
+    },
+    "tools_declared": [
+      "create_dispute",
+      "create_transfer",
+      "get_account_balance",
+      "get_card_limit",
+      "get_dispute_status",
+      "get_transaction_status",
+      "get_transfer_fee",
+      "get_vietqr_payment_status",
+      "list_recent_transactions"
+    ],
+    "tools_never_called": [
+      "create_dispute",
+      "create_transfer",
+      "get_transfer_fee",
+      "get_vietqr_payment_status",
+      "list_recent_transactions"
+    ]
+  },
+  "coverage_achieved": {
+    "cells": [
+      {
+        "achieved": 0,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": false,
+        "policy": "single_turn",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": false,
+        "policy": "missing_slot",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "balance_inquiry",
+        "feasible": false,
+        "met": true,
+        "policy": "confirmation",
+        "structural_reason": "no tool in this category requires confirmation",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": false,
+        "policy": "correction",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": false,
+        "policy": "multi_tool",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": false,
+        "policy": "dependent_call",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": false,
+        "policy": "negative_path",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": true,
+        "policy": "clarify_only",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "balance_inquiry",
+        "feasible": true,
+        "met": true,
+        "policy": "irrelevant",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "dispute",
+        "feasible": true,
+        "met": false,
+        "policy": "single_turn",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "dispute",
+        "feasible": true,
+        "met": false,
+        "policy": "missing_slot",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "dispute",
+        "feasible": true,
+        "met": false,
+        "policy": "confirmation",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "dispute",
+        "feasible": true,
+        "met": false,
+        "policy": "correction",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "dispute",
+        "feasible": true,
+        "met": false,
+        "policy": "multi_tool",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "dispute",
+        "feasible": true,
+        "met": false,
+        "policy": "dependent_call",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "dispute",
+        "feasible": true,
+        "met": true,
+        "policy": "negative_path",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "dispute",
+        "feasible": true,
+        "met": true,
+        "policy": "clarify_only",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "dispute",
+        "feasible": true,
+        "met": true,
+        "policy": "irrelevant",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": false,
+        "met": true,
+        "policy": "single_turn",
+        "structural_reason": "category exposes no tool, and every other policy must call one",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": false,
+        "met": true,
+        "policy": "missing_slot",
+        "structural_reason": "category exposes no tool, and every other policy must call one",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": false,
+        "met": true,
+        "policy": "confirmation",
+        "structural_reason": "category exposes no tool, and every other policy must call one",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": false,
+        "met": true,
+        "policy": "correction",
+        "structural_reason": "category exposes no tool, and every other policy must call one",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": false,
+        "met": true,
+        "policy": "multi_tool",
+        "structural_reason": "category exposes no tool, and every other policy must call one",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": false,
+        "met": true,
+        "policy": "dependent_call",
+        "structural_reason": "category exposes no tool, and every other policy must call one",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": false,
+        "met": true,
+        "policy": "negative_path",
+        "structural_reason": "category exposes no tool, and every other policy must call one",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "out_of_scope",
+        "feasible": true,
+        "met": false,
+        "policy": "clarify_only",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 2,
+        "category": "out_of_scope",
+        "feasible": true,
+        "met": true,
+        "policy": "irrelevant",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": false,
+        "policy": "single_turn",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": false,
+        "policy": "missing_slot",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "qr_payment",
+        "feasible": false,
+        "met": true,
+        "policy": "confirmation",
+        "structural_reason": "no tool in this category requires confirmation",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": false,
+        "policy": "correction",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": false,
+        "policy": "multi_tool",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": false,
+        "policy": "dependent_call",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 1,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": true,
+        "policy": "negative_path",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": true,
+        "policy": "clarify_only",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 2,
+        "category": "qr_payment",
+        "feasible": true,
+        "met": true,
+        "policy": "irrelevant",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 1,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": true,
+        "policy": "single_turn",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": false,
+        "policy": "missing_slot",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transaction_status",
+        "feasible": false,
+        "met": true,
+        "policy": "confirmation",
+        "structural_reason": "no tool in this category requires confirmation",
+        "target": 0
+      },
+      {
+        "achieved": 0,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": false,
+        "policy": "correction",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": false,
+        "policy": "multi_tool",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": false,
+        "policy": "dependent_call",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 1,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": true,
+        "policy": "negative_path",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 2,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": true,
+        "policy": "clarify_only",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 1,
+        "category": "transaction_status",
+        "feasible": true,
+        "met": true,
+        "policy": "irrelevant",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transfer",
+        "feasible": true,
+        "met": false,
+        "policy": "single_turn",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "transfer",
+        "feasible": true,
+        "met": false,
+        "policy": "missing_slot",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transfer",
+        "feasible": true,
+        "met": false,
+        "policy": "confirmation",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transfer",
+        "feasible": true,
+        "met": false,
+        "policy": "correction",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transfer",
+        "feasible": true,
+        "met": false,
+        "policy": "multi_tool",
+        "structural_reason": "",
+        "target": 2
+      },
+      {
+        "achieved": 0,
+        "category": "transfer",
+        "feasible": true,
+        "met": false,
+        "policy": "dependent_call",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 0,
+        "category": "transfer",
+        "feasible": true,
+        "met": false,
+        "policy": "negative_path",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "transfer",
+        "feasible": true,
+        "met": true,
+        "policy": "clarify_only",
+        "structural_reason": "",
+        "target": 1
+      },
+      {
+        "achieved": 1,
+        "category": "transfer",
+        "feasible": true,
+        "met": true,
+        "policy": "irrelevant",
+        "structural_reason": "",
+        "target": 1
+      }
+    ],
+    "cells_covered": 17,
+    "cells_feasible": 44,
+    "cells_structural_empty": 10,
+    "cells_target_met": 15,
+    "coverage_rate": 0.3864
+  },
+  "coverage_spec": {
+    "budget": 56,
+    "categories": [
+      "balance_inquiry",
+      "dispute",
+      "out_of_scope",
+      "qr_payment",
+      "transaction_status",
+      "transfer"
+    ],
+    "cells_feasible": 44,
+    "cells_structural_empty": 10,
+    "cells_total": 54,
+    "dependency_edges": [
+      {
+        "consumer": "get_dispute_status",
+        "parameter": "dispute_id",
+        "path": "dispute_id",
+        "producer": "create_dispute"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "create_dispute"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "rail",
+        "path": "rail",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "create_transfer"
+      },
+      {
+        "consumer": "list_recent_transactions",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_account_balance"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_card_limit"
+      },
+      {
+        "consumer": "list_recent_transactions",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_card_limit"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "reason",
+        "path": "reason",
+        "producer": "get_dispute_status"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_dispute_status"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_dispute_status"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "list_recent_transactions",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_transaction_status"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_transfer_fee"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "rail",
+        "path": "rail",
+        "producer": "get_transfer_fee"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "amount_vnd",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transaction_id",
+        "producer": "get_vietqr_payment_status"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "account_id",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "get_account_balance",
+        "parameter": "account_id",
+        "path": "transactions.0.account_id",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "create_transfer",
+        "parameter": "amount_vnd",
+        "path": "transactions.0.amount_vnd",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "get_transfer_fee",
+        "parameter": "amount_vnd",
+        "path": "transactions.0.amount_vnd",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "create_dispute",
+        "parameter": "transaction_id",
+        "path": "transactions.0.transaction_id",
+        "producer": "list_recent_transactions"
+      },
+      {
+        "consumer": "get_transaction_status",
+        "parameter": "transaction_id",
+        "path": "transactions.0.transaction_id",
+        "producer": "list_recent_transactions"
+      }
+    ],
+    "matrix": {
+      "balance_inquiry": {
+        "clarify_only": {
+          "feasible": true,
+          "target": 1
+        },
+        "confirmation": {
+          "feasible": false,
+          "reason": "no tool in this category requires confirmation",
+          "target": 0
+        },
+        "correction": {
+          "feasible": true,
+          "target": 1
+        },
+        "dependent_call": {
+          "feasible": true,
+          "target": 2
+        },
+        "irrelevant": {
+          "feasible": true,
+          "target": 1
+        },
+        "missing_slot": {
+          "feasible": true,
+          "target": 1
+        },
+        "multi_tool": {
+          "feasible": true,
+          "target": 2
+        },
+        "negative_path": {
+          "feasible": true,
+          "target": 1
+        },
+        "single_turn": {
+          "feasible": true,
+          "target": 1
+        }
+      },
+      "dispute": {
+        "clarify_only": {
+          "feasible": true,
+          "target": 1
+        },
+        "confirmation": {
+          "feasible": true,
+          "target": 2
+        },
+        "correction": {
+          "feasible": true,
+          "target": 2
+        },
+        "dependent_call": {
+          "feasible": true,
+          "target": 1
+        },
+        "irrelevant": {
+          "feasible": true,
+          "target": 1
+        },
+        "missing_slot": {
+          "feasible": true,
+          "target": 2
+        },
+        "multi_tool": {
+          "feasible": true,
+          "target": 1
+        },
+        "negative_path": {
+          "feasible": true,
+          "target": 1
+        },
+        "single_turn": {
+          "feasible": true,
+          "target": 1
+        }
+      },
+      "out_of_scope": {
+        "clarify_only": {
+          "feasible": true,
+          "target": 1
+        },
+        "confirmation": {
+          "feasible": false,
+          "reason": "category exposes no tool, and every other policy must call one",
+          "target": 0
+        },
+        "correction": {
+          "feasible": false,
+          "reason": "category exposes no tool, and every other policy must call one",
+          "target": 0
+        },
+        "dependent_call": {
+          "feasible": false,
+          "reason": "category exposes no tool, and every other policy must call one",
+          "target": 0
+        },
+        "irrelevant": {
+          "feasible": true,
+          "target": 2
+        },
+        "missing_slot": {
+          "feasible": false,
+          "reason": "category exposes no tool, and every other policy must call one",
+          "target": 0
+        },
+        "multi_tool": {
+          "feasible": false,
+          "reason": "category exposes no tool, and every other policy must call one",
+          "target": 0
+        },
+        "negative_path": {
+          "feasible": false,
+          "reason": "category exposes no tool, and every other policy must call one",
+          "target": 0
+        },
+        "single_turn": {
+          "feasible": false,
+          "reason": "category exposes no tool, and every other policy must call one",
+          "target": 0
+        }
+      },
+      "qr_payment": {
+        "clarify_only": {
+          "feasible": true,
+          "target": 1
+        },
+        "confirmation": {
+          "feasible": false,
+          "reason": "no tool in this category requires confirmation",
+          "target": 0
+        },
+        "correction": {
+          "feasible": true,
+          "target": 1
+        },
+        "dependent_call": {
+          "feasible": true,
+          "target": 2
+        },
+        "irrelevant": {
+          "feasible": true,
+          "target": 2
+        },
+        "missing_slot": {
+          "feasible": true,
+          "target": 1
+        },
+        "multi_tool": {
+          "feasible": true,
+          "target": 1
+        },
+        "negative_path": {
+          "feasible": true,
+          "target": 1
+        },
+        "single_turn": {
+          "feasible": true,
+          "target": 1
+        }
+      },
+      "transaction_status": {
+        "clarify_only": {
+          "feasible": true,
+          "target": 2
+        },
+        "confirmation": {
+          "feasible": false,
+          "reason": "no tool in this category requires confirmation",
+          "target": 0
+        },
+        "correction": {
+          "feasible": true,
+          "target": 1
+        },
+        "dependent_call": {
+          "feasible": true,
+          "target": 2
+        },
+        "irrelevant": {
+          "feasible": true,
+          "target": 1
+        },
+        "missing_slot": {
+          "feasible": true,
+          "target": 1
+        },
+        "multi_tool": {
+          "feasible": true,
+          "target": 1
+        },
+        "negative_path": {
+          "feasible": true,
+          "target": 1
+        },
+        "single_turn": {
+          "feasible": true,
+          "target": 1
+        }
+      },
+      "transfer": {
+        "clarify_only": {
+          "feasible": true,
+          "target": 1
+        },
+        "confirmation": {
+          "feasible": true,
+          "target": 1
+        },
+        "correction": {
+          "feasible": true,
+          "target": 1
+        },
+        "dependent_call": {
+          "feasible": true,
+          "target": 1
+        },
+        "irrelevant": {
+          "feasible": true,
+          "target": 1
+        },
+        "missing_slot": {
+          "feasible": true,
+          "target": 1
+        },
+        "multi_tool": {
+          "feasible": true,
+          "target": 2
+        },
+        "negative_path": {
+          "feasible": true,
+          "target": 1
+        },
+        "single_turn": {
+          "feasible": true,
+          "target": 2
+        }
+      }
+    },
+    "policies": [
+      "single_turn",
+      "missing_slot",
+      "confirmation",
+      "correction",
+      "multi_tool",
+      "dependent_call",
+      "negative_path",
+      "clarify_only",
+      "irrelevant"
+    ],
+    "proposals_requested": 56,
+    "seed": 42,
+    "universes": {
+      "balance_inquiry": [
+        "get_account_balance",
+        "get_card_limit"
+      ],
+      "dispute": [
+        "get_dispute_status",
+        "create_dispute",
+        "get_transaction_status"
+      ],
+      "out_of_scope": [],
+      "qr_payment": [
+        "get_vietqr_payment_status",
+        "get_transaction_status"
+      ],
+      "transaction_status": [
+        "get_transaction_status",
+        "list_recent_transactions"
+      ],
+      "transfer": [
+        "get_transfer_fee",
+        "create_transfer",
+        "get_transaction_status"
+      ]
+    }
+  },
+  "definitions": {
+    "cell_empty_structural": "a (category, policy) cell no tool in the category's universe can satisfy",
+    "distinct_masked_surface": "cardinality of the set of slot-masked opening user turns",
+    "fixture_entity_bound": "a fixture row whose primary key appears in some task's fixture_refs",
+    "loc_counting": "every line of every authored pack file plus the run config, including blanks and comments",
+    "publish_rate": "published rows divided by expanded task instances",
+    "slot_mask_rule": "replace each bound slot value with {slot_name} by exact substring match, longest value first; no case folding, no diacritic folding, no punctuation stripping, no tokenisation"
+  },
+  "distribution": {
+    "categories": [
+      "balance_inquiry",
+      "dispute",
+      "out_of_scope",
+      "qr_payment",
+      "transaction_status",
+      "transfer"
+    ],
+    "category_task_counts": {
+      "balance_inquiry": 6,
+      "dispute": 4,
+      "out_of_scope": 2,
+      "qr_payment": 4,
+      "transaction_status": 6,
+      "transfer": 6
+    },
+    "caveat": "Structural emptiness is judged against the arm's declared category tool universes and, for dependent_call, against producer/consumer edges probed from the backend.",
+    "cells_empty_structural": 10,
+    "cells_empty_unwritten": 27,
+    "cells_populated": 17,
+    "cells_total": 54,
+    "difficulty_task_counts": {
+      "easy": 28
+    },
+    "matrix": {
+      "balance_inquiry": {
+        "clarify_only": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "confirmation": {
+          "reason": "no tool in this category requires confirmation",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "tasks": 4,
+          "templates": 1
+        },
+        "negative_path": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "single_turn": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        }
+      },
+      "dispute": {
+        "clarify_only": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "confirmation": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "missing_slot": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "single_turn": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        }
+      },
+      "out_of_scope": {
+        "clarify_only": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "confirmation": {
+          "reason": "category exposes no tool",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "reason": "category exposes no tool",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "reason": "category exposes no tool",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "tasks": 2,
+          "templates": 2
+        },
+        "missing_slot": {
+          "reason": "category exposes no tool",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "reason": "category exposes no tool",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "reason": "category exposes no tool",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "single_turn": {
+          "reason": "category exposes no tool",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        }
+      },
+      "qr_payment": {
+        "clarify_only": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "confirmation": {
+          "reason": "no tool in this category requires confirmation",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "tasks": 2,
+          "templates": 2
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "single_turn": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        }
+      },
+      "transaction_status": {
+        "clarify_only": {
+          "tasks": 3,
+          "templates": 2
+        },
+        "confirmation": {
+          "reason": "no tool in this category requires confirmation",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "single_turn": {
+          "tasks": 1,
+          "templates": 1
+        }
+      },
+      "transfer": {
+        "clarify_only": {
+          "tasks": 5,
+          "templates": 1
+        },
+        "confirmation": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "single_turn": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        }
+      }
+    },
+    "policies": [
+      "clarify_only",
+      "confirmation",
+      "correction",
+      "dependent_call",
+      "irrelevant",
+      "missing_slot",
+      "multi_tool",
+      "negative_path",
+      "single_turn"
+    ],
+    "policy_task_counts": {
+      "clarify_only": 11,
+      "irrelevant": 8,
+      "missing_slot": 1,
+      "multi_tool": 4,
+      "negative_path": 3,
+      "single_turn": 1
+    },
+    "policy_task_share": {
+      "clarify_only": 0.3929,
+      "irrelevant": 0.2857,
+      "missing_slot": 0.0357,
+      "multi_tool": 0.1429,
+      "negative_path": 0.1071,
+      "single_turn": 0.0357
+    },
+    "universe_source": "declared"
+  },
+  "funnel": {
+    "expanded": 28,
+    "generation_mode": "template_only",
+    "gold_rate": 1.0,
+    "gold_rows": 28,
+    "publish_rate": 1.0,
+    "published": 28,
+    "run_gold_eligible": true,
+    "steps": [
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "expand",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "state_machine",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "render_accepted",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "expected_trace_derived",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "schema_valid",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "replay_valid",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "benchmark_raw",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 28,
+        "stage": "published",
+        "survival_from_expand": 1.0
+      }
+    ],
+    "tiers": {
+      "gold": 28
+    }
+  },
+  "metrics_version": "1.0",
+  "pack": "/localhome/local-hndo/Nemotron/bfcl_ablation/_generated/packs/a3_full",
+  "post_generation": {
+    "replay_reasons": {},
+    "templates_with_failed_instances": {}
+  },
+  "proposal": {
+    "accept_rate": 0.3571,
+    "accepted": 20,
+    "budget": 56,
+    "drop_buckets": {
+      "assertion_failed": 5,
+      "expected_trace_invalid": 4,
+      "generation_failed": 8,
+      "plan_invalid": 3,
+      "schema_invalid": 13,
+      "slot_source_invalid": 3
+    },
+    "drop_stages": {
+      "compile": 3,
+      "oracle_validation": 20,
+      "schema": 13
+    },
+    "llm": {
+      "cache_hits": 45,
+      "calls_made": 0,
+      "cells_called": 44,
+      "model": "openai/gpt-oss-120b"
+    },
+    "outcomes": [
+      {
+        "bucket": "generation_failed",
+        "category": "balance_inquiry",
+        "detail": "representative_generation_contract: representative_generation_failed: template 'balance_via_card_single_turn' reads a prior call's result but declares turn_policy 'single_turn'; declare dependent_call so scoring keeps the anti-hallucinated-id meaning",
+        "policy": "single_turn",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "balance_via_card_single_turn"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "balance_inquiry",
+        "detail": "slot 'account_id' declares no source",
+        "policy": "missing_slot",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "balance_inquiry_missing_card"
+      },
+      {
+        "bucket": "generation_failed",
+        "category": "balance_inquiry",
+        "detail": "representative_generation_contract: representative_generation_failed: template 'balance_inquiry_via_card_correction' reads a prior call's result but declares turn_policy 'correction'; declare dependent_call so scoring keeps the anti-hallucinated-id meaning",
+        "policy": "correction",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "balance_inquiry_via_card_correction"
+      },
+      {
+        "bucket": "generation_failed",
+        "category": "balance_inquiry",
+        "detail": "representative_generation_contract: representative_generation_failed: template 'balance_inquiry_card_linked' reads a prior call's result but declares turn_policy 'multi_tool'; declare dependent_call so scoring keeps the anti-hallucinated-id meaning",
+        "policy": "multi_tool",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "balance_inquiry_card_linked"
+      },
+      {
+        "bucket": null,
+        "category": "balance_inquiry",
+        "detail": "",
+        "policy": "multi_tool",
+        "slot_index": 1,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "balance_inquiry_card_independent"
+      },
+      {
+        "bucket": "assertion_failed",
+        "category": "balance_inquiry",
+        "detail": "representative_generation_contract: representative_replay_failed: assert_account_balance_reported: missing get_account_balance for None",
+        "policy": "dependent_call",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "balance_inquiry_via_card_001"
+      },
+      {
+        "bucket": "assertion_failed",
+        "category": "balance_inquiry",
+        "detail": "representative_generation_contract: representative_replay_failed: assert_account_balance_reported: missing get_account_balance for None",
+        "policy": "dependent_call",
+        "slot_index": 1,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "balance_inquiry_via_card_003"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "balance_inquiry",
+        "detail": "negative_path declares no required_tools",
+        "policy": "negative_path",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "balance_inquiry_nonexistent_account"
+      },
+      {
+        "bucket": null,
+        "category": "balance_inquiry",
+        "detail": "",
+        "policy": "clarify_only",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "balance_inquiry_clarify"
+      },
+      {
+        "bucket": null,
+        "category": "balance_inquiry",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "decline_unrelated_balance"
+      },
+      {
+        "bucket": "plan_invalid",
+        "category": "dispute",
+        "detail": "single_turn template 'open_dispute_and_check_status' plans 2 user turns; a policy whose name promises one opening request cannot depend on a later reply",
+        "policy": "single_turn",
+        "slot_index": 0,
+        "stage": "compile",
+        "status": "dropped",
+        "template_id": "open_dispute_and_check_status"
+      },
+      {
+        "bucket": null,
+        "category": "dispute",
+        "detail": "",
+        "policy": "missing_slot",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "dispute_check_status_missing_id"
+      },
+      {
+        "bucket": "generation_failed",
+        "category": "dispute",
+        "detail": "representative_generation_contract: representative_generation_failed: template 'dispute_open_missing_reason' reads a prior call's result but declares turn_policy 'missing_slot'; declare dependent_call so scoring keeps the anti-hallucinated-id meaning",
+        "policy": "missing_slot",
+        "slot_index": 1,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "dispute_open_missing_reason"
+      },
+      {
+        "bucket": "expected_trace_invalid",
+        "category": "dispute",
+        "detail": "representative_generation_contract: representative_trace_schema_mismatch: [{'reason': 'confirmed_mutation_without_user_confirmation', 'tool': 'create_dispute'}]",
+        "policy": "confirmation",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "dispute_open_simple"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "dispute",
+        "detail": "get_dispute_status requires 'dispute_id', which no slot binds and no depends_on supplies",
+        "policy": "confirmation",
+        "slot_index": 1,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "dispute_open_with_status_check"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "dispute",
+        "detail": "get_dispute_status requires 'dispute_id', which no slot binds and no depends_on supplies",
+        "policy": "correction",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "dispute_create_simple_correction"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "dispute",
+        "detail": "get_dispute_status requires 'dispute_id', which no slot binds and no depends_on supplies",
+        "policy": "correction",
+        "slot_index": 1,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "dispute_check_then_create_correction"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "dispute",
+        "detail": "depends_on.transaction_id also has a slot; a value cannot be both stated by the user and read from a result",
+        "policy": "multi_tool",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "dispute_open_and_check"
+      },
+      {
+        "bucket": "expected_trace_invalid",
+        "category": "dispute",
+        "detail": "representative_generation_contract: representative_trace_schema_mismatch: [{'reason': 'confirmed_mutation_without_user_confirmation', 'tool': 'create_dispute'}]",
+        "policy": "dependent_call",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "dispute_open_based_on_existing"
+      },
+      {
+        "bucket": null,
+        "category": "dispute",
+        "detail": "",
+        "policy": "negative_path",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "dispute_nonexistent_transaction"
+      },
+      {
+        "bucket": null,
+        "category": "dispute",
+        "detail": "",
+        "policy": "clarify_only",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "dispute_open_clarify_missing_info"
+      },
+      {
+        "bucket": null,
+        "category": "dispute",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "dispute_irrelevant_decline"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "out_of_scope",
+        "detail": "clarify_only hides slots ['detail']; only missing_slot may withhold a value",
+        "policy": "clarify_only",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "clarify_vague_service_query"
+      },
+      {
+        "bucket": null,
+        "category": "out_of_scope",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "out_of_scope_open_account"
+      },
+      {
+        "bucket": null,
+        "category": "out_of_scope",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 1,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "out_of_scope_apply_loan"
+      },
+      {
+        "bucket": "generation_failed",
+        "category": "qr_payment",
+        "detail": "representative_generation_contract: representative_generation_failed: template 'qr_payment_check_status' reads a prior call's result but declares turn_policy 'single_turn'; declare dependent_call so scoring keeps the anti-hallucinated-id meaning",
+        "policy": "single_turn",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "qr_payment_check_status"
+      },
+      {
+        "bucket": "slot_source_invalid",
+        "category": "qr_payment",
+        "detail": "template_slot_sources: unevaluable_filter: filter 'transaction_id != null' has a non-literal right-hand side",
+        "policy": "missing_slot",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "qr_payment_status_missing_ref"
+      },
+      {
+        "bucket": "slot_source_invalid",
+        "category": "qr_payment",
+        "detail": "template_slot_sources: unevaluable_filter: filter \"payment_ref = 'VQ-1001'\" is not a parsable expression",
+        "policy": "correction",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "qr_payment_status_check_correction"
+      },
+      {
+        "bucket": "slot_source_invalid",
+        "category": "qr_payment",
+        "detail": "template_slot_sources: unevaluable_filter: filter 'transaction_id != null' has a non-literal right-hand side",
+        "policy": "multi_tool",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "qr_payment_status_check"
+      },
+      {
+        "bucket": "assertion_failed",
+        "category": "qr_payment",
+        "detail": "representative_generation_contract: representative_replay_failed: assert_transaction_status_reported: missing get_transaction_status for None",
+        "policy": "dependent_call",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "qr_payment_check_status_paid"
+      },
+      {
+        "bucket": "generation_failed",
+        "category": "qr_payment",
+        "detail": "representative_generation_contract: representative_generation_failed: oracle could not resolve dependent trace for task 'banking_vn__qr_payment_check_status_small_amount__8ec87d9d12807178': path 'transaction_id' on 'call_0' has no field 'transaction_id'",
+        "policy": "dependent_call",
+        "slot_index": 1,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "qr_payment_check_status_small_amount"
+      },
+      {
+        "bucket": null,
+        "category": "qr_payment",
+        "detail": "",
+        "policy": "negative_path",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "qr_payment_check_missing_txn"
+      },
+      {
+        "bucket": null,
+        "category": "qr_payment",
+        "detail": "",
+        "policy": "clarify_only",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "qr_payment_clarify_status"
+      },
+      {
+        "bucket": null,
+        "category": "qr_payment",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "qr_payment_decline_no_tool_01"
+      },
+      {
+        "bucket": null,
+        "category": "qr_payment",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 1,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "qr_payment_decline_no_tool_02"
+      },
+      {
+        "bucket": null,
+        "category": "transaction_status",
+        "detail": "",
+        "policy": "single_turn",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "txn_status_single_turn"
+      },
+      {
+        "bucket": "generation_failed",
+        "category": "transaction_status",
+        "detail": "representative_generation_contract: representative_generation_failed: template 'check_txn_status_missing_account' reads a prior call's result but declares turn_policy 'missing_slot'; declare dependent_call so scoring keeps the anti-hallucinated-id meaning",
+        "policy": "missing_slot",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "check_txn_status_missing_account"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "transaction_status",
+        "detail": "corrects.transaction_id resolves through 'literal' but the slot resolves through 'fixture'; a replacement must resolve the same way",
+        "policy": "correction",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "check_transaction_status_correction"
+      },
+      {
+        "bucket": "generation_failed",
+        "category": "transaction_status",
+        "detail": "representative_generation_contract: representative_generation_failed: template 'txn_status_from_recent' reads a prior call's result but declares turn_policy 'multi_tool'; declare dependent_call so scoring keeps the anti-hallucinated-id meaning",
+        "policy": "multi_tool",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "txn_status_from_recent"
+      },
+      {
+        "bucket": "assertion_failed",
+        "category": "transaction_status",
+        "detail": "representative_generation_contract: representative_replay_failed: assert_transaction_status_reported: missing get_transaction_status for None",
+        "policy": "dependent_call",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "txn_status_from_list"
+      },
+      {
+        "bucket": "assertion_failed",
+        "category": "transaction_status",
+        "detail": "representative_generation_contract: representative_replay_failed: assert_recent_transactions_listed: missing list_recent_transactions for None",
+        "policy": "dependent_call",
+        "slot_index": 1,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "txn_status_from_detail"
+      },
+      {
+        "bucket": null,
+        "category": "transaction_status",
+        "detail": "",
+        "policy": "negative_path",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "txn_status_not_found"
+      },
+      {
+        "bucket": null,
+        "category": "transaction_status",
+        "detail": "",
+        "policy": "clarify_only",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "txn_status_missing_txn_id"
+      },
+      {
+        "bucket": null,
+        "category": "transaction_status",
+        "detail": "",
+        "policy": "clarify_only",
+        "slot_index": 1,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "txn_status_missing_account_id"
+      },
+      {
+        "bucket": null,
+        "category": "transaction_status",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "txn_status_irrelevant_decline"
+      },
+      {
+        "bucket": "plan_invalid",
+        "category": "transfer",
+        "detail": "single_turn template 'transfer_success_napas' plans 2 user turns; a policy whose name promises one opening request cannot depend on a later reply",
+        "policy": "single_turn",
+        "slot_index": 0,
+        "stage": "compile",
+        "status": "dropped",
+        "template_id": "transfer_success_napas"
+      },
+      {
+        "bucket": "plan_invalid",
+        "category": "transfer",
+        "detail": "single_turn template 'transfer_insufficient_funds' plans 2 user turns; a policy whose name promises one opening request cannot depend on a later reply",
+        "policy": "single_turn",
+        "slot_index": 1,
+        "stage": "compile",
+        "status": "dropped",
+        "template_id": "transfer_insufficient_funds"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "transfer",
+        "detail": "assistant_turn_templates.final_answer references undeclared slots ['fee_vnd']",
+        "policy": "missing_slot",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "transfer_missing_amount"
+      },
+      {
+        "bucket": "expected_trace_invalid",
+        "category": "transfer",
+        "detail": "representative_generation_contract: representative_trace_schema_mismatch: [{'reason': 'confirmed_mutation_without_user_confirmation', 'tool': 'create_transfer'}]",
+        "policy": "confirmation",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "transfer_napas_confirm"
+      },
+      {
+        "bucket": "expected_trace_invalid",
+        "category": "transfer",
+        "detail": "representative_generation_contract: representative_trace_schema_mismatch: [{'reason': 'confirmed_mutation_without_user_confirmation', 'tool': 'create_transfer'}]",
+        "policy": "correction",
+        "slot_index": 0,
+        "stage": "oracle_validation",
+        "status": "dropped",
+        "template_id": "transfer_correct_amount"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "transfer",
+        "detail": "slot 'confirm' declares an unparseable literal list",
+        "policy": "multi_tool",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "transfer_fee_and_execute_success"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "transfer",
+        "detail": "slot 'confirm' declares an unparseable literal list",
+        "policy": "multi_tool",
+        "slot_index": 1,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "transfer_and_check_status"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "transfer",
+        "detail": "depends_on.amount_vnd also has a slot; a value cannot be both stated by the user and read from a result",
+        "policy": "dependent_call",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "transfer_fee_then_create"
+      },
+      {
+        "bucket": "schema_invalid",
+        "category": "transfer",
+        "detail": "user turn does not state visible slots ['to_bank_code']; the must_preserve guard drops it",
+        "policy": "negative_path",
+        "slot_index": 0,
+        "stage": "schema",
+        "status": "dropped",
+        "template_id": "transfer_insufficient_funds"
+      },
+      {
+        "bucket": null,
+        "category": "transfer",
+        "detail": "",
+        "policy": "clarify_only",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "transfer_clarify_missing_details"
+      },
+      {
+        "bucket": null,
+        "category": "transfer",
+        "detail": "",
+        "policy": "irrelevant",
+        "slot_index": 0,
+        "stage": "accepted",
+        "status": "accepted",
+        "template_id": "transfer_irrelevant_request"
+      }
+    ],
+    "proposals_requested": 56,
+    "proposals_returned": 56
+  },
+  "selection_bias": {
+    "assertion_choice": {
+      "never_used": [
+        "assert_dispute_opened",
+        "assert_only_corrected_amount_transferred",
+        "assert_recent_transactions_listed",
+        "assert_status_checked_from_listed_transaction",
+        "assert_transfer_committed",
+        "assert_transfer_fee_reported",
+        "assert_transfer_rejected_for_funds",
+        "assert_vietqr_status_reported"
+      ],
+      "observed": {
+        "assert_account_balance_reported": 1,
+        "assert_card_limit_reported": 1,
+        "assert_dispute_status_reported": 1,
+        "assert_no_tool_called": 14,
+        "assert_transaction_not_found": 3,
+        "assert_transaction_status_reported": 1
+      },
+      "tvd_from_uniform": 0.6667
+    },
+    "entity_choice": {
+      "by_collection": {
+        "accounts": {
+          "bindings": 11,
+          "most_bound": [
+            {
+              "id": "ACC-001",
+              "tasks": 6
+            },
+            {
+              "id": "ACC-002",
+              "tasks": 2
+            },
+            {
+              "id": "ACC-003",
+              "tasks": 1
+            }
+          ],
+          "rows": 8,
+          "rows_bound": 5,
+          "tvd_from_uniform": 0.4773
+        },
+        "cards": {
+          "bindings": 4,
+          "most_bound": [
+            {
+              "id": "CARD-001",
+              "tasks": 1
+            },
+            {
+              "id": "CARD-002",
+              "tasks": 1
+            },
+            {
+              "id": "CARD-003",
+              "tasks": 1
+            }
+          ],
+          "rows": 4,
+          "rows_bound": 4,
+          "tvd_from_uniform": 0.0
+        },
+        "disputes": {
+          "bindings": 1,
+          "most_bound": [
+            {
+              "id": "DSP-0001",
+              "tasks": 1
+            }
+          ],
+          "rows": 4,
+          "rows_bound": 1,
+          "tvd_from_uniform": 0.75
+        },
+        "transactions": {
+          "bindings": 2,
+          "most_bound": [
+            {
+              "id": "TXN-1001",
+              "tasks": 2
+            }
+          ],
+          "rows": 16,
+          "rows_bound": 1,
+          "tvd_from_uniform": 0.9375
+        },
+        "transfers": {
+          "bindings": 0,
+          "most_bound": [],
+          "rows": 4,
+          "rows_bound": 0,
+          "tvd_from_uniform": 1.0
+        },
+        "vietqr_payments": {
+          "bindings": 0,
+          "most_bound": [],
+          "rows": 6,
+          "rows_bound": 0,
+          "tvd_from_uniform": 1.0
+        }
+      },
+      "coverage": 0.2619,
+      "entities_bound": 11,
+      "entities_total": 42
+    },
+    "failure_bias": {
+      "accept_rate_spread": 1.0,
+      "by_category": {
+        "balance_inquiry": {
+          "accept_rate": 0.3,
+          "accepted": 3,
+          "drop_buckets": {
+            "assertion_failed": 2,
+            "generation_failed": 3,
+            "schema_invalid": 2
+          },
+          "proposed": 10
+        },
+        "dispute": {
+          "accept_rate": 0.3333,
+          "accepted": 4,
+          "drop_buckets": {
+            "expected_trace_invalid": 2,
+            "generation_failed": 1,
+            "plan_invalid": 1,
+            "schema_invalid": 4
+          },
+          "proposed": 12
+        },
+        "out_of_scope": {
+          "accept_rate": 0.6667,
+          "accepted": 2,
+          "drop_buckets": {
+            "schema_invalid": 1
+          },
+          "proposed": 3
+        },
+        "qr_payment": {
+          "accept_rate": 0.4,
+          "accepted": 4,
+          "drop_buckets": {
+            "assertion_failed": 1,
+            "generation_failed": 2,
+            "slot_source_invalid": 3
+          },
+          "proposed": 10
+        },
+        "transaction_status": {
+          "accept_rate": 0.5,
+          "accepted": 5,
+          "drop_buckets": {
+            "assertion_failed": 2,
+            "generation_failed": 2,
+            "schema_invalid": 1
+          },
+          "proposed": 10
+        },
+        "transfer": {
+          "accept_rate": 0.1818,
+          "accepted": 2,
+          "drop_buckets": {
+            "expected_trace_invalid": 2,
+            "plan_invalid": 2,
+            "schema_invalid": 5
+          },
+          "proposed": 11
+        }
+      },
+      "by_policy": {
+        "clarify_only": {
+          "accept_rate": 0.8571,
+          "accepted": 6,
+          "drop_buckets": {
+            "schema_invalid": 1
+          },
+          "proposed": 7
+        },
+        "confirmation": {
+          "accept_rate": 0.0,
+          "accepted": 0,
+          "drop_buckets": {
+            "expected_trace_invalid": 2,
+            "schema_invalid": 1
+          },
+          "proposed": 3
+        },
+        "correction": {
+          "accept_rate": 0.0,
+          "accepted": 0,
+          "drop_buckets": {
+            "expected_trace_invalid": 1,
+            "generation_failed": 1,
+            "schema_invalid": 3,
+            "slot_source_invalid": 1
+          },
+          "proposed": 6
+        },
+        "dependent_call": {
+          "accept_rate": 0.0,
+          "accepted": 0,
+          "drop_buckets": {
+            "assertion_failed": 5,
+            "expected_trace_invalid": 1,
+            "generation_failed": 1,
+            "schema_invalid": 1
+          },
+          "proposed": 8
+        },
+        "irrelevant": {
+          "accept_rate": 1.0,
+          "accepted": 8,
+          "drop_buckets": {},
+          "proposed": 8
+        },
+        "missing_slot": {
+          "accept_rate": 0.1667,
+          "accepted": 1,
+          "drop_buckets": {
+            "generation_failed": 2,
+            "schema_invalid": 2,
+            "slot_source_invalid": 1
+          },
+          "proposed": 6
+        },
+        "multi_tool": {
+          "accept_rate": 0.1429,
+          "accepted": 1,
+          "drop_buckets": {
+            "generation_failed": 2,
+            "schema_invalid": 3,
+            "slot_source_invalid": 1
+          },
+          "proposed": 7
+        },
+        "negative_path": {
+          "accept_rate": 0.6,
+          "accepted": 3,
+          "drop_buckets": {
+            "schema_invalid": 2
+          },
+          "proposed": 5
+        },
+        "single_turn": {
+          "accept_rate": 0.1667,
+          "accepted": 1,
+          "drop_buckets": {
+            "generation_failed": 2,
+            "plan_invalid": 3
+          },
+          "proposed": 6
+        }
+      }
+    },
+    "literal_choice": {
+      "distinct_filters": 2,
+      "filters_written": 2,
+      "literal_slots": {
+        "account_ref": {
+          "distinct_value_sets": 1,
+          "most_common": [
+            {
+              "n": 1,
+              "value": "[\"tài khoản\"]"
+            }
+          ],
+          "proposals": 1
+        },
+        "request_type": {
+          "distinct_value_sets": 1,
+          "most_common": [
+            {
+              "n": 1,
+              "value": "[\"mở khiếu nại\"]"
+            }
+          ],
+          "proposals": 1
+        }
+      },
+      "most_common_filters": [
+        {
+          "filter": "balance_vnd >= 1000000",
+          "n": 1
+        },
+        {
+          "filter": "status == 'open'",
+          "n": 1
+        }
+      ]
+    },
+    "tool_choice": {
+      "chi_square_vs_conditional_uniform": 3.885,
+      "expected_uniform_within_category": {
+        "create_dispute": 0.67,
+        "create_transfer": 0.0,
+        "get_account_balance": 1.0,
+        "get_card_limit": 1.0,
+        "get_dispute_status": 0.67,
+        "get_transaction_status": 2.17,
+        "get_transfer_fee": 0.0,
+        "get_vietqr_payment_status": 0.5,
+        "list_recent_transactions": 1.0
+      },
+      "observed": {
+        "get_account_balance": 1,
+        "get_card_limit": 1,
+        "get_dispute_status": 1,
+        "get_transaction_status": 4
+      },
+      "off_universe_choices": [],
+      "ratio_observed_over_expected": {
+        "create_dispute": 0.0,
+        "get_account_balance": 1.0,
+        "get_card_limit": 1.0,
+        "get_dispute_status": 1.5,
+        "get_transaction_status": 1.85,
+        "get_vietqr_payment_status": 0.0,
+        "list_recent_transactions": 0.0
+      },
+      "tools_never_required": [
+        "create_dispute",
+        "create_transfer",
+        "get_transfer_fee",
+        "get_vietqr_payment_status",
+        "list_recent_transactions"
+      ],
+      "tvd_from_uniform_over_all_tools": 0.5556
+    },
+    "vacuous_gold": {
+      "answerable_but_declined": [
+        {
+          "answerable_by": "list_recent_transactions",
+          "policy": "clarify_only",
+          "template_id": "txn_status_missing_account_id"
+        },
+        {
+          "answerable_by": "get_transaction_status",
+          "policy": "clarify_only",
+          "template_id": "txn_status_missing_txn_id"
+        }
+      ],
+      "note": "An unfalsifiable template is not necessarily a bad task; it is a task the executable oracle cannot check. `answerable_but_declined` is the decidable subset of those that are also mislabelled.",
+      "unfalsifiable_count": 14,
+      "unfalsifiable_share_of_accepted": 0.7,
+      "unfalsifiable_templates": [
+        "balance_inquiry_clarify",
+        "decline_unrelated_balance",
+        "dispute_irrelevant_decline",
+        "dispute_open_clarify_missing_info",
+        "out_of_scope_apply_loan",
+        "out_of_scope_open_account",
+        "qr_payment_clarify_status",
+        "qr_payment_decline_no_tool_01",
+        "qr_payment_decline_no_tool_02",
+        "transfer_clarify_missing_details",
+        "transfer_irrelevant_request",
+        "txn_status_irrelevant_decline",
+        "txn_status_missing_account_id",
+        "txn_status_missing_txn_id"
+      ]
+    },
+    "vs_a0": {
+      "required_tools": {
+        "a0_share": {
+          "create_dispute": 0.0588,
+          "create_transfer": 0.1765,
+          "get_account_balance": 0.1765,
+          "get_card_limit": 0.1176,
+          "get_dispute_status": 0.0588,
+          "get_transaction_status": 0.1765,
+          "get_transfer_fee": 0.0588,
+          "get_vietqr_payment_status": 0.0588,
+          "list_recent_transactions": 0.1176
+        },
+        "a3_share": {
+          "get_account_balance": 0.1429,
+          "get_card_limit": 0.1429,
+          "get_dispute_status": 0.1429,
+          "get_transaction_status": 0.5714
+        },
+        "in_a0_only": [
+          "create_dispute",
+          "create_transfer",
+          "get_transfer_fee",
+          "get_vietqr_payment_status",
+          "list_recent_transactions"
+        ],
+        "in_a3_only": [],
+        "tvd_a3_vs_a0": 0.5042
+      },
+      "success_assertions": {
+        "a0_share": {
+          "assert_account_balance_reported": 0.1667,
+          "assert_card_limit_reported": 0.1111,
+          "assert_dispute_opened": 0.0556,
+          "assert_dispute_status_reported": 0.0556,
+          "assert_no_tool_called": 0.1111,
+          "assert_only_corrected_amount_transferred": 0.0556,
+          "assert_recent_transactions_listed": 0.0556,
+          "assert_status_checked_from_listed_transaction": 0.0556,
+          "assert_transaction_not_found": 0.0556,
+          "assert_transaction_status_reported": 0.0556,
+          "assert_transfer_committed": 0.0556,
+          "assert_transfer_fee_reported": 0.0556,
+          "assert_transfer_rejected_for_funds": 0.0556,
+          "assert_vietqr_status_reported": 0.0556
+        },
+        "a3_share": {
+          "assert_account_balance_reported": 0.0476,
+          "assert_card_limit_reported": 0.0476,
+          "assert_dispute_status_reported": 0.0476,
+          "assert_no_tool_called": 0.6667,
+          "assert_transaction_not_found": 0.1429,
+          "assert_transaction_status_reported": 0.0476
+        },
+        "in_a0_only": [
+          "assert_dispute_opened",
+          "assert_only_corrected_amount_transferred",
+          "assert_recent_transactions_listed",
+          "assert_status_checked_from_listed_transaction",
+          "assert_transfer_committed",
+          "assert_transfer_fee_reported",
+          "assert_transfer_rejected_for_funds",
+          "assert_vietqr_status_reported"
+        ],
+        "in_a3_only": [],
+        "tvd_a3_vs_a0": 0.6431
+      }
+    }
+  },
+  "shrink": {
+    "a0_templates_discarded": 17,
+    "note": "A0's templates are discarded; only the non-task half of the A1 pack is reused.",
+    "validation_cases_authored_after_shrink": 5
+  },
+  "surface": {
+    "by_category": {
+      "balance_inquiry": {
+        "distinct_masked": 3,
+        "ratio": 0.5,
+        "tasks": 6
+      },
+      "dispute": {
+        "distinct_masked": 4,
+        "ratio": 1.0,
+        "tasks": 4
+      },
+      "out_of_scope": {
+        "distinct_masked": 2,
+        "ratio": 1.0,
+        "tasks": 2
+      },
+      "qr_payment": {
+        "distinct_masked": 4,
+        "ratio": 1.0,
+        "tasks": 4
+      },
+      "transaction_status": {
+        "distinct_masked": 5,
+        "ratio": 0.8333,
+        "tasks": 6
+      },
+      "transfer": {
+        "distinct_masked": 2,
+        "ratio": 0.3333,
+        "tasks": 6
+      }
+    },
+    "by_template": {
+      "balance_inquiry_card_independent": {
+        "distinct_masked": 1,
+        "ratio": 0.25,
+        "tasks": 4
+      },
+      "balance_inquiry_clarify": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "decline_unrelated_balance": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "dispute_check_status_missing_id": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "dispute_irrelevant_decline": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "dispute_nonexistent_transaction": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "dispute_open_clarify_missing_info": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "out_of_scope_apply_loan": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "out_of_scope_open_account": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "qr_payment_check_missing_txn": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "qr_payment_clarify_status": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "qr_payment_decline_no_tool_01": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "qr_payment_decline_no_tool_02": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "transfer_clarify_missing_details": {
+        "distinct_masked": 1,
+        "ratio": 0.2,
+        "tasks": 5
+      },
+      "transfer_irrelevant_request": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "txn_status_irrelevant_decline": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "txn_status_missing_account_id": {
+        "distinct_masked": 1,
+        "ratio": 0.5,
+        "tasks": 2
+      },
+      "txn_status_missing_txn_id": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "txn_status_not_found": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "txn_status_single_turn": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      }
+    },
+    "lexical_shortcut_probe": {
+      "reason": "A generalization-gap probe needs several phrasings per intent. This arm produced 20 distinct masked surfaces across 20 templates; with one surface per template there is no held-out phrasing to test on. The probe becomes available at A2.",
+      "runnable": false
+    },
+    "most_repeated_masked": [
+      {
+        "tasks": 5,
+        "utterance": "Mình muốn chuyển tiền từ tài khoản {account_id}."
+      },
+      {
+        "tasks": 4,
+        "utterance": "Mình muốn kiểm tra số dư tài khoản {account_id} và hạn mức thẻ {card_id}."
+      },
+      {
+        "tasks": 2,
+        "utterance": "Mình muốn biết trạng thái giao dịch cho tài khoản {account_id}."
+      }
+    ],
+    "overall": {
+      "distinct_masked": 20,
+      "distinct_raw": 28,
+      "surfaces_per_template": 1.0,
+      "tasks": 28
+    }
+  },
+  "validation_rounds": [
+    {
+      "gold_eligible": false,
+      "round": 0,
+      "tasks_per_category": 10,
+      "template_failures": 3,
+      "templates": 40,
+      "tier": "silver",
+      "unattributed_failures": []
+    },
+    {
+      "gold_eligible": false,
+      "round": 1,
+      "tasks_per_category": 9,
+      "template_failures": 17,
+      "templates": 37,
+      "tier": "silver",
+      "unattributed_failures": []
+    },
+    {
+      "gold_eligible": true,
+      "round": 2,
+      "tasks_per_category": 6,
+      "template_failures": 0,
+      "templates": 20,
+      "tier": "gold",
+      "unattributed_failures": []
+    }
+  ]
+}

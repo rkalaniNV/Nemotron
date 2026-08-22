@@ -1,0 +1,102 @@
+{
+  "baseline_arm": "a0",
+  "candidate_arm": "a1",
+  "task_ids": {
+    "equal": true,
+    "baseline_count": 33,
+    "candidate_count": 33,
+    "only_in_baseline": [],
+    "only_in_candidate": []
+  },
+  "conversation_plans": {
+    "equal": true,
+    "compared": 33,
+    "mismatches": []
+  },
+  "validation_case_coverage": {
+    "held": true,
+    "baseline_pairs": 22,
+    "candidate_pairs": 22,
+    "lost": [],
+    "gained": []
+  },
+  "expected_tool_calls": {
+    "equal": true,
+    "compared": 33,
+    "stage_mismatches": [],
+    "published_mismatches": []
+  },
+  "surface": {
+    "identical": false,
+    "first_turns_identical": true,
+    "tasks_with_changed_first_turn": 0,
+    "first_turn_examples": [],
+    "tasks_with_changed_wording": 8,
+    "examples": [
+      {
+        "task_id": "banking_vn__bn_balance_withheld_account__0f34f3476873fef5",
+        "baseline": [
+          "Cho mình xem số dư tài khoản của mình với.",
+          "Tài khoản ACC-001 nhé."
+        ],
+        "candidate": [
+          "Cho mình xem số dư tài khoản của mình với.",
+          "ACC-001 nhé."
+        ]
+      },
+      {
+        "task_id": "banking_vn__bn_create_dispute_single__069e782f69b74266",
+        "baseline": [
+          "Mở tra soát cho giao dịch TXN-1011, lý do goods_not_received.",
+          "Tôi xác nhận mở tra soát."
+        ],
+        "candidate": [
+          "Mở tra soát cho giao dịch TXN-1011, lý do goods_not_received.",
+          "Tôi xác nhận thực hiện."
+        ]
+      },
+      {
+        "task_id": "banking_vn__bn_create_dispute_single__9a13aff31ee10eef",
+        "baseline": [
+          "Mở tra soát cho giao dịch TXN-1001, lý do goods_not_received.",
+          "Tôi xác nhận mở tra soát."
+        ],
+        "candidate": [
+          "Mở tra soát cho giao dịch TXN-1001, lý do goods_not_received.",
+          "Tôi xác nhận thực hiện."
+        ]
+      },
+      {
+        "task_id": "banking_vn__bn_create_dispute_single__fac3dccb0bfe459a",
+        "baseline": [
+          "Mở tra soát cho giao dịch TXN-1015, lý do goods_not_received.",
+          "Tôi xác nhận mở tra soát."
+        ],
+        "candidate": [
+          "Mở tra soát cho giao dịch TXN-1015, lý do goods_not_received.",
+          "Tôi xác nhận thực hiện."
+        ]
+      },
+      {
+        "task_id": "banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1",
+        "baseline": [
+          "Chuyển ngay 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+          "Tôi xác nhận thực hiện giao dịch."
+        ],
+        "candidate": [
+          "Chuyển ngay 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+          "Tôi xác nhận thực hiện."
+        ]
+      }
+    ],
+    "note": "Simulator replies are drawn from pack-wide canonical templates at A1, so a changed first-turn surface would be a real regression while a changed later turn is the intended trade."
+  },
+  "publication": {
+    "baseline_published": 33,
+    "candidate_published": 33,
+    "baseline_gold_eligible": true,
+    "candidate_gold_eligible": true,
+    "gold_preserved": true
+  },
+  "verdict": "EQUIVALENT"
+}

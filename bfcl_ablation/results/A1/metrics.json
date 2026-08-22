@@ -1,0 +1,1290 @@
+{
+  "arm": "a1",
+  "authoring_friction": {
+    "category_count": 6,
+    "loc_by_file": {
+      "TOTAL": 1412,
+      "assertions.py": 182,
+      "backend.py": 465,
+      "fixtures.json": 68,
+      "manifest.yaml": 28,
+      "run_config": 43,
+      "task_templates.yaml": 393,
+      "tools.json": 162,
+      "validation_cases.yaml": 71
+    },
+    "loc_per_template": 23.1,
+    "loc_total": 1412,
+    "policy_count": 9,
+    "template_count": 17
+  },
+  "config_minimization": {
+    "config_lines_after": 17,
+    "config_lines_before": 43,
+    "equivalence": {
+      "baseline_arm": "a0",
+      "candidate_arm": "a1c",
+      "conversation_plans": {
+        "compared": 33,
+        "equal": true,
+        "mismatches": []
+      },
+      "expected_tool_calls": {
+        "compared": 33,
+        "equal": true,
+        "published_mismatches": [],
+        "stage_mismatches": []
+      },
+      "publication": {
+        "baseline_gold_eligible": true,
+        "baseline_published": 33,
+        "candidate_gold_eligible": true,
+        "candidate_published": 33,
+        "gold_preserved": true
+      },
+      "surface": {
+        "examples": [
+          {
+            "baseline": [
+              "Cho mình xem số dư tài khoản của mình với.",
+              "Tài khoản ACC-001 nhé."
+            ],
+            "candidate": [
+              "Cho mình xem số dư tài khoản của mình với.",
+              "ACC-001 nhé."
+            ],
+            "task_id": "banking_vn__bn_balance_withheld_account__0f34f3476873fef5"
+          },
+          {
+            "baseline": [
+              "Mở tra soát cho giao dịch TXN-1011, lý do goods_not_received.",
+              "Tôi xác nhận mở tra soát."
+            ],
+            "candidate": [
+              "Mở tra soát cho giao dịch TXN-1011, lý do goods_not_received.",
+              "Tôi xác nhận thực hiện."
+            ],
+            "task_id": "banking_vn__bn_create_dispute_single__069e782f69b74266"
+          },
+          {
+            "baseline": [
+              "Mở tra soát cho giao dịch TXN-1001, lý do goods_not_received.",
+              "Tôi xác nhận mở tra soát."
+            ],
+            "candidate": [
+              "Mở tra soát cho giao dịch TXN-1001, lý do goods_not_received.",
+              "Tôi xác nhận thực hiện."
+            ],
+            "task_id": "banking_vn__bn_create_dispute_single__9a13aff31ee10eef"
+          },
+          {
+            "baseline": [
+              "Mở tra soát cho giao dịch TXN-1015, lý do goods_not_received.",
+              "Tôi xác nhận mở tra soát."
+            ],
+            "candidate": [
+              "Mở tra soát cho giao dịch TXN-1015, lý do goods_not_received.",
+              "Tôi xác nhận thực hiện."
+            ],
+            "task_id": "banking_vn__bn_create_dispute_single__fac3dccb0bfe459a"
+          },
+          {
+            "baseline": [
+              "Chuyển ngay 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+              "Tôi xác nhận thực hiện giao dịch."
+            ],
+            "candidate": [
+              "Chuyển ngay 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+              "Tôi xác nhận thực hiện."
+            ],
+            "task_id": "banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1"
+          }
+        ],
+        "first_turn_examples": [],
+        "first_turns_identical": true,
+        "identical": false,
+        "note": "Simulator replies are drawn from pack-wide canonical templates at A1, so a changed first-turn surface would be a real regression while a changed later turn is the intended trade.",
+        "tasks_with_changed_first_turn": 0,
+        "tasks_with_changed_wording": 8
+      },
+      "task_ids": {
+        "baseline_count": 33,
+        "candidate_count": 33,
+        "equal": true,
+        "only_in_baseline": [],
+        "only_in_candidate": []
+      },
+      "validation_case_coverage": {
+        "baseline_pairs": 22,
+        "candidate_pairs": 22,
+        "gained": [],
+        "held": true,
+        "lost": []
+      },
+      "verdict": "EQUIVALENT"
+    },
+    "loc_saved_vs_a0": 256,
+    "loc_total": 1386,
+    "minimization": {
+      "dropped": [
+        "surface_generation",
+        "surface_quality_validation",
+        "semantic_deduplication_config",
+        "config_status",
+        "lineage.profile_influenced_surface",
+        "lineage.judge_advisory",
+        "lineage.roles",
+        "oracle_runtime.tool_timeout_s",
+        "oracle_runtime.assertion_timeout_s",
+        "oracle_runtime.import_timeout_s",
+        "oracle_runtime.reset_timeout_s",
+        "oracle_runtime.episode_timeout_s"
+      ],
+      "kept": []
+    }
+  },
+  "coverage": {
+    "distinct_slot_values": {
+      "bn_balance_and_card_parallel.account_id": 1,
+      "bn_balance_and_card_parallel.card_id": 1,
+      "bn_balance_single.account_id": 2,
+      "bn_balance_withheld_account.account_id": 1,
+      "bn_card_limit_single.card_id": 1,
+      "bn_clarify_lookup_target.subject": 1,
+      "bn_create_dispute_single.reason": 1,
+      "bn_create_dispute_single.transaction_id": 3,
+      "bn_create_transfer_single.amount_vnd": 1,
+      "bn_create_transfer_single.from_account_id": 2,
+      "bn_create_transfer_single.rail": 1,
+      "bn_create_transfer_single.to_account_number": 1,
+      "bn_create_transfer_single.to_bank_code": 1,
+      "bn_dispute_status_single.dispute_id": 3,
+      "bn_latest_txn_status_dependent.account_id": 1,
+      "bn_list_recent_single.account_id": 2,
+      "bn_out_of_scope_service.service": 3,
+      "bn_transfer_amount_corrected.amount_vnd": 1,
+      "bn_transfer_amount_corrected.from_account_id": 1,
+      "bn_transfer_amount_corrected.rail": 1,
+      "bn_transfer_amount_corrected.to_account_number": 1,
+      "bn_transfer_amount_corrected.to_bank_code": 1,
+      "bn_transfer_fee_single.amount_vnd": 1,
+      "bn_transfer_fee_single.from_account_id": 2,
+      "bn_transfer_fee_single.rail": 1,
+      "bn_transfer_fee_single.to_account_number": 1,
+      "bn_transfer_fee_single.to_bank_code": 1,
+      "bn_transfer_short_of_funds.amount_vnd": 1,
+      "bn_transfer_short_of_funds.from_account_id": 1,
+      "bn_transfer_short_of_funds.rail": 1,
+      "bn_transfer_short_of_funds.to_account_number": 1,
+      "bn_transfer_short_of_funds.to_bank_code": 1,
+      "bn_txn_status_single.transaction_id": 2,
+      "bn_txn_status_unknown_id.transaction_id": 1,
+      "bn_vietqr_status_single.payment_ref": 6
+    },
+    "fixture_entities_bound": 17,
+    "fixture_entities_total": 50,
+    "fixtures": {
+      "accounts": {
+        "coverage": 0.375,
+        "entities_bound": 3,
+        "entities_never_bound": [
+          "ACC-003",
+          "ACC-004",
+          "ACC-005",
+          "ACC-007",
+          "ACC-008"
+        ],
+        "primary_key": "account_id",
+        "rows": 8
+      },
+      "cards": {
+        "coverage": 0.25,
+        "entities_bound": 1,
+        "entities_never_bound": [
+          "CARD-002",
+          "CARD-003",
+          "CARD-004"
+        ],
+        "primary_key": "card_id",
+        "rows": 4
+      },
+      "disputes": {
+        "coverage": 0.75,
+        "entities_bound": 3,
+        "entities_never_bound": [
+          "DSP-0004"
+        ],
+        "primary_key": "dispute_id",
+        "rows": 4
+      },
+      "fee_schedule": {
+        "coverage": null,
+        "entities_bound": 0,
+        "entities_never_bound": [],
+        "primary_key": null,
+        "rows": 6
+      },
+      "transactions": {
+        "coverage": 0.25,
+        "entities_bound": 4,
+        "entities_never_bound": [
+          "TXN-1003",
+          "TXN-1004",
+          "TXN-1005",
+          "TXN-1006",
+          "TXN-1007",
+          "TXN-1008",
+          "TXN-1009",
+          "TXN-1010",
+          "TXN-1012",
+          "TXN-1013",
+          "TXN-1014",
+          "TXN-1016"
+        ],
+        "primary_key": "transaction_id",
+        "rows": 16
+      },
+      "transfer_scenarios": {
+        "coverage": null,
+        "entities_bound": 0,
+        "entities_never_bound": [],
+        "primary_key": null,
+        "rows": 2
+      },
+      "transfers": {
+        "coverage": 0.0,
+        "entities_bound": 0,
+        "entities_never_bound": [
+          "TRF-0001",
+          "TRF-0002",
+          "TRF-0003",
+          "TRF-0004"
+        ],
+        "primary_key": "transfer_id",
+        "rows": 4
+      },
+      "vietqr_payments": {
+        "coverage": 1.0,
+        "entities_bound": 6,
+        "entities_never_bound": [],
+        "primary_key": "payment_ref",
+        "rows": 6
+      }
+    },
+    "tool_call_counts": {
+      "create_dispute": 3,
+      "create_transfer": 4,
+      "get_account_balance": 4,
+      "get_card_limit": 2,
+      "get_dispute_status": 3,
+      "get_transaction_status": 4,
+      "get_transfer_fee": 2,
+      "get_vietqr_payment_status": 6,
+      "list_recent_transactions": 3
+    },
+    "tools_declared": [
+      "create_dispute",
+      "create_transfer",
+      "get_account_balance",
+      "get_card_limit",
+      "get_dispute_status",
+      "get_transaction_status",
+      "get_transfer_fee",
+      "get_vietqr_payment_status",
+      "list_recent_transactions"
+    ],
+    "tools_never_called": []
+  },
+  "definitions": {
+    "cell_empty_structural": "a (category, policy) cell no tool in the category's universe can satisfy",
+    "distinct_masked_surface": "cardinality of the set of slot-masked opening user turns",
+    "fixture_entity_bound": "a fixture row whose primary key appears in some task's fixture_refs",
+    "loc_counting": "every line of every authored pack file plus the run config, including blanks and comments",
+    "publish_rate": "published rows divided by expanded task instances",
+    "slot_mask_rule": "replace each bound slot value with {slot_name} by exact substring match, longest value first; no case folding, no diacritic folding, no punctuation stripping, no tokenisation"
+  },
+  "distribution": {
+    "categories": [
+      "balance_inquiry",
+      "dispute",
+      "out_of_scope",
+      "qr_payment",
+      "transaction_status",
+      "transfer"
+    ],
+    "category_task_counts": {
+      "balance_inquiry": 6,
+      "dispute": 6,
+      "out_of_scope": 3,
+      "qr_payment": 6,
+      "transaction_status": 6,
+      "transfer": 6
+    },
+    "caveat": "Structural emptiness is inferred from the union of tools_present across the templates a category already has. A category whose templates all expose one tool is reported as unable to host multi_tool even if the domain could.",
+    "cells_empty_structural": 4,
+    "cells_empty_unwritten": 35,
+    "cells_populated": 15,
+    "cells_total": 54,
+    "difficulty_task_counts": {
+      "easy": 21,
+      "hard": 3,
+      "medium": 9
+    },
+    "matrix": {
+      "balance_inquiry": {
+        "clarify_only": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "confirmation": {
+          "reason": "no tool in this category requires confirmation",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "missing_slot": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "multi_tool": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "negative_path": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "single_turn": {
+          "tasks": 3,
+          "templates": 2
+        }
+      },
+      "dispute": {
+        "clarify_only": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "confirmation": {
+          "tasks": 3,
+          "templates": 1
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "single_turn": {
+          "tasks": 3,
+          "templates": 1
+        }
+      },
+      "out_of_scope": {
+        "clarify_only": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "confirmation": {
+          "reason": "no tool in this category requires confirmation",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "tasks": 3,
+          "templates": 1
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "single_turn": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        }
+      },
+      "qr_payment": {
+        "clarify_only": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "confirmation": {
+          "reason": "no tool in this category requires confirmation",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "single_turn": {
+          "tasks": 6,
+          "templates": 1
+        }
+      },
+      "transaction_status": {
+        "clarify_only": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "confirmation": {
+          "reason": "no tool in this category requires confirmation",
+          "status": "empty_structural",
+          "tasks": 0,
+          "templates": 0
+        },
+        "correction": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "dependent_call": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "irrelevant": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "single_turn": {
+          "tasks": 4,
+          "templates": 2
+        }
+      },
+      "transfer": {
+        "clarify_only": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "confirmation": {
+          "tasks": 2,
+          "templates": 1
+        },
+        "correction": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "dependent_call": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "irrelevant": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "missing_slot": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "multi_tool": {
+          "status": "empty_unwritten",
+          "tasks": 0,
+          "templates": 0
+        },
+        "negative_path": {
+          "tasks": 1,
+          "templates": 1
+        },
+        "single_turn": {
+          "tasks": 2,
+          "templates": 1
+        }
+      }
+    },
+    "policies": [
+      "clarify_only",
+      "confirmation",
+      "correction",
+      "dependent_call",
+      "irrelevant",
+      "missing_slot",
+      "multi_tool",
+      "negative_path",
+      "single_turn"
+    ],
+    "policy_task_counts": {
+      "clarify_only": 1,
+      "confirmation": 5,
+      "correction": 1,
+      "dependent_call": 1,
+      "irrelevant": 3,
+      "missing_slot": 1,
+      "multi_tool": 1,
+      "negative_path": 2,
+      "single_turn": 18
+    },
+    "policy_task_share": {
+      "clarify_only": 0.0303,
+      "confirmation": 0.1515,
+      "correction": 0.0303,
+      "dependent_call": 0.0303,
+      "irrelevant": 0.0909,
+      "missing_slot": 0.0303,
+      "multi_tool": 0.0303,
+      "negative_path": 0.0606,
+      "single_turn": 0.5455
+    },
+    "universe_source": "inferred_from_templates"
+  },
+  "equivalence": {
+    "baseline_arm": "a0",
+    "candidate_arm": "a1",
+    "conversation_plans": {
+      "compared": 33,
+      "equal": true,
+      "mismatches": []
+    },
+    "expected_tool_calls": {
+      "compared": 33,
+      "equal": true,
+      "published_mismatches": [],
+      "stage_mismatches": []
+    },
+    "publication": {
+      "baseline_gold_eligible": true,
+      "baseline_published": 33,
+      "candidate_gold_eligible": true,
+      "candidate_published": 33,
+      "gold_preserved": true
+    },
+    "surface": {
+      "examples": [
+        {
+          "baseline": [
+            "Cho mình xem số dư tài khoản của mình với.",
+            "Tài khoản ACC-001 nhé."
+          ],
+          "candidate": [
+            "Cho mình xem số dư tài khoản của mình với.",
+            "ACC-001 nhé."
+          ],
+          "task_id": "banking_vn__bn_balance_withheld_account__0f34f3476873fef5"
+        },
+        {
+          "baseline": [
+            "Mở tra soát cho giao dịch TXN-1011, lý do goods_not_received.",
+            "Tôi xác nhận mở tra soát."
+          ],
+          "candidate": [
+            "Mở tra soát cho giao dịch TXN-1011, lý do goods_not_received.",
+            "Tôi xác nhận thực hiện."
+          ],
+          "task_id": "banking_vn__bn_create_dispute_single__069e782f69b74266"
+        },
+        {
+          "baseline": [
+            "Mở tra soát cho giao dịch TXN-1001, lý do goods_not_received.",
+            "Tôi xác nhận mở tra soát."
+          ],
+          "candidate": [
+            "Mở tra soát cho giao dịch TXN-1001, lý do goods_not_received.",
+            "Tôi xác nhận thực hiện."
+          ],
+          "task_id": "banking_vn__bn_create_dispute_single__9a13aff31ee10eef"
+        },
+        {
+          "baseline": [
+            "Mở tra soát cho giao dịch TXN-1015, lý do goods_not_received.",
+            "Tôi xác nhận mở tra soát."
+          ],
+          "candidate": [
+            "Mở tra soát cho giao dịch TXN-1015, lý do goods_not_received.",
+            "Tôi xác nhận thực hiện."
+          ],
+          "task_id": "banking_vn__bn_create_dispute_single__fac3dccb0bfe459a"
+        },
+        {
+          "baseline": [
+            "Chuyển ngay 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+            "Tôi xác nhận thực hiện giao dịch."
+          ],
+          "candidate": [
+            "Chuyển ngay 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+            "Tôi xác nhận thực hiện."
+          ],
+          "task_id": "banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1"
+        }
+      ],
+      "first_turn_examples": [],
+      "first_turns_identical": true,
+      "identical": false,
+      "note": "Simulator replies are drawn from pack-wide canonical templates at A1, so a changed first-turn surface would be a real regression while a changed later turn is the intended trade.",
+      "tasks_with_changed_first_turn": 0,
+      "tasks_with_changed_wording": 8
+    },
+    "task_ids": {
+      "baseline_count": 33,
+      "candidate_count": 33,
+      "equal": true,
+      "only_in_baseline": [],
+      "only_in_candidate": []
+    },
+    "validation_case_coverage": {
+      "baseline_pairs": 22,
+      "candidate_pairs": 22,
+      "gained": [],
+      "held": true,
+      "lost": []
+    },
+    "verdict": "EQUIVALENT"
+  },
+  "funnel": {
+    "expanded": 33,
+    "generation_mode": "template_only",
+    "gold_rate": 1.0,
+    "gold_rows": 33,
+    "publish_rate": 1.0,
+    "published": 33,
+    "run_gold_eligible": true,
+    "steps": [
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "expand",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "state_machine",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "render_accepted",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "expected_trace_derived",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "schema_valid",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "replay_valid",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "benchmark_raw",
+        "survival_from_expand": 1.0
+      },
+      {
+        "drop_reasons": {},
+        "lost_here": 0,
+        "rows": 33,
+        "stage": "published",
+        "survival_from_expand": 1.0
+      }
+    ],
+    "tiers": {
+      "gold": 33
+    }
+  },
+  "metrics_version": "1.0",
+  "pack": "/localhome/local-hndo/Nemotron/bfcl_ablation/_generated/packs/a1_full",
+  "simplification": {
+    "authored_pack": "/localhome/local-hndo/Nemotron/bfcl_ablation/_generated/packs/a1_authored",
+    "loc_a1": {
+      "TOTAL": 1412,
+      "assertions.py": 182,
+      "backend.py": 465,
+      "fixtures.json": 68,
+      "manifest.yaml": 28,
+      "run_config": 43,
+      "task_templates.yaml": 393,
+      "tools.json": 162,
+      "validation_cases.yaml": 71
+    },
+    "loc_baseline": {
+      "TOTAL": 1642,
+      "assertions.py": 182,
+      "backend.py": 465,
+      "fixtures.json": 68,
+      "manifest.yaml": 50,
+      "run_config": 43,
+      "task_templates.yaml": 473,
+      "tools.json": 162,
+      "validation_cases.yaml": 199
+    },
+    "loc_saved": 230,
+    "loc_saved_pct": 14.0,
+    "rehydrate": {
+      "absent_ids": {
+        "accounts": [
+          "ACC-ABSENT-1"
+        ],
+        "cards": [
+          "CARD-ABSENT-1"
+        ],
+        "disputes": [
+          "DSP-ABSENT-1"
+        ],
+        "transactions": [
+          "TXN-ABSENT-1"
+        ],
+        "vietqr_payments": [
+          "VQ-ABSENT-1"
+        ]
+      },
+      "absent_ids_derived": true,
+      "primary_keys": {
+        "accounts": "account_id",
+        "cards": "card_id",
+        "disputes": "dispute_id",
+        "transactions": "transaction_id",
+        "vietqr_payments": "payment_ref"
+      },
+      "primary_keys_derived": true,
+      "source": "/localhome/local-hndo/Nemotron/bfcl_ablation/_generated/packs/a1_authored",
+      "target": "/localhome/local-hndo/Nemotron/bfcl_ablation/_generated/packs/a1_full",
+      "templates": 17,
+      "validation_cases_authored": 5,
+      "validation_cases_generated": 18
+    },
+    "rehydrated_pack": "/localhome/local-hndo/Nemotron/bfcl_ablation/_generated/packs/a1_full",
+    "shrink": {
+      "manifest_findings": [
+        {
+          "field": "paths",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "{\"accounts\": \"account_id\", \"cards\": \"card_id\", \"disputes\": \"dispute_id\", \"transactions\": \"transaction_id\", \"vietqr_payments\": \"payment_ref\"}",
+          "field": "primary_keys",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "{\"accounts\": [\"ACC-ABSENT-1\"], \"cards\": [\"CARD-ABSENT-1\"], \"disputes\": [\"DSP-ABSENT-1\"], \"transactions\": [\"TXN-ABSENT-1\"], \"vietqr_payments\": [\"VQ-ABSENT-1\"]}",
+          "field": "absent_ids",
+          "verdict": "derived_exact"
+        }
+      ],
+      "template_findings": [
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_balance_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_balance_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_card_limit_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_card_limit_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_balance_withheld_account",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "structure reproduced; wording now comes from the pack-wide canonical templates",
+          "field": "user_simulator_turns",
+          "template_id": "bn_balance_withheld_account",
+          "verdict": "surface_changed"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_balance_withheld_account",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_clarify_lookup_target",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_clarify_lookup_target",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_balance_and_card_parallel",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "authored=\"any\" derived=\"strict\"",
+          "field": "call_order",
+          "template_id": "bn_balance_and_card_parallel",
+          "verdict": "not_derivable"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_txn_status_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_txn_status_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_list_recent_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_list_recent_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_txn_status_unknown_id",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_txn_status_unknown_id",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_latest_txn_status_dependent",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_latest_txn_status_dependent",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_transfer_fee_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_transfer_fee_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_create_transfer_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "structure reproduced; wording now comes from the pack-wide canonical templates",
+          "field": "user_simulator_turns",
+          "template_id": "bn_create_transfer_single",
+          "verdict": "surface_changed"
+        },
+        {
+          "field": "mutates",
+          "template_id": "bn_create_transfer_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_create_transfer_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_transfer_short_of_funds",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "structure reproduced; wording now comes from the pack-wide canonical templates",
+          "field": "user_simulator_turns",
+          "template_id": "bn_transfer_short_of_funds",
+          "verdict": "surface_changed"
+        },
+        {
+          "field": "mutates",
+          "template_id": "bn_transfer_short_of_funds",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_transfer_short_of_funds",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "structure reproduced; wording now comes from the pack-wide canonical templates",
+          "field": "assistant_milestones",
+          "template_id": "bn_transfer_amount_corrected",
+          "verdict": "surface_changed"
+        },
+        {
+          "detail": "structure reproduced; wording now comes from the pack-wide canonical templates",
+          "field": "user_simulator_turns",
+          "template_id": "bn_transfer_amount_corrected",
+          "verdict": "surface_changed"
+        },
+        {
+          "field": "mutates",
+          "template_id": "bn_transfer_amount_corrected",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_transfer_amount_corrected",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_vietqr_status_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_vietqr_status_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_dispute_status_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_dispute_status_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_create_dispute_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "detail": "structure reproduced; wording now comes from the pack-wide canonical templates",
+          "field": "user_simulator_turns",
+          "template_id": "bn_create_dispute_single",
+          "verdict": "surface_changed"
+        },
+        {
+          "field": "mutates",
+          "template_id": "bn_create_dispute_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_create_dispute_single",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "assistant_milestones",
+          "template_id": "bn_out_of_scope_service",
+          "verdict": "derived_exact"
+        },
+        {
+          "field": "call_order",
+          "template_id": "bn_out_of_scope_service",
+          "verdict": "derived_exact"
+        }
+      ],
+      "validation_cases_authored_after": 5,
+      "validation_cases_authored_before": 23,
+      "validation_cases_generated": 22
+    }
+  },
+  "surface": {
+    "by_category": {
+      "balance_inquiry": {
+        "distinct_masked": 5,
+        "ratio": 0.8333,
+        "tasks": 6
+      },
+      "dispute": {
+        "distinct_masked": 2,
+        "ratio": 0.3333,
+        "tasks": 6
+      },
+      "out_of_scope": {
+        "distinct_masked": 1,
+        "ratio": 0.3333,
+        "tasks": 3
+      },
+      "qr_payment": {
+        "distinct_masked": 1,
+        "ratio": 0.1667,
+        "tasks": 6
+      },
+      "transaction_status": {
+        "distinct_masked": 4,
+        "ratio": 0.6667,
+        "tasks": 6
+      },
+      "transfer": {
+        "distinct_masked": 4,
+        "ratio": 0.6667,
+        "tasks": 6
+      }
+    },
+    "by_template": {
+      "bn_balance_and_card_parallel": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_balance_single": {
+        "distinct_masked": 1,
+        "ratio": 0.5,
+        "tasks": 2
+      },
+      "bn_balance_withheld_account": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_card_limit_single": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_clarify_lookup_target": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_create_dispute_single": {
+        "distinct_masked": 1,
+        "ratio": 0.3333,
+        "tasks": 3
+      },
+      "bn_create_transfer_single": {
+        "distinct_masked": 1,
+        "ratio": 0.5,
+        "tasks": 2
+      },
+      "bn_dispute_status_single": {
+        "distinct_masked": 1,
+        "ratio": 0.3333,
+        "tasks": 3
+      },
+      "bn_latest_txn_status_dependent": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_list_recent_single": {
+        "distinct_masked": 1,
+        "ratio": 0.5,
+        "tasks": 2
+      },
+      "bn_out_of_scope_service": {
+        "distinct_masked": 1,
+        "ratio": 0.3333,
+        "tasks": 3
+      },
+      "bn_transfer_amount_corrected": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_transfer_fee_single": {
+        "distinct_masked": 1,
+        "ratio": 0.5,
+        "tasks": 2
+      },
+      "bn_transfer_short_of_funds": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_txn_status_single": {
+        "distinct_masked": 1,
+        "ratio": 0.5,
+        "tasks": 2
+      },
+      "bn_txn_status_unknown_id": {
+        "distinct_masked": 1,
+        "ratio": 1.0,
+        "tasks": 1
+      },
+      "bn_vietqr_status_single": {
+        "distinct_masked": 1,
+        "ratio": 0.1667,
+        "tasks": 6
+      }
+    },
+    "lexical_shortcut_probe": {
+      "reason": "A generalization-gap probe needs several phrasings per intent. This arm produced 17 distinct masked surfaces across 17 templates; with one surface per template there is no held-out phrasing to test on. The probe becomes available at A2.",
+      "runnable": false
+    },
+    "most_repeated_masked": [
+      {
+        "tasks": 6,
+        "utterance": "Mã VietQR {payment_ref} đã trừ tiền chưa?"
+      },
+      {
+        "tasks": 3,
+        "utterance": "Hồ sơ tra soát {dispute_id} đang ở trạng thái nào?"
+      },
+      {
+        "tasks": 3,
+        "utterance": "Mở tra soát cho giao dịch {transaction_id}, lý do {reason}."
+      },
+      {
+        "tasks": 3,
+        "utterance": "Mình muốn đăng ký {service} thì làm thủ tục thế nào?"
+      },
+      {
+        "tasks": 2,
+        "utterance": "Cho mình xem số dư tài khoản {account_id}."
+      },
+      {
+        "tasks": 2,
+        "utterance": "Kiểm tra giao dịch {transaction_id} đã thành công chưa."
+      },
+      {
+        "tasks": 2,
+        "utterance": "Liệt kê vài giao dịch gần đây của tài khoản {account_id}."
+      },
+      {
+        "tasks": 2,
+        "utterance": "Phí chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail} là bao nhiêu?"
+      },
+      {
+        "tasks": 2,
+        "utterance": "Chuyển ngay {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}."
+      }
+    ],
+    "overall": {
+      "distinct_masked": 17,
+      "distinct_raw": 33,
+      "surfaces_per_template": 1.0,
+      "tasks": 33
+    }
+  }
+}
