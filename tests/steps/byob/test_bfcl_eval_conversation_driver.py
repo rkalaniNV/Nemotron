@@ -407,10 +407,13 @@ def _plan(
     *,
     task_ids: tuple[str, ...] = ("t__1", "t__2", "t__3", "t__4", "t__5"),
     identity: str = SOURCE_IDENTITY,
+    scoring: EvalScoringConfig | None = None,
 ) -> EligibleEvalPlan:
     candidate = _candidate()
+    policy = scoring or _scoring()
     return EligibleEvalPlan(
         eval_config_hash="sha256:" + "3" * 64,
+        scoring_policy_hash=policy.scoring_policy_hash,
         source_verification_identity=identity,
         source_run_id="run-1",
         source_task_ids_hash="sha256:" + "4" * 64,
@@ -526,7 +529,7 @@ def _drive(
                 limits=bounds,
                 client=client,
                 script=script,
-                plan=plan or _plan(),
+                plan=plan or _plan(scoring=scoring),
                 gate=gate or CanonicalCallMatchGate(scoring or _scoring()),
             )
         finally:
@@ -1016,7 +1019,7 @@ def test_a_strict_row_requires_the_traces_order_inside_one_turn(
     episode, _ = _drive(_script(_parallel_row()), [swapped], tmp_path, monkeypatch=monkeypatch)
 
     assert episode.status == "candidate_mismatch"
-    assert "call 0" in episode.detail
+    assert "different order" in episode.detail
 
 
 def test_an_unordered_row_accepts_the_same_calls_in_either_order(

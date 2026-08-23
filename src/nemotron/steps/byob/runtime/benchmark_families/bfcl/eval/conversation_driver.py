@@ -197,6 +197,15 @@ async def run_candidate_episode(
     bugs in the run rather than facts about the model.
     """
     _authorize(candidate, script, plan)
+    gate_policy_hash = getattr(gate, "scoring_policy_hash", None)
+    if gate_policy_hash is not None and gate_policy_hash != plan.scoring_policy_hash:
+        raise ConversationAuthorizationError(
+            "eval.continuation_gate.scoring_policy",
+            "is not the scoring policy the authorization plan was created under",
+            actual=gate_policy_hash,
+            expected=plan.scoring_policy_hash,
+            recovery="construct the continuation gate from the scoring section of the gated eval config",
+        )
     conversation = ModelFacingConversation(script)
     log = _EpisodeLog()
     log.event("seed", messages_released=len(conversation), detail="answer-free opening")

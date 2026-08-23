@@ -13,6 +13,10 @@ from typing import Any
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.fixture_filter import evaluate_filter
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
+    validate_function_arguments,
+    validate_tool_definition,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
     confirmation_protocol,
@@ -38,9 +42,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
     resolve_render_contract,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.schema_validation import (
-    validate_function_arguments,
     validate_task,
-    validate_tool_definition,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
     PlanError,

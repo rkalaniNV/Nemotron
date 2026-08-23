@@ -278,7 +278,11 @@ writes `oracle_validation_report.json` containing `tier`, `gold_eligible`,
    satisfy is refused rather than certified: an unsupported keyword, a malformed or
    inconsistent bound (`minimum` above `maximum`), an empty `enum`, a repeated `enum`
    value, `required` name or type-union member, and an `enum` or `const` value the
-   declared `type` rejects.
+   declared `type` rejects. Local `$ref` through `$defs` or `definitions` and
+   `allOf` conjunctions are supported and enforced recursively; external, missing,
+   and cyclic references are refused. Because defaults participate in call
+   comparison, every declared `default` must itself satisfy the schema under which
+   it would be inserted.
 4. `assertions_importable` — every template declares at least one `success_assertions`
    entry, and each referenced assertion exists with a valid signature. A template
    naming none has no statement of success, so replay could only confirm that its
@@ -773,6 +777,34 @@ fail-closed rule is what makes a `missing_slot` or `ask_confirm` policy safe: a
 model that calls straight through or emits unrelated prose never receives the
 slot value it failed to ask for. Nothing else from the row enters a prompt. The
 driver releases recorded results only; it executes no tool and derives no score.
+
+Executable evaluation uses a separate live driver. It first projects an
+`ExecutableTaskSpec` that binds the published row, candidate authorization,
+source clock, pack fingerprint, oracle resource, template milestones, fixture
+references, assertions, and pack-local mutation flags. The Python and endpoint
+adapters then keep one reset/call/state/assertion session inside a task-local
+process worker. Local `backend.py` and `assertions.py` are never imported into
+the evaluator process; endpoint sessions are deleted on every normal and
+exceptional exit. Calls execute once in candidate order, and only canonical live
+results are returned under the candidate's call IDs. Recorded replay results,
+expected calls, assertion metadata, and fixture values have no operation that
+can add them to the live model-facing conversation. A timed-out mutating call is
+never retried because its commit state is unknown. A returned mutating result is
+classified as committed only when canonical state snapshots before and after the
+call differ; equal snapshots prove no commit, and a missing snapshot remains
+unknown. The runner reconstructs assertion `slots`, `slots_initial`, and
+`slot_updates` from verified template metadata and published evidence: the
+verbatim opening turn, the expected trace, the cited fixture rows, and typed
+fixture, literal, enum, range, and absent-id values from the verified pack.
+Because the opening turn renders pre-correction values, it selects the typed
+candidate used for `slots_initial`, including values no tool argument names. A
+paraphrased surface is never read back. A final slot no channel settles is
+listed in `unresolved_slots`; unknown pre-correction and correction values are
+listed separately in `unresolved_slots_initial` and `unresolved_slot_updates`
+instead of being inferred from another phase. The isolated assertion runner
+tracks reads of all three so an assertion that needs a missing value fails as
+infrastructure rather than as a candidate error, while an unrelated assertion
+runs normally.
 
 `stage=generate` refuses `eval_config_path` and inline `eval` blocks because
 generation does not consume evaluation settings. Candidate execution belongs to

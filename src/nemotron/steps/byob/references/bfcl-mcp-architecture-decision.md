@@ -8,14 +8,25 @@ Supersedes nothing. Superseded by nothing.
 An MCP server reaches BFCL through a **gateway that speaks BFCL Oracle HTTP v1**.
 The oracle pack keeps declaring `endpoint_config.yaml`; the gateway translates that
 contract into MCP `tools/list`, `tools/call`, and the control operations defined in
-`bfcl-mcp-oracle-contract.md`. No stage of `runtime/benchmark_families/bfcl` learns
-what MCP is, and `generate_bfcl` is not modified.
+`bfcl-mcp-oracle-contract.md`. Generation stages do not learn what MCP is, and
+`generate_bfcl` is not modified. The Gold Gate gains one provider-neutral endpoint
+attestation check: it verifies what an endpoint claims it has proved, without
+implementing MCP discovery, transport, or result mapping itself.
 
 ```
-MCP server ──JSON-RPC──▶ MCP client ──▶ MCP-to-BFCL gateway ──BFCL Oracle HTTP v1──▶ EndpointOracleClient
-                                                                                      │
-                                                              existing ProcessWorker ─┘
-                                                              prepare → gold gate → generate → publish
+prepare → Gold Gate → existing ProcessWorker → EndpointOracleClient
+                                                   │
+                                      BFCL Oracle HTTP v1
+                                                   ▼
+                                        MCP-to-BFCL gateway
+                                                   │
+                                              MCP client
+                                                   │
+                                                JSON-RPC
+                                                   ▼
+                                               MCP server
+
+Gold Gate ── GET /v1/conformance + pinned digest ──▶ gateway
 ```
 
 MCP is additionally used as an **intake source** for authoring: the normalized tool
@@ -48,8 +59,10 @@ and refuses a pack that declares both. `EndpointOracleClient` already implements
 callable surface the worker expects (`list_tools`, `reset`, `call_tool`, `get_state`,
 `close`), plus HTTPS-only origins, environment-referenced credentials, an allowlisted
 CA bundle, request and response size caps, no redirects, and no retry of mutating
-requests. A gateway inherits all of it. A native MCP oracle kind would reimplement
-each of those properties in a second place.
+requests. Those controls protect the **BFCL-to-gateway** hop. The gateway separately
+implements the equivalent transport policy for the **gateway-to-MCP-server** hop;
+security does not propagate across an adapter boundary. A native MCP oracle kind
+would still duplicate the first set inside BFCL.
 
 ### A native oracle kind is not a local change
 
@@ -95,8 +108,14 @@ certified code paths.
   no eval-side change is required.
 - The gateway must publish a stable `expected.oracle_id`, `oracle_version`, and
   `sha256:` `content_digest`, because identity is compared during prepare, session
-  creation, generation, and publication. Digest derivation is specified in
+  creation, generation, and publication. This is an **effective** digest over the
+  server, normalized catalog, gateway and shim artifacts, and any snapshot — not a
+  server version string. Digest derivation is specified in
   `bfcl-mcp-oracle-contract.md`.
+- The endpoint config pins a conformance-attestation digest. Prepare retrieves
+  `GET /v1/conformance`, verifies that digest, records the document in
+  `oracle_validation_report.json`, and permits publication only for level `L2`.
+  This is the only Gold-Gate change and is provider-neutral.
 - One BFCL session maps to exactly one isolated MCP episode. Session lifetime,
   cleanup, and concurrency become gateway responsibilities.
 - A server that cannot reset fixtures, cannot expose deterministic final state, or
@@ -106,8 +125,9 @@ certified code paths.
   business tools only.
 - Adding a transport (stdio, Streamable HTTP) is a gateway-local change and does not
   alter the pack contract.
-- One extra process sits in the execution path, so gateway faults must surface as
-  BFCL-shaped failures rather than as ambiguous oracle defects.
+- One extra service boundary sits in the execution path (it may be a local process or
+  a remote service), so gateway faults must surface as infrastructure failures rather
+  than as business outcomes.
 
 ## Alternatives considered
 

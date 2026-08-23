@@ -55,9 +55,14 @@ skipped probe as passed all have this effect.
 
 Controls: the total, explicit result mapping in the oracle contract §8, where every
 unmappable shape is a route failure; refusal rather than coercion for every
-unsupported shape; probes that fail closed; skipped never recorded as passed; the
-catalog-fallback digest capped at conformance level `L1`; the claimed level recorded
-before generation so publication cannot be attempted on an unstated assumption.
+unsupported shape; probes that fail closed; skipped never recorded as passed; a live
+endpoint without `server_content_digest` capped at conformance level `L1`; the
+endpoint config pinning the digest of `GET /v1/conformance`; and the Gold Gate
+re-deriving eligibility from
+the attestation's individual probes and artifacts rather than trusting its `level`
+summary. A local file that merely declares `L2` has no authority. The gateway also
+cannot certify itself: gateway-conformance evidence must be rerun locally by the
+BFCL-owned suite or signed by a trust root configured outside the pack.
 
 ### `TM-03` Trusting mutation and confirmation hints — *high, quiet*
 
@@ -78,13 +83,15 @@ version that moved makes the certified gold trace describe an oracle that no lon
 exists.
 
 Controls: pinned `expected.server_name`, `expected.server_version`, the negotiated MCP
-version, and `tool_catalog_digest`, all verified at handshake; `content_digest`
-compared by `EndpointOracleClient` at metadata read, at every `list_tools`, and at
-every session creation; no `listChanged` subscription during a run, so a mid-run
-change is drift rather than a silent update; `pack_fingerprint` covering
-`mcp_oracle.yaml`. Residual risk: a server that changes logic without changing its
-reported `content_digest` is undetectable from outside, which is why the digest must be
-server-derived for `L2` and why the catalog fallback is publication-blocked.
+version, and `tool_catalog_digest`, all verified at handshake; the effective digest
+composing server content, normalized catalog, exact gateway and shim artifacts, and
+any snapshot; that digest compared by `EndpointOracleClient` at metadata read, at
+every `list_tools`, and at every session creation; no `listChanged` subscription
+during a run, so a mid-run change is drift rather than a silent update;
+`pack_fingerprint` covering `mcp_oracle.yaml` and `endpoint_config.yaml`. Residual
+risk: a live server that changes logic without changing its reported content digest
+is undetectable from outside, which caps it at `L1`; only an immutable snapshot
+sandbox can remove that live dependency without a server digest.
 
 ### `TM-05` Arbitrary code execution through a stdio server — *high*
 
@@ -92,13 +99,15 @@ server-derived for `L2` and why the catalog fallback is publication-blocked.
 episode. A command taken from an untrusted config, resolved through `PATH`, or passed
 to a shell is host compromise.
 
-Controls: argument vector only, never a shell string; executable and `cwd` must
-resolve under an allowed root, reusing the pack allowlist policy; no shell
-interpolation; explicit `env_passthrough` with everything else withheld; the child
-runs with the gateway's resource and time limits, not the host's; stdout parsed as
-newline-delimited JSON-RPC and nothing else, with stderr captured as bounded
-diagnostics; a per-episode restart bounded by `limits.max_concurrent_episodes` so
-restart-based reset cannot fork unbounded processes.
+Controls: argument vector only, never a shell string; the executable resolved through
+a dedicated `trusted_executables` policy that pins its path and artifact/package
+digest, separate from pack file `allowed_roots`; `cwd` confined to an allowed data
+root; no shell interpolation; explicit `env_passthrough` with everything else
+withheld; the child runs with the gateway's resource and time limits, not the host's;
+stdout parsed as newline-delimited JSON-RPC and nothing else, with stderr captured as
+bounded diagnostics; a per-episode restart bounded by
+`limits.max_concurrent_episodes` so restart-based reset cannot fork unbounded
+processes.
 
 ### `TM-06` Credential exposure — *high*
 
@@ -151,7 +160,10 @@ own episode rather than assuming the channel works; one BFCL session bound to ex
 one MCP episode; reset required to replace rather than merge state; probe `P5`
 comparing two fresh episodes; check `D1` as the backstop; teardown idempotent so a
 failed one cannot leak an episode into the next; under `no_op_verified` reset, probe
-`P10` must prove no exposed tool can mutate at all.
+`P10` must find no observed mutation, and `L2` additionally requires an enforced
+read-only authorization or immutable snapshot boundary plus a state projection
+complete for every exposed effect. A projection that could miss hidden state caps the
+endpoint at `L1`.
 
 ### `TM-10` Session confusion after a gateway restart — *medium, quiet*
 
@@ -166,7 +178,11 @@ Controls: an unknown or expired `session_id` answered with `mcp_session_unknown`
 never with an implicit new session; a session ceiling and idle TTL so eviction is
 bounded and named; no retry of a call whose transport failed mid-flight, because a
 mutation may already have applied and a retry would double-apply it; the double replay
-in `executable_replay` as the backstop.
+in `executable_replay` as the backstop. Infrastructure codes use non-2xx responses:
+returning them as HTTP-200 BFCL error objects could let a negative business case pass
+for an infrastructure failure. A timeout or broken transport poisons and tears down
+the episode; no later state read is trusted because closing a stream does not prove
+the upstream rolled back.
 
 ### `TM-11` Resource exhaustion and unbounded results — *medium*
 
@@ -178,7 +194,10 @@ enforcement is a Gold requirement.
 Controls: `max_response_bytes`, `max_tools`, `max_catalog_pages`,
 `max_concurrent_episodes`, and the timeouts in `limits`, all required positive finite
 numbers; cancellation on timeout via `notifications/cancelled` on stdio and stream
-close on HTTP; bounded stderr capture; an episode deadline above the per-call deadline.
+close on HTTP; bounded stderr capture; an episode deadline above the per-call
+deadline; cancellation behavior tested against a controlled hung MCP fixture and
+bound to the exact gateway artifact digest, rather than requiring a production server
+to expose a deliberately hanging tool.
 
 ### `TM-12` Non-determinism presented as flakiness — *medium, quiet*
 
@@ -226,9 +245,9 @@ properties the upstream source had — and `TM-01`'s injection surface extends f
 descriptions to field values.
 
 Controls: snapshot calls declared in reviewed config, never open-ended crawls; the
-snapshot digest folded into `content_digest` so the exact rows are pinned; snapshot
-content reviewed on the same path as tool descriptions before publication; the
-existing surface guards over rendered turns.
+snapshot digest folded into `effective_content_digest` so the exact rows are pinned;
+snapshot content reviewed on the same path as tool descriptions before publication;
+the existing surface guards over rendered turns.
 
 ### `TM-16` Tool name collisions and confusion — *low*
 
@@ -244,16 +263,18 @@ alias requirement in the normalization rules; uniqueness enforced after aliasing
 A gateway crash, a dropped connection, or a mapping bug that surfaces as a generic
 oracle error sends the operator to debug the pack instead of the gateway.
 
-Controls: distinct `mcp_*` failure reasons in the result mapping; gateway and shim
-versions recorded in the catalog digest and in the validation artifacts; probe results
-kept as artifacts; the same content-hashed artifact discipline the rest of the
-pipeline uses.
+Controls: distinct `mcp_*` infrastructure reasons in gateway diagnostics and bounded
+non-2xx bodies; gateway and shim **artifact digests**, not version labels, included in
+effective identity and the validation artifacts; target probe coverage recorded per
+tool and result class without claiming unobserved paths; the same content-hashed
+artifact discipline the rest of the pipeline uses.
 
 ## 3. Explicitly Accepted Residual Risk
 
-- A server that reports a stable `content_digest` while changing its business logic
-  cannot be detected from outside. The profile makes the digest the server's own
-  statement; BFCL verifies the statement is stable, not that it is honest.
+- A server that reports a stable `server_content_digest` while changing its business
+  logic cannot be detected from outside. Effective identity proves which claim,
+  gateway, shim, catalog, and snapshot BFCL used; it cannot make a dishonest upstream
+  claim true.
 - Human review is load-bearing against `TM-01` and `TM-15`. Automated flagging reduces
   volume; it does not replace the reviewer, and text crafted to read as ordinary domain
   prose can pass.
@@ -261,19 +282,23 @@ pipeline uses.
   Pinning identity bounds *when* it can change, not *who* controls it.
 - Mode `C` cannot exercise mutation, confirmation, or correction-of-a-mutation
   categories, so a read-only benchmark is narrower rather than equivalent. The
-  narrowing is recorded, not compensated for.
+  narrowing is recorded, not compensated for. A live third-party mode-C server
+  without a server content digest, enforceable read-only boundary, or complete state
+  projection remains `L1`.
 
 ## 4. Preconditions Before Any Remote Server Is Used
 
 1. `mcp_oracle.yaml` loads under the strict schema with no secret literals, and its
    declared `mode` is consistent with its strategies.
-2. Probes `P1`–`P11` pass, or the run is marked `smoke_no_publication`.
+2. Required and applicable target probes pass; conditionally irrelevant probes are
+   recorded as `not_applicable`, never as a coverage pass. Gateway timeout and mapping
+   conformance tests refer to the exact gateway artifact digest.
 3. Fixtures sent off-host are synthetic, or egress is explicitly acknowledged. In mode
    `C`, snapshot provenance is acknowledged in the other direction.
 4. Every published tool description has been reviewed and recorded as approved, and in
    mode `C` so has the snapshot content.
 5. `tools.include`, `tools.mutates`, and `tools.requires_confirmation` are reviewed
    config, not discovery output.
-6. The conformance level the pack will claim is recorded before generation, so a
-   publication attempt on an `L1` server is refused by a stated rule rather than by a
-   reviewer noticing.
+6. The endpoint config pins the live conformance-attestation digest, and the Gold Gate
+   verifies it, its referenced reports, and effective identity before generation. A
+   publication attempt on `L1` is refused by code rather than by a reviewer noticing.

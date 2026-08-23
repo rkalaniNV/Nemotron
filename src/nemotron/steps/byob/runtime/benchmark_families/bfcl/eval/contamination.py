@@ -135,6 +135,7 @@ def evaluate_contamination(config: BfclEvalConfig, source: VerifiedEvalSource) -
     try:
         return EligibleEvalPlan(
             eval_config_hash=config.eval_config_hash,
+            scoring_policy_hash=config.scoring.scoring_policy_hash,
             source_verification_identity=source.verification_identity,
             source_run_id=source.source_run_id,
             source_task_ids_hash=source.task_index.task_ids_hash,

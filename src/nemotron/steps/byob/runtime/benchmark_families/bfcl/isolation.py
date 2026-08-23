@@ -320,26 +320,16 @@ def _run_backend_episode_sync_inner(
         elif op == "run_assertion":
             if assertions_module is None:
                 raise RuntimeError("run_assertion requires assertions_path on the worker")
-            try:
-                _resolve_assertion(assertions_module, step["name"])(
+            outputs.append(
+                _assertion_verdict(
+                    _resolve_assertion(assertions_module, step["name"]),
+                    name=step["name"],
                     state=module.get_state(),
                     trace=step.get("trace") if step.get("trace") is not None else trace,
                     task=step.get("task") or {},
                     ctx=ctx,
                 )
-                outputs.append({"name": step["name"], "passed": True, "detail": None})
-            except AssertionError as exc:
-                outputs.append({"name": step["name"], "passed": False, "detail": str(exc)})
-            except Exception as exc:  # noqa: BLE001
-                # Type and message only: an object repr can carry an address and
-                # would make two identical replays look nondeterministic.
-                outputs.append(
-                    {
-                        "name": step["name"],
-                        "passed": False,
-                        "detail": f"{type(exc).__name__}: {exc}",
-                    }
-                )
+            )
         else:
             raise ValueError(f"unknown episode op {op!r}")
         try:
@@ -398,6 +388,220 @@ def _resolve_assertion(module: ModuleType, name: str) -> Callable[..., Any]:
     if not callable(candidate):
         raise LookupError(f"assertion {name!r} is not defined")
     return candidate
+
+
+def _tracked_assertion_value(
+    value: Any,
+    *,
+    path: tuple[str, ...],
+    accessed: set[tuple[str, ...]],
+) -> Any:
+    if isinstance(value, dict):
+        return _AssertionTaskDict(value, path=path, accessed=accessed)
+    if isinstance(value, list):
+        return _AssertionTaskList(value, path=path, accessed=accessed)
+    return value
+
+
+class _AssertionTaskList(list[Any]):
+    """A list whose nested containers retain their assertion-task paths."""
+
+    def __init__(
+        self,
+        value: list[Any],
+        *,
+        path: tuple[str, ...],
+        accessed: set[tuple[str, ...]],
+    ) -> None:
+        super().__init__(
+            _tracked_assertion_value(
+                child,
+                path=(*path, str(index)),
+                accessed=accessed,
+            )
+            for index, child in enumerate(value)
+        )
+
+
+class _AssertionTaskDict(dict[str, Any]):
+    """A plain-dict-compatible assertion payload that records field reads."""
+
+    def __init__(
+        self,
+        value: dict[str, Any],
+        *,
+        path: tuple[str, ...] = (),
+        accessed: set[tuple[str, ...]],
+    ) -> None:
+        self._path = path
+        self._accessed = accessed
+        super().__init__(
+            {
+                str(key): _tracked_assertion_value(
+                    child,
+                    path=(*path, str(key)),
+                    accessed=accessed,
+                )
+                for key, child in value.items()
+            }
+        )
+
+    def _read(self, key: Any) -> None:
+        name = str(key)
+        self._accessed.add((*self._path, name))
+        child = dict.get(self, name)
+        # ``task.get("slots") or {}`` is the ordinary pack idiom, and an empty
+        # child is falsy, so every later read would land on an untracked literal.
+        # Record the whole child here, while the caller can still be observed.
+        if isinstance(child, _AssertionTaskDict) and not child:
+            self._accessed.add((*self._path, name, "*"))
+
+    def __getitem__(self, key: Any) -> Any:
+        self._read(key)
+        return super().__getitem__(key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._read(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        self._read(key)
+        return super().__contains__(key)
+
+    def _read_all(self) -> None:
+        self._accessed.add((*self._path, "*"))
+
+    def __iter__(self) -> Iterator[str]:
+        self._read_all()
+        return super().__iter__()
+
+    def items(self) -> Any:
+        self._read_all()
+        return super().items()
+
+    def keys(self) -> Any:
+        self._read_all()
+        return super().keys()
+
+    def values(self) -> Any:
+        self._read_all()
+        return super().values()
+
+    def copy(self) -> dict[str, Any]:
+        self._read_all()
+        return super().copy()
+
+    def setdefault(self, key: Any, default: Any = None) -> Any:
+        self._read(key)
+        return super().setdefault(key, default)
+
+    def pop(self, key: Any, *default: Any) -> Any:
+        self._read(key)
+        return super().pop(key, *default)
+
+    def popitem(self) -> tuple[str, Any]:
+        self._read_all()
+        return super().popitem()
+
+    def __len__(self) -> int:
+        self._read_all()
+        return super().__len__()
+
+    def __eq__(self, other: object) -> bool:
+        self._read_all()
+        return super().__eq__(other)
+
+    def __ne__(self, other: object) -> bool:
+        self._read_all()
+        return super().__ne__(other)
+
+
+def _assertion_verdict(
+    assertion: Callable[..., Any],
+    *,
+    name: str,
+    state: dict[str, Any],
+    trace: list[dict[str, Any]],
+    task: dict[str, Any],
+    ctx: Any,
+) -> dict[str, Any]:
+    """Run one assertion and keep missing reconstructed slots infrastructural."""
+    accessed: set[tuple[str, ...]] = set()
+    tracked_task = _AssertionTaskDict(task, accessed=accessed)
+    unresolved_by_field = {
+        "slots": {
+            str(slot)
+            for slot in task.get("unresolved_slots") or []
+            if isinstance(slot, str)
+        },
+        "slots_initial": {
+            str(slot)
+            for slot in task.get("unresolved_slots_initial") or []
+            if isinstance(slot, str)
+        },
+    }
+    unresolved_updates = [
+        (entry.get("update_index"), str(slot))
+        for entry in task.get("unresolved_slot_updates") or []
+        if isinstance(entry, dict)
+        and isinstance(entry.get("update_index"), int)
+        and not isinstance(entry.get("update_index"), bool)
+        for slot in entry.get("slots") or []
+        if isinstance(slot, str)
+    ]
+    assertion_error: AssertionError | None = None
+    try:
+        assertion(state=state, trace=trace, task=tracked_task, ctx=ctx)
+    except AssertionError as exc:
+        assertion_error = exc
+    except Exception as exc:  # noqa: BLE001 — an assertion exception is verdict data
+        return {
+            "name": name,
+            "status": "infrastructure_error",
+            "passed": False,
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    missing_reads = sorted(
+        f"{field}.{slot}"
+        for field, unresolved in unresolved_by_field.items()
+        for slot in unresolved
+        if (field, slot) in accessed or (field, "*") in accessed
+    )
+    missing_reads.extend(
+        sorted(
+            f"slot_updates[{update_index}].values.{slot}"
+            for update_index, slot in unresolved_updates
+            if (
+                ("slot_updates", str(update_index), "values", slot) in accessed
+                or ("slot_updates", str(update_index), "values", "*") in accessed
+                or ("slot_updates", str(update_index), "*") in accessed
+            )
+        )
+    )
+    if missing_reads:
+        return {
+            "name": name,
+            "status": "infrastructure_error",
+            "passed": False,
+            "detail": (
+                "UnresolvedAssertionBinding: assertion accessed unresolved slot(s): "
+                + ", ".join(missing_reads)
+            ),
+        }
+    if assertion_error is not None:
+        return {
+            "name": name,
+            "status": "failed",
+            "passed": False,
+            "detail": str(assertion_error),
+        }
+    return {
+        "name": name,
+        "status": "passed",
+        "passed": True,
+        "detail": None,
+    }
 
 
 def _backend_worker(
@@ -493,23 +697,14 @@ def _backend_worker(
             elif op == "run_assertion":
                 if assertions_module is None:
                     raise RuntimeError("run_assertion requires assertions_path on the worker")
-                # An assertion verdict is data: a failing pack assertion must not kill the worker.
-                try:
-                    _resolve_assertion(assertions_module, step["name"])(
-                        state=module.get_state(),
-                        trace=step.get("trace") if step.get("trace") is not None else trace,
-                        task=step.get("task") or {},
-                        ctx=ctx,
-                    )
-                    value = {"name": step["name"], "passed": True, "detail": None}
-                except AssertionError as exc:
-                    value = {"name": step["name"], "passed": False, "detail": str(exc)}
-                except Exception as exc:  # noqa: BLE001 — surfaced as a failed assertion, not a crash
-                    value = {
-                        "name": step["name"],
-                        "passed": False,
-                        "detail": f"{type(exc).__name__}: {exc}",
-                    }
+                value = _assertion_verdict(
+                    _resolve_assertion(assertions_module, step["name"]),
+                    name=step["name"],
+                    state=module.get_state(),
+                    trace=step.get("trace") if step.get("trace") is not None else trace,
+                    task=step.get("task") or {},
+                    ctx=ctx,
+                )
             else:
                 raise ValueError(f"unknown episode op {op!r}")
             connection.send(("ok", value, getattr(module, "session_id", None)))

@@ -84,7 +84,7 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
 when = "You need to evaluate candidate models against a published BFCL benchmark"
-then = "Start from config/eval.default.yaml (schema 1.1). It reads run_manifest.json rather than a bare parquet, pins the scoring contract in references/bfcl-eval-scoring-contract.md by content hash, and requires an immutable model commit or weights digest per candidate. Executable mode also pins a matching oracle-pack manifest plus backend.py or endpoint config; oracle.kind alone is not executable. The result resolves into one eval_config_hash. Keep it in its own file: eval inputs are excluded from every generation lineage hash, so scoring a new candidate never changes the identity of the benchmark. Native candidate transport and deterministic conversation driving are available; deterministic scoring and live oracle execution are separate capabilities. stage=generate refuses eval_config_path and inline eval blocks because generation does not consume evaluation settings."
+then = "Start from config/eval.default.yaml (schema 1.1). It reads run_manifest.json rather than a bare parquet, pins the scoring contract in references/bfcl-eval-scoring-contract.md by content hash, and requires an immutable model commit or weights digest per candidate. Executable mode also pins a matching oracle-pack manifest plus backend.py or endpoint config; oracle.kind alone is not executable. The result resolves into one eval_config_hash. Keep it in its own file: eval inputs are excluded from every generation lineage hash, so scoring a new candidate never changes the identity of the benchmark. Native candidate transport, deterministic trace driving/scoring, source-bound executable task projection, process-isolated oracle sessions, and live executable conversation driving are available. stage=generate refuses eval_config_path and inline eval blocks because generation does not consume evaluation settings."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[strategies]]
@@ -104,7 +104,17 @@ skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[strategies]]
 when = "You need to run a whole multi-turn task against a candidate without leaking the answer"
-then = "Project source.evaluation_benchmark with its expected content hash and source.task_ids, then call build_conversation_script(projection, task_id, source=source) and run_candidate_episode() with the plan, client, and ContinuationGate. The builder refuses a projection whose hash, row count, or task sequence differs from the verified source; the driver also requires the candidate's canonical weights identity to equal the identity the contamination plan authorized. The prompt starts as the system prompts plus the first user request; only the candidate's own turns, released tool results, and scripted user requests may enter. An intermediate text turn must reproduce the published text before it unlocks a hidden user answer. A recorded result is released only to a matching type=function call with a unique non-empty id, addressed to that candidate id. Everything the model can cause — wrong tool, wrong or unparseable arguments, ambiguous call ids, an unreachable endpoint, or a spent budget — comes back as a CandidateEpisode status. The conversation driver releases recorded results only; tool execution and scoring are separate responsibilities."
+then = "Project source.evaluation_benchmark with its expected content hash and source.task_ids, then call build_conversation_script(projection, task_id, source=source) and run_candidate_episode() with the plan, client, and ContinuationGate. The builder refuses a projection whose hash, row count, or task sequence differs from the verified source; the driver also requires the candidate's canonical weights identity and the canonical gate's scoring-policy hash to equal what the contamination plan authorized. The prompt starts as the system prompts plus the first user request; only the candidate's own turns, released tool results, and scripted user requests may enter. An intermediate text turn must reproduce the published text before it unlocks a hidden user answer, and a terminal turn must contain non-empty textual content. Explicit truncation, content-filter, and max-token finish reasons never advance. A recorded result is released only to a matching type=function call with a unique non-empty id, addressed to that candidate id. Everything the model can cause — wrong tool, wrong or unparseable arguments, ambiguous call ids, an unreachable endpoint, or a spent budget — comes back as a CandidateEpisode status. The conversation driver releases recorded results only; tool execution and scoring are separate responsibilities."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need one deterministic score out of a recorded candidate episode"
+then = "Call score_trace_episode(episode=..., script=..., scoring=..., plan=...). It verifies the episode's authorization plan, candidate weights, task, source, and scoring-policy hash, then derives eval_config_hash from that plan instead of trusting a caller-provided stamp. It never contacts a provider, executes a tool, reads a clock, or re-parses provider bytes — so the same authorized evidence always reproduces the same score_hash, while human diagnostic wording does not. The result is a TraceTaskScore naming every gate the contract defines: tool_selection and arguments measure coverage of the whole gold trace; schema_valid, call_grouping, call_ordering, and text_turn measure consistency of asked turns; and trace_completion always applies. Empty terminal content and explicit truncated, filtered, or max-token provider finishes cannot succeed. Ordering is judged apart from selection. Candidate arguments must satisfy their declared schema before default insertion and canonical comparison can earn a recorded result; local refs and allOf are enforced, and invalid operational defaults are rejected during pack validation. task_success is derived from the gates, unsupported repair and assertions-only policies are refused, and continuation and scoring share one comparison kernel. Executable evaluation adds oracle replay and pack assertions; a trace score never stands in for one."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to record what a candidate actually did against a live oracle"
+then = "Build an ExecutableTaskSpec from the complete canonical projection, VerifiedEvalSource, EligibleEvalPlan, candidate alias, and task id. Open the source-selected PythonOracleSession or EndpointOracleSession, then call run_executable_episode(...). The task projection binds source bytes, publication order, candidate authorization, source clock, verified oracle, runner-only milestones, fixture references, assertion names, and mutation policy while exposing only the answer-free seed and model-facing tools. It reconstructs assertion slots, initial slots, and the correction timeline from the verbatim opening surface, expected trace, cited fixture rows, and typed fixture, literal, enum, range, and absent-id values from the verified pack. Unknown final, pre-correction, and correction values are named separately in unresolved_slots, unresolved_slots_initial, and unresolved_slot_updates rather than guessed from each other; the isolated assertion runner tracks reads of all three so an assertion that needs one fails as infrastructure, never as a candidate error, while unrelated assertions retain their ordinary verdict. Both oracle adapters keep reset, ordered calls, state, and assertions in one task-local process worker; pack code never enters the evaluator process, every preflight and runtime exit closes the session, and mutating calls are never retried. A returned mutating result is committed only when bound pre-call and post-call state hashes differ; equal hashes prove no commit and a missing snapshot is unknown. The live driver injects only candidate output, canonical live results addressed by candidate call id, and earned deterministic user turns — never recorded gold results. Its ExecutableEpisode (contract 1.0) keeps one ExecutedToolCall for every proposed call, retaining invalid calls as not_executed and distinguishing normal results, certified {error:{code}} business rejections, malformed results, timeouts, infrastructure failures, and commit state. released_to_model is committed only when a later request actually admits the result; a terminal tool-only turn completes without falsely claiming a release. Terminal status is checked against fatal evidence in both directions, and episode_hash excludes replay and diagnostic wording while preserving semantic oracle data. Tool-trace persistence and executable scoring remain separate components."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[errors]]
@@ -346,6 +356,42 @@ recovery = "A prompt held an assistant or tool message that the candidate did no
 [[errors]]
 name = "eval_conversation_transition_invalid"
 recovery = "The driver was asked for a move its own state forbids: echoing a tool call whose id is absent or ambiguous, whose type is not function, or whose name or argument string is missing; releasing a recorded result with no call to answer; or injecting a non-user message as the next request. End the episode with the matching status instead of repairing the model's output."
+
+[[errors]]
+name = "eval_executable_projection_invalid"
+recovery = "The published row cannot be bound to the verified executable source: the source clock, pack tool policy, template milestones, complete projection identity, or oracle lineage is missing or inconsistent. Restore the verified publication and pack; do not reconstruct runner metadata from an unrelated row or pack."
+
+[[errors]]
+name = "eval_executable_unauthorized"
+recovery = "The ExecutableTaskSpec does not match the candidate, EligibleEvalPlan, VerifiedEvalSource, scoring policy, or VerifiedOracleSource being driven. Rebuild it from the exact canonical projection and handles produced by source verification and contamination gating."
+
+[[errors]]
+name = "eval_oracle_session_failed"
+recovery = "The task-local Python worker or endpoint session could not be opened or closed cleanly. Discard the episode, verify the source resource again, and inspect worker or endpoint cleanup before retrying the complete task."
+
+[[errors]]
+name = "eval_oracle_reset_failed"
+recovery = "The verified oracle failed to establish a clean state for this task. Do not continue or reuse a prior session; inspect fixtures and reset behavior, then rerun the whole task with a new session."
+
+[[errors]]
+name = "eval_oracle_call_failed"
+recovery = "A declared schema-valid tool call failed outside the structured business-result contract. Record the infrastructure outcome. Never retry a mutating call in the same episode because its commit state may be unknown."
+
+[[errors]]
+name = "eval_oracle_state_failed"
+recovery = "The live oracle could not return a canonical JSON object for final state. Retain the earlier call evidence, classify the episode as an oracle-state failure, and rerun only after fixing the verified oracle."
+
+[[errors]]
+name = "eval_assertion_infrastructure_failed"
+recovery = "A pack assertion could not be imported or executed. This is not an assertion verdict and must not be counted as a candidate failure or pass. Fix the assertion infrastructure and rerun the complete executable task."
+
+[[errors]]
+name = "eval_trace_evidence_mismatch"
+recovery = "An episode was scored against a script it did not answer: a different task id, or a script hash that identifies a different conversation. Score each episode against the script the driver was given for that task; a re-projected row is a different question, so re-drive it rather than re-pairing the evidence."
+
+[[errors]]
+name = "eval_trace_scoring_policy_unsupported"
+recovery = "scoring asks for a verdict a trace score cannot produce: allow_llm_repair would make the number a property of the repairer, and assertions_only needs an oracle to evaluate the pack's assertions. Score with allow_llm_repair: false and task_success: all_applicable_gates, or run executable evaluation."
 
 [[errors]]
 name = "unsupported_eval_mode"

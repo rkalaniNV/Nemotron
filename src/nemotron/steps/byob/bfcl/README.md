@@ -765,8 +765,10 @@ because a recorded result is only meaningful at the point the trace reached it.
 
 An intermediate text-only turn advances only when it reproduces the text the
 published trace recorded. This deliberately fail-closed rule prevents arbitrary
-prose from unlocking a hidden slot or confirmation; terminal text is retained as
-an observation for scoring instead. Tool calls must declare type `function` and
+prose from unlocking a hidden slot or confirmation; a terminal turn must contain
+non-empty plain or structured text. Provider finishes that explicitly mean
+truncation or filtering (`length`, `content_filter`, or max-token variants) never
+advance, even if the partial payload otherwise matches. Tool calls must declare type `function` and
 carry unique non-empty ids — missing types are not repaired, and ambiguous ids
 never receive recorded results. Before execution, the candidate's canonical
 weights identity must still equal the identity the contamination plan authorized;
@@ -783,8 +785,171 @@ client: an interruption is not an observation.
 
 The conversation driver derives no number and executes no tool. The results it
 releases are the ones benchmark generation replay recorded, so an answer cannot
-depend on a live fixture. The trace parser/scorer and executable oracle runner are
-separate components.
+depend on a live fixture. The executable oracle runner is a separate component.
+
+## Canonical Tool-Call Parser and Trace Scorer
+
+`score_trace_episode(..., plan=...)` turns one recorded episode into
+one `TraceTaskScore`. It
+is a pure function of evidence and policy: it reads the `CandidateEpisode`, the
+`ConversationScript` that produced it, the pinned `EvalScoringConfig`, and the
+`EligibleEvalPlan` that authorized the run, and it
+contacts no provider, executes no tool, reads no clock, and re-parses no provider
+bytes. Scoring the same episode twice therefore reproduces the same `score_hash`,
+which is what makes a published number auditable after the endpoint it came from
+is gone.
+
+Parsing flattens the episode rather than re-reading it. The client already parsed
+the provider's bytes once under strict JSON, so a call whose arguments never
+parsed stays unparsed and a turn the episode never sent is listed as unsent
+rather than invented as an empty one. The parser refuses an episode whose task id
+or script hash is not the conversation it answered: a score taken over mismatched
+halves would grade the wrong task.
+
+The comparison behind scoring is the same code the driver's release gate uses. A
+gate stricter than the scorer would end an episode the scorer would have
+credited, so a correct model would fail a task on transport grounds; the two read
+one kernel rather than two implementations of the same prose.
+
+A score names every gate the contract defines, and reports a gate that does not
+apply as such rather than omitting it. `tool_selection` and `arguments` measure
+coverage of the whole gold trace, so a gold call in a turn the episode never
+reached counts against them. `schema_valid`, `call_grouping`, `call_ordering`,
+and `text_turn` measure consistency of the turns that were actually asked.
+`trace_completion` always applies, which is what makes an unfinished episode a
+failed task rather than a skipped one, while `non_candidate_stop` still lets a
+report separate an unreachable endpoint from a wrong model. `task_success` is
+derived from the gates rather than asserted beside them.
+
+The parser also requires the episode and script to name the same verified source;
+a recorded episode cannot be restamped as evidence from another benchmark. It
+also requires the episode's plan identity, candidate weights, and task to match
+the supplied plan, and requires the scoring policy's content hash to match the
+one embedded in that plan. The score derives the complete `eval_config_hash`
+from this authorization rather than accepting a caller-provided stamp,
+so changing limits, candidate inference, or another measurement input changes
+the authorization and requires a new episode.
+
+Two attributions are deliberate. Ordering is judged apart from selection: a turn
+that made the trace's calls in the wrong order fails ordering only, and a turn
+that called something else fails selection only. And declared defaults are filled
+only after the candidate arguments satisfy their declared schema, so a parameter
+that is both defaulted and required cannot be laundered into a match or earn a
+recorded result. Relaxing
+`respect_call_group` or `respect_call_order` drops the corresponding gate but does
+not make an unreplayable episode succeed, because replay still holds exactly one
+recorded result per gold call.
+
+Nothing here is repaired. `allow_llm_repair` and `task_success: assertions_only`
+are refused with a typed error rather than approximated: the first would make the
+number a property of the repairer, and the second needs an oracle this scorer does
+not have. Oracle replay and pack assertions belong to executable evaluation, and a
+trace score never stands in for one.
+
+Human-readable `detail` fields are emitted for diagnosis but excluded from
+`score_hash`; stable `reason_code` values and structural verdicts carry semantic
+identity. Rewording a diagnostic therefore does not fork otherwise identical
+scores.
+
+## Executable Evaluation Evidence
+
+`ExecutableEpisode` (`executable contract` `1.0`) freezes what one live-oracle
+task must record before the executable driver and scorer derive any metric. It
+binds the candidate, task, authorized plan, full eval config, verified source,
+verified oracle, and conversation script by content identity. It then retains
+the candidate turns, exactly one `ExecutedToolCall` outcome for every proposed
+call, the final-state hash, classified assertion outcomes, and ordered driver
+events.
+
+A proposed call never disappears because it could not execute. Invalid JSON,
+schema-invalid arguments, missing ids, and undeclared tools are represented as
+`not_executed`; attempted calls distinguish normal JSON results, structured
+business rejections, tool failures, oracle returns that do not conform to the
+tool contract, timeouts, infrastructure failures, and an unknown mutation commit
+state. A business rejection is evidence only when it has the certified
+`{"error": {"code": ...}}` shape. A non-object oracle return is recorded as a
+`malformed_result` outcome that preserves the non-object JSON value, verifies
+its type and canonical hash, and keeps it separate from conforming `result`.
+Malformed output and commit state are independent: if a mutating call's result
+is malformed and its commit cannot be established, the outcome retains both
+facts and the episode terminates as `unknown_commit_state`. Assertion failures
+remain model outcomes, while assertion import or runtime failures are
+infrastructure outcomes.
+
+Obtaining a result and admitting it to the candidate prompt are separate facts.
+`released_to_model` records the second one per execution, so a result the driver
+obtained but never released — the batch aborted after it, or the episode budget
+expired, or a terminal tool-only task needed no following model request — is
+retained without claiming the candidate read it. Every nonterminal turn that
+advanced must have released its results in the next request; a terminal turn can
+complete with unreleased results. Per-turn and per-episode release counts are
+derived from the executions rather than restated beside them. A scripted
+user-message release is likewise attached to the turn by the released message's
+content hash; its episode count is derived rather than trusted as a free-standing
+claim.
+
+The contract is frozen and closed. It binds every outcome to the provider call it
+records by typed JSON equality, so a coerced argument cannot pass as the value
+the provider sent. It validates call-to-outcome ordering, result hashes, that a
+tool-execution event cites both the exact outcome and the turn that owns it, that
+a scripted user turn is released only by a turn that advanced, and that a
+candidate call which never completed carries no envelope to read a finish
+reason, assistant content, or tool calls from. Terminal status is checked in both
+directions: malformed or unknown-commit evidence cannot be restamped as a
+completed episode.
+
+`build_executable_task_spec(...)` creates the only task handle accepted by the
+live driver. It checks the complete canonical projection against
+`VerifiedEvalSource`, requires the task to be assigned to the candidate by
+`EligibleEvalPlan`, binds the verified oracle identity and source clock, and
+retains runner-only fixture references, milestones, assertion names, and
+mutation policy outside the model-facing seed. Pack-local `x-mutates` and
+`x-requires-confirmation` flags are recovered from the verified `tools.json`;
+they are never added to the provider tool schema. The assertion task preserves
+verified template metadata and reconstructs bound `slots`, `slots_initial`, and
+`slot_updates` from what the row published: the verbatim opening surface, the
+expected trace, cited fixture rows, and the verified pack's fixture, literal,
+enum, range, and absent-id declarations. The opening turn renders pre-correction
+values, so it selects typed candidates for `slots_initial`; a model-paraphrased
+surface is not read back. A final value no channel settles is named in
+`unresolved_slots`, while unknown pre-correction and correction values are named
+separately in `unresolved_slots_initial` and `unresolved_slot_updates`; none is
+guessed from another phase. The isolated assertion runner tracks which missing
+final, initial, or correction values each assertion reads and classifies such a
+verdict as an infrastructure error, never a candidate failure, while an assertion
+that does not read the missing value still runs normally.
+
+`open_oracle_session(...)` selects a `PythonOracleSession` or
+`EndpointOracleSession`. Both run through one persistent process-isolated
+`ProcessWorker` episode per task, so reset, calls, state, and assertions share
+state while pack modules never enter the evaluator process. Endpoint sessions
+are deleted on normal close, timeout, cancellation, and worker failure.
+Mutating calls are issued once; a timeout or transport failure becomes unknown
+commit state instead of being retried. Successful mutating responses are not
+assumed to have committed: the driver compares canonical state snapshots before
+and after the call and records both hashes as evidence of `committed` or
+`not_committed`. Missing either side yields `unknown_commit_state`.
+
+`run_executable_episode(...)` interleaves native candidate turns with those live
+operations. It executes only declared, parseable, schema-valid calls, in
+candidate order, and sends canonical live results back under the candidate's
+own call IDs. The continuation gate controls release of deterministic scripted
+user turns, but never supplies a recorded gold result. Result and user-message
+release evidence is committed only when the next candidate request is actually
+sent. A terminal tool-only turn records no false release. Final state and pack
+assertions are recorded before the session is closed. Source/plan/task lineage is
+checked as one authorization unit, and the oracle session is closed even when
+that preflight check fails.
+
+`episode_hash` is path-free and time-free. Human `detail` wording and the
+cache-replay flag are outside that identity; stable reason codes, canonical
+arguments and results, commit verdicts, release verdicts, state identity, and
+assertion verdicts remain inside it. Each model excludes only its own `detail`,
+so oracle-owned JSON keys named `detail` are still evidence. Trace scores derive
+`score_hash` the same way.
+
+Persisting an append-only tool trace, executable scoring, bounded batch
+execution, and aggregate reporting remain separate runtime components.
 
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
@@ -803,7 +968,7 @@ ignored.
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), and deterministic conversation driving (`conversation` `1.0`) are available. Deterministic scoring and executable oracle replay are not exposed by this runtime. |
+| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection, process-isolated Python/endpoint oracle sessions, live result conversation driving, pack-assertion execution, and executable evidence (`1.0`) are available. Tool-trace persistence, executable scoring, and bounded batch execution are not yet exposed. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |

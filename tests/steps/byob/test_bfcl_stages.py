@@ -9,6 +9,11 @@ from typing import Any
 
 import pytest
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
+    apply_declared_defaults,
+    validate_function_arguments,
+    validate_function_schema,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     canonical_json,
     decode_arguments,
@@ -21,7 +26,6 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
     task_seed_for,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.schema_validation import (
-    validate_function_schema,
     validate_task,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
@@ -1057,6 +1061,75 @@ def test_tool_schema_validation_keeps_distinct_values_of_different_types() -> No
     assert validate_function_schema(function) == []
 
 
+def test_tool_schema_validation_supports_local_refs_all_of_and_inherited_defaults() -> None:
+    function = {
+        "name": "bounded",
+        "parameters": {
+            "type": "object",
+            "$defs": {"limit": {"type": "integer", "minimum": 1, "default": 5}},
+            "properties": {
+                "limit": {
+                    "allOf": [
+                        {"$ref": "#/$defs/limit"},
+                        {"maximum": 10},
+                    ]
+                }
+            },
+            "additionalProperties": False,
+        },
+    }
+
+    assert validate_function_schema(function) == []
+    assert apply_declared_defaults({}, function["parameters"]) == {"limit": 5}
+    assert validate_function_arguments(function, {"limit": 0}) == [
+        {"reason": "number_below_minimum", "argument": "limit"}
+    ]
+    assert validate_function_arguments(function, {"limit": 11}) == [
+        {"reason": "number_above_maximum", "argument": "limit"}
+    ]
+
+
+def test_tool_schema_validation_rejects_an_operational_default_that_violates_its_schema() -> None:
+    function = {
+        "name": "bad_default",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "default": "many"},
+            },
+        },
+    }
+
+    assert validate_function_schema(function) == [
+        {
+            "reason": "invalid_schema_default",
+            "path": "$.limit",
+            "failure": "argument_type_mismatch",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reference", "reason"),
+    [
+        ("https://example.invalid/schema.json", "schema_ref_not_local"),
+        ("#/$defs/missing", "unresolvable_schema_ref"),
+        ("#/$defs/loop", "cyclic_schema_ref"),
+    ],
+)
+def test_tool_schema_validation_rejects_unsafe_local_references(reference: str, reason: str) -> None:
+    function = {
+        "name": "bad_ref",
+        "parameters": {
+            "type": "object",
+            "$defs": {"loop": {"$ref": "#/$defs/loop"}},
+            "properties": {"value": {"$ref": reference}},
+        },
+    }
+
+    assert reason in {failure["reason"] for failure in validate_function_schema(function)}
+
+
 @pytest.mark.parametrize(
     ("constraint", "reason"),
     [
@@ -1067,9 +1140,7 @@ def test_tool_schema_validation_keeps_distinct_values_of_different_types() -> No
 def test_argument_constraints_keep_json_booleans_distinct_from_integers(
     constraint: dict[str, Any], reason: str
 ) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.schema_validation import (
-        _check_value,
-    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import _check_value
 
     schema = {"type": ["integer", "boolean"], **constraint}
     assert _check_value(schema, 1, "value") == [{"reason": reason, "argument": "value"}]
