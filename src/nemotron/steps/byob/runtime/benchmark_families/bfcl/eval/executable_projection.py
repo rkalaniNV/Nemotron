@@ -13,11 +13,17 @@ import hashlib
 import itertools
 import json
 import re
+from pathlib import Path
 from typing import Any, Final, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, model_validator
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.assertion_capabilities import (
+    AssertionCapabilityError,
+    assertion_capabilities,
+    read_literal_assertion_capabilities,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import OraclePackRef
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.contamination_contract import (
     EligibleEvalPlan,
@@ -27,6 +33,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_contr
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_projection import (
     build_conversation_script,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_contract import (
+    AssertionCategory,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_errors import (
     ExecutableAuthorizationError,
@@ -42,6 +51,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
     CanonicalExportRow,
     ContentHash,
     FrozenDict,
+    NonNegativeInt,
     freeze_json,
     json_equal,
     thaw_json,
@@ -54,6 +64,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.fixture_filter import (
     evaluate_filter,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+    confirmation_protocol,
     project_model_facing_tools,
     resolve_declared_pack_paths,
 )
@@ -61,12 +72,15 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canon
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
     primary_key_for,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
+    build_plan,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.templating import (
     placeholder_names,
     substitute,
 )
 
-EXECUTABLE_PROJECTION_VERSION: Final = "1.0"
+EXECUTABLE_PROJECTION_VERSION: Final = "1.2"
 _SLOT_REFERENCE = re.compile(r"^\{([^{}]+)\}$")
 
 
@@ -84,19 +98,80 @@ class ExecutableToolPolicy(_Frozen):
     function_name: StrictStr
     mutates: StrictBool = False
     requires_confirmation: StrictBool = False
+    confirmation_parameter: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def _coherent(self) -> ExecutableToolPolicy:
+        if self.requires_confirmation != (self.confirmation_parameter is not None):
+            raise ValueError(
+                "a confirmation-protected tool names the pack's confirmation parameter"
+            )
+        if self.confirmation_parameter is not None and not self.confirmation_parameter.strip():
+            raise ValueError("the confirmation parameter is a non-empty argument name")
+        return self
 
     def semantic_payload(self) -> dict[str, Any]:
         return {
             "function_name": self.function_name,
             "mutates": self.mutates,
             "requires_confirmation": self.requires_confirmation,
+            "confirmation_parameter": self.confirmation_parameter,
         }
+
+
+class ExecutableDependency(_Frozen):
+    """One expected argument whose value must come from a prior live result."""
+
+    dependency_index: NonNegativeInt
+    consumer_call_index: NonNegativeInt
+    consumer_turn_index: NonNegativeInt
+    consumer_position_in_turn: NonNegativeInt
+    argument_path: tuple[StrictStr | NonNegativeInt, ...]
+    producer_call_index: NonNegativeInt
+    producer_turn_index: NonNegativeInt
+    result_path: StrictStr
+    expected_value_type: Literal["null", "bool", "integer", "number", "string"]
+
+    def semantic_payload(self) -> dict[str, Any]:
+        return {
+            "dependency_index": self.dependency_index,
+            "consumer_call_index": self.consumer_call_index,
+            "consumer_turn_index": self.consumer_turn_index,
+            "consumer_position_in_turn": self.consumer_position_in_turn,
+            "argument_path": list(self.argument_path),
+            "producer_call_index": self.producer_call_index,
+            "producer_turn_index": self.producer_turn_index,
+            "result_path": self.result_path,
+            "expected_value_type": self.expected_value_type,
+        }
+
+
+class ExecutableAssertionSpec(_Frozen):
+    """Verified applicability and metric category for one pack assertion."""
+
+    name: StrictStr
+    category: AssertionCategory = "unclassified"
+    trace_compatible: StrictBool = False
+    executable_compatible: StrictBool = True
+
+    @model_validator(mode="after")
+    def _coherent(self) -> ExecutableAssertionSpec:
+        if not self.name.strip():
+            raise ValueError("an executable assertion spec names its assertion")
+        if not self.executable_compatible:
+            raise ValueError(
+                "an executable task references only executable-compatible assertions"
+            )
+        return self
+
+    def semantic_payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json")
 
 
 class ExecutableTaskSpec(_Frozen):
     """One candidate-authorized task with verified oracle and source lineage."""
 
-    schema_version: Literal["1.0"] = EXECUTABLE_PROJECTION_VERSION
+    schema_version: Literal["1.2"] = EXECUTABLE_PROJECTION_VERSION
     task_id: StrictStr
     candidate_alias: StrictStr
     canonical_model_identity: StrictStr
@@ -111,8 +186,11 @@ class ExecutableTaskSpec(_Frozen):
     fixture_refs: tuple[StrictStr, ...] = ()
     script: ConversationScript
     success_assertions: tuple[StrictStr, ...] = ()
+    assertion_specs: tuple[ExecutableAssertionSpec, ...] = ()
     turn_policy: StrictStr
     assistant_milestones: tuple[FrozenDict, ...] = ()
+    confirmed_call_turns: tuple[NonNegativeInt, ...] = ()
+    dependencies: tuple[ExecutableDependency, ...] = ()
     tool_policies: tuple[ExecutableToolPolicy, ...]
     assertion_task: FrozenDict
 
@@ -155,12 +233,68 @@ class ExecutableTaskSpec(_Frozen):
             raise ValueError("executable tool policies cover exactly the model-facing tools")
         if not self.oracle_clock.strip():
             raise ValueError("an executable task carries the source run's frozen oracle clock")
+        if tuple(spec.name for spec in self.assertion_specs) != self.success_assertions:
+            raise ValueError(
+                "executable assertion specs cover every required assertion in order"
+            )
+        if list(self.confirmed_call_turns) != sorted(set(self.confirmed_call_turns)):
+            raise ValueError("confirmed call turns are unique and ordered")
+        if any(
+            index >= len(self.script.turns)
+            or not self.script.turn(index).expects_tool_calls
+            for index in self.confirmed_call_turns
+        ):
+            raise ValueError("confirmation covers only call turns in the executable script")
+        if [item.dependency_index for item in self.dependencies] != list(
+            range(len(self.dependencies))
+        ):
+            raise ValueError("executable dependencies are contiguous and zero-based")
+        if (self.turn_policy == "dependent_call") != bool(self.dependencies):
+            raise ValueError(
+                "dependent_call tasks, and only those tasks, carry result dependencies"
+            )
+        calls = {
+            call.call_index: (turn, position, call)
+            for turn in self.script.turns
+            for position, call in enumerate(turn.calls)
+        }
+        seen_targets: set[tuple[int, tuple[str | int, ...]]] = set()
+        for dependency in self.dependencies:
+            consumer = calls.get(dependency.consumer_call_index)
+            producer = calls.get(dependency.producer_call_index)
+            if consumer is None or producer is None:
+                raise ValueError("a dependency cites calls in the executable script")
+            consumer_turn, consumer_position, _ = consumer
+            producer_turn, _, _ = producer
+            if (
+                dependency.consumer_turn_index != consumer_turn.turn_index
+                or dependency.consumer_position_in_turn != consumer_position
+                or dependency.producer_turn_index != producer_turn.turn_index
+                or dependency.producer_call_index >= dependency.consumer_call_index
+                or dependency.producer_turn_index >= dependency.consumer_turn_index
+            ):
+                raise ValueError(
+                    "a dependency binds a later consumer to an earlier producer turn"
+                )
+            target = (
+                dependency.consumer_call_index,
+                tuple(dependency.argument_path),
+            )
+            if target in seen_targets:
+                raise ValueError("a dependent argument path has exactly one producer")
+            seen_targets.add(target)
         return self
 
     def tool_policy(self, function_name: str) -> ExecutableToolPolicy | None:
         for policy in self.tool_policies:
             if policy.function_name == function_name:
                 return policy
+        return None
+
+    def assertion_spec(self, name: str) -> ExecutableAssertionSpec | None:
+        for spec in self.assertion_specs:
+            if spec.name == name:
+                return spec
         return None
 
     def semantic_payload(self) -> dict[str, Any]:
@@ -180,9 +314,16 @@ class ExecutableTaskSpec(_Frozen):
             "fixture_refs": list(self.fixture_refs),
             "script_hash": self.script.script_hash,
             "success_assertions": list(self.success_assertions),
+            "assertion_specs": [
+                spec.semantic_payload() for spec in self.assertion_specs
+            ],
             "turn_policy": self.turn_policy,
             "assistant_milestones": [
                 thaw_json(milestone) for milestone in self.assistant_milestones
+            ],
+            "confirmed_call_turns": list(self.confirmed_call_turns),
+            "dependencies": [
+                dependency.semantic_payload() for dependency in self.dependencies
             ],
             "tool_policies": [policy.semantic_payload() for policy in self.tool_policies],
             "assertion_task": thaw_json(self.assertion_task),
@@ -214,6 +355,222 @@ def _manifest(source: VerifiedEvalSource) -> dict[str, Any]:
     return document
 
 
+def _dependent_markers(
+    value: Any,
+    path: tuple[str | int, ...] = (),
+) -> list[tuple[tuple[str | int, ...], Any]]:
+    if isinstance(value, dict) and set(value) == {"from_result"}:
+        return [(path, value["from_result"])]
+    found: list[tuple[tuple[str | int, ...], Any]] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            found.extend(_dependent_markers(child, (*path, str(key))))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(_dependent_markers(child, (*path, index)))
+    return found
+
+
+def _value_at_path(value: Any, path: tuple[str | int, ...]) -> Any:
+    current = value
+    for token in path:
+        if isinstance(token, int) and isinstance(current, list):
+            current = current[token]
+        elif isinstance(token, str) and isinstance(current, dict):
+            current = current[token]
+        else:
+            raise KeyError(token)
+    return current
+
+
+def _scalar_type(value: Any) -> Literal["null", "bool", "integer", "number", "string"]:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    raise TypeError("dependent argument resolves to a JSON scalar")
+
+
+def _dependency_specs(
+    *,
+    row: CanonicalExportRow,
+    plan: dict[str, Any],
+    script: ConversationScript,
+) -> tuple[ExecutableDependency, ...]:
+    """Bind verified template markers to concrete script call coordinates."""
+
+    call_by_index = {
+        call.call_index: (turn.turn_index, position, call)
+        for turn in script.turns
+        for position, call in enumerate(turn.calls)
+    }
+    group_by_turn = {turn.turn_index: turn.call_group for turn in script.turns}
+    milestone_ids: dict[str, tuple[int, int]] = {}
+    pending: list[
+        tuple[int, int, int, tuple[str | int, ...], str, str]
+    ] = []
+    call_index = 0
+    assistant_turn = -1
+    for step in plan["steps"]:
+        if step["kind"] == "text":
+            assistant_turn += 1
+            continue
+        if step["kind"] != "calls":
+            continue
+        assistant_turn += 1
+        call_group = int(step["call_group"])
+        for position, milestone in enumerate(step["milestones"]):
+            identifier = milestone.get("id")
+            if identifier is not None:
+                key = str(identifier)
+                if key in milestone_ids:
+                    raise ExecutableProjectionError(
+                        f"task {row.task_id} dependency producer",
+                        f"reuses milestone id {key!r}",
+                        expected="a unique id for every dependency-producing call",
+                        recovery="fix the verified template and regenerate the benchmark",
+                    )
+                milestone_ids[key] = (call_index, call_group)
+            for argument_path, marker in _dependent_markers(milestone.get("args") or {}):
+                producer = marker.get("call") if isinstance(marker, dict) else None
+                result_path = marker.get("path") if isinstance(marker, dict) else None
+                if (
+                    not argument_path
+                    or not isinstance(producer, str)
+                    or not producer
+                    or not isinstance(result_path, str)
+                    or not result_path
+                ):
+                    raise ExecutableProjectionError(
+                        f"task {row.task_id} dependency",
+                        "has an unreadable from_result marker",
+                        expected=(
+                            "a nested argument marker with non-empty call and path strings"
+                        ),
+                        recovery="fix the verified template and regenerate the benchmark",
+                    )
+                pending.append(
+                    (
+                        call_index,
+                        assistant_turn,
+                        position,
+                        argument_path,
+                        producer,
+                        result_path,
+                    )
+                )
+            call_index += 1
+    dependencies: list[ExecutableDependency] = []
+    for (
+        consumer_index,
+        consumer_turn,
+        consumer_position,
+        argument_path,
+        producer_id,
+        result_path,
+    ) in pending:
+        producer = milestone_ids.get(producer_id)
+        consumer = call_by_index.get(consumer_index)
+        if producer is None or consumer is None:
+            raise ExecutableProjectionError(
+                f"task {row.task_id} dependency",
+                f"cannot bind producer {producer_id!r} to the published script",
+                expected="an earlier uniquely identified tool-call milestone",
+                recovery="restore the verified pack and canonical publication",
+            )
+        producer_index, producer_group = producer
+        producer_call = call_by_index.get(producer_index)
+        # A text turn and an unknown turn both leave the consumer without a call
+        # group, and neither can host a dependent call.
+        consumer_group = group_by_turn.get(consumer_turn)
+        if (
+            producer_call is None
+            or consumer_group is None
+            or producer_index >= consumer_index
+            or producer_group >= consumer_group
+        ):
+            raise ExecutableProjectionError(
+                f"task {row.task_id} dependency",
+                f"producer {producer_id!r} does not complete before its consumer",
+                expected="a producer in an earlier call group and assistant turn",
+                recovery="fix the verified dependent-call template",
+            )
+        try:
+            expected_value = _value_at_path(
+                thaw_json(consumer[2].arguments),
+                argument_path,
+            )
+            expected_type = _scalar_type(expected_value)
+        except (IndexError, KeyError, TypeError) as exc:
+            raise ExecutableProjectionError(
+                f"task {row.task_id} dependency",
+                "does not identify a scalar argument in the published expected call",
+                expected="a concrete scalar value at the dependent argument path",
+                recovery="regenerate the publication from the verified pack",
+            ) from exc
+        dependencies.append(
+            ExecutableDependency(
+                dependency_index=len(dependencies),
+                consumer_call_index=consumer_index,
+                consumer_turn_index=consumer_turn,
+                consumer_position_in_turn=consumer_position,
+                argument_path=argument_path,
+                producer_call_index=producer_index,
+                producer_turn_index=producer_call[0],
+                result_path=result_path,
+                expected_value_type=expected_type,
+            )
+        )
+    return tuple(dependencies)
+
+
+def _assertion_specs(
+    path: Path,
+    names: tuple[str, ...],
+    *,
+    task_id: str,
+) -> tuple[ExecutableAssertionSpec, ...]:
+    """Read the pack's declared assertion capabilities without importing it."""
+    try:
+        capabilities = assertion_capabilities(
+            read_literal_assertion_capabilities(path),
+            names,
+        )
+    except AssertionCapabilityError as exc:
+        raise ExecutableProjectionError(
+            f"task {task_id} assertion capabilities",
+            str(exc),
+            expected="the capability contract the verified pack passed validation under",
+            recovery="fix ASSERTION_CAPABILITIES and regenerate the source",
+        ) from exc
+
+    specs: list[ExecutableAssertionSpec] = []
+    for name in names:
+        capability = capabilities[name]
+        if not capability["executable"]:
+            raise ExecutableProjectionError(
+                f"task {task_id} assertion capability {name}",
+                "is not executable-compatible",
+                expected="every executable success_assertion to declare executable: true",
+                recovery="remove it from the task or make the assertion executable-compatible",
+            )
+        specs.append(
+            ExecutableAssertionSpec(
+                name=name,
+                category=capability["category"],
+                trace_compatible=capability["trace"],
+                executable_compatible=capability["executable"],
+            )
+        )
+    return tuple(specs)
+
+
 def _pack_metadata(
     source: VerifiedEvalSource,
     *,
@@ -223,6 +580,9 @@ def _pack_metadata(
     tuple[FrozenDict, ...],
     dict[str, Any],
     dict[str, Any],
+    tuple[int, ...],
+    dict[str, Any],
+    tuple[ExecutableAssertionSpec, ...],
 ]:
     oracle = source.oracle
     assert oracle is not None
@@ -261,6 +621,15 @@ def _pack_metadata(
             ),
             recovery="restore the pack revision that source verification accepted",
         )
+    try:
+        confirm_parameter = confirmation_protocol(pack_manifest)["parameter"]
+    except ValueError as exc:
+        raise ExecutableProjectionError(
+            "source_oracle.pack manifest confirmation",
+            f"does not resolve a confirmation vocabulary: {exc}",
+            expected="the confirmation protocol the verified pack declares",
+            recovery="restore the pack revision that source verification accepted",
+        ) from exc
     full_by_name = {
         str((tool.get("function") or {}).get("name")): tool
         for tool in tools
@@ -281,11 +650,13 @@ def _pack_metadata(
                 expected="the exact projected definition from the verified tools.json",
                 recovery="re-publish the benchmark from the verified pack",
             )
+        requires_confirmation = full.get("x-requires-confirmation") is True
         policies.append(
             ExecutableToolPolicy(
                 function_name=name,
                 mutates=full.get("x-mutates") is True,
-                requires_confirmation=full.get("x-requires-confirmation") is True,
+                requires_confirmation=requires_confirmation,
+                confirmation_parameter=confirm_parameter if requires_confirmation else None,
             )
         )
     matching = [
@@ -316,11 +687,23 @@ def _pack_metadata(
         tools=tools,
         fixtures=fixtures,
     )
+    plan = build_plan(
+        template,
+        {"task_id": row.task_id, "template_id": row.template_id},
+    )
+    assertion_specs = _assertion_specs(
+        paths.assertions_path,
+        row.success_assertions,
+        task_id=row.task_id,
+    )
     return (
         tuple(policies),
         tuple(freeze_json(item) for item in milestones),
         assertion_bindings,
         template,
+        tuple(plan["confirmed_call_turns"]),
+        plan,
+        assertion_specs,
     )
 
 
@@ -846,9 +1229,22 @@ def build_executable_task_spec(
             expected="the frozen ISO-8601 clock source verification accepted",
             recovery="restore the verified run manifest",
         )
-    policies, milestones, assertion_bindings, template_metadata = _pack_metadata(
+    (
+        policies,
+        milestones,
+        assertion_bindings,
+        template_metadata,
+        confirmed_call_turns,
+        conversation_plan,
+        assertion_specs,
+    ) = _pack_metadata(
         source,
         row=row,
+    )
+    dependencies = _dependency_specs(
+        row=row,
+        plan=conversation_plan,
+        script=script,
     )
     assertion_task = {
         **template_metadata,
@@ -904,8 +1300,11 @@ def build_executable_task_spec(
         fixture_refs=row.fixture_refs,
         script=script,
         success_assertions=row.success_assertions,
+        assertion_specs=assertion_specs,
         turn_policy=row.turn_policy,
         assistant_milestones=milestones,
+        confirmed_call_turns=confirmed_call_turns,
+        dependencies=dependencies,
         tool_policies=policies,
         assertion_task=assertion_task,
     )
@@ -913,6 +1312,8 @@ def build_executable_task_spec(
 
 __all__ = [
     "EXECUTABLE_PROJECTION_VERSION",
+    "ExecutableAssertionSpec",
+    "ExecutableDependency",
     "ExecutableTaskSpec",
     "ExecutableToolPolicy",
     "build_executable_task_spec",

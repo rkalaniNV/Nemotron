@@ -141,8 +141,19 @@ values are resolved from the environment at runtime and are not included in
 fingerprints, reports, logs, or manifests.
 
 `assertions.py` functions must accept exactly the keyword arguments
-`(*, state, trace, task, ctx)` and raise `AssertionError` on failure. Export them
-through an `ASSERTIONS` dict or name them `assert_*`. Assertions run inside the
+`(*, state, trace, task, ctx)`. Return `None` on success, raise `AssertionError`
+on failure, or return `{"status": "not_applicable", "detail": "..."}` when the
+declared predicate does not apply. Any other return is an infrastructure error.
+Export assertions through an `ASSERTIONS` dict or name them `assert_*`.
+Optional literal `ASSERTION_CAPABILITIES` entries declare boolean `trace` and
+`executable` support plus category `state`, `path`, `result`, `final_answer`, or
+`unclassified`; omitted entries default to executable-only and unclassified.
+Validation and executable projection both read the mapping as a literal
+assignment rather than importing it, so a computed mapping, an unknown assertion
+name, or a malformed entry fails validation with
+`invalid_assertion_capability`. That reason is separate from `invalid_signature`,
+which is only about the assertion's keyword arguments.
+Assertions run inside the
 same process worker as the local backend or endpoint client. For endpoints,
 `state` is fetched from the active remote session; `trace` holds the calls the
 episode just made: `[{"tool": ..., "arguments": {...}, "result": {...}}]`.
@@ -456,6 +467,15 @@ the stage enforces:
   slot-bound arguments.
 - Pair the template with an assertion that the consumed id appeared in the earlier
   result; that is what keeps the anti-hallucinated-id meaning of this edge.
+
+During executable evaluation, the published locked value is not replayed into
+the expected downstream call. The runner projects the marker coordinates,
+extracts the value again from the candidate episode's paired live producer
+result, and compares the candidate's next call against that live-derived
+expectation. The runner never edits candidate arguments. If the live result
+cannot satisfy the declared producer, path, scalar type, and consumer schema,
+the episode ends with dependency infrastructure evidence rather than falling
+back to generation-time oracle bytes.
 
 A `correction` template has a later user turn replace a value the user already
 gave, through `user_simulator_turns[].slot_updates`:

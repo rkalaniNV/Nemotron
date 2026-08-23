@@ -918,6 +918,11 @@ guessed from another phase. The isolated assertion runner tracks which missing
 final, initial, or correction values each assertion reads and classifies such a
 verdict as an infrastructure error, never a candidate failure, while an assertion
 that does not read the missing value still runs normally.
+For `dependent_call`, the projection also converts every verified
+`from_result` marker into source-bound producer, consumer, argument-path, and
+result-path coordinates. The concrete value locked into the published gold call
+is retained only as its expected JSON type; it is not used as the live
+downstream value.
 
 `open_oracle_session(...)` selects a `PythonOracleSession` or
 `EndpointOracleSession`. Both run through one persistent process-isolated
@@ -940,16 +945,79 @@ sent. A terminal tool-only turn records no false release. Final state and pack
 assertions are recorded before the session is closed. Source/plan/task lineage is
 checked as one authorization unit, and the oracle session is closed even when
 that preflight check fails.
+For a tool carrying `x-requires-confirmation`, a call that asserts the pack's
+confirmation parameter reaches the oracle only on a turn covered by the
+scripted user confirmation and after the candidate's whole batch matches the
+authorized batch. An unconfirmed probe with that parameter false or omitted
+still executes where the verified trace places it. Bypass attempts become
+`not_executed` evidence and cannot mutate oracle state.
+Before a dependent consumer turn is sent, the driver resolves its expected
+argument from the paired producer's actual canonical result. It never rewrites
+the candidate's arguments: the candidate must read the released result and emit
+the downstream value itself. Missing producers, ambiguous pairings, unavailable
+results, missing paths, type drift, and schema-invalid substitutions terminate
+as deterministic dependency infrastructure evidence. Recorded gold results are
+never a fallback. Confirmation, correction, and missing-slot continuations
+remain published scripted user messages rather than model-generated simulation.
 
 `episode_hash` is path-free and time-free. Human `detail` wording and the
 cache-replay flag are outside that identity; stable reason codes, canonical
 arguments and results, commit verdicts, release verdicts, state identity, and
 assertion verdicts remain inside it. Each model excludes only its own `detail`,
-so oracle-owned JSON keys named `detail` are still evidence. Trace scores derive
-`score_hash` the same way.
+so oracle-owned JSON keys named `detail` are still evidence.
 
-Persisting an append-only tool trace, executable scoring, bounded batch
-execution, and aggregate reporting remain separate runtime components.
+`score_executable_episode(...)` consumes only the authorized task, immutable
+episode, pinned scoring policy, and contamination plan. It reuses the same
+normalized call-comparison gates as trace scoring, then adds oracle execution,
+dependency-resolution, commit-state, assertion, and executable-completion
+gates. Business rejection is
+a successful oracle exchange whose semantic correctness remains the pack
+assertion's decision. Unknown commit state and oracle/assertion infrastructure
+errors fail the task and set `non_candidate_stop`; no model, oracle, filesystem,
+or clock is consulted during scoring. `ExecutableTaskScore.score_hash` binds the
+task spec, episode, source, oracle, plan, policy, and stable structural verdicts,
+while excluding diagnostic wording.
+The episode itself carries `task_spec_hash`, so changing runner-only fixtures,
+assertion input, mutation policy, or confirmation coverage after execution is an
+evidence mismatch. Assertions explicitly marked `not_applicable` are skipped;
+when a fatal oracle failure prevents a required assertion suffix from running,
+the scorer retains the infrastructure stop without inventing verdicts.
+Pack assertions may declare trace/executable compatibility and a
+`state`/`path`/`result`/`final_answer` category through literal
+`ASSERTION_CAPABILITIES`. Executable scores expose the fixed metric taxonomy
+with numerator, denominator, value, and an explicit N/A reason code whenever
+the denominator is zero. Evidence an infrastructure stop prevented from being
+produced makes its metric N/A instead of a candidate failure.
+
+`task_success: all_applicable_gates` requires every applicable trace and
+executable gate to pass. Debug-only `assertions_only` requires declared
+assertions to pass and still refuses infrastructure or evidence failures; it
+does not let a broken oracle become a success.
+
+`aggregate_executable_scores(...)` accepts exactly one candidate's authorized
+task scores in plan order, sums metric numerators and denominators, preserves
+explicit N/A semantics, and emits a path-free `aggregate_hash` bound to every
+task `score_hash`. `ToolTraceCache` persists complete executable episodes in
+append-only, hash-verified JSONL. Complete-episode replay preserves mutating
+state, dependent-call, final-state, and assertion evidence; individual tool
+calls are never memoized. The durable cache exposes its byte hash for the eval
+manifest. `write_executable_eval_artifacts(...)` writes immutable
+`eval_report.json`, `eval_task_results.parquet`, and `eval_manifest.json`; the
+manifest binds source, plan, candidate aggregates, output hashes, and both
+required caches after validating their JSONL records and cross-checking every
+candidate observation against the streamed tool-trace episodes. A run that keeps
+no episodes still has to prove its candidate cache holds no unfinished request.
+It also records runtime, source, dependency-lock, and worker-image identity, each
+reported as null rather than guessed when it cannot be established.
+`run_bfcl_eval(...)`
+performs the complete executable run with
+task-local oracle sessions, candidate-sequential execution, and task concurrency
+bounded by `limits.max_parallel_tasks`. Its machine-readable error taxonomy
+separates candidate failures, infrastructure stops, evidence failures, and fatal
+setup errors, attributes each task row's terminal episode status alongside its
+gate failures, and is hashed into final artifacts under a regression test that
+refuses drift between the taxonomy, the exception codes, and this step's error
+registry.
 
 For the complete pack contract, validation rules, turn policies, and schema
 requirements, see
@@ -968,7 +1036,7 @@ ignored.
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection, process-isolated Python/endpoint oracle sessions, live result conversation driving, pack-assertion execution, and executable evidence (`1.0`) are available. Tool-trace persistence, executable scoring, and bounded batch execution are not yet exposed. |
+| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.2`), run-level executable metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable executable artifacts (`1.3`), bounded executable batch orchestration, and error taxonomy (`1.0`) are available. Trace-only batch aggregation/publication remains unexposed. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |

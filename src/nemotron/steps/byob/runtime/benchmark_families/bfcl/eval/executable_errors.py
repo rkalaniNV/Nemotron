@@ -89,6 +89,18 @@ class OracleAssertionError(OracleSessionError):
     code = "eval_assertion_infrastructure_failed"
 
 
+class ToolTraceCacheError(ExecutableEvalError):
+    """Persisted executable evidence is incomplete, corrupt, or unreadable."""
+
+    code = "eval_tool_trace_cache_invalid"
+
+
+class ToolTraceCacheConflictError(ToolTraceCacheError):
+    """An immutable tool-trace key was observed with different evidence."""
+
+    code = "eval_tool_trace_cache_conflict"
+
+
 def describe_executable_error(exc: Exception) -> str:
     if isinstance(exc, ExecutableEvalError):
         report = exc.as_report()
@@ -105,5 +117,7 @@ __all__ = [
     "OracleResetError",
     "OracleSessionError",
     "OracleStateError",
+    "ToolTraceCacheConflictError",
+    "ToolTraceCacheError",
     "describe_executable_error",
 ]

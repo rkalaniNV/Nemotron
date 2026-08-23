@@ -44,7 +44,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-EXECUTABLE_CONTRACT_VERSION: Final = "1.0"
+EXECUTABLE_CONTRACT_VERSION: Final = "1.2"
 
 ToolExecutionStatus = Literal[
     "not_executed",
@@ -66,12 +66,22 @@ StateCommitStatus = Literal[
 ]
 AssertionCategory = Literal["state", "path", "result", "final_answer", "unclassified"]
 AssertionStatus = Literal["passed", "failed", "not_applicable", "infrastructure_error"]
+DependencyResolutionStatus = Literal[
+    "resolved",
+    "producer_missing",
+    "producer_ambiguous",
+    "result_unavailable",
+    "result_path_missing",
+    "result_type_mismatch",
+    "consumer_schema_invalid",
+]
 ExecutableEpisodeStatus = Literal[
     "completed",
     "candidate_mismatch",
     "malformed_response",
     "candidate_call_failed",
     "unusable_tool_call_ids",
+    "confirmation_not_earned",
     "max_turns_exceeded",
     "episode_timeout",
     "oracle_reset_failed",
@@ -356,6 +366,7 @@ class ExecutableTurn(_Frozen):
     assistant_content: Any = None
     tool_calls: tuple[CandidateToolCall, ...] = ()
     tool_call_outcome_indexes: tuple[NonNegativeInt, ...] = ()
+    paired_call_indexes: tuple[NonNegativeInt, ...] = ()
     released_user_message_hash: ContentHash | None = None
     advanced: StrictBool
     reason_code: StrictStr
@@ -387,6 +398,14 @@ class ExecutableTurn(_Frozen):
             raise ValueError("only a call that received a response body can identify one")
         if self.released_user_message_hash is not None and not self.advanced:
             raise ValueError("only a turn that advanced can release its scripted user message")
+        if self.paired_call_indexes and len(self.paired_call_indexes) != len(
+            self.tool_calls
+        ):
+            raise ValueError(
+                "expected-call pairings cover every candidate call in the turn"
+            )
+        if self.advanced and self.tool_calls and not self.paired_call_indexes:
+            raise ValueError("an advanced tool-call turn identifies its expected pairings")
         return self
 
     def semantic_payload(self) -> dict[str, Any]:
@@ -399,6 +418,7 @@ class ExecutableTurn(_Frozen):
             "assistant_content": thaw_json(self.assistant_content),
             "tool_calls": [call.as_document() for call in self.tool_calls],
             "tool_call_outcome_indexes": list(self.tool_call_outcome_indexes),
+            "paired_call_indexes": list(self.paired_call_indexes),
             "released_user_message_hash": self.released_user_message_hash,
             "advanced": self.advanced,
             "reason_code": self.reason_code,
@@ -449,6 +469,81 @@ class AssertionOutcome(_Frozen):
         return {key: value for key, value in self.semantic_payload().items() if key != "detail"}
 
 
+class DependencyResolution(_Frozen):
+    """How one expected downstream argument was derived from live evidence."""
+
+    dependency_index: NonNegativeInt
+    consumer_call_index: NonNegativeInt
+    consumer_turn_index: NonNegativeInt
+    argument_path: tuple[StrictStr | NonNegativeInt, ...]
+    producer_call_index: NonNegativeInt
+    producer_execution_index: NonNegativeInt | None = None
+    result_path: StrictStr
+    status: DependencyResolutionStatus
+    resolved_value: Any = None
+    resolved_value_hash: ContentHash | None = None
+    reason_code: StrictStr
+    detail: StrictStr
+
+    @model_validator(mode="before")
+    @classmethod
+    def _freeze_resolved_value(cls, value: Any) -> Any:
+        if isinstance(value, dict) and value.get("status") == "resolved":
+            value = dict(value)
+            validate_json_value(
+                value.get("resolved_value"),
+                label="resolved dependency value",
+            )
+            value["resolved_value"] = freeze_json(value.get("resolved_value"))
+        return value
+
+    @model_validator(mode="after")
+    def _coherent(self) -> DependencyResolution:
+        if not self.reason_code.strip():
+            raise ValueError("a dependency resolution carries a stable reason code")
+        if self.status == "resolved":
+            resolved = thaw_json(self.resolved_value)
+            if isinstance(resolved, (dict, list)):
+                raise ValueError("a resolved dependency value is a JSON scalar")
+            if (
+                self.producer_execution_index is None
+                or self.resolved_value_hash is None
+                or self.resolved_value_hash
+                != _sha256_json(resolved)
+            ):
+                raise ValueError(
+                    "a resolved dependency binds its producer and canonical value hash"
+                )
+        elif self.resolved_value_hash is not None or self.resolved_value is not None:
+            raise ValueError("a failed dependency does not claim a resolved value")
+        return self
+
+    def semantic_payload(self) -> dict[str, Any]:
+        return {
+            "dependency_index": self.dependency_index,
+            "consumer_call_index": self.consumer_call_index,
+            "consumer_turn_index": self.consumer_turn_index,
+            "argument_path": list(self.argument_path),
+            "producer_call_index": self.producer_call_index,
+            "producer_execution_index": self.producer_execution_index,
+            "result_path": self.result_path,
+            "status": self.status,
+            "resolved_value": (
+                thaw_json(self.resolved_value) if self.status == "resolved" else None
+            ),
+            "resolved_value_hash": self.resolved_value_hash,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+        }
+
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in self.semantic_payload().items()
+            if key != "detail"
+        }
+
+
 class ExecutableEvent(_Frozen):
     """One deterministic driver action, ordered within an executable episode."""
 
@@ -488,7 +583,7 @@ class ExecutableEvent(_Frozen):
 class ExecutableEpisode(_Frozen):
     """One source-bound candidate conversation interleaved with live oracle I/O."""
 
-    schema_version: Literal["1.0"] = EXECUTABLE_CONTRACT_VERSION
+    schema_version: Literal["1.2"] = EXECUTABLE_CONTRACT_VERSION
     candidate_alias: StrictStr
     canonical_model_identity: StrictStr
     task_id: StrictStr
@@ -497,12 +592,14 @@ class ExecutableEpisode(_Frozen):
     source_verification_identity: ContentHash
     oracle_verification_identity: ContentHash
     script_hash: ContentHash
+    task_spec_hash: ContentHash
     status: ExecutableEpisodeStatus
     reason_code: StrictStr
     detail: StrictStr
     assistant_turns: NonNegativeInt
     observed: tuple[ExecutableTurn, ...]
     executions: tuple[ExecutedToolCall, ...] = ()
+    dependencies: tuple[DependencyResolution, ...] = ()
     final_state_hash: ContentHash | None = None
     assertions: tuple[AssertionOutcome, ...] = ()
     events: tuple[ExecutableEvent, ...] = ()
@@ -565,6 +662,18 @@ class ExecutableEpisode(_Frozen):
                 raise ValueError(
                     "a nonterminal turn that advanced released every live result it obtained"
                 )
+            # Re-checked here because the runner marks a turn advanced with
+            # ``model_copy``, which does not re-run the turn's own validators.
+            if turn.paired_call_indexes and len(turn.paired_call_indexes) != len(
+                turn.tool_calls
+            ):
+                raise ValueError(
+                    "expected-call pairings cover every candidate call in the turn"
+                )
+            if turn.advanced and turn.tool_calls and not turn.paired_call_indexes:
+                raise ValueError(
+                    "an advanced tool-call turn identifies its expected pairings"
+                )
         # Safety first, then the most specific observable protocol failure. In
         # practice the runner stops at the first terminal execution, but this
         # precedence also makes a partially executed multi-call turn unambiguous.
@@ -613,6 +722,7 @@ class ExecutableEpisode(_Frozen):
             "assertion_infrastructure_failed",
             "oracle_state_failed",
             "oracle_session_failed",
+            "dependency_resolution_failed",
         }:
             raise ValueError("an episode that stopped for another reason did not advance its last turn")
 
@@ -627,6 +737,28 @@ class ExecutableEpisode(_Frozen):
         names = [assertion.name for assertion in self.assertions]
         if len(set(names)) != len(names):
             raise ValueError("an executable episode records each assertion once")
+        if [item.dependency_index for item in self.dependencies] != list(
+            range(len(self.dependencies))
+        ):
+            raise ValueError("dependency outcomes are an ordered declaration prefix")
+        failed_dependencies = [
+            item for item in self.dependencies if item.status != "resolved"
+        ]
+        if bool(failed_dependencies) != (self.status == "dependency_resolution_failed"):
+            raise ValueError(
+                "dependency_resolution_failed identifies a recorded dependency failure"
+            )
+        for item in self.dependencies:
+            if item.producer_execution_index is not None:
+                if item.producer_execution_index >= len(self.executions):
+                    raise ValueError(
+                        "a dependency cites an execution the episode did not record"
+                    )
+                producer = self.executions[item.producer_execution_index]
+                if producer.turn_index >= item.consumer_turn_index:
+                    raise ValueError(
+                        "a dependency producer executes before its consumer turn"
+                    )
         if [event.index for event in self.events] != list(range(len(self.events))):
             raise ValueError("executable events must be contiguous and zero-based")
         for event in self.events:
@@ -675,6 +807,7 @@ class ExecutableEpisode(_Frozen):
             "source_verification_identity": self.source_verification_identity,
             "oracle_verification_identity": self.oracle_verification_identity,
             "script_hash": self.script_hash,
+            "task_spec_hash": self.task_spec_hash,
             "status": self.status,
             "reason_code": self.reason_code,
             "detail": self.detail,
@@ -683,6 +816,9 @@ class ExecutableEpisode(_Frozen):
             "released_tool_results": self.released_tool_results,
             "observed": [turn.semantic_payload() for turn in self.observed],
             "executions": [execution.semantic_payload() for execution in self.executions],
+            "dependencies": [
+                dependency.semantic_payload() for dependency in self.dependencies
+            ],
             "final_state_hash": self.final_state_hash,
             "assertions": [assertion.semantic_payload() for assertion in self.assertions],
             "events": [event.semantic_payload() for event in self.events],
@@ -698,6 +834,7 @@ class ExecutableEpisode(_Frozen):
                 "detail",
                 "observed",
                 "executions",
+                "dependencies",
                 "assertions",
                 "events",
             }
@@ -706,6 +843,9 @@ class ExecutableEpisode(_Frozen):
             {
                 "observed": [turn.identity_payload() for turn in self.observed],
                 "executions": [execution.identity_payload() for execution in self.executions],
+                "dependencies": [
+                    dependency.identity_payload() for dependency in self.dependencies
+                ],
                 "assertions": [assertion.identity_payload() for assertion in self.assertions],
                 "events": [event.identity_payload() for event in self.events],
             }
@@ -730,6 +870,8 @@ __all__ = [
     "AssertionCategory",
     "AssertionOutcome",
     "AssertionStatus",
+    "DependencyResolution",
+    "DependencyResolutionStatus",
     "ExecutableEpisode",
     "ExecutableEpisodeStatus",
     "ExecutableEvent",

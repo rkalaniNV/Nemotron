@@ -12,14 +12,12 @@ releases recorded tool results only to calls that earned them; and
 Only :class:`NativeFunctionCallingClient` contacts a candidate, and only
 :func:`run_candidate_episode` decides what it is asked next. Scoring reads the
 recorded episode and never re-asks the model, so re-scoring the same evidence
-reproduces the same ``score_hash``. Live tool execution and pack assertions are
-the concern of executable evaluation, and a trace score never stands in for one.
-The versioned :class:`ExecutableEpisode` contract fixes the evidence boundary for
-that mode — candidate turns, one live outcome per proposed call, final-state
-identity, and assertion observations — without yet performing the live I/O. It
-keeps obtaining a tool result separate from admitting it to the candidate prompt,
-and records an oracle return that does not conform to the tool contract rather
-than storing it as if it had.
+reproduces the same ``score_hash``. Executable evaluation interleaves live oracle
+I/O with candidate turns, records final state and assertion evidence in
+:class:`ExecutableEpisode`, and derives :class:`ExecutableTaskScore` without
+re-running any external operation. It keeps obtaining a tool result separate
+from admitting it to the candidate prompt, and records an oracle return that does
+not conform to the tool contract rather than storing it as if it had.
 
 The comparison behind both continuation and scoring lives once, in
 :mod:`call_comparison`. A release gate stricter than the scorer would end an
@@ -155,6 +153,22 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_proje
     build_conversation_script,
     released_results,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.error_taxonomy import (
+    ERROR_TAXONOMY_CONTRACT_VERSION,
+    ERROR_TAXONOMY_HASH,
+    EXECUTABLE_EPISODE_ATTRIBUTION,
+    EXECUTABLE_NON_CANDIDATE_STOPS,
+    FATAL_EVAL_ERROR_CODES,
+    METRIC_NOT_APPLICABLE_CODES,
+    REASON_CODE_NAMESPACES,
+    TRACE_EPISODE_ATTRIBUTION,
+    TRACE_NON_CANDIDATE_STOPS,
+    EvalFailureRecord,
+    episode_attribution,
+    episode_failure_record,
+    gate_failure_record,
+    taxonomy_payload,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
     CandidateIdentityError,
     EvalConfigError,
@@ -165,11 +179,36 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
     SecretInConfigError,
     UnsupportedEvalModeError,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.eval_artifacts import (
+    EVAL_ARTIFACT_CONTRACT_VERSION,
+    EVAL_MANIFEST_FILE,
+    EVAL_REPORT_FILE,
+    EVAL_TASK_RESULTS_FILE,
+    EvalArtifactError,
+    EvalArtifactSet,
+    eval_report_document,
+    executable_task_result,
+    write_executable_eval_artifacts,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.eval_runner import (
+    BfclEvalRunResult,
+    EvalRunnerError,
+    UnsupportedRunnerModeError,
+    run_bfcl_eval,
+    run_bfcl_eval_sync,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_aggregation import (
+    EXECUTABLE_AGGREGATION_CONTRACT_VERSION,
+    ExecutableCandidateScore,
+    aggregate_executable_scores,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_contract import (
     EXECUTABLE_CONTRACT_VERSION,
     AssertionCategory,
     AssertionOutcome,
     AssertionStatus,
+    DependencyResolution,
+    DependencyResolutionStatus,
     ExecutableEpisode,
     ExecutableEpisodeStatus,
     ExecutableEvent,
@@ -192,13 +231,42 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_errors 
     OracleResetError,
     OracleSessionError,
     OracleStateError,
+    ToolTraceCacheConflictError,
+    ToolTraceCacheError,
     describe_executable_error,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_projection import (
     EXECUTABLE_PROJECTION_VERSION,
+    ExecutableAssertionSpec,
+    ExecutableDependency,
     ExecutableTaskSpec,
     ExecutableToolPolicy,
     build_executable_task_spec,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scorer import (
+    score_executable_episode,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring_contract import (
+    EXECUTABLE_METRIC_TAXONOMY,
+    EXECUTABLE_SCORING_CONTRACT_VERSION,
+    EXECUTABLE_SCORING_GATES,
+    ExecutableGateOutcome,
+    ExecutableGateResult,
+    ExecutableMetricName,
+    ExecutableMetricResult,
+    ExecutableScoringGate,
+    ExecutableTaskScore,
+    GateFailureClass,
+    ScoredAssertion,
+    ScoredDependency,
+    ScoredExecution,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring_errors import (
+    ExecutableAggregationError,
+    ExecutableEvidenceError,
+    ExecutableScoringError,
+    ExecutableScoringPolicyError,
+    describe_executable_scoring_error,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
     MODEL_IDENTITY_CONTRACT_VERSION,
@@ -281,6 +349,17 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_verificatio
     write_source_failure_diagnostic,
     write_source_verification_report,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_cache import (
+    PublishedEpisode,
+    PublishedTurn,
+    ToolTraceCache,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_contract import (
+    TOOL_TRACE_CACHE_CONTRACT_VERSION,
+    TOOL_TRACE_CACHE_FILE,
+    ToolTraceRequest,
+    build_tool_trace_request,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_parser import (
     NON_CANDIDATE_STOPS,
     ParsedCall,
@@ -318,6 +397,10 @@ __all__ = [
     "AssertionCategory",
     "AssertionOutcome",
     "AssertionStatus",
+    "DependencyResolution",
+    "DependencyResolutionStatus",
+    "ExecutableAssertionSpec",
+    "ExecutableDependency",
     "BACKEND_INTERFACE",
     "CANDIDATE_CLIENT_CONTRACT_VERSION",
     "CANDIDATE_IO_CACHE_FILE",
@@ -327,9 +410,19 @@ __all__ = [
     "CONVERSATION_CONTRACT_VERSION",
     "EVAL_CONFIG_SCHEMA_VERSION",
     "EVAL_CONFIG_TOP_LEVEL_KEYS",
+    "ERROR_TAXONOMY_CONTRACT_VERSION",
+    "ERROR_TAXONOMY_HASH",
+    "EVAL_ARTIFACT_CONTRACT_VERSION",
+    "EVAL_MANIFEST_FILE",
     "EVAL_MODES",
+    "EVAL_REPORT_FILE",
+    "EVAL_TASK_RESULTS_FILE",
+    "EXECUTABLE_AGGREGATION_CONTRACT_VERSION",
     "EXECUTABLE_CONTRACT_VERSION",
     "EXECUTABLE_PROJECTION_VERSION",
+    "EXECUTABLE_SCORING_CONTRACT_VERSION",
+    "EXECUTABLE_SCORING_GATES",
+    "EXECUTABLE_METRIC_TAXONOMY",
     "EXPORT_METRIC_BY_GATE",
     "GENERATION_EXPOSURE_ROLES",
     "INCOMPLETE_FINISH_REASONS",
@@ -343,9 +436,12 @@ __all__ = [
     "SOURCE_VERIFICATION_FAILURE_FILE",
     "SOURCE_VERIFICATION_REPORT_FILE",
     "TRACE_SCORING_CONTRACT_VERSION",
+    "TOOL_TRACE_CACHE_CONTRACT_VERSION",
+    "TOOL_TRACE_CACHE_FILE",
     "TRANSLATION_PRESERVED_FIELDS",
     "BenchmarkHashMismatchError",
     "BenchmarkSchemaMismatchError",
+    "BfclEvalRunResult",
     "BfclEvalConfig",
     "CandidateApi",
     "CandidateAttempt",
@@ -394,6 +490,10 @@ __all__ = [
     "EpisodeEvent",
     "EpisodeStatus",
     "EvalCandidate",
+    "EvalArtifactError",
+    "EvalArtifactSet",
+    "EvalFailureRecord",
+    "EvalRunnerError",
     "EvalConfigError",
     "EvalConfigPathError",
     "EvalConfigSchemaError",
@@ -407,13 +507,26 @@ __all__ = [
     "EvalSettings",
     "EvalSource",
     "ExecutableAuthorizationError",
+    "ExecutableAggregationError",
+    "ExecutableCandidateScore",
+    "EXECUTABLE_EPISODE_ATTRIBUTION",
+    "EXECUTABLE_NON_CANDIDATE_STOPS",
     "ExecutableEvalError",
+    "ExecutableEvidenceError",
     "ExecutableEpisode",
     "ExecutableEpisodeStatus",
     "ExecutableEvent",
     "ExecutableEventKind",
+    "ExecutableGateOutcome",
+    "ExecutableGateResult",
+    "ExecutableMetricName",
+    "ExecutableMetricResult",
     "ExecutableProjectionError",
+    "ExecutableScoringError",
+    "ExecutableScoringGate",
+    "ExecutableScoringPolicyError",
     "ExecutableTaskSpec",
+    "ExecutableTaskScore",
     "ExecutableToolPolicy",
     "ExecutableTurn",
     "ExecutedToolCall",
@@ -422,6 +535,7 @@ __all__ = [
     "ExposureRole",
     "ExposureScope",
     "GateOutcome",
+    "GateFailureClass",
     "GateResult",
     "IdentityVerdict",
     "ModelExposureError",
@@ -429,6 +543,9 @@ __all__ = [
     "ModelIdentityClaim",
     "MutableCandidateRevisionError",
     "NativeFunctionCallingClient",
+    "FATAL_EVAL_ERROR_CODES",
+    "METRIC_NOT_APPLICABLE_CODES",
+    "REASON_CODE_NAMESPACES",
     "ObservedTurn",
     "OracleAssertionError",
     "OracleCallError",
@@ -444,8 +561,13 @@ __all__ = [
     "PredictedCall",
     "PublicationPolicyError",
     "PublicationSemanticsError",
+    "PublishedEpisode",
+    "PublishedTurn",
     "PythonOracleSession",
     "ScoredCall",
+    "ScoredAssertion",
+    "ScoredDependency",
+    "ScoredExecution",
     "ScoredTurn",
     "ScoringGate",
     "ScriptedCall",
@@ -467,6 +589,13 @@ __all__ = [
     "TraceScoringPolicyError",
     "TraceTaskScore",
     "ToolExecutionStatus",
+    "ToolTraceCache",
+    "ToolTraceCacheConflictError",
+    "ToolTraceCacheError",
+    "ToolTraceRequest",
+    "TRACE_EPISODE_ATTRIBUTION",
+    "TRACE_NON_CANDIDATE_STOPS",
+    "UnsupportedRunnerModeError",
     "TranslationLineageError",
     "TurnMatch",
     "UnresolvedContaminationError",
@@ -479,12 +608,14 @@ __all__ = [
     "VerifiedPublication",
     "VerifiedTranslationSource",
     "apply_declared_defaults",
+    "aggregate_executable_scores",
     "assert_plan_unchanged",
     "assert_source_unchanged",
     "benchmark_schema_fingerprint",
     "build_candidate_request",
     "build_conversation_script",
     "build_executable_task_spec",
+    "build_tool_trace_request",
     "candidate_identity_claim",
     "compare_arguments",
     "compare_call",
@@ -498,11 +629,17 @@ __all__ = [
     "describe_candidate_client_error",
     "describe_conversation_error",
     "describe_executable_error",
+    "describe_executable_scoring_error",
     "describe_eval_config_error",
     "describe_source_verification_error",
     "describe_trace_scoring_error",
     "eval_config_reference",
+    "eval_report_document",
+    "episode_attribution",
+    "episode_failure_record",
     "evaluate_contamination",
+    "executable_task_result",
+    "gate_failure_record",
     "first_appearances",
     "finish_reason_problem",
     "load_eval_config",
@@ -518,7 +655,11 @@ __all__ = [
     "resolved_eval_config_document",
     "run_candidate_episode",
     "run_executable_episode",
+    "run_bfcl_eval",
+    "run_bfcl_eval_sync",
+    "score_executable_episode",
     "score_trace_episode",
+    "taxonomy_payload",
     "source_verification_report",
     "turn_order_scope",
     "turn_request_id",
@@ -526,6 +667,7 @@ __all__ = [
     "write_contamination_failure",
     "write_contamination_report",
     "write_eval_artifact",
+    "write_executable_eval_artifacts",
     "write_resolved_eval_config",
     "write_source_failure_diagnostic",
     "write_source_verification_report",

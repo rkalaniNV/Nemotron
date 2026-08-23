@@ -120,6 +120,85 @@ class CandidateIOCache:
             {"outcome": outcome.model_copy(update={"replayed": False}).as_document()},
         )
 
+    def _durable_requests(self) -> tuple[set[str], set[str]]:
+        with _THREAD_LOCK, _file_lock(self._lock_path):
+            self._sync()
+            completed = {
+                request_hash
+                for record_type, request_hash, attempt_index in self._located
+                if record_type == "completion" and attempt_index is None
+            }
+            return set(self._requests), completed
+
+    def validate_complete(self) -> None:
+        """Prove no claimed request was left without a durable completion.
+
+        This is all that can be proved when the published run kept no episode
+        evidence to compare the cache against.
+        """
+        requested, completed = self._durable_requests()
+        if requested != completed:
+            raise CandidateCacheError(
+                self.path.name,
+                "holds a claimed candidate request without a durable completion",
+                actual={"requests": len(requested), "completions": len(completed)},
+                expected="one completion for every claimed candidate request",
+                recovery=(
+                    "keep this cache as crash evidence and resume into a new eval "
+                    "output directory"
+                ),
+            )
+
+    def validate_for_publication(
+        self,
+        expected: dict[str, tuple[str, str | None]],
+    ) -> None:
+        """Prove the cache is complete and matches every published episode turn."""
+        requested, completed = self._durable_requests()
+        if requested != set(expected) or completed != set(expected):
+            raise CandidateCacheError(
+                self.path.name,
+                "does not exactly cover the candidate turns in the published episodes",
+                actual={
+                    "requests": len(requested),
+                    "completions": len(completed),
+                    "expected": len(expected),
+                },
+                expected="one completed cache request for every and only published candidate turn",
+                recovery="restore the candidate cache produced by these executable episodes",
+            )
+        for request_hash, (status, response_hash) in expected.items():
+            outcome = self.get(request_hash)
+            if outcome is None:  # pragma: no cover - exact completion set proved above.
+                raise AssertionError("completed candidate cache request disappeared")
+            actual_response_hash = (
+                outcome.response.response_hash if outcome.response is not None else None
+            )
+            if outcome.status != status or actual_response_hash != response_hash:
+                raise CandidateCacheError(
+                    f"candidate_io_cache[{request_hash}]",
+                    "does not match the status or response retained by the executable episode",
+                    actual={
+                        "status": outcome.status,
+                        "response_hash": actual_response_hash,
+                    },
+                    expected=f"status={status}, response_hash={response_hash}",
+                    recovery="restore both caches from the same completed eval run",
+                )
+
+    @property
+    def content_hash(self) -> str | None:
+        """Hash the durable cache bytes for an eval manifest."""
+        with _THREAD_LOCK, _file_lock(self._lock_path):
+            self._sync()
+            if not self.path.exists():
+                return None
+            digest = hashlib.sha256()
+            with self.path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            return f"sha256:{digest.hexdigest()}"
+
     def _append(
         self,
         record_type: str,

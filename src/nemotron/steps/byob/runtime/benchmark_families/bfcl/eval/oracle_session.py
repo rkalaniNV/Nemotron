@@ -8,10 +8,12 @@ between oracle operations, preserving task state without weakening isolation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import queue
 import threading
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import OraclePackRef
@@ -40,6 +42,32 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     ResolvedPackPaths,
     resolve_declared_pack_paths,
 )
+
+_FIXTURES_CACHE: dict[tuple[str, str], Any] = {}
+_FIXTURES_CACHE_LIMIT = 8
+
+
+def _load_pack_fixtures(path: Path) -> Any:
+    """Parse and validate fixtures once per revision, not once per task.
+
+    A batch run opens one session per task against the same pack, and validating
+    a large fixture set on every one of them costs more than the episode. The
+    bytes are still read and hashed each time, so pack drift is still caught. The
+    parsed value only ever crosses a process boundary, so no session can observe
+    another's mutation of it.
+    """
+    raw = path.read_bytes()
+    key = (str(path), hashlib.sha256(raw).hexdigest())
+    if key in _FIXTURES_CACHE:
+        return _FIXTURES_CACHE[key]
+    fixtures = json.loads(raw.decode("utf-8"))
+    if not isinstance(fixtures, dict):
+        raise ValueError("fixtures.json is not an object")
+    validate_json_value(fixtures, label="oracle fixtures")
+    if len(_FIXTURES_CACHE) >= _FIXTURES_CACHE_LIMIT:
+        _FIXTURES_CACHE.clear()
+    _FIXTURES_CACHE[key] = fixtures
+    return fixtures
 
 
 @runtime_checkable
@@ -207,13 +235,10 @@ class _IsolatedOracleSession:
                 (oracle.pack_root,),
             )
             fixtures = (
-                json.loads(paths.fixtures_path.read_text(encoding="utf-8"))
+                _load_pack_fixtures(paths.fixtures_path)
                 if paths.fixtures_path is not None
                 else None
             )
-            if fixtures is not None and not isinstance(fixtures, dict):
-                raise ValueError("fixtures.json is not an object")
-            validate_json_value(fixtures, label="oracle fixtures")
             endpoint_config = (
                 load_endpoint_config(
                     paths.endpoint_config_path,
@@ -326,7 +351,12 @@ class _IsolatedOracleSession:
                 not isinstance(verdict, dict)
                 or verdict.get("name") != name
                 or verdict.get("status")
-                not in {"passed", "failed", "infrastructure_error"}
+                not in {
+                    "passed",
+                    "failed",
+                    "not_applicable",
+                    "infrastructure_error",
+                }
             ):
                 raise TypeError("assertion returned an invalid verdict")
             return verdict
@@ -334,7 +364,10 @@ class _IsolatedOracleSession:
             raise OracleAssertionError(
                 f"eval.oracle.assertion[{name}]",
                 f"failed as {type(exc).__name__}",
-                expected="a passed, failed, or infrastructure_error assertion verdict",
+                expected=(
+                    "a passed, failed, not_applicable, or infrastructure_error "
+                    "assertion verdict"
+                ),
                 recovery="fix the assertion module and rerun the whole executable task",
             ) from exc
 

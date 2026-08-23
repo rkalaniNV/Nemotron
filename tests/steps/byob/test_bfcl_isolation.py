@@ -316,6 +316,10 @@ ASSERTIONS = {
     "assert_valid": assert_valid,
     "assert_invalid": assert_invalid,
 }
+
+ASSERTION_CAPABILITIES = {
+    "assert_valid": {"trace": True, "executable": True, "category": "result"},
+}
 """,
         encoding="utf-8",
     )
@@ -323,7 +327,67 @@ ASSERTIONS = {
     report = ProcessWorker().inspect_assertions(assertions, timeout_s=2.0)
 
     assert report["assert_valid"]["valid"] is True
+    assert report["assert_valid"]["capabilities"] == {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    }
     assert report["assert_invalid"]["valid"] is False
+    assert report["assert_invalid"]["capabilities"] == {
+        "trace": False,
+        "executable": True,
+        "category": "unclassified",
+    }
+    assert report["assert_valid"]["capability_reason"] is None
+
+
+def test_a_malformed_capability_is_not_reported_as_a_signature_defect(
+    tmp_path: Path,
+) -> None:
+    assertions = tmp_path / "assertions.py"
+    assertions.write_text(
+        """
+def assert_valid(*, state, trace, task, ctx):
+    return None
+
+ASSERTIONS = {"assert_valid": assert_valid}
+
+ASSERTION_CAPABILITIES = {
+    "assert_valid": {"trace": True, "executable": True, "category": "spelling"},
+}
+""",
+        encoding="utf-8",
+    )
+
+    report = ProcessWorker().inspect_assertions(assertions, timeout_s=2.0)
+
+    assert report["assert_valid"]["valid"] is True
+    assert report["assert_valid"]["reason"] is None
+    assert report["assert_valid"]["capabilities"] is None
+    assert "category 'spelling'" in report["assert_valid"]["capability_reason"]
+
+
+def test_a_computed_capability_mapping_is_refused_at_validation(
+    tmp_path: Path,
+) -> None:
+    assertions = tmp_path / "assertions.py"
+    assertions.write_text(
+        """
+def assert_valid(*, state, trace, task, ctx):
+    return None
+
+ASSERTIONS = {"assert_valid": assert_valid}
+
+ASSERTION_CAPABILITIES = dict.fromkeys(ASSERTIONS, {"category": "state"})
+""",
+        encoding="utf-8",
+    )
+
+    report = ProcessWorker().inspect_assertions(assertions, timeout_s=2.0)
+
+    assert report["assert_valid"]["valid"] is True
+    assert report["assert_valid"]["capabilities"] is None
+    assert "computed" in report["assert_valid"]["capability_reason"]
 
 
 def test_episode_propagates_each_call_turn_index(tmp_path: Path) -> None:

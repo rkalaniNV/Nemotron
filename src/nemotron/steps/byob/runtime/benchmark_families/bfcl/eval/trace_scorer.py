@@ -26,6 +26,7 @@ property of the repairer.
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.call_comparison import (
@@ -68,6 +69,15 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
 )
 
 
+@dataclass(frozen=True)
+class NormalizedTraceScore:
+    """Shared pure trace-gate result for either episode evidence contract."""
+
+    turns: tuple[ScoredTurn, ...]
+    gates: tuple[GateResult, ...]
+    matched_calls: int
+
+
 def score_trace_episode(
     *,
     episode: CandidateEpisode,
@@ -79,6 +89,45 @@ def score_trace_episode(
     _refuse_unsupported_policy(scoring)
     _authorize_score(episode, script, scoring=scoring, plan=plan)
     trace = parse_observed_trace(episode, script)
+    normalized = score_normalized_trace(
+        trace=trace,
+        script=script,
+        scoring=scoring,
+        completion_detail=episode.detail,
+    )
+
+    failed = tuple(gate.gate for gate in normalized.gates if gate.counts_against)
+    return TraceTaskScore(
+        task_id=episode.task_id,
+        candidate_alias=episode.candidate_alias,
+        canonical_model_identity=episode.canonical_model_identity,
+        plan_identity=episode.plan_identity,
+        eval_config_hash=plan.eval_config_hash,
+        source_verification_identity=episode.source_verification_identity,
+        script_hash=episode.script_hash,
+        episode_hash=episode.episode_hash,
+        scoring_contract_hash=scoring.contract.content_hash,
+        scoring_policy=scoring.semantic_payload(),
+        episode_status=episode.status,
+        non_candidate_stop=trace.non_candidate_stop,
+        expected_calls=script.expected_call_count,
+        observed_calls=trace.observed_calls,
+        matched_calls=normalized.matched_calls,
+        turns=normalized.turns,
+        gates=normalized.gates,
+        task_success=not failed,
+        detail=("every applicable gate passed" if not failed else f"failed gate(s): {', '.join(failed)}"),
+    )
+
+
+def score_normalized_trace(
+    *,
+    trace: ParsedTrace,
+    script: ConversationScript,
+    scoring: EvalScoringConfig,
+    completion_detail: str,
+) -> NormalizedTraceScore:
+    """Run the shared trace gates over already-canonical normalized evidence."""
 
     turns: list[ScoredTurn] = []
     names_so_far: list[str | None] = []
@@ -94,28 +143,17 @@ def score_trace_episode(
             )
         )
     scored = tuple(turns)
-    gates = _score_gates(script, trace, scored, scoring=scoring, episode=episode)
-    failed = tuple(gate.gate for gate in gates if gate.counts_against)
-    return TraceTaskScore(
-        task_id=episode.task_id,
-        candidate_alias=episode.candidate_alias,
-        canonical_model_identity=episode.canonical_model_identity,
-        plan_identity=episode.plan_identity,
-        eval_config_hash=plan.eval_config_hash,
-        source_verification_identity=episode.source_verification_identity,
-        script_hash=episode.script_hash,
-        episode_hash=episode.episode_hash,
-        scoring_contract_hash=scoring.contract.content_hash,
-        scoring_policy=scoring.semantic_payload(),
-        episode_status=trace.status,
-        non_candidate_stop=trace.non_candidate_stop,
-        expected_calls=script.expected_call_count,
-        observed_calls=trace.observed_calls,
-        matched_calls=len(_matched_gold(scored)),
+    gates = _score_gates(
+        script,
+        trace,
+        scored,
+        scoring=scoring,
+        completion_detail=completion_detail,
+    )
+    return NormalizedTraceScore(
         turns=scored,
         gates=gates,
-        task_success=not failed,
-        detail=("every applicable gate passed" if not failed else f"failed gate(s): {', '.join(failed)}"),
+        matched_calls=len(_matched_gold(scored)),
     )
 
 
@@ -417,7 +455,7 @@ def _score_gates(
     scored: Sequence[ScoredTurn],
     *,
     scoring: EvalScoringConfig,
-    episode: CandidateEpisode,
+    completion_detail: str,
 ) -> tuple[GateResult, ...]:
     results = {
         "tool_selection": _tool_selection_gate(script, scored),
@@ -426,7 +464,7 @@ def _score_gates(
         "call_grouping": _grouping_gate(script, scored, scoring=scoring),
         "call_ordering": _ordering_gate(script, scored, scoring=scoring),
         "text_turn": _text_gate(script, scored),
-        "trace_completion": _completion_gate(trace, episode),
+        "trace_completion": _completion_gate(trace, completion_detail),
     }
     return tuple(results[gate] for gate in SCORING_GATES)
 
@@ -527,7 +565,7 @@ def _text_gate(script: ConversationScript, scored: Sequence[ScoredTurn]) -> Gate
     return _passed("text_turn", "every asked text turn answered as the trace does")
 
 
-def _completion_gate(trace: ParsedTrace, episode: CandidateEpisode) -> GateResult:
+def _completion_gate(trace: ParsedTrace, completion_detail: str) -> GateResult:
     """Whether the conversation reached the end of the trace at all.
 
     This gate always applies, which is what makes an unfinished episode a failed
@@ -546,7 +584,7 @@ def _completion_gate(trace: ParsedTrace, episode: CandidateEpisode) -> GateResul
                 )
         return _passed("trace_completion", "the conversation was replayed to the end of the trace")
     stopped_at = trace.unsent_turn_indexes[0] if trace.unsent_turn_indexes else len(trace.turns) - 1
-    return _failed("trace_completion", episode.detail, turn_index=max(stopped_at, 0))
+    return _failed("trace_completion", completion_detail, turn_index=max(stopped_at, 0))
 
 
-__all__ = ["score_trace_episode"]
+__all__ = ["NormalizedTraceScore", "score_normalized_trace", "score_trace_episode"]

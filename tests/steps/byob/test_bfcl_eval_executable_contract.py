@@ -88,6 +88,7 @@ def _turn(*, arguments: dict[str, Any] | None = None, detail: str = "live result
         finish_reason="tool_calls",
         tool_calls=(_candidate_call(arguments=arguments),),
         tool_call_outcome_indexes=(0,),
+        paired_call_indexes=(0,),
         advanced=True,
         reason_code="turn.advanced",
         detail=detail,
@@ -123,6 +124,7 @@ def _episode(
         source_verification_identity="sha256:" + "3" * 64,
         oracle_verification_identity="sha256:" + "4" * 64,
         script_hash="sha256:" + "5" * 64,
+        task_spec_hash="sha256:" + "7" * 64,
         status="completed",
         reason_code="episode.completed",
         detail=detail,
@@ -147,7 +149,7 @@ def _episode(
 def test_the_executable_evidence_contract_is_versioned_frozen_and_self_describing() -> None:
     episode = _episode()
 
-    assert episode.schema_version == EXECUTABLE_CONTRACT_VERSION == "1.0"
+    assert episode.schema_version == EXECUTABLE_CONTRACT_VERSION == "1.2"
     assert episode.succeeded
     assert episode.executions[0].attempted
     assert episode.executions[0].has_result
@@ -256,6 +258,7 @@ def test_an_invalid_candidate_call_is_retained_as_not_executed() -> None:
         source_verification_identity="sha256:" + "3" * 64,
         oracle_verification_identity="sha256:" + "4" * 64,
         script_hash="sha256:" + "5" * 64,
+        task_spec_hash="sha256:" + "7" * 64,
         status="candidate_mismatch",
         reason_code="episode.invalid_arguments",
         detail="candidate call was not executable",
