@@ -513,6 +513,50 @@ its own diagnostic wording; a declared constraint or argument value is not
 diagnostic prose because a schema author named it `detail`, so reported evidence
 stays inside the score identity.
 
+## What a trace-only run publishes
+
+A trace score is a set of per-task gate verdicts, so a run-level number over them
+is a rate of tasks, not a rate of calls. `aggregate_trace_scores(...)` therefore
+reports its own taxonomy under trace aggregation contract `1.0`: one
+`<gate>_pass_rate` for every gate this document defines, in that order, plus
+`task_success_rate`. The names are deliberately not the executable ones —
+`arguments_pass_rate` counts tasks whose argument gate passed while
+`argument_accuracy` counts calls whose arguments matched, and publishing one
+under the other's name would make two incomparable numbers look like the same
+measurement. The taxonomy is derived from the gate list rather than restated, so
+a new gate cannot be scored without a published metric.
+
+A gate that did not apply to a task is left out of that metric's denominator
+rather than counted as a pass, exactly as the per-task contract records it. A
+metric no task could apply is `value: null` with the stable
+`metric.no_applicable_task` code instead of a vacuous zero or one. As with an
+executable aggregate, the counts and reason code carry identity while the
+quotient stays derived, and the aggregate requires the exact task ids and
+publication order `EligibleEvalPlan` authorized: partial, duplicated, reordered,
+or cross-candidate, cross-plan, cross-policy, and cross-scoring-contract inputs
+are refused rather than averaged.
+
+`run_bfcl_trace_eval(...)` runs the trace-only batch, and
+`run_declared_eval_sync(...)` dispatches on the pinned `eval.mode` so an operator
+does not restate the mode by choosing a function. Trace batching shares the
+executable run's scaffolding: the same run-identity rules, source verification,
+contamination gate, plan recheck, sequential candidates in plan alias order,
+tasks in publication order with at most `limits.max_parallel_tasks` in flight,
+and sibling cancellation on the first raised error. It opens no oracle session
+and persists no tool-trace cache, because a released tool result is benchmark
+bytes that source verification already hashed by content. The candidate I/O cache
+is therefore the whole of a trace run's replay evidence and must prove that no
+claimed request was left without a completion.
+
+`write_trace_eval_artifacts(...)` publishes the same immutable `eval_report.json`,
+`eval_task_results.parquet`, and `eval_manifest.json` under artifact contract
+`1.4`, with oracle-, assertion-, milestone-, and final-answer-only columns null.
+Every candidate aggregate declares the scope it measured — `trace` or
+`trace_and_executable` — the report and manifest stamp `eval_scope`, and a report
+whose aggregates mix scopes is refused. A trace-only artifact set never stands in
+for an executable one, and an executable config handed to the trace runner is
+refused rather than measured with fewer gates.
+
 ## Task success
 
 `task_success: all_applicable_gates` (*pinned*)
