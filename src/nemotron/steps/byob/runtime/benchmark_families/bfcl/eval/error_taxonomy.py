@@ -111,6 +111,7 @@ FATAL_EVAL_ERROR_CODES: Final = frozenset(
         "eval_trace_scoring_invalid",
         "eval_trace_evidence_mismatch",
         "eval_trace_scoring_policy_unsupported",
+        "eval_trace_aggregation_invalid",
         "eval_artifact_invalid",
         "eval_runner_invalid",
         "eval_runner_mode_unsupported",

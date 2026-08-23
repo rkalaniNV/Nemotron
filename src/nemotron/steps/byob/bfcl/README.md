@@ -842,9 +842,34 @@ an executable one read in one vocabulary.
 
 `score_normalized_trace` remains an internal sharing kernel: the public scoring
 entry point is `score_trace_episode`, which enforces policy and authorization.
-`trace_task_result` can project one trace score onto the shared task-results
-columns while leaving oracle-, assertion-, milestone-, and final-answer-only
-columns null. Trace-only batch aggregation and artifact writing remain unexposed.
+`trace_task_result` projects one trace score onto the shared task-results columns
+while leaving oracle-, assertion-, milestone-, and final-answer-only columns null.
+
+`aggregate_trace_scores(...)` rolls one candidate's authorized task set, in plan
+order, into a `TraceCandidateScore` under trace aggregation contract `1.0`. Its
+metric names are deliberately not the executable ones: `arguments_pass_rate`
+counts tasks whose argument gate passed, while executable `argument_accuracy`
+counts matching calls, and publishing one under the other's name would make two
+incomparable numbers look like one measurement. A gate no task applied is
+reported N/A with a stable reason instead of a vacuous rate, and a task set that
+is partial, reordered, or taken under another candidate, plan, policy, or
+scoring contract is refused.
+
+`run_bfcl_trace_eval(...)` performs the complete trace-only run, and
+`run_declared_eval_sync(...)` selects the runner the pinned `eval.mode` declares
+rather than making the caller restate it. Trace batching reuses the executable
+run's scaffolding — the same run-identity rules, source verification,
+contamination gate, plan recheck, sequential candidates, `max_parallel_tasks`
+bound, and sibling cancellation on the first raised error — but opens no oracle
+session and persists no tool-trace cache, because a released tool result is
+benchmark bytes source verification already hashed. `write_trace_eval_artifacts(...)`
+publishes the same immutable `eval_report.json`, `eval_task_results.parquet`,
+and `eval_manifest.json`, stamped `eval_scope: trace`, and requires the
+candidate I/O cache to prove no claimed request was left without a completion.
+Both aggregates declare their scope, so a report cannot mix trace and executable
+measurements, and a trace-only artifact set never stands in for an executable
+one; an executable config handed to the trace runner is refused rather than
+measured with fewer gates.
 
 The parser also requires the episode and script to name the same verified source;
 a recorded episode cannot be restamped as evidence from another benchmark. It
@@ -1033,7 +1058,9 @@ required caches after validating their JSONL records and cross-checking every
 candidate observation against the streamed tool-trace episodes. A run that keeps
 no episodes still has to prove its candidate cache holds no unfinished request.
 It also records runtime, source, dependency-lock, and worker-image identity, each
-reported as null rather than guessed when it cannot be established.
+reported as null rather than guessed when it cannot be established. Both
+evaluation modes publish through one writer under artifact contract `1.4`, whose
+`eval_scope` names which measurement a file set carries.
 `run_bfcl_eval(...)`
 performs the complete executable run with
 task-local oracle sessions, candidate-sequential execution, and task concurrency
@@ -1061,7 +1088,7 @@ ignored.
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.2`), run-level executable metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable executable artifacts (`1.3`), bounded executable batch orchestration, and error taxonomy (`1.0`) are available. Trace-only batch aggregation/publication remains unexposed. |
+| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.2`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.4`), bounded executable and trace-only batch orchestration, and error taxonomy (`1.0`) are available. CLI stage wiring for evaluation remains unexposed. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |

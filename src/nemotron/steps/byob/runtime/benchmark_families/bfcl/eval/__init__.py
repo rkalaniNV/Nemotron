@@ -190,13 +190,18 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.eval_artifacts imp
     executable_task_result,
     trace_task_result,
     write_executable_eval_artifacts,
+    write_trace_eval_artifacts,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.eval_runner import (
     BfclEvalRunResult,
+    BfclTraceEvalRunResult,
     EvalRunnerError,
     UnsupportedRunnerModeError,
     run_bfcl_eval,
     run_bfcl_eval_sync,
+    run_bfcl_trace_eval,
+    run_bfcl_trace_eval_sync,
+    run_declared_eval_sync,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_aggregation import (
     EXECUTABLE_AGGREGATION_CONTRACT_VERSION,
@@ -364,6 +369,14 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_contrac
     ToolTraceRequest,
     build_tool_trace_request,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_aggregation import (
+    TRACE_AGGREGATION_CONTRACT_VERSION,
+    TRACE_METRIC_TAXONOMY,
+    TraceCandidateScore,
+    TraceMetricName,
+    TraceMetricResult,
+    aggregate_trace_scores,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_parser import (
     NON_CANDIDATE_STOPS,
     ParsedCall,
@@ -388,6 +401,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_cont
     trace_failure_records,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_errors import (
+    TraceAggregationError,
     TraceEvidenceError,
     TraceScoringError,
     TraceScoringPolicyError,
@@ -441,6 +455,8 @@ __all__ = [
     "SOURCE_VERIFICATION_CONTRACT_VERSION",
     "SOURCE_VERIFICATION_FAILURE_FILE",
     "SOURCE_VERIFICATION_REPORT_FILE",
+    "TRACE_AGGREGATION_CONTRACT_VERSION",
+    "TRACE_METRIC_TAXONOMY",
     "TRACE_SCORING_CONTRACT_VERSION",
     "TOOL_TRACE_CACHE_CONTRACT_VERSION",
     "TOOL_TRACE_CACHE_FILE",
@@ -448,6 +464,7 @@ __all__ = [
     "BenchmarkHashMismatchError",
     "BenchmarkSchemaMismatchError",
     "BfclEvalRunResult",
+    "BfclTraceEvalRunResult",
     "BfclEvalConfig",
     "CandidateApi",
     "CandidateAttempt",
@@ -590,7 +607,11 @@ __all__ = [
     "StateCommitStatus",
     "TaskSetConsistencyError",
     "TextComparison",
+    "TraceAggregationError",
+    "TraceCandidateScore",
     "TraceEvidenceError",
+    "TraceMetricName",
+    "TraceMetricResult",
     "TraceScoringError",
     "TraceScoringPolicyError",
     "TraceGateFailureClass",
@@ -616,6 +637,7 @@ __all__ = [
     "VerifiedTranslationSource",
     "apply_declared_defaults",
     "aggregate_executable_scores",
+    "aggregate_trace_scores",
     "assert_plan_unchanged",
     "assert_source_unchanged",
     "benchmark_schema_fingerprint",
@@ -665,6 +687,9 @@ __all__ = [
     "run_executable_episode",
     "run_bfcl_eval",
     "run_bfcl_eval_sync",
+    "run_bfcl_trace_eval",
+    "run_bfcl_trace_eval_sync",
+    "run_declared_eval_sync",
     "score_executable_episode",
     "score_trace_episode",
     "taxonomy_payload",
@@ -678,6 +703,7 @@ __all__ = [
     "write_contamination_report",
     "write_eval_artifact",
     "write_executable_eval_artifacts",
+    "write_trace_eval_artifacts",
     "write_resolved_eval_config",
     "write_source_failure_diagnostic",
     "write_source_verification_report",

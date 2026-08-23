@@ -62,6 +62,12 @@ class TraceScoringPolicyError(TraceScoringError):
     code = "eval_trace_scoring_policy_unsupported"
 
 
+class TraceAggregationError(TraceScoringError):
+    """The task scores offered do not form one candidate's authorized task set."""
+
+    code = "eval_trace_aggregation_invalid"
+
+
 def describe_trace_scoring_error(exc: Exception) -> str:
     if isinstance(exc, TraceScoringError):
         report = exc.as_report()
@@ -70,6 +76,7 @@ def describe_trace_scoring_error(exc: Exception) -> str:
 
 
 __all__ = [
+    "TraceAggregationError",
     "TraceEvidenceError",
     "TraceScoringError",
     "TraceScoringPolicyError",

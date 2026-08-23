@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, TypeVar
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_cache import (
     CandidateIOCache,
@@ -43,6 +43,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_cache i
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_contract import (
     TOOL_TRACE_CACHE_FILE,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_aggregation import (
+    TraceCandidateScore,
+    TraceMetricResult,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_contract import (
     GateResult,
     TraceTaskScore,
@@ -52,10 +56,17 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.runtime_metadata import
     runtime_metadata,
 )
 
-EVAL_ARTIFACT_CONTRACT_VERSION: Final = "1.3"
+EVAL_ARTIFACT_CONTRACT_VERSION: Final = "1.4"
 EVAL_REPORT_FILE: Final = "eval_report.json"
 EVAL_TASK_RESULTS_FILE: Final = "eval_task_results.parquet"
 EVAL_MANIFEST_FILE: Final = "eval_manifest.json"
+
+# What a published artifact set measured. Trace-only and executable runs report
+# different metric taxonomies over the same task set, so a reader that could not
+# tell them apart would compare two numbers that answer different questions.
+CandidateAggregate = ExecutableCandidateScore | TraceCandidateScore
+EvalTaskScore = ExecutableTaskScore | TraceTaskScore
+_ScoreT = TypeVar("_ScoreT", ExecutableTaskScore, TraceTaskScore)
 
 
 class EvalArtifactError(Exception):
@@ -99,7 +110,7 @@ def _file_hash(path: Path) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
-def _metric_document(metric: ExecutableMetricResult) -> dict[str, Any]:
+def _metric_document(metric: ExecutableMetricResult | TraceMetricResult) -> dict[str, Any]:
     return {
         "numerator": metric.numerator,
         "denominator": metric.denominator,
@@ -207,16 +218,24 @@ def trace_task_result(score: TraceTaskScore) -> dict[str, Any]:
     }
 
 
+def _eval_scope(candidate_scores: tuple[CandidateAggregate, ...]) -> str:
+    """Which evaluation an artifact set publishes, as its aggregates declare it."""
+    scopes = {score.scope for score in candidate_scores}
+    if len(scopes) != 1:
+        raise EvalArtifactError("candidate aggregates mix evaluation scopes")
+    return next(iter(scopes))
+
+
 def _validate_complete_run(
     *,
     config: BfclEvalConfig,
     plan: EligibleEvalPlan,
-    candidate_scores: tuple[ExecutableCandidateScore, ...],
-    task_scores: tuple[ExecutableTaskScore, ...],
-) -> dict[str, tuple[ExecutableTaskScore, ...]]:
+    candidate_scores: tuple[CandidateAggregate, ...],
+    task_scores: tuple[_ScoreT, ...],
+) -> dict[str, tuple[_ScoreT, ...]]:
     if config.eval_config_hash != plan.eval_config_hash:
         raise EvalArtifactError("eval config and contamination plan identities differ")
-    by_candidate: dict[str, tuple[ExecutableTaskScore, ...]] = {}
+    by_candidate: dict[str, tuple[_ScoreT, ...]] = {}
     aggregate_by_alias = {score.candidate_alias: score for score in candidate_scores}
     if tuple(sorted(aggregate_by_alias)) != plan.candidate_aliases:
         raise EvalArtifactError("candidate aggregates do not cover the plan aliases")
@@ -245,7 +264,7 @@ def eval_report_document(
     eval_run_id: str,
     config: BfclEvalConfig,
     plan: EligibleEvalPlan,
-    candidate_scores: tuple[ExecutableCandidateScore, ...],
+    candidate_scores: tuple[CandidateAggregate, ...],
 ) -> dict[str, Any]:
     """Build the human-facing aggregate report without filesystem identities."""
     if not eval_run_id.strip():
@@ -276,6 +295,7 @@ def eval_report_document(
     return {
         "schema_version": EVAL_ARTIFACT_CONTRACT_VERSION,
         "eval_run_id": eval_run_id,
+        "eval_scope": _eval_scope(candidate_scores),
         "source_run_id": plan.source_run_id,
         "eval_config_hash": config.eval_config_hash,
         "error_taxonomy_hash": ERROR_TAXONOMY_HASH,
@@ -418,6 +438,23 @@ def _required_cache(
     return path, _file_hash(path)
 
 
+def _validate_candidate_cache(path: Path | None) -> None:
+    """Prove the weakest property a candidate cache always has to have.
+
+    Without episode evidence there is nothing to compare the recorded turns
+    against, so what remains provable is that no claimed request was left without
+    a durable completion — the shape a crashed run leaves behind.
+    """
+    if path is None:
+        return
+    try:
+        CandidateIOCache(path).validate_complete()
+    except CandidateCacheError as exc:
+        raise EvalArtifactError(
+            f"replay cache failed publication validation: {exc.code}"
+        ) from exc
+
+
 def _validate_cache_evidence(
     *,
     candidate_cache_path: Path | None,
@@ -425,18 +462,15 @@ def _validate_cache_evidence(
     task_scores: tuple[ExecutableTaskScore, ...],
 ) -> None:
     """Refuse to hash a replay cache into a manifest it cannot account for."""
+    if tool_cache_path is None:
+        _validate_candidate_cache(candidate_cache_path)
+        return
     try:
         candidate_cache = (
             CandidateIOCache(candidate_cache_path)
             if candidate_cache_path is not None
             else None
         )
-        if tool_cache_path is None:
-            # Without episode evidence there is nothing to compare the candidate
-            # turns against, so prove the weaker property that still holds.
-            if candidate_cache is not None:
-                candidate_cache.validate_complete()
-            return
         expected_episodes = {
             (score.candidate_alias, score.task_id): score.episode_hash
             for score in task_scores
@@ -472,42 +506,23 @@ def _validate_cache_evidence(
         ) from exc
 
 
-def write_executable_eval_artifacts(
+def _publish(
     *,
     eval_run_id: str,
     config: BfclEvalConfig,
     plan: EligibleEvalPlan,
-    candidate_scores: tuple[ExecutableCandidateScore, ...],
-    task_scores: tuple[ExecutableTaskScore, ...],
-    candidate_io_cache_path: Path | None,
-    tool_trace_cache_path: Path | None,
+    candidate_scores: tuple[CandidateAggregate, ...],
+    rows: list[dict[str, Any]] | None,
+    caches: dict[str, tuple[Path, str]],
 ) -> EvalArtifactSet:
-    """Write report, task table, and manifest as one identity-checked artifact set."""
-    grouped = _validate_complete_run(
-        config=config,
-        plan=plan,
-        candidate_scores=candidate_scores,
-        task_scores=task_scores,
-    )
+    """Write report, task table, and manifest as one immutable artifact set.
+
+    Both evaluation modes publish the same three files under the same identities;
+    what differs is which task-result projection fills the table and which replay
+    caches the manifest binds. Sharing the writer is what keeps a trace-only run
+    from acquiring a differently shaped report than an executable one.
+    """
     output_dir = config.outputs.output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-    candidate_cache = _required_cache(
-        candidate_io_cache_path,
-        enabled=config.outputs.cache_candidate_responses,
-        expected_name=CANDIDATE_IO_CACHE_FILE,
-        output_dir=output_dir,
-    )
-    tool_cache = _required_cache(
-        tool_trace_cache_path,
-        enabled=config.outputs.cache_tool_results,
-        expected_name=TOOL_TRACE_CACHE_FILE,
-        output_dir=output_dir,
-    )
-    _validate_cache_evidence(
-        candidate_cache_path=candidate_cache[0] if candidate_cache is not None else None,
-        tool_cache_path=tool_cache[0] if tool_cache is not None else None,
-        task_scores=task_scores,
-    )
     report = eval_report_document(
         eval_run_id=eval_run_id,
         config=config,
@@ -519,12 +534,7 @@ def write_executable_eval_artifacts(
 
     task_path: Path | None = None
     task_hash: str | None = None
-    if config.outputs.write_task_results:
-        rows = [
-            executable_task_result(score)
-            for alias in plan.candidate_aliases
-            for score in grouped[alias]
-        ]
+    if rows is not None:
         task_path = output_dir / EVAL_TASK_RESULTS_FILE
         task_hash = _write_task_results(task_path, rows)
 
@@ -542,19 +552,12 @@ def write_executable_eval_artifacts(
                 "file": EVAL_TASK_RESULTS_FILE,
                 "content_hash": task_hash,
             }
-        if candidate_cache is not None:
-            artifacts["candidate_io_cache"] = {
-                "file": candidate_cache[0].name,
-                "content_hash": candidate_cache[1],
-            }
-        if tool_cache is not None:
-            artifacts["tool_trace_cache"] = {
-                "file": tool_cache[0].name,
-                "content_hash": tool_cache[1],
-            }
+        for name, (path, content_hash) in caches.items():
+            artifacts[name] = {"file": path.name, "content_hash": content_hash}
         manifest = {
             "schema_version": EVAL_ARTIFACT_CONTRACT_VERSION,
             "eval_run_id": eval_run_id,
+            "eval_scope": _eval_scope(candidate_scores),
             "source_run_id": plan.source_run_id,
             "eval_config_hash": config.eval_config_hash,
             "error_taxonomy_hash": ERROR_TAXONOMY_HASH,
@@ -596,15 +599,137 @@ def write_executable_eval_artifacts(
     )
 
 
+def write_executable_eval_artifacts(
+    *,
+    eval_run_id: str,
+    config: BfclEvalConfig,
+    plan: EligibleEvalPlan,
+    candidate_scores: tuple[ExecutableCandidateScore, ...],
+    task_scores: tuple[ExecutableTaskScore, ...],
+    candidate_io_cache_path: Path | None,
+    tool_trace_cache_path: Path | None,
+) -> EvalArtifactSet:
+    """Write report, task table, and manifest as one identity-checked artifact set."""
+    grouped = _validate_complete_run(
+        config=config,
+        plan=plan,
+        candidate_scores=candidate_scores,
+        task_scores=task_scores,
+    )
+    output_dir = config.outputs.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    candidate_cache = _required_cache(
+        candidate_io_cache_path,
+        enabled=config.outputs.cache_candidate_responses,
+        expected_name=CANDIDATE_IO_CACHE_FILE,
+        output_dir=output_dir,
+    )
+    tool_cache = _required_cache(
+        tool_trace_cache_path,
+        enabled=config.outputs.cache_tool_results,
+        expected_name=TOOL_TRACE_CACHE_FILE,
+        output_dir=output_dir,
+    )
+    _validate_cache_evidence(
+        candidate_cache_path=candidate_cache[0] if candidate_cache is not None else None,
+        tool_cache_path=tool_cache[0] if tool_cache is not None else None,
+        task_scores=task_scores,
+    )
+    caches: dict[str, tuple[Path, str]] = {}
+    if candidate_cache is not None:
+        caches["candidate_io_cache"] = candidate_cache
+    if tool_cache is not None:
+        caches["tool_trace_cache"] = tool_cache
+    return _publish(
+        eval_run_id=eval_run_id,
+        config=config,
+        plan=plan,
+        candidate_scores=candidate_scores,
+        rows=(
+            [
+                executable_task_result(score)
+                for alias in plan.candidate_aliases
+                for score in grouped[alias]
+            ]
+            if config.outputs.write_task_results
+            else None
+        ),
+        caches=caches,
+    )
+
+
+def write_trace_eval_artifacts(
+    *,
+    eval_run_id: str,
+    config: BfclEvalConfig,
+    plan: EligibleEvalPlan,
+    candidate_scores: tuple[TraceCandidateScore, ...],
+    task_scores: tuple[TraceTaskScore, ...],
+    candidate_io_cache_path: Path | None,
+) -> EvalArtifactSet:
+    """Publish one trace-only run's report, task table, and manifest.
+
+    There is no tool-trace cache to bind: trace evaluation executes no tool, and
+    the results it released are the ones the benchmark recorded, which source
+    verification already proved by content hash. The candidate cache is therefore
+    the whole of a trace run's replay evidence, and it is required to prove it
+    left no claimed request without a completion.
+    """
+    grouped = _validate_complete_run(
+        config=config,
+        plan=plan,
+        candidate_scores=candidate_scores,
+        task_scores=task_scores,
+    )
+    if len({(score.candidate_alias, score.task_id) for score in task_scores}) != len(
+        task_scores
+    ):
+        raise EvalArtifactError("task scores repeat a candidate and task identity")
+    output_dir = config.outputs.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    candidate_cache = _required_cache(
+        candidate_io_cache_path,
+        enabled=config.outputs.cache_candidate_responses,
+        expected_name=CANDIDATE_IO_CACHE_FILE,
+        output_dir=output_dir,
+    )
+    _validate_candidate_cache(
+        candidate_cache[0] if candidate_cache is not None else None
+    )
+    return _publish(
+        eval_run_id=eval_run_id,
+        config=config,
+        plan=plan,
+        candidate_scores=candidate_scores,
+        rows=(
+            [
+                trace_task_result(score)
+                for alias in plan.candidate_aliases
+                for score in grouped[alias]
+            ]
+            if config.outputs.write_task_results
+            else None
+        ),
+        caches=(
+            {"candidate_io_cache": candidate_cache}
+            if candidate_cache is not None
+            else {}
+        ),
+    )
+
+
 __all__ = [
     "EVAL_ARTIFACT_CONTRACT_VERSION",
     "EVAL_MANIFEST_FILE",
     "EVAL_REPORT_FILE",
     "EVAL_TASK_RESULTS_FILE",
+    "CandidateAggregate",
     "EvalArtifactError",
     "EvalArtifactSet",
+    "EvalTaskScore",
     "eval_report_document",
     "executable_task_result",
     "trace_task_result",
     "write_executable_eval_artifacts",
+    "write_trace_eval_artifacts",
 ]

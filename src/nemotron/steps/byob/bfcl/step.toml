@@ -145,6 +145,11 @@ when = "You need to run the complete executable evaluation with bounded concurre
 then = "Load a resolved executable eval config and call run_bfcl_eval(...). It verifies source and contamination before inference, rechecks the plan immediately before requests, processes candidates sequentially, runs each candidate's tasks with at most limits.max_parallel_tasks active task-local oracle sessions, fails closed on raised infrastructure/setup errors, aggregates in publication order, and writes the immutable report, task table, manifest, and replay caches."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
+[[strategies]]
+when = "You need to publish a trace-only evaluation without an oracle"
+then = "Call run_bfcl_trace_eval(config, ...) for a config whose eval.mode is [trace], or run_declared_eval_sync(config_path) to let the pinned mode choose the runner. It shares the executable run's scaffolding — the same run-identity rules, source verification, contamination gate, plan recheck, sequential candidates, at most limits.max_parallel_tasks tasks in flight, and sibling cancellation on the first raised error — but opens no oracle session and persists no tool-trace cache, because a released tool result is benchmark bytes the source verification already hashed. Each task is driven with run_candidate_episode() and scored with score_trace_episode(), then aggregate_trace_scores(...) rolls one candidate's authorized set into a TraceCandidateScore whose metrics are per-task gate rates (tool_selection_pass_rate through trace_completion_pass_rate, plus task_success_rate) rather than the executable per-call rates. write_trace_eval_artifacts(...) publishes the same immutable eval_report.json, eval_task_results.parquet, and eval_manifest.json, stamped eval_scope: trace, with oracle-, assertion-, milestone-, and final-answer-only columns left null and the candidate I/O cache required to prove it left no claimed request without a completion. A trace-only artifact set never stands in for an executable one, and an executable config is refused here rather than measured with fewer gates."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
 [[errors]]
 name = "missing_family_pin"
 recovery = "Every bfcl/config/*.yaml must set family: bfcl. Without it the shared dispatcher defaults to mcq."
@@ -458,16 +463,20 @@ name = "eval_executable_aggregation_invalid"
 recovery = "Candidate task scores are missing, duplicated, reordered, or cross an identity boundary. Score every authorized task once in plan order before aggregation."
 
 [[errors]]
+name = "eval_trace_aggregation_invalid"
+recovery = "Trace task scores are missing, duplicated, reordered, or cross a candidate, plan, policy, or scoring-contract boundary. Score every authorized task once in plan order before aggregation."
+
+[[errors]]
 name = "eval_artifact_invalid"
 recovery = "The final report, task table, manifest, aggregate hashes, or required caches do not form one immutable artifact set. Preserve existing evidence and resume into a new output directory."
 
 [[errors]]
 name = "eval_runner_invalid"
-recovery = "The batch runner requires one verified executable configuration, complete authorized task sets, and a non-empty run id. Fix the named precondition and restart before candidate inference."
+recovery = "The batch runner requires one verified configuration, complete authorized task sets, and a non-empty run id. Fix the named precondition and restart before candidate inference."
 
 [[errors]]
 name = "eval_runner_mode_unsupported"
-recovery = "This batch runner executes [trace, executable] evaluation. Use the trace runner for [trace] or enable executable mode with a verified gold oracle."
+recovery = "Each batch runner publishes one measurement: run_bfcl_eval executes [trace, executable] and run_bfcl_trace_eval drives [trace]. Call the runner the pinned eval.mode declares, or run_declared_eval_sync to let the config choose."
 
 [reference]
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
