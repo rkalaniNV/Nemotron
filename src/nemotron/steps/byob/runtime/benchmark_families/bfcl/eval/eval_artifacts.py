@@ -1,4 +1,4 @@
-"""Deterministic final artifacts for executable BFCL evaluation."""
+"""Deterministic BFCL task-result projections and executable-run artifacts."""
 
 from __future__ import annotations
 
@@ -42,6 +42,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_cache i
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_contract import (
     TOOL_TRACE_CACHE_FILE,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_contract import (
+    GateResult,
+    TraceTaskScore,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.runtime_metadata import (
@@ -104,7 +108,7 @@ def _metric_document(metric: ExecutableMetricResult) -> dict[str, Any]:
     }
 
 
-def _gate_bool(gate: ExecutableGateResult) -> bool | None:
+def _gate_bool(gate: ExecutableGateResult | GateResult) -> bool | None:
     if gate.outcome == "not_applicable":
         return None
     return gate.outcome == "passed"
@@ -167,6 +171,39 @@ def executable_task_result(score: ExecutableTaskScore) -> dict[str, Any]:
         "task_success": score.task_success,
         "failure_codes": [gate.reason_code for gate in failed],
         "failure_records": [record.as_document() for record in records],
+    }
+
+
+def trace_task_result(score: TraceTaskScore) -> dict[str, Any]:
+    """Project one trace score onto the shared eval-task-results columns.
+
+    Columns that require live oracle execution, pack assertions, or executable
+    milestones remain null. A trace-only row must not imply evidence its scorer
+    never observed merely to fill a shared table.
+    """
+    failed = tuple(gate for gate in score.gates if gate.outcome == "failed")
+    return {
+        "candidate_alias": score.candidate_alias,
+        "candidate_canonical_id": score.canonical_model_identity,
+        "task_id": score.task_id,
+        "mode": "trace",
+        "schema_valid": _gate_bool(score.gate("schema_valid")),
+        "tool_name_correct": _gate_bool(score.gate("tool_selection")),
+        "arguments_correct": _gate_bool(score.gate("arguments")),
+        "call_group_correct": _gate_bool(score.gate("call_grouping")),
+        "call_order_correct": _gate_bool(score.gate("call_ordering")),
+        "required_subset_correct": _gate_bool(score.gate("tool_selection")),
+        "milestones_correct": None,
+        "execution_success": None,
+        "assertions_passed": None,
+        "final_answer_passed": None,
+        "episode_status": score.episode_status,
+        "non_candidate_stop": score.non_candidate_stop,
+        "task_success": score.task_success,
+        "failure_codes": [gate.reason_code for gate in failed],
+        "failure_records": [
+            record.as_document() for record in score.failure_records()
+        ],
     }
 
 
@@ -568,5 +605,6 @@ __all__ = [
     "EvalArtifactSet",
     "eval_report_document",
     "executable_task_result",
+    "trace_task_result",
     "write_executable_eval_artifacts",
 ]

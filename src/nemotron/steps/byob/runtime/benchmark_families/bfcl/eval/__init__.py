@@ -188,6 +188,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.eval_artifacts imp
     EvalArtifactSet,
     eval_report_document,
     executable_task_result,
+    trace_task_result,
     write_executable_eval_artifacts,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.eval_runner import (
@@ -267,6 +268,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring
     ExecutableScoringError,
     ExecutableScoringPolicyError,
     describe_executable_scoring_error,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_trace_parser import (
+    parse_executable_trace,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
     MODEL_IDENTITY_CONTRACT_VERSION,
@@ -379,7 +383,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_cont
     ScoredCall,
     ScoredTurn,
     ScoringGate,
+    TraceGateFailureClass,
     TraceTaskScore,
+    trace_failure_records,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_errors import (
     TraceEvidenceError,
@@ -587,6 +593,7 @@ __all__ = [
     "TraceEvidenceError",
     "TraceScoringError",
     "TraceScoringPolicyError",
+    "TraceGateFailureClass",
     "TraceTaskScore",
     "ToolExecutionStatus",
     "ToolTraceCache",
@@ -650,6 +657,7 @@ __all__ = [
     "pair_turn_calls",
     "parse_candidate_response",
     "parse_function_arguments",
+    "parse_executable_trace",
     "parse_observed_trace",
     "released_results",
     "resolved_eval_config_document",
@@ -660,6 +668,8 @@ __all__ = [
     "score_executable_episode",
     "score_trace_episode",
     "taxonomy_payload",
+    "trace_failure_records",
+    "trace_task_result",
     "source_verification_report",
     "turn_order_scope",
     "turn_request_id",

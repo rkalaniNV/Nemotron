@@ -12,6 +12,13 @@ counted as passes. A single-call row has no ordering gate, and a report that
 silently dropped it could not be told apart from one where ordering was checked
 and passed.
 
+A failed gate also says whose failure it is. An unreachable endpoint and a wrong
+tool both fail the task, and neither is softened, but a run whose gates failed on
+infrastructure is a run to re-drive rather than a model to reject. The
+classification lives on the gate because the scorer is the last place that knows
+why the gate failed; every reader downstream projects it rather than re-deriving
+it from a status it would have to interpret again.
+
 Every hash here is path-free and time-free. A score cites the script and episode
 it was derived from, the complete evaluation-config identity, the pinned scoring
 policy, and the content hash of the prose contract that defines the comparison.
@@ -34,6 +41,12 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_contract
     CallStatus,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_contract import EpisodeStatus
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.error_taxonomy import (
+    TRACE_NON_CANDIDATE_STOPS,
+    EvalFailureRecord,
+    episode_failure_record,
+    gate_failure_record,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
     ContentHash,
     FrozenDict,
@@ -44,7 +57,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-TRACE_SCORING_CONTRACT_VERSION: Final = "1.0"
+TRACE_SCORING_CONTRACT_VERSION: Final = "1.1"
 
 # The gates a trace score reports, in the order a report reads them: what the
 # model asked for, then how it asked, then whether the conversation held together.
@@ -68,6 +81,10 @@ ScoringGate = Literal[
     "trace_completion",
 ]
 GateOutcome = Literal["passed", "failed", "not_applicable"]
+# Who a failed gate is about. A trace score never carries ``evidence``: evidence
+# that does not line up with its script is refused as a typed error instead of
+# being scored, so no gate can report it.
+TraceGateFailureClass = Literal["none", "candidate", "infrastructure"]
 
 # How the gates this scorer computes roll up into the metric names a published
 # bundle declares. Several internal gates map onto one published metric: a bundle
@@ -96,24 +113,38 @@ class _Frozen(BaseModel):
 
 
 class GateResult(_Frozen):
-    """One scoring dimension's verdict, and which turn first went wrong.
+    """One scoring dimension's verdict, whose failure it is, and which turn failed it.
 
     ``turn_index`` is the assistant turn a reader should look at, so a failure is
     actionable without diffing the whole trace. It is absent when the failure is
     about the trace as a whole — gold calls the candidate never got as far as
     being asked for.
+
+    ``failure_class`` never changes whether the gate counts against the task; it
+    only records whether the candidate or the run is answerable for it.
     """
 
     gate: ScoringGate
     outcome: GateOutcome
+    failure_class: TraceGateFailureClass = "none"
     reason_code: StrictStr
     detail: StrictStr
     turn_index: NonNegativeInt | None = None
 
     @model_validator(mode="after")
     def _coherent(self) -> GateResult:
-        if self.outcome != "failed" and self.turn_index is not None:
-            raise ValueError("only a failed gate points at the turn that failed it")
+        if not self.reason_code.strip():
+            raise ValueError("a trace gate carries a stable reason code")
+        if not self.reason_code.startswith(f"{self.gate}."):
+            raise ValueError("a trace gate reason code belongs to that gate's namespace")
+        if self.outcome == "failed":
+            if self.failure_class == "none":
+                raise ValueError("a failed gate says whose failure it is")
+        else:
+            if self.failure_class != "none":
+                raise ValueError("only a failed gate is attributed")
+            if self.turn_index is not None:
+                raise ValueError("only a failed gate points at the turn that failed it")
         return self
 
     @property
@@ -124,10 +155,16 @@ class GateResult(_Frozen):
     def applies(self) -> bool:
         return self.outcome != "not_applicable"
 
+    @property
+    def blames_the_run(self) -> bool:
+        """Whether this gate failed for a reason the candidate did not choose."""
+        return self.outcome == "failed" and self.failure_class == "infrastructure"
+
     def semantic_payload(self) -> dict[str, Any]:
         return {
             "gate": self.gate,
             "outcome": self.outcome,
+            "failure_class": self.failure_class,
             "reason_code": self.reason_code,
             "detail": self.detail,
             "turn_index": self.turn_index,
@@ -279,7 +316,7 @@ class ScoredTurn(_Frozen):
 class TraceTaskScore(_Frozen):
     """One candidate's score on one task, derived only from recorded evidence."""
 
-    schema_version: Literal["1.0"] = TRACE_SCORING_CONTRACT_VERSION
+    schema_version: Literal["1.1"] = TRACE_SCORING_CONTRACT_VERSION
     # What this number is allowed to claim. Oracle replay and pack assertions add
     # gates this scorer does not compute, so a trace score never stands in for an
     # executable one.
@@ -331,6 +368,22 @@ class TraceTaskScore(_Frozen):
         expected_success = all(not gate.counts_against for gate in self.gates)
         if self.task_success != expected_success:
             raise ValueError("task_success must be exactly whether every applicable gate passed")
+        expected_non_candidate_stop = (
+            self.episode_status in TRACE_NON_CANDIDATE_STOPS
+        )
+        if self.non_candidate_stop != expected_non_candidate_stop:
+            raise ValueError(
+                "non_candidate_stop must match the trace episode status taxonomy"
+            )
+        # An episode that stopped for a non-candidate reason never reached the end
+        # of its trace, so completion must blame the run — otherwise a broken run
+        # would read as a wrong model. Nothing else may, unless the episode stopped
+        # that way: a candidate's own mistake is not the run's fault.
+        if self.non_candidate_stop:
+            if not self.gate("trace_completion").blames_the_run:
+                raise ValueError("a non-candidate stop is a completion failure the run is answerable for")
+        elif any(gate.blames_the_run for gate in self.gates):
+            raise ValueError("a gate blames the run only when the episode stopped for a non-candidate reason")
         return self
 
     @property
@@ -391,6 +444,32 @@ class TraceTaskScore(_Frozen):
     def as_document(self) -> dict[str, Any]:
         return {**self.semantic_payload(), "score_hash": self.score_hash}
 
+    def failure_records(self) -> tuple[EvalFailureRecord, ...]:
+        return trace_failure_records(self)
+
+
+def trace_failure_records(score: TraceTaskScore) -> tuple[EvalFailureRecord, ...]:
+    """Project one trace score's failures onto the shared eval error taxonomy.
+
+    The episode record carries what no gate reason code can: every incomplete
+    episode fails the same completion gate, and only the terminal status separates
+    a spent turn budget from an endpoint that was never reachable. Gate records
+    then name each dimension that failed, attributed as the scorer attributed it,
+    so a report reads one vocabulary across trace and executable evaluation.
+    """
+    episode = episode_failure_record(score.episode_status, executable=False)
+    records = [] if episode is None else [episode]
+    records.extend(
+        gate_failure_record(
+            gate=gate.gate,
+            reason_code=gate.reason_code,
+            failure_class=gate.failure_class,
+        )
+        for gate in score.gates
+        if gate.outcome == "failed"
+    )
+    return tuple(records)
+
 
 __all__ = [
     "EXPORT_METRIC_BY_GATE",
@@ -401,5 +480,7 @@ __all__ = [
     "ScoredCall",
     "ScoredTurn",
     "ScoringGate",
+    "TraceGateFailureClass",
     "TraceTaskScore",
+    "trace_failure_records",
 ]

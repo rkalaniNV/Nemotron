@@ -56,6 +56,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_cont
     ScoredCall,
     ScoredTurn,
     ScoringGate,
+    TraceGateFailureClass,
     TraceTaskScore,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_errors import (
@@ -439,10 +440,18 @@ def _failed(
     *,
     turn_index: int | None = None,
     reason_code: str | None = None,
+    failure_class: TraceGateFailureClass = "candidate",
 ) -> GateResult:
+    """Fail one gate, blaming the candidate unless the caller knows better.
+
+    Every gate but completion compares what the candidate produced against what
+    the trace asks for, so the candidate is the default subject. Completion is the
+    one gate that can fail without the candidate having answered at all.
+    """
     return GateResult(
         gate=gate,
         outcome="failed",
+        failure_class=failure_class,
         reason_code=reason_code or f"{gate}.mismatch",
         detail=detail,
         turn_index=turn_index,
@@ -466,7 +475,36 @@ def _score_gates(
         "text_turn": _text_gate(script, scored),
         "trace_completion": _completion_gate(trace, completion_detail),
     }
-    return tuple(results[gate] for gate in SCORING_GATES)
+    return tuple(_attributed(results[gate], trace) for gate in SCORING_GATES)
+
+
+def _attributed(gate: GateResult, trace: ParsedTrace) -> GateResult:
+    """Move a failure the candidate was never given the chance to avoid onto the run.
+
+    Coverage is measured against the whole script, so a gold call the episode never
+    got an answer for fails selection and arguments. That is the candidate's failure
+    when the candidate is why the episode stopped, and the run's when it is not:
+    blaming a model for a turn an unreachable endpoint or a spent budget prevented
+    it from answering would make infrastructure look like weak tool use. The verdict
+    itself is untouched — an unfinished task is failed either way.
+    """
+    if not trace.non_candidate_stop or not gate.counts_against:
+        return gate
+    if _answered(trace, gate.turn_index):
+        return gate
+    return gate.model_copy(update={"failure_class": "infrastructure"})
+
+
+def _answered(trace: ParsedTrace, turn_index: int | None) -> bool:
+    """Whether the candidate returned a usable answer for the turn a failure names.
+
+    A turn the episode never sent and a turn whose request never came back are both
+    turns the candidate did not answer, and neither can carry evidence of what it
+    would have said.
+    """
+    if turn_index is None or turn_index >= len(trace.turns):
+        return False
+    return trace.turns[turn_index].answered
 
 
 def _tool_selection_gate(script: ConversationScript, scored: Sequence[ScoredTurn]) -> GateResult:
@@ -570,12 +608,17 @@ def _completion_gate(trace: ParsedTrace, completion_detail: str) -> GateResult:
 
     This gate always applies, which is what makes an unfinished episode a failed
     task rather than a skipped one: silently dropping a timed-out or unreachable
-    candidate would let a slow model score higher than a fast wrong one.
+    candidate would let a slow model score higher than a fast wrong one. What the
+    attribution adds is who to send the failure to. An episode that stopped for a
+    reason the candidate did not choose still fails the task, but it is a run to
+    re-drive; a truncated or filtered answer is the candidate's own.
     """
     if trace.reached_the_end:
         for turn in trace.turns:
             problem = finish_reason_problem(turn.finish_reason)
             if problem is not None:
+                # An episode that reached the end of its trace was not stopped by
+                # the run, so a truncated answer inside it is the candidate's.
                 return _failed(
                     "trace_completion",
                     problem,
@@ -584,7 +627,12 @@ def _completion_gate(trace: ParsedTrace, completion_detail: str) -> GateResult:
                 )
         return _passed("trace_completion", "the conversation was replayed to the end of the trace")
     stopped_at = trace.unsent_turn_indexes[0] if trace.unsent_turn_indexes else len(trace.turns) - 1
-    return _failed("trace_completion", completion_detail, turn_index=max(stopped_at, 0))
+    return _failed(
+        "trace_completion",
+        completion_detail,
+        turn_index=max(stopped_at, 0),
+        failure_class="infrastructure" if trace.non_candidate_stop else "candidate",
+    )
 
 
 __all__ = ["NormalizedTraceScore", "score_normalized_trace", "score_trace_episode"]
