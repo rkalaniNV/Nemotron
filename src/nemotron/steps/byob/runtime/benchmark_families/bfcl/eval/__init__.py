@@ -4,13 +4,27 @@ The configuration contract pins the source, candidates, policies, and limits.
 Source verification proves the publication bytes and records model exposure.
 The contamination gate turns that evidence into candidate-specific task
 authorization. The native client preserves every OpenAI-compatible request,
-attempt, and response, while the conversation driver replays authorized episodes
-and releases recorded tool results only to calls that earned them.
+attempt, and response; the conversation driver replays authorized episodes and
+releases recorded tool results only to calls that earned them; and
+:func:`score_trace_episode` turns the resulting episode into a gate-by-gate
+:class:`TraceTaskScore`.
 
 Only :class:`NativeFunctionCallingClient` contacts a candidate, and only
-:func:`run_candidate_episode` decides what it is asked next. Neither scores a
-trace or executes a live tool; those concerns belong to separate runtime
-components.
+:func:`run_candidate_episode` decides what it is asked next. Scoring reads the
+recorded episode and never re-asks the model, so re-scoring the same evidence
+reproduces the same ``score_hash``. Live tool execution and pack assertions are
+the concern of executable evaluation, and a trace score never stands in for one.
+The versioned :class:`ExecutableEpisode` contract fixes the evidence boundary for
+that mode — candidate turns, one live outcome per proposed call, final-state
+identity, and assertion observations — without yet performing the live I/O. It
+keeps obtaining a tool result separate from admitting it to the candidate prompt,
+and records an oracle return that does not conform to the tool contract rather
+than storing it as if it had.
+
+The comparison behind both continuation and scoring lives once, in
+:mod:`call_comparison`. A release gate stricter than the scorer would end an
+episode the scorer would have credited, so the two read the same code rather
+than two implementations of the same prose.
 
 A runner receives two handles rather than paths and policies out of a YAML file:
 a :class:`VerifiedEvalSource` from :func:`verify_eval_source`, and an
@@ -21,11 +35,29 @@ states the code can reach.
 
 from __future__ import annotations
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.call_comparison import (
+    INCOMPLETE_FINISH_REASONS,
+    ArgumentDiff,
+    CallComparison,
+    CallOrderScope,
+    CallPairing,
+    PredictedCall,
+    TextComparison,
+    compare_arguments,
+    compare_call,
+    compare_group_size,
+    compare_required_prefix,
+    compare_text_turn,
+    compare_turn_order,
+    finish_reason_problem,
+    first_appearances,
+    pair_turn_calls,
+    turn_order_scope,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.call_matching import (
     CanonicalCallMatchGate,
     ContinuationGate,
     TurnMatch,
-    apply_declared_defaults,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_cache import (
     CandidateIOCache,
@@ -133,6 +165,41 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
     SecretInConfigError,
     UnsupportedEvalModeError,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_contract import (
+    EXECUTABLE_CONTRACT_VERSION,
+    AssertionCategory,
+    AssertionOutcome,
+    AssertionStatus,
+    ExecutableEpisode,
+    ExecutableEpisodeStatus,
+    ExecutableEvent,
+    ExecutableEventKind,
+    ExecutableTurn,
+    ExecutedToolCall,
+    MalformedResultType,
+    StateCommitStatus,
+    ToolExecutionStatus,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver import (
+    run_executable_episode,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_errors import (
+    ExecutableAuthorizationError,
+    ExecutableEvalError,
+    ExecutableProjectionError,
+    OracleAssertionError,
+    OracleCallError,
+    OracleResetError,
+    OracleSessionError,
+    OracleStateError,
+    describe_executable_error,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_projection import (
+    EXECUTABLE_PROJECTION_VERSION,
+    ExecutableTaskSpec,
+    ExecutableToolPolicy,
+    build_executable_task_spec,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
     MODEL_IDENTITY_CONTRACT_VERSION,
     ExposureRole,
@@ -143,6 +210,12 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
     candidate_identity_claim,
     compare_model_identity,
     normalize_model_token,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.oracle_session import (
+    EndpointOracleSession,
+    OracleSession,
+    PythonOracleSession,
+    open_oracle_session,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
     EVAL_CONFIG_SCHEMA_VERSION,
@@ -208,9 +281,43 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_verificatio
     write_source_failure_diagnostic,
     write_source_verification_report,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_parser import (
+    NON_CANDIDATE_STOPS,
+    ParsedCall,
+    ParsedTrace,
+    ParsedTurn,
+    parse_observed_trace,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scorer import (
+    score_trace_episode,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_contract import (
+    EXPORT_METRIC_BY_GATE,
+    SCORING_GATES,
+    TRACE_SCORING_CONTRACT_VERSION,
+    GateOutcome,
+    GateResult,
+    ScoredCall,
+    ScoredTurn,
+    ScoringGate,
+    TraceTaskScore,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_errors import (
+    TraceEvidenceError,
+    TraceScoringError,
+    TraceScoringPolicyError,
+    describe_trace_scoring_error,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
+    apply_declared_defaults,
+)
 
 __all__ = [
+    "ArgumentDiff",
     "ArgumentStatus",
+    "AssertionCategory",
+    "AssertionOutcome",
+    "AssertionStatus",
     "BACKEND_INTERFACE",
     "CANDIDATE_CLIENT_CONTRACT_VERSION",
     "CANDIDATE_IO_CACHE_FILE",
@@ -221,14 +328,21 @@ __all__ = [
     "EVAL_CONFIG_SCHEMA_VERSION",
     "EVAL_CONFIG_TOP_LEVEL_KEYS",
     "EVAL_MODES",
+    "EXECUTABLE_CONTRACT_VERSION",
+    "EXECUTABLE_PROJECTION_VERSION",
+    "EXPORT_METRIC_BY_GATE",
     "GENERATION_EXPOSURE_ROLES",
+    "INCOMPLETE_FINISH_REASONS",
     "LOCKED_PUBLICATION_SCORING",
     "MODEL_IDENTITY_CONTRACT_VERSION",
     "MUTABLE_REVISIONS",
+    "NON_CANDIDATE_STOPS",
     "REQUIRED_MANIFEST_FIELDS",
+    "SCORING_GATES",
     "SOURCE_VERIFICATION_CONTRACT_VERSION",
     "SOURCE_VERIFICATION_FAILURE_FILE",
     "SOURCE_VERIFICATION_REPORT_FILE",
+    "TRACE_SCORING_CONTRACT_VERSION",
     "TRANSLATION_PRESERVED_FIELDS",
     "BenchmarkHashMismatchError",
     "BenchmarkSchemaMismatchError",
@@ -253,6 +367,9 @@ __all__ = [
     "CandidateResponseError",
     "CandidateToolCall",
     "CandidateIOCache",
+    "CallComparison",
+    "CallOrderScope",
+    "CallPairing",
     "CanonicalCallMatchGate",
     "ClaimScope",
     "CollisionVerdict",
@@ -273,6 +390,7 @@ __all__ = [
     "ConversationTransitionError",
     "EligibleEvalPlan",
     "EmptyEvaluationTaskSetError",
+    "EndpointOracleSession",
     "EpisodeEvent",
     "EpisodeStatus",
     "EvalCandidate",
@@ -288,9 +406,23 @@ __all__ = [
     "EvalScoringConfig",
     "EvalSettings",
     "EvalSource",
+    "ExecutableAuthorizationError",
+    "ExecutableEvalError",
+    "ExecutableEpisode",
+    "ExecutableEpisodeStatus",
+    "ExecutableEvent",
+    "ExecutableEventKind",
+    "ExecutableProjectionError",
+    "ExecutableTaskSpec",
+    "ExecutableToolPolicy",
+    "ExecutableTurn",
+    "ExecutedToolCall",
+    "MalformedResultType",
     "EventKind",
     "ExposureRole",
     "ExposureScope",
+    "GateOutcome",
+    "GateResult",
     "IdentityVerdict",
     "ModelExposureError",
     "ModelFacingConversation",
@@ -298,10 +430,24 @@ __all__ = [
     "MutableCandidateRevisionError",
     "NativeFunctionCallingClient",
     "ObservedTurn",
+    "OracleAssertionError",
+    "OracleCallError",
     "OraclePackDriftError",
+    "OracleResetError",
     "OracleResourceMismatchError",
+    "OracleSession",
+    "OracleSessionError",
+    "OracleStateError",
+    "ParsedCall",
+    "ParsedTrace",
+    "ParsedTurn",
+    "PredictedCall",
     "PublicationPolicyError",
     "PublicationSemanticsError",
+    "PythonOracleSession",
+    "ScoredCall",
+    "ScoredTurn",
+    "ScoringGate",
     "ScriptedCall",
     "ScriptedTurn",
     "SecretInConfigError",
@@ -313,7 +459,14 @@ __all__ = [
     "SourceTaskIndexError",
     "SourceVerificationError",
     "SourceVerificationReport",
+    "StateCommitStatus",
     "TaskSetConsistencyError",
+    "TextComparison",
+    "TraceEvidenceError",
+    "TraceScoringError",
+    "TraceScoringPolicyError",
+    "TraceTaskScore",
+    "ToolExecutionStatus",
     "TranslationLineageError",
     "TurnMatch",
     "UnresolvedContaminationError",
@@ -331,26 +484,43 @@ __all__ = [
     "benchmark_schema_fingerprint",
     "build_candidate_request",
     "build_conversation_script",
+    "build_executable_task_spec",
     "candidate_identity_claim",
+    "compare_arguments",
+    "compare_call",
+    "compare_group_size",
     "compare_model_identity",
+    "compare_required_prefix",
+    "compare_text_turn",
+    "compare_turn_order",
     "contamination_report",
     "describe_contamination_error",
     "describe_candidate_client_error",
     "describe_conversation_error",
+    "describe_executable_error",
     "describe_eval_config_error",
     "describe_source_verification_error",
+    "describe_trace_scoring_error",
     "eval_config_reference",
     "evaluate_contamination",
+    "first_appearances",
+    "finish_reason_problem",
     "load_eval_config",
     "load_eval_config_for_generation",
     "load_eval_config_mapping",
     "normalize_model_token",
+    "open_oracle_session",
+    "pair_turn_calls",
     "parse_candidate_response",
     "parse_function_arguments",
+    "parse_observed_trace",
     "released_results",
     "resolved_eval_config_document",
     "run_candidate_episode",
+    "run_executable_episode",
+    "score_trace_episode",
     "source_verification_report",
+    "turn_order_scope",
     "turn_request_id",
     "verify_eval_source",
     "write_contamination_failure",

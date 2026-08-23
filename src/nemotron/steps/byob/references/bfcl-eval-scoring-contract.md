@@ -30,6 +30,67 @@ Two evaluation modes exist, and a report always says which one produced a number
   the matching pack manifest plus the exact Python backend or endpoint config.
   The source manifest's `oracle.kind` is lineage, not an executable resource.
 
+An executable run records a versioned `ExecutableEpisode` before scoring. The
+episode binds the verified source and oracle identities and preserves every
+candidate turn, one outcome for every proposed call (including calls that were
+not executable), the final-state hash, and classified assertion outcomes. Each
+outcome is bound to the provider call it records by typed JSON equality, so a
+coerced argument cannot pass as the value the provider sent.
+
+Structured business rejection is distinct from tool or infrastructure failure.
+A non-object JSON return is retained as malformed evidence whose value, type, and
+canonical hash agree, rather than stored as if it had conformed. Result shape and
+commit state are independent: malformed output from a mutating call can coexist
+with an unknown commit verdict, and unknown commit takes terminal precedence
+rather than being hidden by the result failure. Terminal status is checked in
+both directions, so neither fact can be restamped as a completed episode.
+
+Obtaining a result is also distinct from admitting it to the candidate prompt: a
+result the driver obtained but never released is retained without claiming the
+candidate read it. Scripted user-message releases are bound to their turns by
+content hash, and both user-message and tool-result release counts are derived
+from those records rather than accepted as independent counters. A
+tool-execution event cites both its outcome and the turn that owns it. An
+advanced nonterminal turn must release its live results in the following model
+request; a terminal tool-only turn can complete without inventing such a
+release.
+
+Executable driving starts from `ExecutableTaskSpec`, not an arbitrary row. Its
+builder binds the complete canonical projection to the verified benchmark
+content and task order, checks candidate/task authorization in
+`EligibleEvalPlan`, requires a gold-eligible executable source, and binds the
+verified oracle and source clock. Model requests can read only the answer-free
+seed, model-facing tools, candidate output, live tool results, and earned
+scripted user turns. Expected calls, recorded results, fixture references,
+milestones, dependencies, and assertion metadata remain runner-only.
+Assertion execution receives verified template metadata plus `slots`,
+`slots_initial`, and `slot_updates` reconstructed from the published opening
+surface, expected trace, cited fixture rows, and typed source values from the
+verified pack's fixture, literal, enum, range, and absent-id declarations. A
+final value no channel settles is reported in `unresolved_slots`; unknown
+pre-correction and correction values are reported independently in
+`unresolved_slots_initial` and `unresolved_slot_updates` instead of being guessed
+from another phase. The isolated assertion runner tracks reads of every class of
+missing slot; an assertion that reads one is recorded as an infrastructure error
+and terminates the episode rather than scoring against the candidate, while
+unrelated assertions retain their ordinary pass or fail verdict.
+
+Python and endpoint packs implement one `OracleSession` protocol. Both adapters
+use a task-local persistent process worker for reset, ordered calls, state, and
+assertions; Python pack modules are never imported by the evaluator process.
+Endpoint sessions are cleaned up on every exit path. A mutating call is never
+retried automatically, because losing its response does not prove its state
+change was rolled back. When a response arrives, canonical pre-call and
+post-call state hashes prove whether the mutation committed; a missing snapshot
+keeps the commit verdict unknown. Plan, source, publication, scoring policy, and
+task identities must agree before reset, and even preflight failure closes the
+already-open task-local session.
+
+Diagnostic prose and cache replay do not change the episode identity; canonical
+calls, results, reason codes, release verdicts, state, and assertion verdicts do.
+Each record excludes only its own diagnostic wording, so a key an oracle happens
+to name `detail` stays part of the evidence.
+
 ## What the score is taken over
 
 A number is only meaningful if the benchmark behind it is identified. Before any
@@ -121,22 +182,30 @@ what came back, whether each sent turn advanced, and why it stopped — reaching
 end of the trace, a mismatch, malformed output, an unreachable endpoint, an
 ambiguous tool-call id, or a spent turn or episode budget. A turn the episode
 budget prevented from being sent is a terminal event, not a fabricated candidate
-observation. Every number is derived from that record, so re-scoring never re-asks
+observation. The record retains `finish_reason`; an explicit truncation, content
+filter, or max-token finish cannot be converted into a complete answer by
+re-scoring. Every number is derived from that record, so re-scoring never re-asks
 the model.
 
 ## Argument matching
 
 `argument_matching: schema_then_canonical` (*pinned*)
 
-1. **Schema step.** Each argument is interpreted against the tool's declared
-   parameter schema from the row's `tools`. When
+1. **Schema step.** The candidate argument object must satisfy the tool's
+   declared parameter schema from the row's `tools`. Defaults are annotations,
+   not supplied arguments: a parameter that is both required and defaulted is
+   still missing when the candidate omits it. A schema-invalid call neither
+   matches the trace nor earns a recorded result.
+2. **Default-equivalence step.** After schema validation passes, when
    `insert_declared_defaults: true`, a parameter the schema declares a default for
    is filled with that default on whichever side omitted it, so a model that
    spells out a default is neither rewarded nor punished for it. Filling only the
    omitting side is what makes this do anything: filling both sides, or neither,
    would leave the two spellings unequal. Insertion recurses through nested
-   objects and arrays and follows local `$ref` and `allOf` schemas.
-2. **Canonical step.** Both sides are then compared as canonical JSON, by type as
+   objects and arrays and follows validated local `$ref` and `allOf` schemas.
+   Pack validation rejects external, missing, or cyclic references and rejects a
+   declared default that does not satisfy the schema it would be inserted under.
+3. **Canonical step.** Both sides are then compared as canonical JSON, by type as
    well as by value. `1`, `1.0`, `"1"`, and `true` are four distinct values: a
    scorer that treated them as equal would accept a limit of `"1"` where the gold
    call passed the integer `1`.
@@ -163,19 +232,110 @@ schemas are incomplete and is not publishable.
   either order, but both come after login". Repeated calls to one tool do not
   consume additional prefix positions.
 
+Relaxing `respect_call_group` or `respect_call_order` changes what is *scored*,
+not what replay can hand back. Replay holds exactly one recorded result per gold
+call, so a turn of a different size still has no faithful reply and still ends
+the episode; and a strict row answered out of order still earns no result at the
+point the trace reached. A debug run with either flag relaxed therefore reports
+the gate as not applicable while the completion gate below still fails. This is
+deliberate: the flags are for asking "would this model have been right under
+looser rules", not for turning an unreplayable episode into a success.
+
+## What a trace score reports
+
+A number is only comparable if it says what it measured, so a trace score is not
+a verdict with a label. It names every gate this contract defines, says whether
+that gate applied to the row, and — when a gate failed — which assistant turn a
+reader should look at. A gate that does not apply is reported as such rather than
+omitted or counted as a pass: a report that silently dropped the ordering gate on
+single-call rows could not be told apart from one where ordering was checked.
+
+Two kinds of gate are reported, and the difference decides what a gate rate over
+a benchmark means.
+
+*Coverage* gates ask whether the whole gold trace was requested. Gold calls in
+turns the episode never reached count against them, because a model that stopped
+early did not ask for them.
+
+- `tool_selection` — every gold call was requested, and nothing the trace does
+  not ask for was called.
+- `arguments` — every gold call's arguments matched, under the three steps above.
+
+*Consistency* gates ask whether what the model did do was well formed. They are
+measured only over the turns that were actually asked, so an episode that stopped
+early is not additionally penalized for turns it never saw.
+
+- `schema_valid` — every call the model made satisfies its own declared parameter
+  schema. This is reported separately from `arguments` because "the amount was
+  wrong" and "the schema forbids this argument at all" are different failures.
+  Declared defaults are deliberately *not* filled in before this check: a
+  parameter that is both defaulted and required is one the caller has to pass,
+  and inserting it first would let default insertion launder a missing required
+  argument into a pass. Under `canonical_only` there is no schema step, so this
+  gate does not apply.
+- `call_grouping` — each asked turn issued its gold call group.
+- `call_ordering` — the calls that were made respect the row's `call_order`.
+  Ordering is judged independently of selection: a turn that called the trace's
+  tools in the wrong order fails ordering only, and a turn that called something
+  else entirely fails selection only. Attributing a permutation to both gates
+  would report that the model got the order wrong when it never got as far as
+  having an order to get wrong.
+- `text_turn` — each asked turn the trace answers in words was answered in words,
+  an intermediate one reproduced the recorded text, and a terminal one contained
+  non-empty plain or structured textual content. `null`, whitespace, empty
+  containers, and metadata-only content are not final answers.
+
+One gate stands apart and always applies:
+
+- `trace_completion` — the conversation reached the end of the trace. Because
+  this gate is never skipped, no unfinished episode can be a success, whatever
+  the flags say. An explicit incomplete provider `finish_reason` fails this gate
+  even if imported evidence incorrectly claims that the episode completed. An
+  episode that ended for a reason that is not the model's
+  answer — an unreachable endpoint, a spent episode budget, a turn budget below
+  what the trace needs — is additionally marked as such, so a report can separate
+  a broken run from a wrong model without softening either one's score.
+
+These gates roll up into the metric names an exported bundle declares:
+`tool_selection` and `arguments` map to themselves, `schema_valid` also reports
+under `arguments`, `call_grouping` and `call_ordering` both report under
+`call_ordering`, and `text_turn` and `trace_completion` report under
+`task_success`. The bundle's remaining metric, `results`, has no trace gate: it
+is what oracle replay measures, and a trace score never stands in for one.
+
+A score requires the `EligibleEvalPlan` that authorized the episode. The
+episode's plan identity, candidate weights, task, script source, and the scoring
+policy's content hash must all match that plan. The score derives the complete
+`eval_config_hash` from the plan rather than accepting a caller-provided value,
+so evidence cannot be restamped as coming from another benchmark or evaluation
+configuration. It cites the script and episode it was derived from, the pinned
+policy, and the content hash of this document, and it reads no clock and re-parses
+no provider bytes. Re-scoring the same recorded episode under the same authorized
+rules therefore reproduces the same score identity, which is what makes a
+published number auditable after the endpoint it came from is gone.
+
+Every gate carries a stable `reason_code`. Human-readable `detail` explains the
+verdict but is excluded from `score_hash`, as are call- and turn-level diagnostic
+strings. Rewording a diagnosis without changing evidence, reason codes, or
+structural verdicts does not create a different score. Each record excludes only
+its own diagnostic wording; a declared constraint or argument value is not
+diagnostic prose because a schema author named it `detail`, so reported evidence
+stays inside the score identity.
+
 ## Task success
 
 `task_success: all_applicable_gates` (*pinned*)
 
-A task counts as a success only when every gate that applies to it passes: tool
-selection, argument match, grouping and ordering, and — in `executable` mode —
-oracle replay plus every success assertion the pack declared for the row. A gate
-that does not apply to a row (a single-call row has no ordering gate) is not
-counted for or against it.
+A task counts as a success only when every gate that applies to it passes: the
+gates above and — in `executable` mode — oracle replay plus every success
+assertion the pack declared for the row. A gate that does not apply to a row (a
+single-call row has no ordering gate) is not counted for or against it.
 
 `assertions_only` scores just the pack assertions. It answers a different
 question ("did the end state come out right, however the model got there") and is
-not publishable as a function-calling score.
+not publishable as a function-calling score. A trace score has no oracle to
+evaluate assertions with, so asking for that mode there is refused rather than
+approximated by the trace gates.
 
 ## Repair
 

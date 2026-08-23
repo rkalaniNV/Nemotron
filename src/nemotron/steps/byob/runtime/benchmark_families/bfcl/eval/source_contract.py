@@ -365,6 +365,11 @@ class VerifiedOracleSource(_Verified):
             "endpoint": self.endpoint.semantic_payload() if self.endpoint is not None else None,
         }
 
+    @property
+    def verification_identity(self) -> str:
+        """Path-free identity of the executable oracle resource that was verified."""
+        return _sha256_json(self.semantic_payload())
+
 
 class VerifiedTranslationSource(_Verified):
     """A translated benchmark that derives from this source run without changing its truth."""

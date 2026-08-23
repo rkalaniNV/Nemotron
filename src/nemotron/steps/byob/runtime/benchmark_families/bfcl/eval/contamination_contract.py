@@ -225,6 +225,7 @@ class EligibleEvalPlan(_Verified):
 
     schema_version: Literal["1.0"] = CONTAMINATION_CONTRACT_VERSION
     eval_config_hash: ContentHash
+    scoring_policy_hash: ContentHash
     source_verification_identity: ContentHash
     source_run_id: StrictStr
     source_task_ids_hash: ContentHash
@@ -298,6 +299,7 @@ class EligibleEvalPlan(_Verified):
         return {
             "schema_version": self.schema_version,
             "eval_config_hash": self.eval_config_hash,
+            "scoring_policy_hash": self.scoring_policy_hash,
             "source_verification_identity": self.source_verification_identity,
             "source_run_id": self.source_run_id,
             "source_task_ids_hash": self.source_task_ids_hash,

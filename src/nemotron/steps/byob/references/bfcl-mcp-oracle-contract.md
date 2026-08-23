@@ -18,9 +18,9 @@ A requirement that applies to only one mode says so.
 
 | Level | Claim | Requires | Publication |
 | --- | --- | --- | --- |
-| `L0` discovery | The catalog can be normalized into `tools.json` | `tools/list` normalizes without exclusions the operator did not accept (§7) | Authoring intake only. No oracle, no execution claim. |
+| `L0` discovery | The catalog can be normalized into `tools.json` | Probes `P1`–`P3`: initialize succeeds, every catalog page is retrieved, and the selected tools normalize (§7) | Authoring intake only. No oracle, no execution claim. |
 | `L1` executable | Episodes can be reset, called, and read | A working control plane (§4), the result mapping total over every included tool (§8), probes `P1`–`P4` | `lineage.policy: smoke_no_publication` only |
-| `L2` certifiable | The oracle is trustworthy enough for BFCL to certify | `L1` plus probes `P5`–`P11` and server-derived identity (§9) | Publishable if BFCL's own gold gate passes |
+| `L2` certifiable | The oracle is trustworthy enough for BFCL to certify | `L1` plus every applicable target probe, gateway conformance tests, complete observable state, and effective identity (§9–§10) | Publishable if BFCL's own gold gate independently verifies the `L2` attestation and passes |
 
 `L2` is a precondition, not a verdict. A pack on an `L2` server still has to pass
 `run_oracle_validation`; the levels only describe what the MCP side contributed.
@@ -28,13 +28,32 @@ A level is recorded in the gateway's conformance artifact and in the pack's
 provenance, so a pack can never be published on the strength of an unstated
 assumption about its server.
 
+### Enforcement boundary
+
+The level is not advisory metadata. An MCP-backed endpoint config pins
+`attestation.expected_digest`; during prepare, the endpoint client retrieves
+`GET /v1/conformance`, verifies the document against that digest, and copies the
+verified document into `oracle_validation_report.json`. `derive_pack_tier` treats all
+of the following as publication blockers:
+
+- the attestation is missing, malformed, or does not match the pinned digest;
+- `level` is not `L2`;
+- `effective_content_digest` differs from `/v1/metadata.content_digest`;
+- a required or applicable probe is not `pass`;
+- a gateway conformance test refers to a different gateway artifact digest.
+
+This is a provider-neutral extension of endpoint validation: the Gold Gate reads a
+strict attestation schema and digests, not MCP messages. An `L1` gateway can still be
+used by a pack whose lineage is `smoke_no_publication`; changing lineage does not
+upgrade the attestation.
+
 ## 2. Operating Modes
 
 | Mode | Situation | Reset strategy | State strategy | Fixtures | Reachable level |
 | --- | --- | --- | --- | --- | --- |
 | `A` cooperative | The operator controls the server and can add the control tools of §4 | `control_tool` | `control_tool` | pushed to the server | `L2` |
 | `B` shimmed | The server cannot be changed; the gateway owns a wrapper that launches, seeds, and inspects it | `process_restart` or `namespace` | `read_only_projection` or a shim-provided control tool | pushed by the shim | `L2` when the shim can seed and isolate |
-| `C` read-only snapshot | A third-party server with data the operator cannot seed, exposing non-mutating tools only | `no_op_verified` | `read_only_projection` | **snapshotted from** the server at discovery | `L2` for read-only domains |
+| `C` read-only snapshot | A third-party server with data the operator cannot seed, exposing non-mutating tools only | `no_op_verified` | `read_only_projection` | **snapshotted from** the server at discovery | `L1` by default; `L2` only with an enforceable read-only boundary, complete state projection, and effective identity |
 
 Mode `C` inverts the usual direction of fixtures. Nothing is pushed; `fixtures.json`
 is a snapshot of the server's own data taken during discovery, so template slots bind
@@ -43,22 +62,28 @@ upstream data drift is detected as an identity change rather than as a run of
 mysteriously failing tasks. The cost is stated plainly: mode `C` exposes no mutating
 tool, so it cannot cover the `confirmation`, `correction`-of-a-mutation, or
 mutation-assertion task categories, and a pack built on it is narrower by
-construction rather than by accident.
+construction rather than by accident. Calling a credential or tool “read-only” is
+not enough for `L2`: the boundary must be enforced by the upstream authorization
+scope, an immutable snapshot sandbox, or an equivalent mechanism the conformance
+artifact names. If hidden state can change without appearing in the state projection,
+the mode remains `L1`.
 
 Mode `B` is the one that makes this contract usable against servers in the wild. The
 shim is gateway-side code, not pack code, so it is not fingerprinted as pack content;
-its version enters the catalog digest instead (§9).
+its exact artifact digest enters effective identity instead (§9).
 
 ## 3. Gateway Obligations
 
-The gateway exposes BFCL Oracle HTTP v1 and nothing else. Routes and payloads are
-fixed by `EndpointOracleClient`; `protocol_version` is always the literal
-`bfcl-oracle-http-v1`, which names the BFCL contract and is unrelated to the MCP
-version.
+The gateway exposes BFCL Oracle HTTP v1 and its provider-neutral conformance
+extension, and nothing else. Execution routes and payloads are fixed by
+`EndpointOracleClient`; Epic 4 adds only the read-only conformance route and client
+method. `protocol_version` remains the literal `bfcl-oracle-http-v1`, which names the
+execution contract and is unrelated to the MCP version.
 
 | BFCL route | Gateway obligation |
 | --- | --- |
-| `GET /v1/metadata` | Return `{protocol_version, oracle_id, oracle_version, content_digest}` with exactly those four keys, all non-empty strings, `content_digest` matching `sha256:<64 hex>`. Derived per §9. |
+| `GET /v1/metadata` | Return `{protocol_version, oracle_id, oracle_version, content_digest}` with exactly those four keys, all non-empty strings, `content_digest` matching `sha256:<64 hex>`. The digest is the effective digest derived per §9. |
+| `GET /v1/conformance` | Return the strict attestation document pinned by the endpoint config. This route is read only, bounded by the endpoint response limit, and may be called before any session exists. |
 | `GET /v1/tools` | Return `{"tools": [<name>, ...]}` — the published business tool names in catalog order (§7). Control tools never appear. The client re-reads metadata before every list, so identity must be stable within a run. |
 | `POST /v1/sessions` | Body carries `context{clock, seed, timeout_s, task_id}` and `fixtures`. Open one isolated episode, apply the reset strategy, propagate the frozen clock and seed, and return `{session_id, oracle{...identity...}}`. The identity must equal the metadata identity or the client aborts. |
 | `POST /v1/sessions/{id}/calls` | Body carries `{name, arguments, turn_index}`. Invoke `tools/call` on the bound episode and return the mapped result object (§8). |
@@ -79,7 +104,18 @@ be trusted:
 - **A call is never retried.** `EndpointOracleClient` does not retry mutating
   requests, and the gateway must not retry `tools/call` either: a transport failure
   after the server applied a mutation is indistinguishable from one before, so a
-  retry can double-apply. Report `mcp_call_failed` and let the task drop.
+  retry can double-apply. Report `mcp_call_failed` and let the task drop. A timeout
+  or transport failure with unknown commit status **poisons the episode**: the
+  gateway attempts teardown and refuses later calls or state reads for that session.
+  Closing an HTTP response stream is not evidence that the server rolled back.
+- **Infrastructure failures use non-2xx HTTP responses.** `mcp_session_unknown`,
+  `mcp_call_failed`, `mcp_call_timeout`, and other `mcp_*` codes are gateway
+  diagnostics, not tool results. They are written to the gateway/conformance
+  artifact and returned in a bounded error body, but the current
+  `EndpointOracleClient` intentionally turns the response into a raised endpoint
+  error. A gateway must never return HTTP 200 with `{"error": {"code":
+  "mcp_call_failed"}}`: BFCL would classify that as a business error and a negative
+  validation case could pass for the wrong reason.
 - **Concurrency is supported, not relied upon.** BFCL generation drives one session
   at a time, so correctness must not depend on parallelism; but the gateway must
   serve at least two concurrent episodes, otherwise the isolation probe `P6` cannot
@@ -124,19 +160,26 @@ Whichever strategy is used, these hold:
 - **Reset replaces, never merges.** A second episode must not inherit the first's
   mutations. Under `no_op_verified` the strategy is only valid if no exposed tool can
   mutate observed state, and probe `P10` must confirm exactly that.
-- **A `read_only_projection` is deterministic and pure.** The declared probe calls
+- **A `read_only_projection` is deterministic, pure, and complete for the exposed
+  effects.** The declared probe calls
   run in declared order, their results are serialized with the repo's
   `canonical_json`, and they must not mutate. Reading state must be repeatable,
-  because check `D1` compares state around a call.
+  because check `D1` compares state around a call. For `L2`, every state change an
+  exposed tool can cause must change this document. A projection that only samples
+  visible fields while hidden state may mutate is diagnostic state and caps the
+  endpoint at `L1`.
 - **Episode binding is verified, not assumed.** Allowed channels, in order of
   preference: `transport` (one process or namespace per episode, so no token is
   needed), `meta` (`_meta.bfcl.episode_id` on the `tools/call` request, the
   specification's designated extension slot), or `argument` (an injected argument
   named in config). A server that accepts `_meta` and ignores it routes every call to
   one shared episode while looking healthy, so probe `P6` must prove binding works
-  rather than trusting that it does. With `argument`, the injected name must not
-  appear in the model-facing `tools.json`: the evaluated model never sees an episode
-  id.
+  rather than trusting that it does. With `argument`, the **upstream** MCP input
+  schema must declare the episode property; normalization removes that property and
+  its `required` entry from the model-facing schema, and the gateway injects it only
+  after validating the model arguments. If the upstream schema does not declare it,
+  argument binding is invalid at `L2` even when `additionalProperties` is true. The
+  evaluated model never sees or chooses an episode id.
 - **Isolation.** Two concurrent episodes must not observe each other's state, and a
   new episode must not inherit a previous one's. BFCL check `I1` separately requires
   `oracle_runtime.worker: process`; the gateway's own isolation mode is declared in
@@ -145,8 +188,11 @@ Whichever strategy is used, these hold:
   must produce identical results and identical state. Wall-clock reads, unseeded
   randomness, unpinned upstream dependencies, and counters that survive a reset all
   violate this, and check `D1` is what detects them.
-- **Frozen time and seed.** `context.clock` and `context.seed` must be honored by
-  whatever generates timestamps or identifiers.
+- **Frozen time and seed are conditional inputs.** The externally testable
+  requirement is observational determinism: identical snapshot, arguments, and
+  context yield identical results and state. A tool that generates timestamps,
+  random identifiers, or sampled values must consume `context.clock` and
+  `context.seed`; a static read-only server need not accept inputs it never uses.
 - **Bounded calls.** A call must return or fail within `limits.tool_timeout_s`. Check
   `T1` requires that a hung tool is killed on the same path pack tools run through,
   so the gateway must cancel in flight — `notifications/cancelled` on stdio, closing
@@ -183,6 +229,7 @@ transport:
   command: ["python", "-m", "acme_banking_mcp"]
   cwd: /opt/acme-banking-mcp         # must resolve under an allowed root
   env_passthrough: [ACME_MCP_TOKEN, ACME_MCP_TENANT]
+  executable_policy: acme-mcp-runtimes
   # kind: streamable_http
   # url: https://mcp.internal.example.com/mcp
   # auth: {bearer_token_env: ACME_MCP_TOKEN, headers: {X-Tenant: ACME_MCP_TENANT}}
@@ -194,7 +241,7 @@ expected:
   tool_catalog_digest: "sha256:<64 hex>"
   oracle_id: acme-banking
   oracle_version: "3.2.0"
-  content_digest: "sha256:<64 hex>"  # omit only when describe_oracle is absent
+  server_content_digest: "sha256:<64 hex>"  # omit only when describe_oracle is absent
 
 control:
   reset_strategy: control_tool       # control_tool | process_restart | namespace | no_op_verified
@@ -254,13 +301,21 @@ Validation rules the loader enforces:
 - `url` must be `https` with no credentials, query, or fragment. `http` is allowed
   only for `localhost` and only under a non-publication lineage policy.
 - `command` must be an argument vector, never a shell string, and its executable must
-  resolve under an allowed root. `env_passthrough` names variables to forward; every
-  other variable is withheld from the child.
+  resolve through a separately configured `trusted_executables` policy. That policy
+  pins the resolved executable path and artifact/package digest; it is not
+  `oracle_runtime.allowed_roots`. Pack roots govern what pack data may be read,
+  whereas executable policy governs what host code may run. `env_passthrough` names
+  variables to forward; every other variable is withheld from the child.
 - `ca_bundle_path` must resolve under an allowed root and inside the pack tree, so it
   participates in the fingerprint the way the endpoint CA bundle does.
-- `expected.tool_catalog_digest` is required. `expected.content_digest` is required
-  unless `control.describe_oracle` is omitted, in which case §9's fallback applies
-  and the level is capped at `L1`.
+- `expected.tool_catalog_digest` is required. `expected.server_content_digest` is
+  required when `control.describe_oracle` is present and must equal its response.
+  When the operation is absent, §9's fallback applies and a live endpoint is capped
+  at `L1`.
+- The generated `endpoint_config.yaml`, not this intake file, pins the conformance
+  attestation as shown below. Omitting that block caps the endpoint at `L1`; a pack
+  file that merely says `level: L2` without a matching live endpoint attestation has
+  no authority.
 - `tools.include` is an explicit ordered allowlist. A discovered tool that is not
   listed is excluded; a listed tool that is not discovered is an error. There is no
   implicit "expose everything".
@@ -272,8 +327,9 @@ Validation rules the loader enforces:
   parameter.
 - `trust_annotations` must be `false` at `L2`.
 - `episode_argument` is required when and only when `episode_binding: argument`, and
-  the named argument must not be a declared model-facing parameter of any published
-  tool.
+  the named argument must be declared by every bound upstream tool, then removed from
+  each published model-facing parameter schema. Removing it must leave a valid schema;
+  the gateway injects it after model-argument validation.
 - `results.error_path` names where the server places its error object inside
   `structuredContent`; the gateway republishes it under the key `error`, because
   `_classify_result` classifies on exactly that key and nothing else.
@@ -284,6 +340,27 @@ Validation rules the loader enforces:
 - Every value in `limits` must be a positive finite number; `NaN` and infinities are
   refused before they reach deadline arithmetic, as elsewhere in BFCL config.
 - No key may hold a secret-looking literal. Credentials are named, never inlined.
+
+For MCP-backed endpoints, Epic 4 extends the provider-neutral endpoint config with
+one optional block. Existing Python packs and endpoints that do not claim conformance
+remain valid:
+
+```yaml
+protocol_version: bfcl-oracle-http-v1
+base_url: https://127.0.0.1:9443
+expected:
+  oracle_id: acme-banking
+  oracle_version: "3.2.0"
+  content_digest: "sha256:<effective digest>"
+attestation:
+  kind: bfcl-endpoint-conformance-v1
+  expected_digest: "sha256:<digest of GET /v1/conformance>"
+```
+
+`load_endpoint_config` rejects unknown keys today, so this block requires an explicit
+schema change; documentation alone does not activate it. The loader rejects unknown
+attestation fields and requires the block whenever publication is requested for an
+MCP-backed endpoint.
 
 ## 6. MCP Version Support
 
@@ -361,6 +438,12 @@ Allowed types are `string`, `integer`, `number`, `boolean`, `array`, `object`, `
 - Order is deterministic: tools sorted by published name, object keys canonicalized
   through `canonical_json`, `required` sorted. Two discoveries of an unchanged server
   must produce byte-identical `tools.json`.
+- With `episode_binding: argument`, normalization performs one additional,
+  deterministic projection: remove the configured episode property from
+  `properties` and `required` after verifying it is declared upstream. The unmodified
+  upstream schema remains in evidence and is what the gateway uses after injection.
+  This is the only parameter removed for transport purposes; arbitrary backend-only
+  parameter stripping is not allowed.
 
 ### Descriptions
 
@@ -393,10 +476,10 @@ looser than that, so the mapping is total and explicit.
 
 | MCP `tools/call` result | Mapped BFCL result | Class |
 | --- | --- | --- |
-| `isError` absent or false, `structuredContent` is a JSON object carrying no error at `results.error_path`, and its `status_field` is absent or not `pending_status` | `structuredContent` verbatim | `success` |
-| `isError` absent or false, `structuredContent` is an object whose `status_field` equals `pending_status` | `structuredContent` verbatim | `awaiting_confirmation` |
+| `isError` absent or false, no value exists at `results.error_path`, and `status_field` equals `pending_status` | `structuredContent` verbatim | `awaiting_confirmation` |
+| `isError` absent or false, no value exists at `results.error_path`, and `status_field` is absent or differs from `pending_status` | `structuredContent` verbatim | `success` |
 | `isError: true` **and** the object at `results.error_path` carries `code` as a non-empty string | that object under the key `error` | `structured_error` |
-| `isError` absent or false but the object at `results.error_path` carries `code` | that object under the key `error`, and the inconsistency is recorded | `structured_error` |
+| `isError` absent or false but any value exists at `results.error_path` | route failure `mcp_error_flag_inconsistent` | none |
 | `isError: true` without a machine-readable code | route failure `mcp_unstructured_error` | none |
 | `structuredContent` absent, or not a JSON object | route failure `mcp_result_not_object` | none |
 | `InputRequiredResult` | route failure `mcp_input_required_unsupported` | none |
@@ -405,9 +488,22 @@ looser than that, so the mapping is total and explicit.
 | Timeout or cancellation | route failure `mcp_call_timeout` | none |
 | Transport failure mid-call | route failure `mcp_call_failed`, never a retry | none |
 
+The precedence is fixed: reject protocol and shape errors first; then, only when
+`isError: true`, map a valid structured error; then map pending confirmation; finally
+map success. An object cannot be both a pending confirmation and an error. A legacy
+server that returns an error envelope without `isError` needs a reviewed mode-`B`
+shim that supplies the missing protocol signal; the gateway does not reinterpret a
+domain field by itself.
+
 The `content` array is never the source of truth. It is human-facing text a server may
 format freely, and MCP only *recommends* mirroring `structuredContent` into it. It is
 retained in the diagnostic artifacts and never reaches a published row.
+
+When the tool declares `outputSchema`, the gateway validates `structuredContent`
+against that schema before applying the table above. A mismatch is the infrastructure
+failure `mcp_output_schema_mismatch`, not a business error. The original output schema
+and validator implementation digest are retained in evidence; silently dropping an
+unsupported output constraint would certify data the server's own contract rejects.
 
 `structuredContent` may legally be any JSON value, including an array or a scalar.
 BFCL reads results as mappings — `_classify_result` looks up the `error` key and a
@@ -456,46 +552,116 @@ order, separators, and non-ASCII handling are decided once, in code the pipeline
 already uses.
 
 - **`tool_catalog_digest`** covers
-  `{profile_version, mode, negotiated_mcp_version, server_name, server_version, tools: [normalized definitions in published order], control: {resolved names and strategies}, adapter_version, shim_version}`.
+  `{profile_version, mode, negotiated_mcp_version, server_name, server_version, tools: [normalized definitions in published order], control: {resolved names and strategies}}`.
   Volatile fields — `nextCursor`, `ttlMs`, `cacheScope`, request ids — are excluded,
   because a cache directive or a pagination token is not part of the contract.
-- **`content_digest`** is the digest the server reports through `describe_oracle`. It
-  is the server's own statement about its domain content — fixture handling, business
-  rules, data version — which a catalog digest cannot see. In mode `C` it must also
-  cover the fixture snapshot, so upstream data drift changes identity.
-- **Fallback.** Without `describe_oracle`, the gateway reports the catalog digest as
-  `content_digest` and records `content_digest_source: catalog_fallback`. That pack is
-  capped at `L1`: a server can change its business logic without changing one byte of
-  its catalog, so the fallback cannot support a claim that the oracle being replayed
-  is the oracle that was certified.
+- **`server_content_digest`** is the digest the server reports through
+  `describe_oracle`. It is the server's statement about domain content — fixture
+  handling, business rules, and data version — which a catalog digest cannot see.
+- **Artifact digests, not version labels.** `gateway_artifact_digest` and an optional
+  `shim_artifact_digest` hash the exact executable/package artifacts used. Version
+  strings remain descriptive metadata and never substitute for these hashes.
+- **`snapshot_digest`** is present in mode `C` and covers the exact canonical fixture
+  snapshot BFCL sends back on session creation.
+- **`effective_content_digest`**, exposed as `/v1/metadata.content_digest`, is
+  `sha256(canonical_json({server_content_digest, tool_catalog_digest,
+  gateway_artifact_digest, shim_artifact_digest, snapshot_digest,
+  profile_version, negotiated_mcp_version}))`. Null optional components are retained
+  so two modes cannot hash the same document accidentally.
+- **Fallback.** Without `describe_oracle`, `server_content_digest` is null. The
+  effective digest still detects catalog, adapter, shim, and snapshot drift, but not a
+  live server changing business logic behind the same catalog. A live endpoint is
+  therefore capped at `L1`. Mode `C` may reach `L2` without a server digest only when
+  it executes against an immutable local snapshot sandbox rather than the live
+  third-party service; the sandbox artifact and snapshot are then the oracle being
+  certified.
 - **Handshake pinning.** `expected.server_name`, `expected.server_version`, and the
   negotiated MCP version are checked before any probe runs, because a probe against
   an unexpected server produces confident results about the wrong thing.
 
+### 9.1 Conformance attestation
+
+`GET /v1/conformance` returns exactly this provider-neutral shape:
+
+```json
+{
+  "schema_version": "bfcl-endpoint-conformance-v1",
+  "provider_kind": "mcp",
+  "profile_version": "bfcl-mcp-oracle-v1",
+  "level": "L2",
+  "effective_content_digest": "sha256:<64 hex>",
+  "gateway_artifact_digest": "sha256:<64 hex>",
+  "shim_artifact_digest": null,
+  "tool_catalog_digest": "sha256:<64 hex>",
+  "server_content_digest": "sha256:<64 hex>",
+  "snapshot_digest": null,
+  "probe_report_digest": "sha256:<64 hex>",
+  "gateway_conformance_report_digest": "sha256:<64 hex>",
+  "gateway_evidence_kind": "locally_verified",
+  "gateway_evidence_issuer": "bfcl-mcp-conformance-v1",
+  "state_observability": "complete",
+  "read_only_boundary": null,
+  "checks": [
+    {"id": "P1", "requirement": "required", "status": "pass", "reason": null},
+    {"id": "P8", "requirement": "conditional", "status": "not_applicable", "reason": "no gated tool"}
+  ]
+}
+```
+
+Unknown or missing fields are rejected. Optional digests are explicit JSON `null`,
+not omitted. `state_observability` is `complete` or `diagnostic`; only `complete`
+can reach `L2`. A mode-C attestation additionally names `read_only_boundary` as
+`upstream_authorization`, `immutable_snapshot_sandbox`, or another profile value
+implemented by the verifier; free-form claims are not accepted.
+
+The Gold Gate treats `checks` generically: every `required` check must be `pass`; a
+`conditional` check may be `not_applicable` only with a non-empty reason; `skipped`
+never satisfies either. It does not need to know what `P1` or `P8` means. The
+provider-specific report explains each check and is pinned by
+`probe_report_digest`.
+
+The gateway does not get to certify itself. `gateway_evidence_kind` is either
+`locally_verified`, meaning prepare ran the BFCL-owned conformance suite against the
+exact artifact digest, or `signed_release`, meaning the report signature chains to a
+trust root configured outside the pack. A self-reported or self-signed report caps the
+endpoint at `L1`, regardless of its `level` field.
+
+The attestation digest is `sha256(canonical_json(document))`. The probe and gateway
+conformance reports are content-addressed artifacts retained with the prepare output;
+their digests are not evidence when the corresponding artifact is absent. The Gold
+Gate verifies the attestation and reports rather than trusting `level` as a summary
+flag, following the same rule by which generation re-derives Gold eligibility from
+individual checks.
+
 ## 10. Conformance Probes
 
-`MCP-4xx` implements these as a preflight the gateway runs before BFCL sees the
-endpoint. Each probe names the BFCL check it protects, so a failure explains itself in
-the vocabulary of the existing gold gate.
+The attestation separates **gateway conformance tests**, run against a controlled MCP
+fixture server when the gateway artifact is built, from **target probes**, run against
+the selected server and its declared validation cases. This avoids requiring an
+arbitrary third-party server to expose a deliberately slow or invalid tool merely to
+test gateway mechanics.
 
 | Probe | Passes when | Protects | Needed for |
 | --- | --- | --- | --- |
-| `P1 handshake` | negotiated MCP version, server name, and server version match `expected` | identity comparison | `L1` |
-| `P2 catalog` | all pages retrieved, digest matches `expected.tool_catalog_digest`, every `tools.include` entry found, published set is exactly `tools.include` | check 3, `TM-13` | `L1` |
+| `P1 handshake` | negotiated MCP version, server name, and server version match `expected` | identity comparison | `L0` |
+| `P2 catalog` | all pages retrieved, digest matches `expected.tool_catalog_digest`, every `tools.include` entry found, published set is exactly `tools.include` | check 3, `TM-13` | `L0` |
 | `P3 normalization` | every included tool maps into the supported schema subset | check 3 | `L0` |
-| `P4 control` | the mode's reset, state, and teardown strategies work with the declared shapes | reset, state, close | `L1` |
+| `P4 executable smoke` | the mode's reset, state, and teardown strategies work, and at least one declared success case per included tool maps under §8 | reset, call, state, close | `L1` |
 | `P5 reset` | two fresh episodes with identical fixtures and context yield identical state | check `D1` | `L2` |
-| `P6 isolation` | two concurrent episodes do not observe each other's mutations, and a bound call reaches its own episode | check `I1`, binding | `L2` |
-| `P7 error shape` | at least one deliberately invalid call returns `error.code` | check `D2` | `L2` |
+| `P6 isolation` | mutating modes prove cross-episode state separation; read-only mode proves its authorization/sandbox boundary and that bound calls reach the intended episode | check `I1`, binding | `L2` |
+| `P7 error shape` | every validation case expected to produce a structured error returns `error.code`; not applicable when the pack declares no structured-error case | check `D2` | `L2` when applicable |
 | `P8 confirmation` | a gated tool called with confirmation false returns the pending status and leaves state unchanged | check 6 | `L2` when any tool is gated |
-| `P9 timeout` | a call exceeding `limits.tool_timeout_s` is cancelled and reported | check `T1` | `L2` |
+| `P9 gateway timeout conformance` | the pinned gateway artifact cancels a deliberately hung call on a controlled fixture MCP server, never retries it, poisons the episode, and does not mistake stream closure for rollback | check `T1`, unknown commit state | `L2`; trusted build-time or prepare-time conformance test |
 | `P10 mutation` | every `tools.mutates` entry changes state in at least one successful probe, and no undeclared tool does | check `M1` | `L2` |
-| `P11 rejected shapes` | no included tool returns `InputRequiredResult`, a task handle, or non-object content | §8 | `L2` |
+| `P11 observed result shapes` | every result path exercised by validation cases maps under §8; coverage is recorded per tool and result class rather than claimed for unobserved outputs | §8 | `L2` |
 
-A probe whose precondition failed is recorded as skipped, never as passed, following
-the rule `run_oracle_validation` already applies. `P8` is skipped rather than passed
-when no tool is gated, and a mode `C` configuration therefore cannot claim
-confirmation coverage.
+A required probe whose precondition failed is recorded as skipped, never as passed,
+following the rule `run_oracle_validation` already applies. A conditionally
+applicable probe is recorded as `not_applicable` with the fact that made it
+inapplicable — for example, `P8` when no tool is gated or `P7` when no structured
+error case is declared. `not_applicable` does not claim coverage. The attestation
+contains the per-tool paths actually observed, so `P11` cannot be read as a universal
+claim about outputs no test exercised.
 
 ## 11. Deferred Extension Points
 

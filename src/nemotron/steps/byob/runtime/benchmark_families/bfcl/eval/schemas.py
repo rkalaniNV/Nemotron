@@ -350,6 +350,11 @@ class EvalScoringConfig(_Strict):
             "task_success": self.task_success,
         }
 
+    @property
+    def scoring_policy_hash(self) -> str:
+        """Content identity of the scoring rules, independent of config paths."""
+        return _sha256_json(self.semantic_payload())
+
 
 class EvalLimits(_Strict):
     """Runtime bounds, all pinned; nothing is inherited from a provider default.
