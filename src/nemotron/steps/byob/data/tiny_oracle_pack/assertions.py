@@ -58,3 +58,26 @@ ASSERTIONS = {
     "assert_book_now_on_loan": assert_book_now_on_loan,
     "assert_no_tool_called": assert_no_tool_called,
 }
+
+ASSERTION_CAPABILITIES = {
+    "assert_book_status_reported": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_checkout_awaiting_then_committed": {
+        "trace": False,
+        "executable": True,
+        "category": "state",
+    },
+    "assert_book_now_on_loan": {
+        "trace": False,
+        "executable": True,
+        "category": "state",
+    },
+    "assert_no_tool_called": {
+        "trace": True,
+        "executable": True,
+        "category": "path",
+    },
+}

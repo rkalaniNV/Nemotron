@@ -444,6 +444,21 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
                         "detail": assertion_report[name]["reason"],
                     }
                 )
+            elif assertion_report[name]["capabilities"] is None:
+                failures_4.append(
+                    {
+                        "assertion": name,
+                        "reason": "invalid_assertion_capability",
+                        "detail": assertion_report[name]["capability_reason"],
+                    }
+                )
+            elif not assertion_report[name]["capabilities"]["executable"]:
+                failures_4.append(
+                    {
+                        "assertion": name,
+                        "reason": "assertion_not_executable_compatible",
+                    }
+                )
     checks.append(
         {
             "id": 4,

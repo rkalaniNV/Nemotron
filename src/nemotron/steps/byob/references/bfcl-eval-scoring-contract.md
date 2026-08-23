@@ -31,7 +31,7 @@ Two evaluation modes exist, and a report always says which one produced a number
   The source manifest's `oracle.kind` is lineage, not an executable resource.
 
 An executable run records a versioned `ExecutableEpisode` before scoring. The
-episode binds the verified source and oracle identities and preserves every
+episode binds the verified source, oracle, and complete executable-task identities and preserves every
 candidate turn, one outcome for every proposed call (including calls that were
 not executable), the final-state hash, and classified assertion outcomes. Each
 outcome is bound to the provider call it records by typed JSON equality, so a
@@ -63,6 +63,13 @@ verified oracle and source clock. Model requests can read only the answer-free
 seed, model-facing tools, candidate output, live tool results, and earned
 scripted user turns. Expected calls, recorded results, fixture references,
 milestones, dependencies, and assertion metadata remain runner-only.
+Each verified `from_result` marker is projected into explicit producer,
+consumer, argument-path, and result-path coordinates. Before the consumer is
+asked, its expected argument is rebuilt from the paired producer's live result.
+The candidate call is never repaired. Missing or ambiguous producers,
+unavailable results, missing paths, type mismatches, and schema-invalid
+substitutions are deterministic infrastructure outcomes; the recorded gold
+result is never consulted as a fallback.
 Assertion execution receives verified template metadata plus `slots`,
 `slots_initial`, and `slot_updates` reconstructed from the published opening
 surface, expected trace, cited fixture rows, and typed source values from the
@@ -85,11 +92,160 @@ post-call state hashes prove whether the mutation committed; a missing snapshot
 keeps the commit verdict unknown. Plan, source, publication, scoring policy, and
 task identities must agree before reset, and even preflight failure closes the
 already-open task-local session.
+A call that asserts the pack's confirmation parameter reaches the oracle only on
+a call turn covered by the user's scripted confirmation and after the
+candidate's complete call batch matches the authorized batch. A call that leaves
+that parameter unset is the unconfirmed probe a confirmation template issues
+before the user answers, so it executes wherever the trace places it — the gate
+follows the same rule generation applies when it admits the template as gold. A
+bypass attempt is retained as `not_executed` evidence without invoking pack
+code, and ends the episode as `confirmation_not_earned`, a candidate stop.
 
 Diagnostic prose and cache replay do not change the episode identity; canonical
 calls, results, reason codes, release verdicts, state, and assertion verdicts do.
 Each record excludes only its own diagnostic wording, so a key an oracle happens
 to name `detail` stays part of the evidence.
+
+Executable scoring is a pure projection of that evidence.
+`score_executable_episode(...)` first requires the episode, task spec,
+authorization plan, source, oracle, script, eval config, scoring policy,
+candidate identity, and task authorization to agree. Identity drift, missing or
+unexpected assertions, and mutation-policy contradictions are typed evidence
+errors, not ordinary failed scores.
+
+The scorer reuses the trace scorer's normalized call view and pure comparison
+kernel for tool selection, arguments, schema validity, grouping, ordering, text,
+and trace completion. It adds five dimensions:
+
+- `oracle_execution`: `completed` and structured `business_rejection` are
+  successful exchanges; not-executed calls are candidate failures, while
+  malformed results, tool failures, timeouts, and unknown execution outcomes
+  are infrastructure failures.
+- `dependency_resolution`: applies to reached `dependent_call` arguments.
+  Every expected downstream value must be derived from exactly one paired,
+  successful prior live execution and satisfy the verified path, JSON type, and
+  consumer schema. A candidate must emit that value itself for the ordinary
+  argument gate to pass.
+- `commit_state_known`: applies to mutating tools only. `committed` and
+  `not_committed` are determined evidence, `not_started` is valid for an
+  unexecuted call, and `unknown` is an infrastructure stop. A state delta never
+  substitutes for a semantic pack assertion.
+- `assertions`: observed assertions must form the declared sequence in order.
+  `passed` succeeds, `failed` is a candidate failure, `not_applicable` is
+  skipped, and `infrastructure_error` is a non-candidate stop. A fatal oracle
+  or state failure may leave a declared suffix unrun; the failed infrastructure
+  gate remains the stop and assertions are not fabricated. The scorer never
+  runs an assertion.
+- `executable_completion`: records whether live driving reached its terminal
+  boundary and classifies candidate and infrastructure stops separately.
+
+Every executable score reports all twelve trace and executable gates, using
+`not_applicable` rather than omission. Under pinned
+`task_success: all_applicable_gates`, every applicable gate must pass. Debug-only
+`assertions_only` requires at least one declared assertion and all of them to
+pass; candidate trace failures do not decide that mode, but evidence and
+infrastructure failures remain blockers. `allow_llm_repair` is always refused.
+
+Each score also emits the fixed per-task metric taxonomy
+`schema_valid_rate`, `tool_name_accuracy`, `argument_accuracy`,
+`call_group_accuracy`, `call_order_accuracy`,
+`required_call_subset_accuracy`, `milestone_accuracy`, `turn_success_rate`,
+`tool_execution_success_rate`, `assertion_success_rate`, `state_match_rate`,
+`path_success_rate`, `final_answer_success_rate`, and `task_success_rate`.
+Every metric carries integer numerator and denominator plus their value.
+A zero denominator carries `value: null` and a stable N/A reason code; it is
+never reported as a vacuous zero or one. Assertion-derived metrics use the
+pack's literal `ASSERTION_CAPABILITIES` category, while `path_success_rate`
+also requires the applicable call, milestone, dependency, execution, and
+completion gates. A declared assertion that an infrastructure stop left unrun,
+and an infrastructure failure in a path gate, make the affected metric N/A
+(`metric.assertion_evidence_incomplete`, `metric.path_evidence_incomplete`)
+rather than a candidate failure: the gate already records the stop, and a
+broken oracle is not a wrong answer. Run-level aggregation sums numerators and
+denominators over task scores and preserves a shared zero-denominator reason.
+When task contributions have different N/A causes, the aggregate uses the
+stable `metric.no_applicable_task` code instead of concatenating diagnostics.
+`ExecutableCandidateScore` requires the exact task ids and publication order
+authorized by `EligibleEvalPlan`; it refuses partial, duplicate, cross-candidate,
+cross-oracle, or cross-contract inputs. Its identity cites every task
+`score_hash`, while metric quotients remain derived rather than hashed.
+
+A metric's `value` is its numerator over its denominator, so `score_hash`
+carries the counts and the reason code but not the quotient.
+
+`ExecutableTaskScore.score_hash` is path-free and time-free. It includes the
+task-spec and episode identities, result and malformed-result hashes, commit
+verdicts, assertion verdicts, gate reason codes, and the scoring contract and
+policy. It excludes each record's own diagnostic `detail`, so rewording a
+diagnosis does not fork a score.
+
+Executable driving may persist a complete episode in
+`tool_trace_cache.jsonl`. The cache is append-only, record-hashed, process
+locked, and keyed by candidate, task, plan, eval config, source, oracle, script,
+and task-spec identities. A request without a completion is crash evidence, not
+a cache hit; a second non-identical observation for the same key is a conflict.
+On a hit the driver replays the complete `ExecutableEpisode` and sets only its
+non-semantic `replayed` flag. It never memoizes one tool call in isolation:
+skipping a mutating call would not reproduce state for dependent calls, final
+state, or assertions. The cache's byte hash is available for
+`eval_manifest.json`.
+
+Final publication uses `write_executable_eval_artifacts(...)`. It refuses task
+scores that do not exactly match each aggregate's ordered task ids and score
+hashes. It then writes immutable `eval_report.json` and, when enabled,
+`eval_task_results.parquet`; `eval_manifest.json` binds their byte hashes to the
+source/config/plan identities, candidate aggregate hashes, and the byte hashes
+of both `candidate_io_cache.jsonl` and `tool_trace_cache.jsonl`. A required cache
+that is absent or lives outside the artifact directory is a publication error,
+not an omitted manifest entry. Publication reparses both hash-verified caches,
+requires one complete tool-trace episode per task score, and proves every
+episode turn's request/status/response hash against the candidate cache; valid
+but unrelated cache files are refused. Episode evidence is streamed one record at
+a time, because a whole run's episodes do not fit in memory at the point where
+the run is otherwise finished. A run that publishes the candidate cache without
+tool results keeps no episodes to compare against, so that cache must still prove
+that no claimed request was left without a completion.
+
+Immutability of `eval_task_results.parquet` is a property of its rows, not its
+bytes: a re-encoding by another writer build is accepted, a changed row is not.
+The manifest also records Python, platform, machine, pipeline Git sha and dirty
+state, pipeline source, dependency-lock, and worker-image identities. The
+pipeline source hash covers the whole `byob` step package, since this family
+executes through shared runtime and isolation code. Every provenance field is
+best effort and reports null when it cannot be established; a Git sha is refused
+outright when the surrounding repository does not contain this pipeline, because
+a confident wrong commit is worse than an absent one.
+
+The complete executable run is exposed as `run_bfcl_eval(...)`. Source
+verification and contamination gating finish before the first candidate
+request. Candidates run sequentially in plan alias order; within one candidate,
+authorized tasks run in publication order with at most
+`limits.max_parallel_tasks` active tasks. Every task owns one oracle session.
+The first raised setup, authorization, cache, or scoring exception cancels
+sibling tasks and closes every opened oracle and candidate client; an
+infrastructure terminal represented by a completed `ExecutableEpisode` remains
+scored evidence and does not abort the batch.
+
+A caller-supplied `eval_run_id` is reused exactly. Otherwise a fresh output tree
+gets a timestamp-plus-UUID identity; replay in a completed output tree reuses
+the immutable report's id. Config identity is never used as run identity because
+two fresh provider samples under one config are different runs.
+
+Error attribution is frozen by `error_taxonomy.py` contract `1.0`. It defines
+the trace and executable terminal-status mappings, the shared non-candidate-stop
+sets, fatal `eval_*` exception codes, metric N/A codes, and accepted reason-code
+namespaces. Final report and manifest documents cite its content hash, and a
+regression test binds every set in it to the codes the pipeline can actually
+emit, so the hash cannot claim a coverage the code no longer has.
+`eval_task_results.parquet` retains `failure_codes` and additionally records
+`episode_status`, `non_candidate_stop`, and structured `failure_records` with
+layer, code, attribution, and subject. Each incomplete episode contributes one
+`episode`-layer record before its gate records: every incomplete episode fails
+the same completion gate, so only the terminal status separates a spent budget
+from a broken oracle. `non_candidate_stop` is true for a terminal the taxonomy
+attributes away from the model and for infrastructure that broke inside an
+otherwise finished episode. Oracle business error codes are domain results and
+never enter the harness taxonomy.
 
 ## What the score is taken over
 

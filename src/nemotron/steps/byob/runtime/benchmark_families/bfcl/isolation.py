@@ -17,12 +17,19 @@ import sys
 import threading
 import time
 import traceback
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any, TypeVar
+
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.assertion_capabilities import (
+    ASSERTION_CAPABILITIES_SYMBOL,
+    AssertionCapabilityError,
+    normalized_assertion_capability,
+    read_literal_assertion_capabilities,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -550,8 +557,9 @@ def _assertion_verdict(
         if isinstance(slot, str)
     ]
     assertion_error: AssertionError | None = None
+    returned: Any = None
     try:
-        assertion(state=state, trace=trace, task=tracked_task, ctx=ctx)
+        returned = assertion(state=state, trace=trace, task=tracked_task, ctx=ctx)
     except AssertionError as exc:
         assertion_error = exc
     except Exception as exc:  # noqa: BLE001 — an assertion exception is verdict data
@@ -595,6 +603,35 @@ def _assertion_verdict(
             "status": "failed",
             "passed": False,
             "detail": str(assertion_error),
+        }
+    if isinstance(returned, Mapping):
+        status = returned.get("status")
+        detail = returned.get("detail")
+        if status == "not_applicable" and isinstance(detail, str) and detail.strip():
+            return {
+                "name": name,
+                "status": "not_applicable",
+                "passed": False,
+                "detail": detail,
+            }
+        return {
+            "name": name,
+            "status": "infrastructure_error",
+            "passed": False,
+            "detail": (
+                "AssertionContractError: a verdict mapping must declare "
+                "status='not_applicable' and a non-empty detail"
+            ),
+        }
+    if returned is not None:
+        return {
+            "name": name,
+            "status": "infrastructure_error",
+            "passed": False,
+            "detail": (
+                "AssertionContractError: assertions return None, or an explicit "
+                "not_applicable verdict mapping"
+            ),
         }
     return {
         "name": name,
@@ -744,6 +781,23 @@ def _inspect_assertions_module_inner(
             for name in dir(module)
             if name.startswith("assert_") and callable(getattr(module, name))
         }
+    # Read from the file rather than the imported module so validation admits
+    # exactly the declarations executable projection can read back later.
+    declared: dict[str, Any] | None = None
+    module_reason: str | None = None
+    try:
+        declared = read_literal_assertion_capabilities(Path(path))
+        if declared is None and hasattr(module, ASSERTION_CAPABILITIES_SYMBOL):
+            raise AssertionCapabilityError(
+                f"{ASSERTION_CAPABILITIES_SYMBOL} is computed rather than "
+                "declared literally, so projection cannot read it back"
+            )
+        if unknown := sorted(set(declared or {}) - set(assertions)):
+            raise AssertionCapabilityError(
+                f"{ASSERTION_CAPABILITIES_SYMBOL} names unknown assertion(s) {unknown}"
+            )
+    except AssertionCapabilityError as exc:
+        declared, module_reason = None, str(exc)
 
     required = {"state", "trace", "task", "ctx"}
     report: dict[str, dict[str, Any]] = {}
@@ -768,12 +822,25 @@ def _inspect_assertions_module_inner(
             }
             and param.default is inspect.Parameter.empty
         )
+        # A malformed capability and a malformed signature are separate defects
+        # with separate fixes, so neither is reported as the other.
+        capability: dict[str, Any] | None = None
+        capability_reason = module_reason
+        if module_reason is None:
+            try:
+                capability = normalized_assertion_capability(
+                    name, (declared or {}).get(name, {})
+                )
+            except AssertionCapabilityError as exc:
+                capability_reason = str(exc)
         valid = (has_var_kwargs or not missing) and not required_extras
         report[name] = {
             "valid": valid,
             "reason": None
             if valid
             else f"missing keyword args={missing}; unsupported required args={required_extras}",
+            "capabilities": capability,
+            "capability_reason": capability_reason,
         }
     return report
 

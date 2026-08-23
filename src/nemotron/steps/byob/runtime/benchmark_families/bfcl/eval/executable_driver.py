@@ -31,12 +31,16 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_drive
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_contract import (
     AssertionOutcome,
+    DependencyResolution,
     ExecutableEpisode,
     ExecutableEpisodeStatus,
     ExecutableEvent,
     ExecutableEventKind,
     ExecutableTurn,
     ExecutedToolCall,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_dependencies import (
+    resolve_turn_dependencies,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_errors import (
     ExecutableAuthorizationError,
@@ -62,6 +66,13 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract im
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_verification import (
     assert_source_unchanged,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_cache import (
+    ToolTraceCache,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_contract import (
+    ToolTraceRequest,
+    build_tool_trace_request,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
     ExportedMessage,
     json_equal,
@@ -74,13 +85,16 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-_ASSERTION_STATUSES: Final = frozenset({"passed", "failed", "infrastructure_error"})
+_ASSERTION_STATUSES: Final = frozenset(
+    {"passed", "failed", "not_applicable", "infrastructure_error"}
+)
 _FATAL_EXECUTION_STATUSES: Final = frozenset(
     {
         "unknown_commit_state",
         "oracle_timeout",
         "oracle_call_failed",
         "oracle_result_malformed",
+        "dependency_resolution_failed",
     }
 )
 # A failure met while winding the session down explains nothing the episode has
@@ -168,6 +182,7 @@ class _Log:
     def __init__(self) -> None:
         self.turns: list[ExecutableTurn] = []
         self.executions: list[ExecutedToolCall] = []
+        self.dependencies: list[DependencyResolution] = []
         self.assertions: list[AssertionOutcome] = []
         self.events: list[ExecutableEvent] = []
 
@@ -381,6 +396,7 @@ async def _execute_calls(
     task: ExecutableTaskSpec,
     oracle: OracleSession,
     log: _Log,
+    turn_authorized: bool,
 ) -> tuple[list[int], list[tuple[str, dict[str, Any]]], ExecutableEpisodeStatus | None, str | None]:
     indexes: list[int] = []
     live_results: list[tuple[str, dict[str, Any]]] = []
@@ -419,6 +435,41 @@ async def _execute_calls(
         assert arguments is not None and call.function_name is not None and call.id is not None
         policy = task.tool_policy(call.function_name)
         assert policy is not None
+        # Only a call that asserts the pack's confirmation parameter commits the
+        # protected mutation. A probe that leaves it unset is the very call a
+        # confirmation template makes before the user has answered, so gating it
+        # would refuse the published gold trace.
+        confirm_parameter = policy.confirmation_parameter
+        if (
+            confirm_parameter is not None
+            and arguments.get(confirm_parameter) is True
+            and (turn_index not in task.confirmed_call_turns or not turn_authorized)
+        ):
+            outcome = _not_executed(
+                call,
+                execution_index=execution_index,
+                turn_index=turn_index,
+                position=position,
+                schema_valid=True,
+                schema_failures=(),
+                reason_code="tool_execution.confirmation_not_earned",
+                detail=(
+                    "the candidate attempted a confirmation-protected call before "
+                    "matching the call batch authorized by the user's confirmation"
+                ),
+            )
+            log.executions.append(outcome)
+            log.event(
+                "tool_execution",
+                outcome.reason_code,
+                turn_index=turn_index,
+                execution_index=execution_index,
+                detail=outcome.detail,
+            )
+            terminal_status = "confirmation_not_earned"
+            terminal_detail = outcome.detail
+            stop = True
+            continue
         before_known, before_state, state_before_hash = await _state_before_mutation(
             oracle,
             mutates=policy.mutates,
@@ -617,8 +668,14 @@ async def run_executable_episode(
     plan: EligibleEvalPlan,
     oracle: OracleSession,
     gate: ContinuationGate,
+    tool_trace_cache: ToolTraceCache | None = None,
 ) -> ExecutableEpisode:
-    """Interleave candidate turns with live oracle results and return evidence."""
+    """Interleave candidate turns with live oracle results and return evidence.
+
+    A cache hit replays a complete authorized episode. Individual calls are not
+    memoized because a mutating result without its state transition cannot
+    reproduce downstream calls, final state, or assertions.
+    """
 
     conversation = _LiveConversation(task)
     log = _Log()
@@ -632,10 +689,23 @@ async def run_executable_episode(
     pending_turn: int | None = None
     pending_executions: list[int] = []
     pending_user_hash: str | None = None
+    producer_executions: dict[int, list[int]] = {}
+    trace_request: ToolTraceRequest | None = None
 
     try:
         assert_source_unchanged(source)
         _authorize(candidate, task, source, plan, oracle, gate)
+        if tool_trace_cache is not None:
+            trace_request = build_tool_trace_request(
+                candidate=candidate,
+                task=task,
+                source=source,
+                plan=plan,
+            )
+            cached = tool_trace_cache.get(trace_request)
+            if cached is not None:
+                return cached
+            tool_trace_cache.put_request(trace_request)
         try:
             await oracle.reset()
             session_ready = True
@@ -656,6 +726,27 @@ async def run_executable_episode(
                     status = "episode_timeout"
                     reason_code = "episode.timeout"
                     detail = "the episode deadline elapsed before the next candidate turn"
+                    break
+
+                scripted, dependency_outcomes = resolve_turn_dependencies(
+                    task=task,
+                    turn=scripted,
+                    executions=log.executions,
+                    producer_executions=producer_executions,
+                )
+                log.dependencies.extend(dependency_outcomes)
+                failed_dependency = next(
+                    (
+                        item
+                        for item in dependency_outcomes
+                        if item.status != "resolved"
+                    ),
+                    None,
+                )
+                if failed_dependency is not None:
+                    status = "dependency_resolution_failed"
+                    reason_code = f"episode.{failed_dependency.reason_code}"
+                    detail = failed_dependency.detail
                     break
 
                 # These messages become model-visible only when this request is
@@ -815,6 +906,7 @@ async def run_executable_episode(
                         task=task,
                         oracle=oracle,
                         log=log,
+                        turn_authorized=match.advanced,
                     )
                 turn = ExecutableTurn(
                     turn_index=scripted.turn_index,
@@ -825,11 +917,25 @@ async def run_executable_episode(
                     assistant_content=response.assistant_content,
                     tool_calls=response.tool_calls,
                     tool_call_outcome_indexes=tuple(execution_indexes),
+                    paired_call_indexes=(
+                        match.paired_call_indexes
+                        if match.advanced and not unusable_ids
+                        else ()
+                    ),
                     advanced=False,
                     reason_code="turn.observed",
                     detail="the candidate turn and its live outcomes were recorded",
                 )
                 log.turns.append(turn)
+                if match.advanced and not unusable_ids:
+                    for expected_index, execution_index in zip(
+                        match.paired_call_indexes,
+                        execution_indexes,
+                        strict=True,
+                    ):
+                        producer_executions.setdefault(expected_index, []).append(
+                            execution_index
+                        )
                 if unusable_ids:
                     status = "unusable_tool_call_ids"
                     reason_code = "episode.unusable_tool_call_ids"
@@ -910,12 +1016,19 @@ async def run_executable_episode(
                                 "returned a verdict this contract cannot read",
                                 actual=assertion_status,
                                 expected=f"one of {sorted(_ASSERTION_STATUSES)}",
-                                recovery="return a verdict naming passed, failed, or infrastructure_error",
+                                recovery=(
+                                    "return passed, failed, not_applicable, or "
+                                    "infrastructure_error"
+                                ),
                             )
                         assertion = AssertionOutcome(
                             assertion_index=len(log.assertions),
                             name=name,
-                            category="unclassified",
+                            category=(
+                                task.assertion_spec(name).category
+                                if task.assertion_spec(name) is not None
+                                else "unclassified"
+                            ),
                             status=assertion_status,
                             reason_code=f"assertion.{assertion_status}",
                             detail=str(verdict.get("detail") or assertion_status),
@@ -924,7 +1037,11 @@ async def run_executable_episode(
                         assertion = AssertionOutcome(
                             assertion_index=len(log.assertions),
                             name=name,
-                            category="unclassified",
+                            category=(
+                                task.assertion_spec(name).category
+                                if task.assertion_spec(name) is not None
+                                else "unclassified"
+                            ),
                             status="infrastructure_error",
                             reason_code="assertion.infrastructure_error",
                             detail=str(exc),
@@ -956,7 +1073,7 @@ async def run_executable_episode(
         turn_index=log.turns[-1].turn_index if log.turns else None,
         detail=detail,
     )
-    return ExecutableEpisode(
+    episode = ExecutableEpisode(
         candidate_alias=candidate.alias,
         canonical_model_identity=candidate.canonical_model_identity,
         task_id=task.task_id,
@@ -965,17 +1082,24 @@ async def run_executable_episode(
         source_verification_identity=source.verification_identity,
         oracle_verification_identity=task.oracle_verification_identity,
         script_hash=task.script.script_hash,
+        task_spec_hash=task.task_spec_hash,
         status=status,
         reason_code=reason_code,
         detail=detail,
         assistant_turns=len(log.turns),
         observed=tuple(log.turns),
         executions=tuple(log.executions),
+        dependencies=tuple(log.dependencies),
         final_state_hash=final_state_hash,
         assertions=tuple(log.assertions),
         events=tuple(log.events),
         replayed=False,
     )
+    if tool_trace_cache is not None:
+        if trace_request is None:  # pragma: no cover - authorization creates it.
+            raise RuntimeError("tool-trace request was not initialized")
+        tool_trace_cache.put_completion(trace_request, episode)
+    return episode
 
 
 __all__ = ["run_executable_episode"]

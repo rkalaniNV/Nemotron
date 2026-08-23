@@ -180,3 +180,76 @@ ASSERTIONS = {
     "assert_transfer_rejected_for_funds": assert_transfer_rejected_for_funds,
     "assert_no_tool_called": assert_no_tool_called,
 }
+
+ASSERTION_CAPABILITIES = {
+    "assert_account_balance_reported": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_card_limit_reported": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_transaction_status_reported": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_recent_transactions_listed": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_transfer_fee_reported": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_transfer_committed": {
+        "trace": False,
+        "executable": True,
+        "category": "state",
+    },
+    "assert_only_corrected_amount_transferred": {
+        "trace": False,
+        "executable": True,
+        "category": "state",
+    },
+    "assert_vietqr_status_reported": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_dispute_status_reported": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_dispute_opened": {
+        "trace": False,
+        "executable": True,
+        "category": "state",
+    },
+    "assert_status_checked_from_listed_transaction": {
+        "trace": True,
+        "executable": True,
+        "category": "path",
+    },
+    "assert_transaction_not_found": {
+        "trace": True,
+        "executable": True,
+        "category": "result",
+    },
+    "assert_transfer_rejected_for_funds": {
+        "trace": False,
+        "executable": True,
+        "category": "state",
+    },
+    "assert_no_tool_called": {
+        "trace": True,
+        "executable": True,
+        "category": "path",
+    },
+}

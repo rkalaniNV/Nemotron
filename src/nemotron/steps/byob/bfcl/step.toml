@@ -41,6 +41,14 @@ description = "contamination_report.json in the eval output tree naming which mo
 type = "bfcl_candidate_io_cache"
 description = "candidate_io_cache.jsonl in the eval output tree: append-only, hash-verified native function-calling requests, every HTTP attempt, and a completion marker used for network-free replay."
 
+[[produces]]
+type = "bfcl_tool_trace_cache"
+description = "tool_trace_cache.jsonl in the eval output tree: append-only, hash-verified complete executable episodes used for oracle-free replay."
+
+[[produces]]
+type = "bfcl_eval_artifacts"
+description = "eval_report.json, eval_task_results.parquet, and eval_manifest.json binding source, plan, candidate aggregates, result hashes, and both replay caches."
+
 [[parameters]]
 name = "family"
 description = "Benchmark family implementation to run."
@@ -114,7 +122,27 @@ skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[strategies]]
 when = "You need to record what a candidate actually did against a live oracle"
-then = "Build an ExecutableTaskSpec from the complete canonical projection, VerifiedEvalSource, EligibleEvalPlan, candidate alias, and task id. Open the source-selected PythonOracleSession or EndpointOracleSession, then call run_executable_episode(...). The task projection binds source bytes, publication order, candidate authorization, source clock, verified oracle, runner-only milestones, fixture references, assertion names, and mutation policy while exposing only the answer-free seed and model-facing tools. It reconstructs assertion slots, initial slots, and the correction timeline from the verbatim opening surface, expected trace, cited fixture rows, and typed fixture, literal, enum, range, and absent-id values from the verified pack. Unknown final, pre-correction, and correction values are named separately in unresolved_slots, unresolved_slots_initial, and unresolved_slot_updates rather than guessed from each other; the isolated assertion runner tracks reads of all three so an assertion that needs one fails as infrastructure, never as a candidate error, while unrelated assertions retain their ordinary verdict. Both oracle adapters keep reset, ordered calls, state, and assertions in one task-local process worker; pack code never enters the evaluator process, every preflight and runtime exit closes the session, and mutating calls are never retried. A returned mutating result is committed only when bound pre-call and post-call state hashes differ; equal hashes prove no commit and a missing snapshot is unknown. The live driver injects only candidate output, canonical live results addressed by candidate call id, and earned deterministic user turns — never recorded gold results. Its ExecutableEpisode (contract 1.0) keeps one ExecutedToolCall for every proposed call, retaining invalid calls as not_executed and distinguishing normal results, certified {error:{code}} business rejections, malformed results, timeouts, infrastructure failures, and commit state. released_to_model is committed only when a later request actually admits the result; a terminal tool-only turn completes without falsely claiming a release. Terminal status is checked against fatal evidence in both directions, and episode_hash excludes replay and diagnostic wording while preserving semantic oracle data. Tool-trace persistence and executable scoring remain separate components."
+then = "Build an ExecutableTaskSpec from the complete canonical projection, VerifiedEvalSource, EligibleEvalPlan, candidate alias, and task id. Open the source-selected PythonOracleSession or EndpointOracleSession, then call run_executable_episode(...). The task projection binds source bytes, publication order, candidate authorization, source clock, verified oracle, runner-only milestones, fixture references, assertion names, mutation policy, confirmation coverage, and from_result producer/consumer coordinates while exposing only the answer-free seed and model-facing tools. It reconstructs assertion slots, initial slots, and the correction timeline from the verbatim opening surface, expected trace, cited fixture rows, and typed fixture, literal, enum, range, and absent-id values from the verified pack. Unknown final, pre-correction, and correction values are named separately in unresolved_slots, unresolved_slots_initial, and unresolved_slot_updates rather than guessed from each other; the isolated assertion runner tracks reads of all three so an assertion that needs one fails as infrastructure, never as a candidate error, while unrelated assertions retain their ordinary verdict. Both oracle adapters keep reset, ordered calls, state, and assertions in one task-local process worker; pack code never enters the evaluator process, every preflight and runtime exit closes the session, and mutating calls are never retried. A returned mutating result is committed only when bound pre-call and post-call state hashes differ; equal hashes prove no commit and a missing snapshot is unknown. A confirmation-protected call reaches the oracle only after its entire candidate batch matches the batch authorized by the user's scripted confirmation; bypass attempts remain not_executed evidence. Before a dependent consumer request, resolve its expected argument from exactly one paired successful live producer result and enforce the declared result path, JSON type, and consumer schema. Never rewrite candidate arguments or fall back to the recorded gold result. Missing, ambiguous, unavailable, or malformed dependency sources terminate with deterministic infrastructure evidence. Confirmation, correction, and missing-slot continuation messages come only from the published script. The live driver injects only candidate output, canonical live results addressed by candidate call id, and earned deterministic user turns. Its ExecutableEpisode (contract 1.2) binds task_spec_hash and keeps one ExecutedToolCall for every proposed call plus ordered dependency evidence, retaining invalid calls as not_executed and distinguishing normal results, certified {error:{code}} business rejections, malformed results, timeouts, infrastructure failures, and commit state. released_to_model is committed only when a later request actually admits the result; a terminal tool-only turn completes without falsely claiming a release. Terminal status is checked against fatal evidence in both directions, and episode_hash excludes replay and diagnostic wording while preserving semantic oracle data. Tool-trace persistence and bounded batch execution remain separate components."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to score a recorded executable BFCL episode"
+then = "Call score_executable_episode(episode=..., task=..., scoring=..., plan=...). It verifies candidate, task-spec hash, plan, source, oracle, script, eval-config, scoring-policy, dependency, and assertion identities before producing a number. The scorer performs no model, oracle, assertion, filesystem, or clock operation. It reconstructs dependent expected arguments from persisted paired live results, reuses the normalized trace gates against that resolved script, and adds oracle_execution, dependency_resolution, commit_state_known, assertions, and executable_completion. Structured business rejection is a valid oracle exchange whose correctness remains assertion-defined; dependency, commit-state, oracle, or assertion infrastructure errors set non_candidate_stop. Assertions marked not_applicable are skipped, and a fatal infrastructure stop may leave a declared assertion suffix unrun without fabricating verdicts. all_applicable_gates requires every applicable gate, while debug-only assertions_only still requires an actually passed assertion gate and blocks evidence or infrastructure failures. ExecutableTaskScore.score_hash binds the task spec, episode, policy, result hashes, dependency verdicts, commit verdicts, assertions, and stable reason codes while excluding diagnostic wording."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to aggregate executable scores for one candidate"
+then = "Call aggregate_executable_scores(scores=..., plan=..., candidate_alias=...). It requires every authorized task exactly once in publication order, refuses mixed candidate, plan, source, oracle, policy, or scoring-contract identities, sums metric numerators and denominators, preserves explicit N/A semantics, and binds every task score hash into ExecutableCandidateScore.aggregate_hash."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need executable tool traces to survive restart and replay"
+then = "Create ToolTraceCache(outputs.output_dir / TOOL_TRACE_CACHE_FILE) and pass it to run_executable_episode(..., tool_trace_cache=cache). The cache claims an identity-bound request and commits the complete ExecutableEpisode in append-only, hash-verified JSONL. A completion replays without candidate or oracle I/O; an unfinished request is crash evidence, and conflicting evidence is refused. Never cache one mutating call independently because that cannot reproduce downstream state or assertions."
+skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
+
+[[strategies]]
+when = "You need to run the complete executable evaluation with bounded concurrency"
+then = "Load a resolved executable eval config and call run_bfcl_eval(...). It verifies source and contamination before inference, rechecks the plan immediately before requests, processes candidates sequentially, runs each candidate's tasks with at most limits.max_parallel_tasks active task-local oracle sessions, fails closed on raised infrastructure/setup errors, aggregates in publication order, and writes the immutable report, task table, manifest, and replay caches."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[errors]]
@@ -258,6 +286,10 @@ name = "eval_publication_policy_violation"
 recovery = "publication.requested: true requires every locked gate: argument_matching schema_then_canonical, respect_call_order, respect_call_group, allow_llm_repair false, task_success all_applicable_gates, contamination enforce/fail_run/common_intersection, and all outputs artifacts enabled. Executable publication additionally requires a gold-eligible source run. Restore the gate, or set publication.requested: false and read non_publication_reasons."
 
 [[errors]]
+name = "eval_source_invalid"
+recovery = "Source verification refused the published run for a reason it reports in its own subject and problem fields, and it names the specific check that failed. Read that report first: this code is only used where no narrower source code applies. Fix the publication it names, or evaluate a run that verifies clean."
+
+[[errors]]
 name = "eval_source_manifest_invalid"
 recovery = "The file named by source_run_manifest is not a Stage 12 commit marker: it is absent, unreadable, not named run_manifest.json, missing a required publication field, or declares a benchmark schema this build cannot read. A parquet without its manifest is an unpublished artifact. Rerun stage=generate, or evaluate with the pipeline revision that published the run."
 
@@ -396,6 +428,46 @@ recovery = "scoring asks for a verdict a trace score cannot produce: allow_llm_r
 [[errors]]
 name = "unsupported_eval_mode"
 recovery = "eval.mode is a non-empty list drawn from [trace, executable] with no repeats; the canonical order is trace then executable. Executable mode needs a source run whose manifest declares an oracle."
+
+[[errors]]
+name = "eval_candidate_provider_extension_invalid"
+recovery = "Provider extensions must live under the exact provider and API-version namespace and may not replace standard request fields. Remove unknown namespaces or conflicting keys."
+
+[[errors]]
+name = "eval_candidate_cache_conflict"
+recovery = "The same immutable candidate request key has different persisted evidence. Preserve the cache for diagnosis and start the evaluation in a new output directory; never overwrite an observation."
+
+[[errors]]
+name = "eval_tool_trace_cache_invalid"
+recovery = "tool_trace_cache.jsonl is incomplete, truncated, hash-invalid, or contains an episode that does not belong to its request. Preserve it as crash evidence and resume into a new output directory."
+
+[[errors]]
+name = "eval_tool_trace_cache_conflict"
+recovery = "The same executable trace key has different immutable episode evidence. Do not replace either observation; investigate the source, plan, task-spec, or oracle identity and use a new output directory."
+
+[[errors]]
+name = "eval_executable_evidence_mismatch"
+recovery = "The episode, executable task spec, candidate, source, and plan do not identify one evaluation. Rebuild and score the task under the exact handles that drove it."
+
+[[errors]]
+name = "eval_executable_scoring_policy_unsupported"
+recovery = "The executable scoring policy requests behavior this deterministic scorer cannot provide. Restore the frozen scoring contract and disable repair or unsupported task-success semantics."
+
+[[errors]]
+name = "eval_executable_aggregation_invalid"
+recovery = "Candidate task scores are missing, duplicated, reordered, or cross an identity boundary. Score every authorized task once in plan order before aggregation."
+
+[[errors]]
+name = "eval_artifact_invalid"
+recovery = "The final report, task table, manifest, aggregate hashes, or required caches do not form one immutable artifact set. Preserve existing evidence and resume into a new output directory."
+
+[[errors]]
+name = "eval_runner_invalid"
+recovery = "The batch runner requires one verified executable configuration, complete authorized task sets, and a non-empty run id. Fix the named precondition and restart before candidate inference."
+
+[[errors]]
+name = "eval_runner_mode_unsupported"
+recovery = "This batch runner executes [trace, executable] evaluation. Use the trace runner for [trace] or enable executable mode with a verified gold oracle."
 
 [reference]
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"

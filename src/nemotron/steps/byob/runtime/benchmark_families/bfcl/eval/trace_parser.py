@@ -17,7 +17,7 @@ a score derived from mismatched halves would silently grade the wrong task.
 
 from __future__ import annotations
 
-from typing import Any, Final, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, model_validator
 
@@ -28,8 +28,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_contract
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_contract import (
     CandidateEpisode,
     ConversationScript,
-    EpisodeStatus,
     ObservedTurn,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.error_taxonomy import (
+    TRACE_NON_CANDIDATE_STOPS as NON_CANDIDATE_STOPS,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_errors import (
     TraceEvidenceError,
@@ -39,13 +41,6 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
     FrozenDict,
     NonNegativeInt,
     freeze_json,
-)
-
-# Ways an episode can end that say nothing about how the candidate answered. They
-# still fail the task — the alternative is a benchmark where a slow or unreachable
-# model outscores a fast wrong one — but a report can separate them.
-NON_CANDIDATE_STOPS: Final[frozenset[str]] = frozenset(
-    {"candidate_call_failed", "episode_timeout", "max_turns_exceeded"}
 )
 
 
@@ -106,7 +101,9 @@ class ParsedTrace(_Frozen):
     source_verification_identity: ContentHash
     script_hash: ContentHash
     episode_hash: ContentHash
-    status: EpisodeStatus
+    # Shared normalized views include both trace-only and executable terminal
+    # statuses. Each source contract validates its own status before projection.
+    status: StrictStr
     non_candidate_stop: StrictBool
     scripted_turns: NonNegativeInt
     turns: tuple[ParsedTurn, ...] = ()
