@@ -118,7 +118,7 @@ def score_executable_episode(
         for item in episode.dependencies
     )
     gates_by_name: dict[str, ExecutableGateResult] = {
-        gate.gate: _trace_gate(gate, episode=episode) for gate in trace_score.gates
+        gate.gate: _trace_gate(gate) for gate in trace_score.gates
     }
     gates_by_name.update(
         {
@@ -594,22 +594,22 @@ def _failed(
     )
 
 
-def _trace_gate(
-    gate: GateResult,
-    *,
-    episode: ExecutableEpisode,
-) -> ExecutableGateResult:
+def _trace_gate(gate: GateResult) -> ExecutableGateResult:
+    """Lift one shared trace gate into the executable gate set, verdict intact.
+
+    The attribution is carried over rather than recomputed. The trace layer
+    already knows whether the episode stopped for a reason the candidate did not
+    choose — it read the terminal status through the executable attribution map to
+    normalize the evidence — and deriving it a second time here would let the two
+    layers disagree about the same failure.
+    """
     if gate.outcome == "passed":
         return _passed(gate.gate, gate.reason_code, gate.detail)
     if gate.outcome == "not_applicable":
         return _skipped(gate.gate, gate.detail)
-    infrastructure = (
-        gate.gate == "trace_completion"
-        and episode.status in EXECUTABLE_NON_CANDIDATE_STOPS
-    )
     return _failed(
         gate.gate,
-        failure_class="infrastructure" if infrastructure else "candidate",
+        failure_class=gate.failure_class,
         reason=gate.reason_code,
         detail=gate.detail,
         turn_index=gate.turn_index,

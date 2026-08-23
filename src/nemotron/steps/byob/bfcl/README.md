@@ -790,7 +790,10 @@ depend on a live fixture. The executable oracle runner is a separate component.
 ## Canonical Tool-Call Parser and Trace Scorer
 
 `score_trace_episode(..., plan=...)` turns one recorded episode into
-one `TraceTaskScore`. It
+one `TraceTaskScore` under trace scoring contract `1.1`. Version `1.1` adds
+mandatory per-gate attribution to score identity; persisted `1.0` scores must be
+re-scored rather than restamped, so their historical hashes retain their original
+meaning. The scorer
 is a pure function of evidence and policy: it reads the `CandidateEpisode`, the
 `ConversationScript` that produced it, the pinned `EvalScoringConfig`, and the
 `EligibleEvalPlan` that authorized the run, and it
@@ -805,6 +808,10 @@ parsed stays unparsed and a turn the episode never sent is listed as unsent
 rather than invented as an empty one. The parser refuses an episode whose task id
 or script hash is not the conversation it answered: a score taken over mismatched
 halves would grade the wrong task.
+Evidence that claims `completed` while omitting a scripted turn is refused rather
+than interpreted as a candidate failure. The executable projection applies the
+same boundary and additionally binds task, candidate, plan, config, source,
+oracle, script, and task-spec identities before producing a normalized trace.
 
 The comparison behind scoring is the same code the driver's release gate uses. A
 gate stricter than the scorer would end an episode the scorer would have
@@ -820,6 +827,24 @@ and `text_turn` measure consistency of the turns that were actually asked.
 failed task rather than a skipped one, while `non_candidate_stop` still lets a
 report separate an unreachable endpoint from a wrong model. `task_success` is
 derived from the gates rather than asserted beside them.
+
+Each failed gate also carries a `failure_class`, so a report can say whose failure
+it is without softening whether it counts. A gate blames the run when the episode
+stopped for a reason the model did not choose and the turn the failure names is a
+turn the model never answered — an unsent turn, or one whose request never came
+back; a gold call that went unrequested because the endpoint was unreachable is
+infrastructure, not weak tool use. Everything else stays the model's, including a
+truncated answer inside an episode that did finish. Executable evaluation lifts
+these gates with their attribution intact rather than deriving it a second time,
+and `trace_failure_records` projects a score onto the same `episode`- and
+`gate`-layer records `eval_task_results.parquet` carries, so a trace failure and
+an executable one read in one vocabulary.
+
+`score_normalized_trace` remains an internal sharing kernel: the public scoring
+entry point is `score_trace_episode`, which enforces policy and authorization.
+`trace_task_result` can project one trace score onto the shared task-results
+columns while leaving oracle-, assertion-, milestone-, and final-answer-only
+columns null. Trace-only batch aggregation and artifact writing remain unexposed.
 
 The parser also requires the episode and script to name the same verified source;
 a recorded episode cannot be restamped as evidence from another benchmark. It

@@ -188,6 +188,17 @@ def _same_replay(episode: CandidateEpisode, script: ConversationScript) -> None:
             expected=f"at most {len(script.turns)} turns",
             recovery="re-drive the task; an episode cannot answer a turn the trace does not ask",
         )
+    if episode.status == "completed" and len(episode.observed) != len(script.turns):
+        raise TraceEvidenceError(
+            "eval.episode.status",
+            "claims completion before every scripted turn was observed",
+            actual=len(episode.observed),
+            expected=f"exactly {len(script.turns)} observed turns",
+            recovery=(
+                "retain the original incomplete terminal status, or re-drive the "
+                "episode to the end of the script"
+            ),
+        )
 
 
 def _parse_turn(observed: ObservedTurn, script: ConversationScript) -> ParsedTurn:

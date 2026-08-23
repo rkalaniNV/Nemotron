@@ -15,8 +15,10 @@ from typing import Any
 import httpx
 import pytest
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl import eval as eval_surface
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     EXPORT_METRIC_BY_GATE,
+    REASON_CODE_NAMESPACES,
     SCORING_GATES,
     CandidateApi,
     CandidateEligibility,
@@ -31,6 +33,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     EvalFileRef,
     EvalLimits,
     EvalScoringConfig,
+    GateResult,
     TraceEvidenceError,
     TraceScoringPolicyError,
     TraceTaskScore,
@@ -39,6 +42,8 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     parse_observed_trace,
     run_candidate_episode,
     score_trace_episode,
+    trace_failure_records,
+    trace_task_result,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_cache import CandidateIOCache
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_client import (
@@ -507,6 +512,12 @@ def _outcomes(score: TraceTaskScore) -> dict[str, str]:
     return {gate.gate: gate.outcome for gate in score.gates}
 
 
+def test_public_eval_surface_exposes_only_the_authorized_trace_scorer() -> None:
+    assert eval_surface.score_trace_episode is score_trace_episode
+    assert not hasattr(eval_surface, "score_normalized_trace")
+    assert not hasattr(eval_surface, "NormalizedTraceScore")
+
+
 # --------------------------------------------------------------------------------------
 # The parser: the episode and the script must be two halves of one replay.
 # --------------------------------------------------------------------------------------
@@ -555,6 +566,24 @@ def test_an_episode_cannot_be_restamped_with_another_source_identity(
 
     with pytest.raises(TraceEvidenceError, match="different verified benchmark"):
         parse_observed_trace(restamped, script)
+
+
+def test_completed_evidence_cannot_hide_scripted_turns_it_never_observed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _script(_single_turn_row())
+    episode = _episode(
+        script,
+        [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    with pytest.raises(TraceEvidenceError, match="claims completion"):
+        parse_observed_trace(
+            episode.model_copy(update={"status": "completed"}),
+            script,
+        )
 
 
 def test_the_parser_flattens_each_call_to_where_it_appeared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1231,6 +1260,394 @@ def test_a_candidate_mismatch_is_not_a_non_candidate_stop(tmp_path: Path, monkey
 
 
 # --------------------------------------------------------------------------------------
+# Attribution: a failed gate says whether the candidate or the run is answerable.
+# --------------------------------------------------------------------------------------
+
+
+def test_an_endpoint_that_never_answered_is_the_runs_failure_not_the_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing the candidate did can be read off a turn it was never sent."""
+    score, episode = _score(_single_turn_row(), [500], tmp_path, monkeypatch=monkeypatch)
+
+    assert episode.status == "candidate_call_failed"
+    assert score.gate("trace_completion").failure_class == "infrastructure"
+    # Coverage still fails — the gold call was never requested — but the reason it
+    # was never requested is the endpoint, so the failure is not the model's.
+    assert score.gate("tool_selection").outcome == "failed"
+    assert score.gate("tool_selection").failure_class == "infrastructure"
+    assert not score.task_success
+
+
+def test_a_turn_budget_below_the_trace_blames_the_run_for_what_it_cut_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, episode = _score(
+        _missing_slot_row(),
+        [_says("Which account should I check?")],
+        tmp_path,
+        monkeypatch=monkeypatch,
+        limits=_limits(max_turns=1),
+    )
+
+    assert episode.status == "max_turns_exceeded"
+    # The one turn it was asked, it answered as the trace does.
+    assert score.gate("text_turn").outcome == "passed"
+    for gate in score.gates:
+        if gate.outcome == "failed":
+            assert gate.failure_class == "infrastructure", gate.gate
+
+
+def test_an_infrastructure_stop_preserves_a_model_failure_on_an_answered_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Attribution is per gate; one score can contain both responsible parties."""
+    script = _script(_missing_slot_row())
+    episode = _episode(
+        script,
+        [_says("I will not ask which account.")],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    score = score_trace_episode(
+        episode=episode.model_copy(update={"status": "max_turns_exceeded"}),
+        script=script,
+        scoring=_scoring(),
+        plan=_plan(),
+    )
+
+    # The model answered the first text turn incorrectly.
+    assert score.gate("text_turn").failure_class == "candidate"
+    # The run, not the model, owns calls and completion in turns it cut off.
+    assert score.gate("tool_selection").failure_class == "infrastructure"
+    assert score.gate("arguments").failure_class == "infrastructure"
+    assert score.gate("trace_completion").failure_class == "infrastructure"
+    assert score.non_candidate_stop
+
+
+def test_a_model_that_stopped_the_episode_keeps_its_own_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Turns lost to the candidate's own mistake are still the candidate's."""
+    score, episode = _score(
+        _missing_slot_row(),
+        [_calls([("c1", "get_balance", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert episode.status == "candidate_mismatch"
+    assert not score.non_candidate_stop
+    assert score.failed_gates
+    for gate in score.gates:
+        if gate.outcome == "failed":
+            assert gate.failure_class == "candidate", gate.gate
+
+
+@pytest.mark.parametrize("status", ["malformed_response", "unusable_tool_call_ids"])
+def test_candidate_protocol_terminals_keep_candidate_attribution(
+    status: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _script(_single_turn_row())
+    episode = _episode(
+        script,
+        [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    score = score_trace_episode(
+        episode=episode.model_copy(update={"status": status}),
+        script=script,
+        scoring=_scoring(),
+        plan=_plan(),
+    )
+
+    assert not score.non_candidate_stop
+    assert {
+        gate.failure_class for gate in score.gates if gate.outcome == "failed"
+    } == {"candidate"}
+
+
+def test_episode_timeout_keeps_infrastructure_attribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _script(_single_turn_row())
+    episode = _episode(script, [500], tmp_path, monkeypatch=monkeypatch)
+    score = score_trace_episode(
+        episode=episode.model_copy(update={"status": "episode_timeout"}),
+        script=script,
+        scoring=_scoring(),
+        plan=_plan(),
+    )
+
+    assert score.non_candidate_stop
+    assert {
+        gate.failure_class for gate in score.gates if gate.outcome == "failed"
+    } == {"infrastructure"}
+
+
+def test_a_truncated_answer_in_a_finished_episode_is_the_models_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _script(_single_turn_row())
+    episode = _episode(
+        script,
+        [
+            _calls([("c1", "get_balance", '{"account_id":"1"}')]),
+            _says("Account 1 holds", finish_reason="length"),
+        ],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    score = score_trace_episode(
+        episode=episode.model_copy(update={"status": "completed"}),
+        script=script,
+        scoring=_scoring(),
+        plan=_plan(),
+    )
+
+    completion = score.gate("trace_completion")
+    assert completion.reason_code == "trace_completion.incomplete_finish_reason"
+    assert completion.failure_class == "candidate"
+    assert not completion.blames_the_run
+
+
+def test_a_passing_gate_is_never_attributed_and_a_failing_one_always_is() -> None:
+    with pytest.raises(ValueError, match="whose failure it is"):
+        GateResult(
+            gate="tool_selection",
+            outcome="failed",
+            reason_code="tool_selection.mismatch",
+            detail="the wrong tool was called",
+        )
+    with pytest.raises(ValueError, match="only a failed gate is attributed"):
+        GateResult(
+            gate="tool_selection",
+            outcome="passed",
+            failure_class="candidate",
+            reason_code="tool_selection.matched",
+            detail="every gold call was requested",
+        )
+
+
+@pytest.mark.parametrize("reason_code", ["", "arguments.mismatch"])
+def test_a_gate_refuses_an_empty_or_foreign_reason_code(reason_code: str) -> None:
+    with pytest.raises(ValueError, match="reason code"):
+        GateResult(
+            gate="tool_selection",
+            outcome="failed",
+            failure_class="candidate",
+            reason_code=reason_code,
+            detail="the wrong tool was called",
+        )
+
+
+def test_non_candidate_stop_must_be_derived_from_the_episode_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(_single_turn_row(), [500], tmp_path, monkeypatch=monkeypatch)
+    payload = score.model_dump()
+    payload["non_candidate_stop"] = False
+
+    with pytest.raises(ValueError, match="episode status taxonomy"):
+        TraceTaskScore.model_validate(payload)
+
+
+def test_trace_score_1_0_requires_rescoring_under_the_1_1_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(
+        _single_turn_row(),
+        [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    payload = score.model_dump()
+    payload["schema_version"] = "1.0"
+
+    with pytest.raises(ValueError, match="schema_version"):
+        TraceTaskScore.model_validate(payload)
+
+
+def test_a_1_1_failed_gate_cannot_omit_attribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(
+        _single_turn_row(),
+        [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    payload = score.model_dump()
+    failed = next(gate for gate in payload["gates"] if gate["outcome"] == "failed")
+    del failed["failure_class"]
+
+    with pytest.raises(ValueError, match="whose failure it is"):
+        TraceTaskScore.model_validate(payload)
+
+
+def test_a_score_that_blames_the_run_without_a_non_candidate_stop_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(
+        _single_turn_row(),
+        [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    payload = score.model_dump()
+    for gate in payload["gates"]:
+        if gate["outcome"] == "failed":
+            gate["failure_class"] = "infrastructure"
+
+    with pytest.raises(ValueError, match="only when the episode stopped"):
+        TraceTaskScore.model_validate(payload)
+
+
+def test_a_non_candidate_stop_that_does_not_blame_the_run_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(_single_turn_row(), [500], tmp_path, monkeypatch=monkeypatch)
+    payload = score.model_dump()
+    for gate in payload["gates"]:
+        if gate["outcome"] == "failed":
+            gate["failure_class"] = "candidate"
+
+    with pytest.raises(ValueError, match="answerable"):
+        TraceTaskScore.model_validate(payload)
+
+
+def test_attribution_is_part_of_the_score_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two reports that disagree about whose failure it was are two scores."""
+    score, _ = _score(_single_turn_row(), [500], tmp_path, monkeypatch=monkeypatch)
+    completion = score.gate("trace_completion")
+    reblamed = completion.model_copy(update={"failure_class": "candidate"})
+    others = tuple(gate for gate in score.gates if gate.gate != "trace_completion")
+
+    assert score.model_copy(update={"gates": (*others, reblamed)}).score_hash != score.score_hash
+
+
+# --------------------------------------------------------------------------------------
+# Taxonomy: a trace failure reads in the same vocabulary as an executable one.
+# --------------------------------------------------------------------------------------
+
+
+def test_a_task_that_passed_every_gate_records_no_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(
+        _single_turn_row(),
+        [_calls([("c1", "get_balance", '{"account_id":"1"}')]), _says("Account 1 holds 500.")],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert score.task_success
+    assert score.failure_records() == ()
+
+
+def test_a_broken_run_projects_its_terminal_and_its_gates_onto_the_taxonomy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(_single_turn_row(), [500], tmp_path, monkeypatch=monkeypatch)
+
+    records = [record.as_document() for record in trace_failure_records(score)]
+
+    # The episode record carries what no gate can: every unfinished episode fails
+    # the same completion gate, and only the terminal says what ended this one.
+    assert records[0] == {
+        "layer": "episode",
+        "code": "episode.candidate_call_failed",
+        "attribution": "infrastructure",
+        "subject": "episode",
+    }
+    assert {record["attribution"] for record in records} == {"infrastructure"}
+    assert {record["subject"] for record in records[1:]} == set(score.failed_gates)
+    assert records == [record.as_document() for record in score.failure_records()]
+
+
+def test_a_wrong_model_projects_candidate_failures_and_no_terminal_of_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, episode = _score(
+        _single_turn_row(),
+        [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    records = [record.as_document() for record in score.failure_records()]
+
+    assert episode.status == "candidate_mismatch"
+    assert records[0]["code"] == "episode.candidate_mismatch"
+    assert {record["attribution"] for record in records} == {"candidate"}
+    assert [record["layer"] for record in records[1:]] == ["gate"] * len(score.failed_gates)
+
+
+def test_a_trace_score_projects_onto_shared_task_result_columns_without_oracle_claims(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(
+        _single_turn_row(),
+        [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    result = trace_task_result(score)
+
+    assert result["mode"] == "trace"
+    assert result["tool_name_correct"] is False
+    assert result["task_success"] is False
+    assert result["failure_records"] == [
+        record.as_document() for record in score.failure_records()
+    ]
+    assert result["milestones_correct"] is None
+    assert result["execution_success"] is None
+    assert result["assertions_passed"] is None
+    assert result["final_answer_passed"] is None
+
+
+def test_every_reason_code_a_trace_gate_emits_is_a_registered_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate record is only readable if its namespace is declared taxonomy-wide."""
+    scores = (
+        _score(
+            _single_turn_row(),
+            [_calls([("c1", "list_cards", '{"account_id":"1"}')])],
+            tmp_path / "candidate",
+            monkeypatch=monkeypatch,
+        )[0],
+        _score(
+            _single_turn_row(),
+            [500],
+            tmp_path / "infrastructure",
+            monkeypatch=monkeypatch,
+        )[0],
+        _score(
+            _single_turn_row(),
+            [
+                _calls([("c1", "get_balance", '{"account_id":"1"}')]),
+                _says("Account 1 holds", finish_reason="length"),
+            ],
+            tmp_path / "truncated",
+            monkeypatch=monkeypatch,
+        )[0],
+    )
+
+    emitted = {
+        gate.reason_code.partition(".")[0]
+        for score in scores
+        for gate in score.gates
+    }
+    assert emitted <= REASON_CODE_NAMESPACES
+    assert emitted == set(SCORING_GATES)
+
+
+# --------------------------------------------------------------------------------------
 # Identity: the same evidence, scored under the same rules, is the same score.
 # --------------------------------------------------------------------------------------
 
@@ -1260,6 +1677,7 @@ def test_scoring_the_same_evidence_twice_reproduces_the_score_hash(
     )
 
     assert first.score_hash == second.score_hash
+    assert first.schema_version == "1.1"
     assert first.as_document()["score_hash"] == first.score_hash
 
 

@@ -11,6 +11,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_contrac
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_projection import (
     ExecutableTaskSpec,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring_errors import (
+    ExecutableEvidenceError,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_parser import (
     ParsedCall,
     ParsedTrace,
@@ -24,6 +27,7 @@ def parse_executable_trace(
 ) -> ParsedTrace:
     """Read canonical turns and calls without re-parsing provider or oracle bytes."""
 
+    _same_replay(episode, task)
     turns = tuple(
         ParsedTurn(
             turn_index=observed.turn_index,
@@ -67,6 +71,67 @@ def parse_executable_trace(
         turns=turns,
         unsent_turn_indexes=tuple(range(len(turns), len(task.script.turns))),
     )
+
+
+def _same_replay(episode: ExecutableEpisode, task: ExecutableTaskSpec) -> None:
+    """Refuse evidence and a task spec that do not identify one live replay."""
+
+    checks = (
+        ("task_id", episode.task_id, task.task_id),
+        ("candidate_alias", episode.candidate_alias, task.candidate_alias),
+        (
+            "canonical_model_identity",
+            episode.canonical_model_identity,
+            task.canonical_model_identity,
+        ),
+        ("plan_identity", episode.plan_identity, task.plan_identity),
+        ("eval_config_hash", episode.eval_config_hash, task.eval_config_hash),
+        (
+            "source_verification_identity",
+            episode.source_verification_identity,
+            task.source_verification_identity,
+        ),
+        (
+            "oracle_verification_identity",
+            episode.oracle_verification_identity,
+            task.oracle_verification_identity,
+        ),
+        ("script_hash", episode.script_hash, task.script.script_hash),
+        ("task_spec_hash", episode.task_spec_hash, task.task_spec_hash),
+    )
+    for field, actual, expected in checks:
+        if actual != expected:
+            raise ExecutableEvidenceError(
+                f"eval.episode.{field}",
+                "does not identify the executable task supplied to the parser",
+                actual=actual,
+                expected=str(expected),
+                recovery=(
+                    "parse the episode with the exact ExecutableTaskSpec used to "
+                    "drive it"
+                ),
+            )
+    if len(episode.observed) > len(task.script.turns):
+        raise ExecutableEvidenceError(
+            "eval.episode.observed",
+            "holds more assistant turns than the executable script has",
+            actual=len(episode.observed),
+            expected=f"at most {len(task.script.turns)} turns",
+            recovery="re-drive the task and retain only canonical episode evidence",
+        )
+    if episode.status == "completed" and len(episode.observed) != len(
+        task.script.turns
+    ):
+        raise ExecutableEvidenceError(
+            "eval.episode.status",
+            "claims completion before every executable turn was observed",
+            actual=len(episode.observed),
+            expected=f"exactly {len(task.script.turns)} observed turns",
+            recovery=(
+                "retain the original incomplete terminal status, or re-drive the "
+                "episode to the end of the executable script"
+            ),
+        )
 
 
 __all__ = ["EXECUTABLE_NON_CANDIDATE_STOPS", "parse_executable_trace"]

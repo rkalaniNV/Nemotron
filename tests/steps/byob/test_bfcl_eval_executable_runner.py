@@ -82,6 +82,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring
     ExecutableEvidenceError,
     ExecutableScoringPolicyError,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_trace_parser import (
+    parse_executable_trace,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
     candidate_identity_claim,
 )
@@ -106,6 +109,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_cache i
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.tool_trace_contract import (
     build_tool_trace_request,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scorer import (
+    score_normalized_trace,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
     CanonicalExportRow,
@@ -3225,6 +3231,96 @@ def test_oracle_timeout_is_a_non_candidate_scoring_stop(
         "attribution": "infrastructure",
         "subject": "episode",
     }
+
+
+def test_the_executable_score_reports_the_trace_layers_attribution_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One layer decides whose failure a shared gate is, and the other carries it.
+
+    Deriving the classification a second time from the terminal status would let
+    the executable score and the trace score disagree about the same evidence.
+    """
+    oracle_source = _oracle()
+    task = _with_assertions(_task(oracle_source), "assert_book_status_reported")
+    episode = asyncio.run(
+        _drive_score_fixture(
+            tmp_path,
+            monkeypatch,
+            task=task,
+            oracle=_TimeoutOracle(oracle_source.verification_identity),
+            responses=[_response_with_call({"book_id": "BK-100"})],
+        )
+    )
+    score = score_executable_episode(
+        episode=episode, task=task, scoring=_scoring(), plan=_plan()
+    )
+    trace = parse_executable_trace(episode, task)
+    normalized = score_normalized_trace(
+        trace=trace,
+        script=task.script,
+        scoring=_scoring(),
+        completion_detail=episode.detail,
+    )
+
+    assert trace.non_candidate_stop
+    assert normalized.gates
+    for gate in normalized.gates:
+        lifted = score.gate(gate.gate)
+        assert (lifted.outcome, lifted.failure_class) == (
+            gate.outcome,
+            gate.failure_class,
+        ), gate.gate
+
+
+def test_executable_trace_parser_refuses_a_task_from_another_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    oracle_source = _oracle()
+    task = _task(oracle_source)
+    episode = asyncio.run(
+        _drive_score_fixture(
+            tmp_path,
+            monkeypatch,
+            task=task,
+            oracle=_FakeOracle(oracle_source.verification_identity),
+            responses=[
+                _response_with_call({"book_id": "BK-100"}),
+                _text_response("BK-100 is available."),
+            ],
+        )
+    )
+
+    with pytest.raises(ExecutableEvidenceError, match="exact ExecutableTaskSpec"):
+        parse_executable_trace(
+            episode.model_copy(update={"script_hash": OTHER_HASH}),
+            task,
+        )
+
+
+def test_completed_executable_evidence_cannot_hide_unobserved_script_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    oracle_source = _oracle()
+    task = _task(oracle_source)
+    episode = asyncio.run(
+        _drive_score_fixture(
+            tmp_path,
+            monkeypatch,
+            task=task,
+            oracle=_FakeOracle(oracle_source.verification_identity),
+            responses=[
+                _response_with_call({"book_id": "BK-100"}),
+                _text_response("BK-100 is available."),
+            ],
+        )
+    )
+
+    with pytest.raises(ExecutableEvidenceError, match="claims completion"):
+        parse_executable_trace(
+            episode.model_copy(update={"observed": episode.observed[:-1]}),
+            task,
+        )
 
 
 @pytest.mark.parametrize("changes_state", [False, True])

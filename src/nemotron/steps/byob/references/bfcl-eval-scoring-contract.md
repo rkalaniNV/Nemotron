@@ -115,7 +115,12 @@ errors, not ordinary failed scores.
 
 The scorer reuses the trace scorer's normalized call view and pure comparison
 kernel for tool selection, arguments, schema validity, grouping, ordering, text,
-and trace completion. It adds five dimensions:
+and trace completion. That normalized scorer is an internal kernel, not an
+authorization-free public scoring API. The executable parser independently
+requires the episode and task spec to agree on task, candidate, plan, config,
+source, oracle, script, and task-spec identities before it creates the shared
+view. It also refuses either trace contract when `completed` evidence omits a
+scripted turn. Executable scoring adds five dimensions:
 
 - `oracle_execution`: `completed` and structured `business_rejection` are
   successful exchanges; not-executed calls are candidate failures, while
@@ -399,6 +404,13 @@ looser rules", not for turning an unreplayable episode into a success.
 
 ## What a trace score reports
 
+A trace task score uses contract `1.1`. Version `1.1` adds mandatory per-gate
+failure attribution to the score identity and intentionally does not load a
+persisted `1.0` score as if it had been produced under the new semantics. Existing
+`1.0` evidence must be re-scored; its historical `score_hash` remains an identity
+under the old contract and is never restamped. Omitting `failure_class` from a
+failed `1.1` gate is invalid rather than defaulting to either party.
+
 A number is only comparable if it says what it measured, so a trace score is not
 a verdict with a label. It names every gate this contract defines, says whether
 that gate applied to the row, and — when a gate failed — which assistant turn a
@@ -451,6 +463,29 @@ One gate stands apart and always applies:
   answer — an unreachable endpoint, a spent episode budget, a turn budget below
   what the trace needs — is additionally marked as such, so a report can separate
   a broken run from a wrong model without softening either one's score.
+
+Every failed gate also says who is answerable for it, and never who earns the
+task. A failure is the run's when the episode stopped for a reason the model did
+not choose *and* the turn the failure names is a turn the model did not answer:
+a turn the episode never sent, or one whose request never came back. Coverage
+failures on such a turn are the clearest case — a gold call that was never
+requested because the endpoint was unreachable is not weak tool use. Everything
+else is the model's own, including a truncated or filtered answer inside an
+episode that did reach the end of its trace, and every failure in an episode the
+model itself ended. A score whose gates blame the run without a non-candidate
+terminal, or one whose non-candidate terminal blames nothing, is refused rather
+than published. Because the classification is part of a score's identity, two
+reports that disagree about whose failure it was are two different scores.
+
+The trace layer classifies these gates once and executable evaluation carries the
+result unchanged. Re-deriving it from the terminal status in the executable scorer
+would let the two layers disagree about one piece of evidence.
+
+A trace score projects onto the same error taxonomy an executable one does:
+`trace_failure_records` emits one `episode`-layer record for a terminal that is
+not `completed` — every incomplete episode fails the same completion gate, so only
+the status separates a spent budget from an endpoint that never answered — and one
+`gate`-layer record per failed gate, attributed as the scorer attributed it.
 
 These gates roll up into the metric names an exported bundle declares:
 `tool_selection` and `arguments` map to themselves, `schema_valid` also reports
