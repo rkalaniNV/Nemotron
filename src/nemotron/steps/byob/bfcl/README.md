@@ -452,13 +452,18 @@ Launcher run config. It explicitly declares that W5 must provide a registered
 environment, candidate endpoint, and tool resource service. Publishing a dataset
 bundle does not pretend those execution dependencies already exist.
 
-W5.10 closes that boundary with native adapter contract `1.1`, pinned to
+W5.10 closes that boundary with native adapter contract `1.2`, pinned to
 `nemo-evaluator==0.2.8` and `nemo-evaluator-launcher==0.2.6`.
 `NemoNativeAdapterConfig` binds an immutable six-file bundle tree hash to one
-resolved BFCL eval config, one candidate alias, and a separate native result
-directory. `verify_native_bundle(...)` re-reads all six files, rejects additions,
+resolved BFCL eval config, one candidate alias, a separate native result
+directory, and the `probe_oracle` choice added in `1.2`, since a Launcher task is
+submitted once and a probe decision left out of the config would be silently
+reversed inside the evaluation container.
+`verify_native_bundle(...)` re-reads all six files, rejects additions,
 validates every dataset row and schema, and cross-checks the descriptor,
-metadata, prompt catalog, and evaluator YAML before the model can be called.
+metadata, prompt catalog, and evaluator YAML before the model can be called. It
+shares `read_native_bundle_tree(...)` with orchestrators that must digest a
+bundle before they can name that digest, so there is one definition of the tree.
 The Launcher dataset mount is passed to the framework command as
 `runtime_bundle_root`; the host bundle path is not assumed to exist inside the
 container. Native records must also equal the canonical projection of the
@@ -470,8 +475,9 @@ single-turn BYOB strategy or generic mean reducer. Its registered command calls
 runner own incremental conversations, dependent calls, tool-result release,
 oracle lifecycle, error attribution, N/A denominators, concurrency, and
 authorization-bound aggregation. Default `target_binding: launcher` mode
-revalidates the Launcher deployment URL into the runtime BFCL config; `exact`
-mode requires the pinned URL. Both require the same model id. The generated task
+revalidates the URL and served model id produced by Launcher into the runtime
+BFCL route while preserving the separately pinned weight identity; `exact` mode
+requires the pinned URL and model id. The generated task
 uses Launcher client mode and translates bundle-declared metric names into NeMo
 `EvaluationResult` with exact count/sum/variance statistics.
 Zero-denominator metrics are omitted from NeMo's float-only score map and retained
@@ -521,20 +527,40 @@ nemotron steps run byob/bfcl -c eval.cli
 `execution_backend: direct` calls `run_declared_eval_sync(...)`; `dry_run: true`
 verifies source and contamination and reports authorized task counts without
 candidate inference. `output_format: json` emits stable machine-readable run and
-artifact locations. `stage=all` remains prepare plus generate and never spends
+artifact locations, and `human` renders the same payload one key per line with
+JSON-rendered values. `stage=all` remains prepare plus generate and never spends
 candidate tokens.
+
+Every failure, including projecting a finished run into CLI output, leaves through
+one published exit status: `2` for a config the operator has to edit, `3` for a
+setup, source, scoring, or aggregation refusal, `4` for contamination or
+answer-key exposure, `5` for a candidate-endpoint failure, `6` for live oracle or
+assertion infrastructure, and `7` for an immutable artifact that already holds
+different evidence. Each registered taxonomy code is assigned a status
+explicitly, and the assignment is checked against the taxonomy at import.
 
 For NeMo Launcher, start from `config/eval.launcher.yaml`. The first invocation
 with `launcher.submit: false` verifies the bundle and materializes the adapter
 config, immutable framework package, task entry, and merged `eval/model_eval`
 config. Install the printed framework package explicitly in the Launcher
-environment, then rerun the same config with `submit: true`. The adapter config,
-task, and merged Launcher config are never overwritten with different bytes.
-When `launcher.container` is set, `launcher.evaluation_mounts` is mandatory and
-is merged into `execution.mounts.evaluation`; it must expose the adapter/eval
-configs, verified source, executable oracle resources, and output trees at the
-absolute paths those contracts name. The task's bundle remains mounted through
-its separate `dataset_dir`/`dataset_mount_path` contract.
+environment, then rerun the same config with `submit: true`; the submit check
+looks for the distribution the adapter names, not one inferred from the build
+directory. The adapter config, task, and merged Launcher config are never
+overwritten with different bytes, and none of the orchestration paths may sit
+inside the bundle, whose exact file set is re-verified on every run.
+
+If the merged Launcher config names an evaluation container anywhere — through
+`launcher.container`, a global base config, or the task — then
+`launcher.evaluation_mounts` is mandatory and is merged into
+`execution.mounts.evaluation`. These must be identity mounts because the adapter
+and resolved eval config deliberately contain absolute paths; the CLI rejects a
+non-identity mapping or a mount set that does not cover the adapter/eval configs,
+verified source, executable oracle resources, and output trees. The task's bundle
+remains mounted through its separate
+`dataset_dir`/`dataset_mount_path` contract. A base config that deploys its own
+endpoint keeps its `deployment` block and gets neither a pinned candidate URL nor
+model id, because Launcher 0.2.6 rejects both for managed deployments and the
+adapter's `launcher` target binding accepts the endpoint Launcher serves.
 
 The whole bundle is encoded, digested, and validated in memory before any file is
 created, so a projection that cannot be expressed — an unresolvable prompt id, a
@@ -1179,7 +1205,7 @@ ignored.
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Implemented** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.3`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.5`), bounded executable and trace-only batch orchestration, NeMo Evaluator native framework/result bridge (`1.1`), Nemotron CLI orchestration (`1.0`), and error taxonomy (`1.2`) are available. `nemotron steps run byob/bfcl -c eval.cli` runs direct evaluation; `eval.launcher` materializes and optionally submits the native task through `eval/model_eval`. |
+| Evaluation and scoring | **Implemented** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.3`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.5`), bounded executable and trace-only batch orchestration, NeMo Evaluator native framework/result bridge (`1.2`), Nemotron CLI orchestration (`1.0`), and error taxonomy (`1.2`) are available. `nemotron steps run byob/bfcl -c eval.cli` runs direct evaluation; `eval.launcher` materializes and optionally submits the native task through `eval/model_eval`. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |

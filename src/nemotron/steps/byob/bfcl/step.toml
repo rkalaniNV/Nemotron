@@ -86,6 +86,11 @@ name = "dry_run"
 description = "For direct evaluation, verify source and contamination without candidate inference. For Launcher, materialize and submit with Launcher dry_run enabled."
 default = false
 
+[[parameters]]
+name = "probe_oracle"
+description = "Verify the oracle pack by executing it. Launcher runs pin this into the adapter config, so a declared choice is not reversed inside the evaluation container."
+default = true
+
 [[strategies]]
 when = "You need a function-calling benchmark from an executable oracle pack"
 then = "Use family=bfcl: stage=prepare normalizes the pack and writes oracle_validation_report.json, stage=generate consumes a gold-eligible report and writes benchmark_raw.parquet, benchmark.parquet, and run_manifest.json. Start from config/default.yaml, point oracle_pack at your pack, and keep domain content out of runtime/benchmark_families/bfcl."
@@ -113,7 +118,7 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
 when = "You need to evaluate candidate models against a published BFCL benchmark"
-then = "Resolve config/eval.default.yaml (schema 1.1), then point config/eval.cli.yaml at it and run stage=eval. The CLI envelope selects direct or nemo_launcher execution, output rendering, dry-run, and operational paths without changing eval_config_hash. Direct mode dispatches to run_declared_eval_sync(...). Launcher mode requires one candidate, materializes the immutable adapter config, framework package, task entry, and merged eval/model_eval config, and optionally submits after the generated package is explicitly installed. stage=generate still refuses eval_config_path and inline eval blocks."
+then = "Resolve config/eval.default.yaml (schema 1.1), then point config/eval.cli.yaml at it and run stage=eval. The CLI envelope selects direct or nemo_launcher execution, output rendering, dry-run, and operational paths without changing eval_config_hash. Direct mode dispatches to run_declared_eval_sync(...) and lets the runner perform the single authoritative load of the pinned eval config. Launcher mode requires one candidate, keeps every orchestration path outside the immutable bundle, pins probe_oracle into the adapter config, requires container mounts to be identity mappings that cover every runtime path, and materializes the immutable adapter config, framework package, task entry, and merged eval/model_eval config. Managed deployments leave target URL/model id to Launcher; attached endpoints pin both. Submission follows only after the generated package is explicitly installed. Every failure leaves through one published exit status per registered taxonomy code. stage=generate still refuses eval_config_path and inline eval blocks."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[strategies]]
@@ -518,7 +523,7 @@ recovery = "Inspect the chained BFCL exception and immutable source/contaminatio
 
 [[errors]]
 name = "eval_cli_artifact_conflict"
-recovery = "Use a fresh orchestration output path or restore the byte-identical generated adapter, task, framework, and Launcher config. The CLI never overwrites conflicting evidence."
+recovery = "Use a fresh orchestration output path or restore the byte-identical generated adapter, task, framework, and Launcher config. The CLI never overwrites conflicting evidence, and no orchestration path may sit inside the immutable bundle whose exact file set is re-verified every run."
 
 [[errors]]
 name = "eval_cli_framework_not_installed"

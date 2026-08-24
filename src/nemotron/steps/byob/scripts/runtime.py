@@ -7,7 +7,7 @@ This module only selects the family and requested stage.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast, overload
 
 import yaml  # type: ignore[import-untyped]
 
@@ -38,15 +38,37 @@ def load_dispatch_config(config_path: str | Path) -> dict[str, Any]:
 _ValueT = TypeVar("_ValueT")
 
 
+@overload
+def resolve_dispatch_value(
+    arg_value: _ValueT | None,
+    yaml_dict: dict[str, Any],
+    yaml_key: str,
+    default: _ValueT,
+) -> _ValueT: ...
+
+
+@overload
+def resolve_dispatch_value(
+    arg_value: _ValueT | None,
+    yaml_dict: dict[str, Any],
+    yaml_key: str,
+    default: None = None,
+) -> _ValueT | None: ...
+
+
 def resolve_dispatch_value(
     arg_value: _ValueT | None,
     yaml_dict: dict[str, Any],
     yaml_key: str,
     default: _ValueT | None = None,
 ) -> _ValueT | None:
-    """Resolve CLI/YAML dispatch values without coupling to one CLI framework."""
-    value = arg_value or yaml_dict.get(yaml_key, default)
-    return cast(_ValueT | None, value)
+    """Resolve CLI/YAML dispatch values without coupling to one CLI framework.
+
+    A key present but explicitly null in the config falls back to the default, so a
+    declared default is honored rather than dispatched as a missing value.
+    """
+    value = arg_value or yaml_dict.get(yaml_key) or default
+    return cast("_ValueT | None", value)
 
 
 def run_byob(

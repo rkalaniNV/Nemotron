@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -19,22 +20,31 @@ class BenchmarkRunResult:
     def render(self) -> str:
         if self.output_format == "json":
             return json.dumps(self.payload, sort_keys=True)
-        lines = [f"{key}: {value}" for key, value in self.payload.items()]
-        return "\n".join(lines)
+        # Human lines stay one-per-key, but nested values are rendered as JSON so a
+        # dict or None never reaches an operator as a Python repr.
+        return "\n".join(
+            f"{key}: {value if isinstance(value, str) else json.dumps(value, sort_keys=True)}"
+            for key, value in self.payload.items()
+        )
 
 
+ConfigPath = str | os.PathLike[str]
+
+
+# Stage hooks are called positionally by the dispatcher, so the parameter is
+# positional-only here: a family is free to name its own argument.
 class PrepareHook(Protocol):
-    def __call__(self, config: Path) -> Path | None: ...
+    def __call__(self, config_path: ConfigPath, /) -> Path | None: ...
 
 
 class GenerateHook(Protocol):
     def __call__(
-        self, config: Path, *, skip_until: str | None = None
+        self, config_path: ConfigPath, /, *, skip_until: str | None = None
     ) -> Path | None: ...
 
 
 class EvaluateHook(Protocol):
-    def __call__(self, config: Path) -> Path | BenchmarkRunResult: ...
+    def __call__(self, config_path: ConfigPath, /) -> Path | BenchmarkRunResult | None: ...
 
 
 @dataclass(frozen=True)

@@ -60,3 +60,27 @@ def test_programmatic_launch_uses_configured_tasks_and_returns_identity(
     assert result.launcher_config_path == saved
     assert result.invocation_id == "invocation"
     assert calls[0][1:] == (True, ["bfcl.task"])
+
+
+def test_a_missing_launcher_raises_instead_of_exiting_and_writes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "nemo_evaluator_launcher.api.functional", None)
+    written: list[Path] = []
+    monkeypatch.setattr(
+        runtime,
+        "_save_launcher_config",
+        lambda config_path, cfg, launcher_cfg: written.append(config_path),
+    )
+
+    # SystemExit here would be a BaseException that an embedding caller cannot map
+    # into its own error contract, and a config saved before the check would look
+    # like a submission that never happened.
+    with pytest.raises(runtime.ModelEvalDependencyError):
+        runtime.launch_model_eval_config(
+            config_path=tmp_path / "materialized.yaml",
+            cfg=OmegaConf.create({"execution": {"type": "local"}}),
+        )
+
+    assert written == []

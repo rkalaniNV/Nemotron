@@ -26,7 +26,14 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, StrictStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.config import (
     load_eval_config,
@@ -58,7 +65,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.nemo_evaluator_export i
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-NEMO_NATIVE_ADAPTER_VERSION: Final = "1.1"
+NEMO_NATIVE_ADAPTER_VERSION: Final = "1.2"
 SUPPORTED_NEMO_EVALUATOR_VERSION: Final = "0.2.8"
 SUPPORTED_NEMO_LAUNCHER_VERSION: Final = "0.2.6"
 NEMO_NATIVE_RESULT_FILE: Final = "nemo_evaluator_results.json"
@@ -79,13 +86,18 @@ class _Frozen(BaseModel):
 class NemoNativeAdapterConfig(_Frozen):
     """Pinned input to one native NeMo Evaluator task invocation."""
 
-    schema_version: Literal["1.1"] = NEMO_NATIVE_ADAPTER_VERSION
+    schema_version: Literal["1.2"] = NEMO_NATIVE_ADAPTER_VERSION
     bundle_root: Path
     bundle_content_hash: ContentHash
     eval_config_path: Path
     candidate_alias: StrictStr
     native_output_dir: Path
     target_binding: Literal["launcher", "exact"] = "launcher"
+    # Whether the run verifies the oracle pack by executing it. This is part of the
+    # pinned setup rather than a runtime flag, because a Launcher task is submitted
+    # once and an orchestrator that could not state it here would silently probe
+    # against an operator who declared otherwise.
+    probe_oracle: StrictBool = True
     nemo_evaluator_version: Literal["0.2.8"] = SUPPORTED_NEMO_EVALUATOR_VERSION
     nemo_launcher_version: Literal["0.2.6"] = SUPPORTED_NEMO_LAUNCHER_VERSION
 
@@ -274,6 +286,39 @@ def _read_dataset(path: Path) -> tuple[NemoEvaluatorRecord, ...]:
     return tuple(records)
 
 
+def read_native_bundle_tree(root: str | Path) -> tuple[dict[str, bytes], str]:
+    """Read the exact bundle file set and digest it.
+
+    An orchestrator has to digest a bundle before it can name that digest in an
+    adapter config, so this is the one definition of what the tree is and how it is
+    hashed; a second copy could accept a bundle this verifier would reject.
+    """
+    bundle_root = Path(root).expanduser().resolve()
+    if not bundle_root.is_dir():
+        raise NemoNativeAdapterError(f"bundle root is not a directory: {bundle_root}")
+    actual_files = tuple(
+        sorted(
+            path.relative_to(bundle_root).as_posix()
+            for path in bundle_root.rglob("*")
+            if path.is_file()
+        )
+    )
+    if actual_files != tuple(sorted(NEMO_BUNDLE_FILES)):
+        raise NemoNativeAdapterError(
+            f"bundle files differ from the contract: {list(actual_files)}"
+        )
+    try:
+        contents = {name: (bundle_root / name).read_bytes() for name in NEMO_BUNDLE_FILES}
+    except OSError as exc:
+        raise NemoNativeAdapterError("the native bundle cannot be read") from exc
+    return contents, export_content_hash(contents)
+
+
+def native_bundle_tree_hash(root: str | Path) -> str:
+    """Digest one exported bundle tree without an adapter config to compare to."""
+    return read_native_bundle_tree(root)[1]
+
+
 def verify_native_bundle(
     config: NemoNativeAdapterConfig,
     *,
@@ -285,20 +330,7 @@ def verify_native_bundle(
         if bundle_root is not None
         else config.bundle_root
     )
-    if not root.is_dir():
-        raise NemoNativeAdapterError(f"bundle root is not a directory: {root}")
-    actual_files = tuple(
-        sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
-    )
-    if actual_files != tuple(sorted(NEMO_BUNDLE_FILES)):
-        raise NemoNativeAdapterError(
-            f"bundle files differ from the contract: {list(actual_files)}"
-        )
-    try:
-        contents = {name: (root / name).read_bytes() for name in NEMO_BUNDLE_FILES}
-    except OSError as exc:
-        raise NemoNativeAdapterError("the native bundle cannot be read") from exc
-    content_hash = export_content_hash(contents)
+    contents, content_hash = read_native_bundle_tree(root)
     if content_hash != config.bundle_content_hash:
         raise NemoNativeAdapterError("bundle tree hash differs from the adapter config")
 
@@ -476,7 +508,11 @@ def _validate_eval_boundary(
             "one native Launcher task requires exactly its configured candidate"
         )
     candidate = eval_config.candidate(adapter.candidate_alias)
-    if target_model_id is not None and target_model_id != candidate.model:
+    if (
+        adapter.target_binding == "exact"
+        and target_model_id is not None
+        and target_model_id != candidate.model
+    ):
         raise NemoNativeAdapterError("Launcher model id differs from the eval config")
     if (
         adapter.target_binding == "exact"
@@ -503,8 +539,11 @@ def _runtime_eval_config(
     config: BfclEvalConfig,
     *,
     target_url: str | None,
+    target_model_id: str | None,
 ) -> BfclEvalConfig:
-    if adapter.target_binding != "launcher" or target_url is None:
+    if adapter.target_binding != "launcher" or (
+        target_url is None and target_model_id is None
+    ):
         return config
     payload = config.model_dump(mode="python")
     candidate_payload = next(
@@ -512,12 +551,15 @@ def _runtime_eval_config(
         for candidate in payload["candidates"]
         if candidate["alias"] == adapter.candidate_alias
     )
-    candidate_payload["api"]["base_url"] = target_url.rstrip("/")
+    if target_url is not None:
+        candidate_payload["api"]["base_url"] = target_url.rstrip("/")
+    if target_model_id is not None:
+        candidate_payload["model"] = target_model_id
     try:
         return BfclEvalConfig.model_validate(payload)
     except Exception as exc:
         raise NemoNativeAdapterError(
-            "Launcher target URL cannot form a valid BFCL runtime config"
+            "Launcher target endpoint cannot form a valid BFCL runtime config"
         ) from exc
 
 
@@ -582,10 +624,15 @@ def _run_nemo_native_adapter(
     *,
     target_url: str | None = None,
     target_model_id: str | None = None,
-    probe_oracle: bool = True,
+    probe_oracle: bool | None = None,
     bundle_root: str | Path | None = None,
 ) -> NemoNativeRunResult:
     """Verify, run through BFCL, and publish a NeMo-native result sidecar."""
+    if probe_oracle is not None and probe_oracle != adapter.probe_oracle:
+        raise NemoNativeAdapterError(
+            "runtime probe_oracle differs from the immutable adapter config"
+        )
+    effective_probe_oracle = adapter.probe_oracle
     versions = verify_nemo_runtime(adapter, require_launcher=False)
     bundle = verify_native_bundle(adapter, bundle_root=bundle_root)
     eval_config = load_eval_config(adapter.eval_config_path)
@@ -600,11 +647,12 @@ def _run_nemo_native_adapter(
         adapter,
         eval_config,
         target_url=target_url,
+        target_model_id=target_model_id,
     )
     authorized = authorize_bfcl_eval(
         runtime_config,
         eval_run_id=None,
-        probe_oracle=probe_oracle,
+        probe_oracle=effective_probe_oracle,
     )
     _validate_authorization(
         bundle,
@@ -614,7 +662,7 @@ def _run_nemo_native_adapter(
     result = _run_authorized_eval(
         runtime_config,
         authorized=authorized,
-        probe_oracle=probe_oracle,
+        probe_oracle=effective_probe_oracle,
     )
     aggregates = {
         aggregate.candidate_alias: aggregate for aggregate in result.candidate_scores
@@ -687,7 +735,7 @@ def run_nemo_native_adapter(
     *,
     target_url: str | None = None,
     target_model_id: str | None = None,
-    probe_oracle: bool = True,
+    probe_oracle: bool | None = None,
     bundle_root: str | Path | None = None,
 ) -> NemoNativeRunResult:
     """Run the native bridge and leave machine-readable evidence on failure."""
@@ -734,6 +782,17 @@ def _launcher_task_name(task_name: str) -> str:
         return normalized
     digest = hashlib.sha256(task_name.encode("utf-8")).hexdigest()[:12]
     return f"{normalized or 'task'}_{digest}"
+
+
+def native_framework_distribution(adapter: NemoNativeAdapterConfig) -> str:
+    """Name the distribution `install_native_framework` builds for this bundle.
+
+    An orchestrator has to verify that exact distribution is installed before it
+    submits, so the name is derived here rather than reconstructed from the built
+    directory by every caller.
+    """
+    bundle = verify_native_bundle(adapter)
+    return f"nemo-evaluator-{_framework_name(bundle.descriptor.task_name)}"
 
 
 def native_framework_definition(
@@ -955,7 +1014,7 @@ def main(argv: list[str] | None = None) -> int:
             authorized = authorize_bfcl_eval(
                 eval_config,
                 eval_run_id=None,
-                probe_oracle=True,
+                probe_oracle=adapter.probe_oracle,
             )
             _validate_authorization(
                 bundle,
@@ -1010,7 +1069,9 @@ def main(argv: list[str] | None = None) -> int:
             adapter,
             target_url=args.target_url,
             target_model_id=args.target_model_id,
-            probe_oracle=not args.no_probe_oracle,
+            # The adapter is the source of truth. The legacy safety flag remains
+            # accepted, but a value that contradicts the config is refused.
+            probe_oracle=False if args.no_probe_oracle else None,
             bundle_root=args.bundle_root,
         )
     except Exception as exc:
@@ -1041,7 +1102,10 @@ __all__ = [
     "load_native_adapter_config",
     "main",
     "native_evaluation_result_document",
+    "native_bundle_tree_hash",
     "native_framework_definition",
+    "native_framework_distribution",
+    "read_native_bundle_tree",
     "run_nemo_native_adapter",
     "verify_native_bundle",
     "verify_nemo_runtime",
