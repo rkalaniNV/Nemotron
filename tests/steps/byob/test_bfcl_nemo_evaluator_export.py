@@ -5,12 +5,27 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.nemo_native_adapter import (
+    NEMO_NATIVE_FAILURE_FILE,
+    NemoNativeAdapterConfig,
+    NemoNativeAdapterError,
+    install_native_framework,
+    launcher_task_entry,
+    native_evaluation_result_document,
+    native_framework_definition,
+    run_nemo_native_adapter,
+    verify_native_bundle,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_aggregation import (
+    TraceMetricResult,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
     NemoEvaluatorBundle,
     NemoEvaluatorRecord,
@@ -253,6 +268,343 @@ def test_the_writer_produces_the_whole_bundle(tmp_path: Path) -> None:
     for name in NEMO_BUNDLE_FILES:
         assert (tmp_path / NEMO_EVALUATOR_ROOT / name).is_file()
     assert artifact.bundle_file == f"{NEMO_EVALUATOR_ROOT}/{NEMO_BUNDLE_FILE}"
+
+
+def _native_adapter(
+    tmp_path: Path,
+    artifact: NemoEvaluatorArtifact,
+) -> NemoNativeAdapterConfig:
+    return NemoNativeAdapterConfig(
+        bundle_root=(tmp_path / artifact.root).resolve(),
+        bundle_content_hash=artifact.content_hash,
+        eval_config_path=(tmp_path / "eval.yaml").resolve(),
+        candidate_alias="candidate",
+        native_output_dir=(tmp_path / "native-results").resolve(),
+    )
+
+
+def test_the_native_adapter_verifies_and_registers_the_immutable_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = write_nemo_evaluator_bundle(
+        _projection([_row("t1"), _parallel_row("t2")]),
+        tmp_path,
+    )
+    adapter = _native_adapter(tmp_path, artifact)
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.load_eval_config",
+        lambda path: SimpleNamespace(
+            candidate=lambda alias: SimpleNamespace(
+                api=SimpleNamespace(api_key_env="CANDIDATE_API_KEY")
+            )
+        ),
+    )
+
+    verified = verify_native_bundle(adapter)
+    fdf = native_framework_definition(
+        adapter,
+        adapter_config_path="/adapter/native.yaml",
+    )
+    task = launcher_task_entry(
+        adapter,
+        adapter_config_path="/adapter/native.yaml",
+        container="nvcr.io/example/evaluator@sha256:" + "0" * 64,
+    )
+
+    assert verified.task_ids == ("t1", "t2")
+    assert verified.content_hash == artifact.content_hash
+    assert fdf["evaluations"][0]["defaults"]["config"]["required_capabilities"] == [
+        "tools"
+    ]
+    assert (
+        fdf["defaults"]["target"]["api_endpoint"]["adapter_config"]["mode"]
+        == "client"
+    )
+    assert "config.params.extra.runtime_bundle_root" in fdf["defaults"]["command"]
+    assert task["name"].endswith(f".{verified.descriptor.task_name}")
+    assert task["endpoint_type"] == "chat"
+    assert task["nemo_evaluator_config"]["config"]["params"]["extra"][
+        "runtime_bundle_root"
+    ] == "/datasets/bfcl"
+    assert task["env_vars"] == {"CANDIDATE_API_KEY": "host:CANDIDATE_API_KEY"}
+
+
+def test_native_paths_are_disjoint_and_cli_overrides_are_revalidated(
+    tmp_path: Path,
+) -> None:
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+    payload = adapter.model_dump(mode="python")
+    payload["native_output_dir"] = adapter.bundle_root / "results"
+
+    with pytest.raises(ValidationError, match="contain or be contained"):
+        NemoNativeAdapterConfig.model_validate(payload)
+
+
+def test_native_framework_build_is_immutable_and_does_not_register_globally(
+    tmp_path: Path,
+) -> None:
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+    install_root = tmp_path / "framework-build"
+
+    package = install_native_framework(
+        adapter,
+        adapter_config_path="/adapter/native.yaml",
+        install_dir=install_root,
+    )
+    assert (package / "pyproject.toml").is_file()
+    assert not tuple(install_root.rglob("*.pth"))
+
+    install_native_framework(
+        adapter,
+        adapter_config_path="/adapter/native.yaml",
+        install_dir=install_root,
+    )
+    (package / "nemo_evaluator" / package.name / "framework.yml").write_text(
+        "changed",
+        encoding="utf-8",
+    )
+    with pytest.raises(NemoNativeAdapterError, match="immutable evidence"):
+        install_native_framework(
+            adapter,
+            adapter_config_path="/adapter/native.yaml",
+            install_dir=install_root,
+        )
+
+
+def test_the_native_adapter_refuses_one_changed_or_extra_bundle_file(
+    tmp_path: Path,
+) -> None:
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+    metadata = tmp_path / artifact.root / NEMO_METADATA_FILE
+    metadata.write_text(metadata.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    with pytest.raises(NemoNativeAdapterError, match="tree hash"):
+        verify_native_bundle(adapter)
+
+    metadata.write_text(
+        json.dumps(_read_json(metadata), sort_keys=True),
+        encoding="utf-8",
+    )
+    (tmp_path / artifact.root / "unexpected.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(NemoNativeAdapterError, match="bundle files differ"):
+        verify_native_bundle(adapter)
+
+
+def test_native_run_maps_setup_failures_to_immutable_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+    (adapter.bundle_root / "unexpected.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.verify_nemo_runtime",
+        lambda config, require_launcher: {"nemo-evaluator": "0.2.8"},
+    )
+
+    with pytest.raises(NemoNativeAdapterError, match="bundle files differ"):
+        run_nemo_native_adapter(adapter)
+
+    failure = _read_json(adapter.native_output_dir / NEMO_NATIVE_FAILURE_FILE)
+    assert failure["error_code"] == "eval_nemo_adapter_invalid"
+    assert failure["error_type"] == "NemoNativeAdapterError"
+    assert failure["adapter_config_hash"] == adapter.config_hash
+
+
+def test_native_metric_translation_preserves_counts_and_omits_na() -> None:
+    aggregate = type(
+        "Aggregate",
+        (),
+        {
+            "metrics": (
+                TraceMetricResult(
+                    metric="tool_selection_pass_rate",
+                    numerator=1,
+                    denominator=2,
+                    value=0.5,
+                ),
+                TraceMetricResult(
+                    metric="arguments_pass_rate",
+                    numerator=0,
+                    denominator=0,
+                    value=None,
+                    not_applicable_reason="metric.gate_not_applicable",
+                ),
+            )
+        },
+    )()
+
+    document = native_evaluation_result_document(aggregate, task_name="bfcl_pack")  # type: ignore[arg-type]
+    scores = document["tasks"]["bfcl_pack"]["metrics"]["pass@1"]["scores"]
+
+    assert scores["tool_selection_pass_rate"]["value"] == 0.5
+    assert scores["tool_selection_pass_rate"]["stats"]["count"] == 2
+    assert scores["tool_selection_pass_rate"]["stats"]["sum"] == 1.0
+    assert "arguments_pass_rate" not in scores
+
+
+def test_native_authorization_rejects_a_different_execution_dataset_before_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = write_nemo_evaluator_bundle(_projection([_row("t1")]), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact).model_copy(
+        update={"target_binding": "exact"}
+    )
+    candidate = SimpleNamespace(
+        alias="candidate",
+        api=SimpleNamespace(base_url="https://candidate.example/v1"),
+        model="model",
+    )
+    eval_config = SimpleNamespace(
+        candidates=(candidate,),
+        outputs=SimpleNamespace(output_dir=(tmp_path / "bfcl-results").resolve()),
+        candidate=lambda alias: candidate,
+    )
+    authorization = SimpleNamespace(
+        eval_run_id="eval-run",
+        source=SimpleNamespace(
+            evaluation_benchmark=SimpleNamespace(
+                content_hash="sha256:" + "0" * 64
+            )
+        ),
+        projection=_projection([_row("t2")]),
+        plan=SimpleNamespace(evaluation_task_ids=lambda alias: ("t1",)),
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.verify_nemo_runtime",
+        lambda config, require_launcher: {"nemo-evaluator": "0.2.8"},
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.load_eval_config",
+        lambda path: eval_config,
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.authorize_bfcl_eval",
+        lambda config, eval_run_id, probe_oracle: authorization,
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter._run_authorized_eval",
+        lambda *args, **kwargs: pytest.fail("candidate execution was reached"),
+    )
+
+    with pytest.raises(NemoNativeAdapterError, match="task order differs"):
+        run_nemo_native_adapter(adapter)
+
+
+def test_native_run_maps_the_bfcl_result_and_publishes_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projection = _projection([_row("t1")])
+    artifact = write_nemo_evaluator_bundle(projection, tmp_path)
+    adapter = _native_adapter(tmp_path, artifact).model_copy(
+        update={"target_binding": "exact"}
+    )
+    candidate = SimpleNamespace(
+        alias="candidate",
+        api=SimpleNamespace(base_url="https://candidate.example/v1"),
+        model="model",
+    )
+    eval_config = SimpleNamespace(
+        candidates=(candidate,),
+        outputs=SimpleNamespace(output_dir=(tmp_path / "bfcl-results").resolve()),
+        candidate=lambda alias: candidate,
+    )
+    aggregate = SimpleNamespace(
+        candidate_alias="candidate",
+        scope="trace",
+        aggregate_hash="sha256:" + "2" * 64,
+        eval_config_hash="sha256:" + "4" * 64,
+        plan_identity="sha256:" + "5" * 64,
+        source_verification_identity="sha256:" + "6" * 64,
+        metrics=(
+            TraceMetricResult(
+                    metric="tool_selection_pass_rate",
+                numerator=1,
+                denominator=1,
+                value=1.0,
+            ),
+            TraceMetricResult(
+                metric="arguments_pass_rate",
+                numerator=0,
+                denominator=0,
+                value=None,
+                not_applicable_reason="metric.gate_not_applicable",
+            ),
+        ),
+    )
+    bfcl_result = SimpleNamespace(
+        eval_run_id="eval-run",
+        plan=SimpleNamespace(
+            candidate_aliases=("candidate",),
+            evaluation_task_ids=lambda alias: ("t1",),
+        ),
+        source=SimpleNamespace(
+            evaluation_benchmark=SimpleNamespace(
+                content_hash="sha256:" + "0" * 64,
+            )
+        ),
+        candidate_scores=(aggregate,),
+        artifacts=SimpleNamespace(
+            report_path=tmp_path / "bfcl-results" / "eval_report.json",
+            report_hash="sha256:" + "3" * 64,
+        ),
+    )
+    authorization = SimpleNamespace(
+        eval_run_id="eval-run",
+        source=bfcl_result.source,
+        projection=projection,
+        plan=bfcl_result.plan,
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.verify_nemo_runtime",
+        lambda config, require_launcher: {"nemo-evaluator": "0.2.8"},
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.load_eval_config",
+        lambda path: eval_config,
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter.authorize_bfcl_eval",
+        lambda config, eval_run_id, probe_oracle: authorization,
+    )
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
+        "nemo_native_adapter._run_authorized_eval",
+        lambda config, authorized, probe_oracle: bfcl_result,
+    )
+
+    result = run_nemo_native_adapter(
+        adapter,
+        target_url="https://candidate.example/v1/",
+        target_model_id="model",
+    )
+    native = _read_json(result.result_path)
+    manifest = _read_json(result.manifest_path)
+
+    score = native["tasks"]["pack"]["metrics"]["pass@1"]["scores"]["tool_selection"]
+    assert score["value"] == 1.0
+    assert manifest["aggregate_hash"] == aggregate.aggregate_hash
+    assert manifest["omitted_not_applicable_metrics"] == {
+        "arguments_pass_rate": "metric.gate_not_applicable"
+    }
+    assert result.result_hash == (
+        "sha256:" + hashlib.sha256(result.result_path.read_bytes()).hexdigest()
+    )
 
 
 def test_the_descriptor_names_every_other_file_and_pins_the_dataset(tmp_path: Path) -> None:

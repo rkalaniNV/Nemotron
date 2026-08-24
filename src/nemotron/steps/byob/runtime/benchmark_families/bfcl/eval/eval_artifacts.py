@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, TypeVar
+from typing import Any, Final, Literal, TypeVar
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_cache import (
     CandidateIOCache,
@@ -51,12 +51,13 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_cont
     GateResult,
     TraceTaskScore,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import thaw_json
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.runtime_metadata import (
     runtime_metadata,
 )
 
-EVAL_ARTIFACT_CONTRACT_VERSION: Final = "1.4"
+EVAL_ARTIFACT_CONTRACT_VERSION: Final = "1.5"
 EVAL_REPORT_FILE: Final = "eval_report.json"
 EVAL_TASK_RESULTS_FILE: Final = "eval_task_results.parquet"
 EVAL_MANIFEST_FILE: Final = "eval_manifest.json"
@@ -218,12 +219,72 @@ def trace_task_result(score: TraceTaskScore) -> dict[str, Any]:
     }
 
 
-def _eval_scope(candidate_scores: tuple[CandidateAggregate, ...]) -> str:
+def _eval_scope(
+    candidate_scores: tuple[CandidateAggregate, ...],
+) -> Literal["trace", "trace_and_executable"]:
     """Which evaluation an artifact set publishes, as its aggregates declare it."""
     scopes = {score.scope for score in candidate_scores}
     if len(scopes) != 1:
         raise EvalArtifactError("candidate aggregates mix evaluation scopes")
     return next(iter(scopes))
+
+
+def _task_policy_hash(score: EvalTaskScore) -> str:
+    if isinstance(score, ExecutableTaskScore):
+        return score.scoring_policy_hash
+    return _sha256_json(thaw_json(score.scoring_policy))
+
+
+def _validate_candidate_aggregates(
+    *,
+    config: BfclEvalConfig,
+    plan: EligibleEvalPlan,
+    candidate_scores: tuple[CandidateAggregate, ...],
+) -> tuple[Literal["trace", "trace_and_executable"], dict[str, CandidateAggregate]]:
+    """Prove aggregate documents still belong to this authorization boundary.
+
+    Aggregators perform the same checks while constructing these values, but report
+    and artifact writers are public APIs. They must not trust a deserialized or
+    ``model_copy``-restamped aggregate merely because a runner normally supplies it.
+    """
+    if config.eval_config_hash != plan.eval_config_hash:
+        raise EvalArtifactError("eval config and contamination plan identities differ")
+    if not candidate_scores:
+        raise EvalArtifactError("candidate aggregates do not cover the plan aliases")
+    scope = _eval_scope(candidate_scores)
+    aliases = tuple(score.candidate_alias for score in candidate_scores)
+    if len(set(aliases)) != len(aliases):
+        raise EvalArtifactError("candidate aggregates contain a duplicate alias")
+    if tuple(sorted(aliases)) != plan.candidate_aliases:
+        raise EvalArtifactError("candidate aggregates do not cover the plan aliases")
+
+    by_alias = {score.candidate_alias: score for score in candidate_scores}
+    for alias in plan.candidate_aliases:
+        aggregate = by_alias[alias]
+        candidate = plan.candidate(alias)
+        expected = {
+            "scope": scope,
+            "canonical_model_identity": candidate.canonical_model_identity,
+            "plan_identity": plan.plan_identity,
+            "eval_config_hash": plan.eval_config_hash,
+            "scoring_policy_hash": plan.scoring_policy_hash,
+            "source_verification_identity": plan.source_verification_identity,
+            "task_ids": plan.evaluation_task_ids(alias),
+        }
+        actual = {
+            "scope": aggregate.scope,
+            "canonical_model_identity": aggregate.canonical_model_identity,
+            "plan_identity": aggregate.plan_identity,
+            "eval_config_hash": aggregate.eval_config_hash,
+            "scoring_policy_hash": aggregate.scoring_policy_hash,
+            "source_verification_identity": aggregate.source_verification_identity,
+            "task_ids": aggregate.task_ids,
+        }
+        if actual != expected:
+            raise EvalArtifactError(
+                f"candidate aggregate for {alias!r} crosses its authorization boundary"
+            )
+    return scope, by_alias
 
 
 def _validate_complete_run(
@@ -233,14 +294,19 @@ def _validate_complete_run(
     candidate_scores: tuple[CandidateAggregate, ...],
     task_scores: tuple[_ScoreT, ...],
 ) -> dict[str, tuple[_ScoreT, ...]]:
-    if config.eval_config_hash != plan.eval_config_hash:
-        raise EvalArtifactError("eval config and contamination plan identities differ")
+    scope, aggregate_by_alias = _validate_candidate_aggregates(
+        config=config,
+        plan=plan,
+        candidate_scores=candidate_scores,
+    )
+    expected_type = TraceTaskScore if scope == "trace" else ExecutableTaskScore
+    if any(not isinstance(score, expected_type) for score in task_scores):
+        raise EvalArtifactError(f"{scope} aggregates require {scope} task scores")
+    identities = [(score.candidate_alias, score.task_id) for score in task_scores]
+    if len(set(identities)) != len(identities):
+        raise EvalArtifactError("task scores repeat a candidate and task identity")
+
     by_candidate: dict[str, tuple[_ScoreT, ...]] = {}
-    aggregate_by_alias = {score.candidate_alias: score for score in candidate_scores}
-    if tuple(sorted(aggregate_by_alias)) != plan.candidate_aliases:
-        raise EvalArtifactError("candidate aggregates do not cover the plan aliases")
-    if len(aggregate_by_alias) != len(candidate_scores):
-        raise EvalArtifactError("candidate aggregates contain a duplicate alias")
     for alias in plan.candidate_aliases:
         scores = tuple(score for score in task_scores if score.candidate_alias == alias)
         aggregate = aggregate_by_alias[alias]
@@ -252,6 +318,38 @@ def _validate_complete_run(
             raise EvalArtifactError(
                 f"task scores for {alias!r} do not match aggregate score identities"
             )
+        for score in scores:
+            expected = {
+                "scope": aggregate.scope,
+                "canonical_model_identity": aggregate.canonical_model_identity,
+                "plan_identity": aggregate.plan_identity,
+                "eval_config_hash": aggregate.eval_config_hash,
+                "scoring_policy_hash": aggregate.scoring_policy_hash,
+                "source_verification_identity": aggregate.source_verification_identity,
+                "scoring_contract_hash": aggregate.scoring_contract_hash,
+            }
+            actual = {
+                "scope": score.scope,
+                "canonical_model_identity": score.canonical_model_identity,
+                "plan_identity": score.plan_identity,
+                "eval_config_hash": score.eval_config_hash,
+                "scoring_policy_hash": _task_policy_hash(score),
+                "source_verification_identity": score.source_verification_identity,
+                "scoring_contract_hash": score.scoring_contract_hash,
+            }
+            if actual != expected:
+                raise EvalArtifactError(
+                    f"task score {alias!r}/{score.task_id!r} crosses its aggregate boundary"
+                )
+            if isinstance(aggregate, ExecutableCandidateScore):
+                if (
+                    not isinstance(score, ExecutableTaskScore)
+                    or score.oracle_verification_identity
+                    != aggregate.oracle_verification_identity
+                ):
+                    raise EvalArtifactError(
+                        f"task score {alias!r}/{score.task_id!r} crosses its oracle boundary"
+                    )
         by_candidate[alias] = scores
     known = set(plan.candidate_aliases)
     if any(score.candidate_alias not in known for score in task_scores):
@@ -269,7 +367,11 @@ def eval_report_document(
     """Build the human-facing aggregate report without filesystem identities."""
     if not eval_run_id.strip():
         raise EvalArtifactError("eval_run_id must be non-empty")
-    aggregates = {score.candidate_alias: score for score in candidate_scores}
+    scope, aggregates = _validate_candidate_aggregates(
+        config=config,
+        plan=plan,
+        candidate_scores=candidate_scores,
+    )
     candidates: list[dict[str, Any]] = []
     for alias in plan.candidate_aliases:
         candidate = config.candidate(alias)
@@ -277,6 +379,7 @@ def eval_report_document(
         candidates.append(
             {
                 "alias": alias,
+                "scope": aggregate.scope,
                 "canonical_id": candidate.canonical_model_identity,
                 "aggregate_hash": aggregate.aggregate_hash,
                 "task_count": aggregate.task_count,
@@ -295,7 +398,7 @@ def eval_report_document(
     return {
         "schema_version": EVAL_ARTIFACT_CONTRACT_VERSION,
         "eval_run_id": eval_run_id,
-        "eval_scope": _eval_scope(candidate_scores),
+        "eval_scope": scope,
         "source_run_id": plan.source_run_id,
         "eval_config_hash": config.eval_config_hash,
         "error_taxonomy_hash": ERROR_TAXONOMY_HASH,
@@ -681,10 +784,6 @@ def write_trace_eval_artifacts(
         candidate_scores=candidate_scores,
         task_scores=task_scores,
     )
-    if len({(score.candidate_alias, score.task_id) for score in task_scores}) != len(
-        task_scores
-    ):
-        raise EvalArtifactError("task scores repeat a candidate and task identity")
     output_dir = config.outputs.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     candidate_cache = _required_cache(

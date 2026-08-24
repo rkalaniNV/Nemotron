@@ -144,6 +144,12 @@ scripted turn. Executable scoring adds five dimensions:
 - `executable_completion`: records whether live driving reached its terminal
   boundary and classifies candidate and infrastructure stops separately.
 
+Executable task scores use contract `1.3`. Version `1.3` binds terminal episode
+status to the executable-completion gate and infrastructure-stop attribution,
+binds `task_success_rate` back to the derived task verdict, and requires every
+metric N/A reason to come from the registered metric taxonomy rather than a gate
+namespace. Existing scores retain their historical version and identity.
+
 Every executable score reports all twelve trace and executable gates, using
 `not_applicable` rather than omission. Under pinned
 `task_success: all_applicable_gates`, every applicable gate must pass. Debug-only
@@ -159,7 +165,9 @@ Each score also emits the fixed per-task metric taxonomy
 `path_success_rate`, `final_answer_success_rate`, and `task_success_rate`.
 Every metric carries integer numerator and denominator plus their value.
 A zero denominator carries `value: null` and a stable N/A reason code; it is
-never reported as a vacuous zero or one. Assertion-derived metrics use the
+never reported as a vacuous zero or one. A gate-derived metric that does not
+apply uses `metric.gate_not_applicable`; all N/A reasons are members of the
+error taxonomy's `metric.*` registry. Assertion-derived metrics use the
 pack's literal `ASSERTION_CAPABILITIES` category, while `path_success_rate`
 also requires the applicable call, milestone, dependency, execution, and
 completion gates. A declared assertion that an infrastructure stop left unrun,
@@ -550,12 +558,51 @@ claimed request was left without a completion.
 
 `write_trace_eval_artifacts(...)` publishes the same immutable `eval_report.json`,
 `eval_task_results.parquet`, and `eval_manifest.json` under artifact contract
-`1.4`, with oracle-, assertion-, milestone-, and final-answer-only columns null.
+`1.5`, with oracle-, assertion-, milestone-, and final-answer-only columns null.
 Every candidate aggregate declares the scope it measured — `trace` or
-`trace_and_executable` — the report and manifest stamp `eval_scope`, and a report
-whose aggregates mix scopes is refused. A trace-only artifact set never stands in
-for an executable one, and an executable config handed to the trace runner is
-refused rather than measured with fewer gates.
+`trace_and_executable` — the report stamps it both at run and candidate level and
+the manifest stamps `eval_scope`. Public report and writer entry points revalidate
+candidate coverage, scope, model, source, plan, policy, scoring-contract, task-score
+hashes, and executable oracle identity; deserialized or restamped evidence cannot
+bypass the aggregator merely because the batch runner normally supplies it. A
+report whose aggregates mix scopes is refused. A trace-only artifact set never
+stands in for an executable one, and an executable config handed to the trace
+runner is refused rather than measured with fewer gates.
+
+## NeMo Evaluator native adapter
+
+Native adapter contract `1.0` targets `nemo-evaluator==0.2.8` and
+`nemo-evaluator-launcher==0.2.6`. One `NemoNativeAdapterConfig` binds the
+six-file `nemo_evaluator_bundle` tree hash, resolved BFCL eval config, candidate
+alias, and native output location. A Launcher task represents exactly one
+candidate; candidate sets are not silently collapsed into one deployment result.
+Before inference, the adapter verifies the exact file set, tree and dataset
+hashes, every dataset row, generated JSON schema, descriptor, metadata, prompt
+catalog, evaluator YAML, package versions, Launcher endpoint/model, verified BFCL
+source hash, and authorized task order.
+
+The framework command delegates to `run_declared_eval_sync(...)`; the generic
+NeMo BYOB single-turn strategy and scalar mean reducer do not define BFCL
+conversation or metric semantics. This keeps dependent calls, scripted
+multiturns, native tool payloads, released tool results, executable resource
+isolation, trace/executable scoring, error attribution, bounded concurrency, and
+immutable BFCL artifacts on their established contracts.
+
+After BFCL aggregation, every metric with a positive denominator is projected
+into NeMo `EvaluationResult` with its exact binary count, sum, squared sum, mean,
+population variance, standard deviation, and standard error. A zero-denominator
+metric cannot be represented by NeMo's required floating score value, so it is
+omitted from that score map and recorded by metric name and stable N/A reason in
+`nemo_native_adapter_manifest.json`. The manifest also binds the adapter config,
+bundle, package versions, candidate, run id, scope, aggregate hash, native result,
+and BFCL report. Existing output is accepted only when byte-identical.
+
+`native_framework_definition(...)` and `install_native_framework(...)` create a
+discovery-only NeMo namespace package; `launcher_task_entry(...)` validates the
+task entry against the pinned Launcher model. The evaluation image and mounts
+must provide the Nemotron package and every absolute path named by the adapter
+and BFCL configs. Missing mounts or a moving package/API version are setup
+failures, not candidate failures.
 
 ## Task success
 

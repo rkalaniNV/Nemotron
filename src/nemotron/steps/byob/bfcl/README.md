@@ -452,6 +452,62 @@ Launcher run config. It explicitly declares that W5 must provide a registered
 environment, candidate endpoint, and tool resource service. Publishing a dataset
 bundle does not pretend those execution dependencies already exist.
 
+W5.10 closes that boundary with native adapter contract `1.1`, pinned to
+`nemo-evaluator==0.2.8` and `nemo-evaluator-launcher==0.2.6`.
+`NemoNativeAdapterConfig` binds an immutable six-file bundle tree hash to one
+resolved BFCL eval config, one candidate alias, and a separate native result
+directory. `verify_native_bundle(...)` re-reads all six files, rejects additions,
+validates every dataset row and schema, and cross-checks the descriptor,
+metadata, prompt catalog, and evaluator YAML before the model can be called.
+The Launcher dataset mount is passed to the framework command as
+`runtime_bundle_root`; the host bundle path is not assumed to exist inside the
+container. Native records must also equal the canonical projection of the
+verified BFCL source, so execution cannot silently use a different dataset.
+
+The native framework deliberately does not send BFCL through NeMo's generic
+single-turn BYOB strategy or generic mean reducer. Its registered command calls
+`run_nemo_native_adapter(...)`, which lets the existing BFCL trace/executable
+runner own incremental conversations, dependent calls, tool-result release,
+oracle lifecycle, error attribution, N/A denominators, concurrency, and
+authorization-bound aggregation. Default `target_binding: launcher` mode
+revalidates the Launcher deployment URL into the runtime BFCL config; `exact`
+mode requires the pinned URL. Both require the same model id. The generated task
+uses Launcher client mode and translates bundle-declared metric names into NeMo
+`EvaluationResult` with exact count/sum/variance statistics.
+Zero-denominator metrics are omitted from NeMo's float-only score map and retained
+with their stable reason in `nemo_native_adapter_manifest.json`; they are never
+turned into a synthetic zero. The manifest binds the evaluator version, Launcher
+version pin, bundle and runtime config hashes, plan/source identities, authorized
+task ids, BFCL aggregate, scope, run id, native result, and BFCL report. Failed
+invocations leave immutable `nemo_native_adapter_failure.json`.
+
+`native_framework_definition(...)` creates the Framework Definition Format,
+`install_native_framework(...)` builds its immutable namespace package, and
+`launcher_task_entry(...)` validates a task entry in an isolated subprocess.
+Building does not mutate global `site-packages` or write a `.pth`; install the
+generated package explicitly in the Launcher environment or bake it into its
+image. The evaluation container needs `nemo-evaluator`, while
+`nemo-evaluator-launcher` remains a host/control-plane dependency. The evaluation
+container must contain this Nemotron package and
+must mount the adapter config, resolved eval inputs, bundle, and oracle resources
+at the absolute paths recorded by the config. A normal setup is:
+
+```python
+adapter = NemoNativeAdapterConfig(...)
+write_native_adapter_config(adapter, "/shared/bfcl/native-adapter.yaml")
+package = install_native_framework(
+    adapter,
+    adapter_config_path="/shared/bfcl/native-adapter.yaml",
+    install_dir="~/.nemo-evaluator/bfcl-frameworks",
+)
+# Explicitly install ``package`` into the Launcher environment.
+task = launcher_task_entry(
+    adapter,
+    adapter_config_path="/shared/bfcl/native-adapter.yaml",
+    container="...immutable evaluator image...",
+)
+```
+
 The whole bundle is encoded, digested, and validated in memory before any file is
 created, so a projection that cannot be expressed — an unresolvable prompt id, a
 row no evaluator record represents — leaves nothing behind to be mistaken for a
@@ -1036,8 +1092,13 @@ Pack assertions may declare trace/executable compatibility and a
 `state`/`path`/`result`/`final_answer` category through literal
 `ASSERTION_CAPABILITIES`. Executable scores expose the fixed metric taxonomy
 with numerator, denominator, value, and an explicit N/A reason code whenever
-the denominator is zero. Evidence an infrastructure stop prevented from being
-produced makes its metric N/A instead of a candidate failure.
+the denominator is zero. Every N/A reason belongs to the error taxonomy's
+`metric.*` registry; a gate that does not apply uses
+`metric.gate_not_applicable` rather than leaking a gate reason into the metric
+namespace. Evidence an infrastructure stop prevented from being produced makes
+its metric N/A instead of a candidate failure. Executable scoring contract `1.3`
+also proves that episode status, executable completion, infrastructure-stop
+attribution, and `task_success_rate` agree before a score can be published.
 
 `task_success: all_applicable_gates` requires every applicable trace and
 executable gate to pass. Debug-only `assertions_only` requires declared
@@ -1059,8 +1120,10 @@ candidate observation against the streamed tool-trace episodes. A run that keeps
 no episodes still has to prove its candidate cache holds no unfinished request.
 It also records runtime, source, dependency-lock, and worker-image identity, each
 reported as null rather than guessed when it cannot be established. Both
-evaluation modes publish through one writer under artifact contract `1.4`, whose
-`eval_scope` names which measurement a file set carries.
+evaluation modes publish through one writer under artifact contract `1.5`, whose
+top-level and per-candidate scope name which measurement a file set carries. The
+public report and writer APIs revalidate every aggregate and task score against
+the plan instead of trusting that only the batch runner can call them.
 `run_bfcl_eval(...)`
 performs the complete executable run with
 task-local oracle sessions, candidate-sequential execution, and task concurrency
@@ -1088,7 +1151,7 @@ ignored.
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.2`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.4`), bounded executable and trace-only batch orchestration, and error taxonomy (`1.0`) are available. CLI stage wiring for evaluation remains unexposed. |
+| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.3`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.5`), bounded executable and trace-only batch orchestration, NeMo Evaluator native framework/result bridge (`1.1`), and error taxonomy (`1.1`) are available. The generic eval/model_eval launcher can submit the generated native task; direct BFCL CLI stage wiring remains unexposed. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |
