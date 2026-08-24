@@ -1,0 +1,30 @@
+# Nemotron CLI envelope for the NeMo Evaluator native BFCL bridge.
+# Resolve eval.default.yaml first and replace every REPLACE_ME path below.
+schema_version: "1.0"
+family: bfcl
+stage: eval
+eval_config_path: ./eval.default.yaml
+execution_backend: nemo_launcher
+output_format: human
+probe_oracle: true
+dry_run: false
+
+launcher:
+  # Optional when the published source tree contains exports/nemo_evaluator_bundle.
+  bundle_root: null
+  native_output_dir: REPLACE_ME_NATIVE_OUTPUT_DIR
+  adapter_config_path: REPLACE_ME_ADAPTER_CONFIG_YAML
+  framework_build_dir: REPLACE_ME_FRAMEWORK_BUILD_DIR
+  task_config_path: REPLACE_ME_LAUNCHER_TASK_YAML
+  launcher_base_config_path: ../../../eval/model_eval/config/tiny_chat.yaml
+  launcher_config_path: REPLACE_ME_MATERIALIZED_LAUNCHER_YAML
+  launcher_output_dir: REPLACE_ME_LAUNCHER_OUTPUT_DIR
+  dataset_mount_path: /datasets/bfcl
+  container: null
+  # Required when container is non-null. Mount a shared root that contains the
+  # adapter/eval configs, published source, executable oracle resources, and
+  # writable BFCL/native output trees at the absolute paths those configs name.
+  evaluation_mounts: {}
+  # First run with false, explicitly install the generated framework package in
+  # the Launcher environment, then set true to submit through eval/model_eval.
+  submit: false

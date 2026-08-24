@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
+from nemotron.steps.byob.runtime.benchmark_families.base import BenchmarkRunResult
 from nemotron.steps.byob.scripts.runtime import (
     STAGE_CHOICES,
     list_family_names,
@@ -21,7 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stage",
         choices=STAGE_CHOICES,
-        help="Pipeline stage to run. Use `all` to chain prepare and generate.",
+        help=(
+            "Pipeline stage to run. `eval` consumes an orchestration config; "
+            "`all` chains prepare and generate only."
+        ),
     )
     parser.add_argument(
         "--skip-until",
@@ -52,9 +57,24 @@ def main() -> None:
     if stage is None:
         parser.error("--stage is required unless the config contains `stage`")
 
-    output_path = run_byob(config=args.config, stage=stage, family=family, skip_until=skip_until)
-    if output_path is not None:
-        print(output_path)
+    try:
+        output = run_byob(
+            config=args.config,
+            stage=stage,
+            family=family,
+            skip_until=skip_until,
+        )
+    except Exception as exc:
+        exit_code = getattr(exc, "cli_exit_code", None)
+        if exit_code is None:
+            raise
+        code = getattr(exc, "code", "byob_cli_failed")
+        print(f"{code}: {exc}", file=sys.stderr)
+        raise SystemExit(exit_code) from exc
+    if isinstance(output, BenchmarkRunResult):
+        print(output.render())
+    elif output is not None:
+        print(output)
 
 
 if __name__ == "__main__":

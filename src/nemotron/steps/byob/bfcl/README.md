@@ -508,6 +508,34 @@ task = launcher_task_entry(
 )
 ```
 
+### Nemotron CLI evaluation
+
+CLI orchestration contract `1.0` exposes evaluation through the ordinary BYOB
+step without mixing operational choices into the hash-bearing eval config.
+Resolve `config/eval.default.yaml`, point `config/eval.cli.yaml` at it, then run:
+
+```bash
+nemotron steps run byob/bfcl -c eval.cli
+```
+
+`execution_backend: direct` calls `run_declared_eval_sync(...)`; `dry_run: true`
+verifies source and contamination and reports authorized task counts without
+candidate inference. `output_format: json` emits stable machine-readable run and
+artifact locations. `stage=all` remains prepare plus generate and never spends
+candidate tokens.
+
+For NeMo Launcher, start from `config/eval.launcher.yaml`. The first invocation
+with `launcher.submit: false` verifies the bundle and materializes the adapter
+config, immutable framework package, task entry, and merged `eval/model_eval`
+config. Install the printed framework package explicitly in the Launcher
+environment, then rerun the same config with `submit: true`. The adapter config,
+task, and merged Launcher config are never overwritten with different bytes.
+When `launcher.container` is set, `launcher.evaluation_mounts` is mandatory and
+is merged into `execution.mounts.evaluation`; it must expose the adapter/eval
+configs, verified source, executable oracle resources, and output trees at the
+absolute paths those contracts name. The task's bundle remains mounted through
+its separate `dataset_dir`/`dataset_mount_path` contract.
+
 The whole bundle is encoded, digested, and validated in memory before any file is
 created, so a projection that cannot be expressed — an unresolvable prompt id, a
 row no evaluator record represents — leaves nothing behind to be mistaken for a
@@ -1151,7 +1179,7 @@ ignored.
 | Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
 | Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
-| Evaluation and scoring | **Partial** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.3`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.5`), bounded executable and trace-only batch orchestration, NeMo Evaluator native framework/result bridge (`1.1`), and error taxonomy (`1.1`) are available. The generic eval/model_eval launcher can submit the generated native task; direct BFCL CLI stage wiring remains unexposed. |
+| Evaluation and scoring | **Implemented** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.3`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.5`), bounded executable and trace-only batch orchestration, NeMo Evaluator native framework/result bridge (`1.1`), Nemotron CLI orchestration (`1.0`), and error taxonomy (`1.2`) are available. `nemotron steps run byob/bfcl -c eval.cli` runs direct evaluation; `eval.launcher` materializes and optionally submits the native task through `eval/model_eval`. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |

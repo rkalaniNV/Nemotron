@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-ERROR_TAXONOMY_CONTRACT_VERSION: Final = "1.1"
+ERROR_TAXONOMY_CONTRACT_VERSION: Final = "1.2"
 ErrorAttribution = Literal[
     "success",
     "candidate",
@@ -116,6 +116,11 @@ FATAL_EVAL_ERROR_CODES: Final = frozenset(
         "eval_runner_invalid",
         "eval_runner_mode_unsupported",
         "eval_nemo_adapter_invalid",
+        "eval_cli_invalid",
+        "eval_cli_runtime_failed",
+        "eval_cli_artifact_conflict",
+        "eval_cli_framework_not_installed",
+        "eval_cli_framework_version_mismatch",
     }
 )
 METRIC_NOT_APPLICABLE_CODES: Final = frozenset(
