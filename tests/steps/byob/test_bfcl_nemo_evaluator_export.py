@@ -12,6 +12,9 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
+    nemo_native_adapter,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.nemo_native_adapter import (
     NEMO_NATIVE_FAILURE_FILE,
     NemoNativeAdapterConfig,
@@ -509,7 +512,7 @@ def test_native_run_maps_the_bfcl_result_and_publishes_provenance(
     projection = _projection([_row("t1")])
     artifact = write_nemo_evaluator_bundle(projection, tmp_path)
     adapter = _native_adapter(tmp_path, artifact).model_copy(
-        update={"target_binding": "exact"}
+        update={"target_binding": "exact", "probe_oracle": False}
     )
     candidate = SimpleNamespace(
         alias="candidate",
@@ -577,15 +580,25 @@ def test_native_run_maps_the_bfcl_result_and_publishes_provenance(
         "nemo_native_adapter.load_eval_config",
         lambda path: eval_config,
     )
+    probe_decisions: list[bool] = []
+
+    def authorize(config, eval_run_id, probe_oracle):  # type: ignore[no-untyped-def]
+        probe_decisions.append(probe_oracle)
+        return authorization
+
+    def execute(config, authorized, probe_oracle):  # type: ignore[no-untyped-def]
+        probe_decisions.append(probe_oracle)
+        return bfcl_result
+
     monkeypatch.setattr(
         "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
         "nemo_native_adapter.authorize_bfcl_eval",
-        lambda config, eval_run_id, probe_oracle: authorization,
+        authorize,
     )
     monkeypatch.setattr(
         "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
         "nemo_native_adapter._run_authorized_eval",
-        lambda config, authorized, probe_oracle: bfcl_result,
+        execute,
     )
 
     result = run_nemo_native_adapter(
@@ -605,6 +618,56 @@ def test_native_run_maps_the_bfcl_result_and_publishes_provenance(
     assert result.result_hash == (
         "sha256:" + hashlib.sha256(result.result_path.read_bytes()).hexdigest()
     )
+    assert probe_decisions == [False, False]
+
+
+def test_native_run_refuses_a_runtime_probe_override(tmp_path: Path) -> None:
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+
+    with pytest.raises(NemoNativeAdapterError, match="differs from.*adapter config"):
+        run_nemo_native_adapter(adapter, probe_oracle=False)
+
+
+def test_launcher_binding_rewrites_the_runtime_route_not_weight_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+    payload = {
+        "candidates": [
+            {
+                "alias": "candidate",
+                "model": "original-route",
+                "api": {"base_url": "https://original.example/v1"},
+                "model_identity": {"canonical_id": "weights"},
+            }
+        ]
+    }
+    config = SimpleNamespace(model_dump=lambda mode: payload)
+    captured: list[dict[str, Any]] = []
+
+    class RuntimeConfig:
+        @classmethod
+        def model_validate(cls, value: dict[str, Any]) -> dict[str, Any]:
+            captured.append(value)
+            return value
+
+    monkeypatch.setattr(nemo_native_adapter, "BfclEvalConfig", RuntimeConfig)
+
+    result = nemo_native_adapter._runtime_eval_config(
+        adapter,
+        config,  # type: ignore[arg-type]
+        target_url="http://managed-endpoint/v1",
+        target_model_id="launcher-served-name",
+    )
+
+    candidate = result["candidates"][0]
+    assert candidate["api"]["base_url"] == "http://managed-endpoint/v1"
+    assert candidate["model"] == "launcher-served-name"
+    assert candidate["model_identity"] == {"canonical_id": "weights"}
+    assert captured == [result]
 
 
 def test_the_descriptor_names_every_other_file_and_pins_the_dataset(tmp_path: Path) -> None:

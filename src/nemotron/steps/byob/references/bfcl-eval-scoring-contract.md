@@ -571,15 +571,27 @@ runner is refused rather than measured with fewer gates.
 
 ## NeMo Evaluator native adapter
 
-Native adapter contract `1.1` targets `nemo-evaluator==0.2.8` and
+Native adapter contract `1.2` targets `nemo-evaluator==0.2.8` and
 `nemo-evaluator-launcher==0.2.6`. One `NemoNativeAdapterConfig` binds the
 six-file `nemo_evaluator_bundle` tree hash, resolved BFCL eval config, candidate
-alias, and native output location. A Launcher task represents exactly one
-candidate; candidate sets are not silently collapsed into one deployment result.
-Before inference, the adapter verifies the exact file set, tree and dataset
-hashes, every dataset row, generated JSON schema, descriptor, metadata, prompt
-catalog, evaluator YAML, package versions, Launcher endpoint/model, verified BFCL
-source hash, and authorized task order.
+alias, native output location, and whether the run probes the oracle pack.
+Version `1.2` adds that `probe_oracle` field: a Launcher task is submitted once,
+so an orchestrator that could not state the probe choice would silently probe
+against an operator who declared otherwise. It is the sole source of truth for
+both CLI and programmatic runs; the legacy `--no-probe-oracle` flag is accepted
+only when it agrees with the immutable config. A Launcher
+task represents exactly one candidate; candidate sets are not silently collapsed
+into one deployment result. Before inference, the adapter verifies the exact file
+set, tree and dataset hashes, every dataset row, generated JSON schema,
+descriptor, metadata, prompt catalog, evaluator YAML, package versions, Launcher
+endpoint/model, verified BFCL source hash, and authorized task order.
+
+`read_native_bundle_tree(...)` and `native_bundle_tree_hash(...)` are the single
+definition of what the bundle tree is and how it is digested, so an orchestrator
+that must digest a bundle before it can name that digest in a config cannot
+accept a tree this verifier would reject. `native_framework_distribution(...)`
+likewise names the distribution `install_native_framework(...)` builds, so a
+submitter verifies that exact name rather than reconstructing it.
 
 The framework command calls `run_nemo_native_adapter(...)`, which pre-authorizes
 the source and then selects `run_bfcl_eval(...)` or `run_bfcl_trace_eval(...)`
@@ -615,25 +627,47 @@ submission state never enter `eval_config_hash`. `stage=eval` dispatches through
 the optional family `evaluate` hook, so unsupported benchmark families fail
 explicitly instead of inheriting BFCL behavior. `all` remains generation-only.
 
-The `direct` backend loads the resolved eval config and calls
-`run_declared_eval_sync(...)`. Its dry-run verifies source and contamination and
-reports authorized task counts without contacting a candidate. The
-`nemo_launcher` backend requires one candidate, verifies the exact exported
-bundle tree, materializes an immutable native adapter config, framework package,
-Launcher task, and merged `eval/model_eval` config, then optionally submits it
-through the same `launch_model_eval_config(...)` API used by the generic step.
-Submission requires the exact generated framework distribution to have been
-installed explicitly in the Launcher environment.
-If the generated task names an evaluation container, the CLI requires explicit
-`evaluation_mounts` and merges them into Launcher
-`execution.mounts.evaluation`; the bundle's dataset mount does not implicitly
-expose the adapter config, eval source, oracle pack, or write targets.
+The `direct` backend delegates to `run_declared_eval_sync(...)`, which performs
+the one authoritative load of the pinned eval config; the CLI does not pre-load
+it for the executing path, so the file cannot change between the CLI's view of it
+and the authorized run. Its dry-run verifies source and contamination and reports
+authorized task counts without contacting a candidate. The `nemo_launcher`
+backend requires one candidate, verifies the exact exported bundle tree,
+materializes an immutable native adapter config, framework package, Launcher
+task, and merged `eval/model_eval` config, then optionally submits it through the
+same `launch_model_eval_config(...)` API used by the generic step. Submission
+requires the exact generated framework distribution, named by
+`native_framework_distribution(...)` rather than reconstructed from the build
+directory, to have been installed explicitly in the Launcher environment.
 
-CLI failures retain registered BFCL taxonomy codes. Unknown runtime exceptions
-map to `eval_cli_runtime_failed`; orchestration config, immutable output
-conflicts, missing framework installation, and framework version drift have
-their own fatal setup codes. Human output is line-oriented while JSON output is
-stable and contains run identity and artifact paths, never credentials.
+Every orchestration artifact — adapter config, framework build, Launcher task,
+merged Launcher config, and both output trees — must lie outside the bundle,
+because the bundle is verified by exact file set and one extra file would fail
+the next verification of that publication. If the merged Launcher config names an
+evaluation container anywhere, whether through the CLI override, a global base
+config, or the task itself, the CLI requires explicit `evaluation_mounts` and
+merges them into Launcher `execution.mounts.evaluation`. They must be identity
+mounts and must cover every adapter/eval config, source publication, executable
+oracle resource, and output path, because those immutable contracts contain
+absolute paths; the bundle's dataset mount remains separate. A base config that
+deploys its own endpoint keeps its `deployment` block and receives no pinned
+candidate URL or model id, as Launcher 0.2.6 rejects both for a managed
+deployment. The adapter's `launcher` target binding revalidates the URL and
+served model id Launcher supplies into the runtime route while preserving weight
+identity.
+
+CLI failures retain registered BFCL taxonomy codes, and every code in the error
+taxonomy is assigned one published process exit status: `2` for a declaration the
+operator has to edit, `3` for setup, source, scoring, or aggregation refusal, `4`
+for contamination and answer-key exposure, `5` for candidate-endpoint failure,
+`6` for live oracle or assertion infrastructure, and `7` for an immutable
+artifact that already holds different evidence. The assignment is explicit per
+code and checked against the taxonomy at import, so registering a new code is a
+build failure rather than a silent reclassification. Projecting a finished run
+into CLI output happens inside the same guard, so no failure reaches an operator
+as a bare traceback. Human output is line-oriented with JSON-rendered values
+while JSON output is stable and contains run identity and artifact paths, never
+credentials.
 
 ## Task success
 

@@ -45,6 +45,15 @@ _STEP_ONLY_KEYS = {
 }
 
 
+class ModelEvalDependencyError(RuntimeError):
+    """The launcher this step delegates to is not importable.
+
+    Raised instead of exiting the process, so a caller that embeds this launch
+    boundary can map the failure into its own error contract; `run_model_eval`
+    turns it back into a process exit for direct CLI use.
+    """
+
+
 @dataclass(frozen=True)
 class ModelEvalLaunchResult:
     launcher_config_path: Path
@@ -57,11 +66,16 @@ def run_model_eval(*, default_config: Path) -> None:
     _validate_passthrough(passthrough)
 
     task_filters = parse_task_flags(passthrough) or None
-    result = launch_model_eval_config(
-        config_path=config_path,
-        cfg=cfg,
-        task_filters=task_filters,
-    )
+    try:
+        result = launch_model_eval_config(
+            config_path=config_path,
+            cfg=cfg,
+            task_filters=task_filters,
+        )
+    except ModelEvalDependencyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        print("Install with: uv sync --extra evaluator", file=sys.stderr)
+        raise SystemExit(1) from exc
     print(f"launcher_config: {result.launcher_config_path}")
     if result.invocation_id:
         print(f"launcher_invocation_id: {result.invocation_id}")
@@ -76,18 +90,20 @@ def launch_model_eval_config(
     task_filters: list[str] | None = None,
 ) -> ModelEvalLaunchResult:
     """Submit a prepared model-eval config without reparsing process arguments."""
-    launcher_cfg, dry_run, configured_tasks = _build_launcher_config(cfg)
-    selected_tasks = task_filters if task_filters is not None else configured_tasks
-    eval_path = _save_launcher_config(config_path, cfg, launcher_cfg)
-
+    # Resolve the launcher before writing anything, so a missing dependency does
+    # not leave a materialized config behind that was never submitted.
     try:
         from nemo_evaluator_launcher.api.functional import (  # type: ignore[import-untyped]
             run_eval,
         )
-    except ImportError:
-        print("Error: nemo-evaluator-launcher is required for evaluation", file=sys.stderr)
-        print("Install with: uv sync --extra evaluator", file=sys.stderr)
-        raise SystemExit(1)
+    except ImportError as exc:
+        raise ModelEvalDependencyError(
+            "nemo-evaluator-launcher is required for evaluation"
+        ) from exc
+
+    launcher_cfg, dry_run, configured_tasks = _build_launcher_config(cfg)
+    selected_tasks = task_filters if task_filters is not None else configured_tasks
+    eval_path = _save_launcher_config(config_path, cfg, launcher_cfg)
 
     invocation_id = run_eval(
         launcher_cfg,
