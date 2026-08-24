@@ -571,7 +571,7 @@ runner is refused rather than measured with fewer gates.
 
 ## NeMo Evaluator native adapter
 
-Native adapter contract `1.0` targets `nemo-evaluator==0.2.8` and
+Native adapter contract `1.1` targets `nemo-evaluator==0.2.8` and
 `nemo-evaluator-launcher==0.2.6`. One `NemoNativeAdapterConfig` binds the
 six-file `nemo_evaluator_bundle` tree hash, resolved BFCL eval config, candidate
 alias, and native output location. A Launcher task represents exactly one
@@ -581,9 +581,11 @@ hashes, every dataset row, generated JSON schema, descriptor, metadata, prompt
 catalog, evaluator YAML, package versions, Launcher endpoint/model, verified BFCL
 source hash, and authorized task order.
 
-The framework command delegates to `run_declared_eval_sync(...)`; the generic
-NeMo BYOB single-turn strategy and scalar mean reducer do not define BFCL
-conversation or metric semantics. This keeps dependent calls, scripted
+The framework command calls `run_nemo_native_adapter(...)`, which pre-authorizes
+the source and then selects `run_bfcl_eval(...)` or `run_bfcl_trace_eval(...)`
+with that exact authorization. The generic NeMo BYOB single-turn strategy and
+scalar mean reducer do not define BFCL conversation or metric semantics. This
+keeps dependent calls, scripted
 multiturns, native tool payloads, released tool results, executable resource
 isolation, trace/executable scoring, error attribution, bounded concurrency, and
 immutable BFCL artifacts on their established contracts.
@@ -597,12 +599,41 @@ omitted from that score map and recorded by metric name and stable N/A reason in
 bundle, package versions, candidate, run id, scope, aggregate hash, native result,
 and BFCL report. Existing output is accepted only when byte-identical.
 
-`native_framework_definition(...)` and `install_native_framework(...)` create a
-discovery-only NeMo namespace package; `launcher_task_entry(...)` validates the
-task entry against the pinned Launcher model. The evaluation image and mounts
+`native_framework_definition(...)` and `install_native_framework(...)` build an
+immutable NeMo namespace package without mutating global site-packages;
+`launcher_task_entry(...)` validates the task entry against the pinned Launcher
+model in an isolated process. The evaluation image and mounts
 must provide the Nemotron package and every absolute path named by the adapter
 and BFCL configs. Missing mounts or a moving package/API version are setup
 failures, not candidate failures.
+
+## Nemotron CLI orchestration
+
+CLI orchestration contract `1.0` is an operational envelope around the resolved
+eval config; `execution_backend`, output rendering, dry-run, Launcher paths, and
+submission state never enter `eval_config_hash`. `stage=eval` dispatches through
+the optional family `evaluate` hook, so unsupported benchmark families fail
+explicitly instead of inheriting BFCL behavior. `all` remains generation-only.
+
+The `direct` backend loads the resolved eval config and calls
+`run_declared_eval_sync(...)`. Its dry-run verifies source and contamination and
+reports authorized task counts without contacting a candidate. The
+`nemo_launcher` backend requires one candidate, verifies the exact exported
+bundle tree, materializes an immutable native adapter config, framework package,
+Launcher task, and merged `eval/model_eval` config, then optionally submits it
+through the same `launch_model_eval_config(...)` API used by the generic step.
+Submission requires the exact generated framework distribution to have been
+installed explicitly in the Launcher environment.
+If the generated task names an evaluation container, the CLI requires explicit
+`evaluation_mounts` and merges them into Launcher
+`execution.mounts.evaluation`; the bundle's dataset mount does not implicitly
+expose the adapter config, eval source, oracle pack, or write targets.
+
+CLI failures retain registered BFCL taxonomy codes. Unknown runtime exceptions
+map to `eval_cli_runtime_failed`; orchestration config, immutable output
+conflicts, missing framework installation, and framework version drift have
+their own fatal setup codes. Human output is line-oriented while JSON output is
+stable and contains run identity and artifact paths, never credentials.
 
 ## Task success
 

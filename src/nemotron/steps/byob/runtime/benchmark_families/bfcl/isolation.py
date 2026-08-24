@@ -1047,7 +1047,10 @@ class ProcessWorker:
             if receiver.is_alive():
                 _stop_process(proc)
                 parent.close()
-                receiver.join(1.0)
+                # The receiver is daemonized and may be stalled inside a partial
+                # frame read. Waiting for it here would extend a hard tool
+                # deadline by an unrelated cleanup second; closing the pipe is
+                # sufficient to make the thread unwind when that read resumes.
                 error = TimeoutError(f"{label} exceeded timeout_s={timeout_s}")
                 try:
                     cleanup_endpoint_session()

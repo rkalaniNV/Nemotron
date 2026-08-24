@@ -98,15 +98,20 @@ uv run nemotron steps run byob/mcq \
 ### BFCL
 
 Start from `bfcl/config/tiny.yaml` for a smoke run or
-`bfcl/config/banking_vn.yaml` for the bundled domain example. BFCL supports:
+`bfcl/config/banking_vn.yaml` for generation. Resolve
+`bfcl/config/eval.default.yaml`, then use `eval.cli.yaml` or
+`eval.launcher.yaml` for model evaluation. BFCL supports:
 
-- `stage`: `prepare`, `generate`, or `all`.
+- `stage`: `prepare`, `generate`, `eval`, or `all`.
 - `oracle_pack.manifest_path`: executable oracle-pack manifest.
 - `oracle_runtime`: clock, process-worker timeouts, and `allowed_roots`.
 - `task_generation.tasks_per_category`: category-wide task budget.
 - `surface_generation.language`: language rendered from pack templates.
+- `execution_backend`: `direct` or `nemo_launcher` in an eval CLI envelope.
+- `output_format`: line-oriented `human` or machine-readable `json`.
 
-BFCL does not support `translate` or `skip_until`; generation must validate the
+BFCL does not support `translate`; `skip_until` is generation-only and eval
+refuses it. Generation must validate the
 current pack and config before publishing output.
 
 ## Change Points

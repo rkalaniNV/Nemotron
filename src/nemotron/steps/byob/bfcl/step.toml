@@ -59,11 +59,32 @@ choices = ["bfcl"]
 name = "stage"
 description = "BYOB pipeline stage to run."
 default = "generate"
-choices = ["prepare", "generate", "all"]
+choices = ["prepare", "generate", "translate", "eval", "all"]
 
 [[parameters]]
 name = "config"
-description = "Path to a BFCL YAML config."
+description = "Path to a generation config, or to a CLI orchestration config when stage=eval."
+
+[[parameters]]
+name = "eval_config_path"
+description = "Resolved BFCL scoring config referenced by an eval orchestration config; kept separate so CLI choices never change eval_config_hash."
+
+[[parameters]]
+name = "execution_backend"
+description = "Evaluation backend selected by the orchestration config."
+default = "direct"
+choices = ["direct", "nemo_launcher"]
+
+[[parameters]]
+name = "output_format"
+description = "CLI result rendering. JSON is stable for automation; human prints one key-value field per line."
+default = "human"
+choices = ["human", "json"]
+
+[[parameters]]
+name = "dry_run"
+description = "For direct evaluation, verify source and contamination without candidate inference. For Launcher, materialize and submit with Launcher dry_run enabled."
+default = false
 
 [[strategies]]
 when = "You need a function-calling benchmark from an executable oracle pack"
@@ -92,7 +113,7 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
 when = "You need to evaluate candidate models against a published BFCL benchmark"
-then = "Start from config/eval.default.yaml (schema 1.1). It reads run_manifest.json rather than a bare parquet, pins the scoring contract in references/bfcl-eval-scoring-contract.md by content hash, and requires an immutable model commit or weights digest per candidate. Executable mode also pins a matching oracle-pack manifest plus backend.py or endpoint config; oracle.kind alone is not executable. The result resolves into one eval_config_hash. Keep it in its own file: eval inputs are excluded from every generation lineage hash, so scoring a new candidate never changes the identity of the benchmark. Native candidate transport, deterministic trace driving/scoring, source-bound executable task projection, process-isolated oracle sessions, and live executable conversation driving are available. stage=generate refuses eval_config_path and inline eval blocks because generation does not consume evaluation settings."
+then = "Resolve config/eval.default.yaml (schema 1.1), then point config/eval.cli.yaml at it and run stage=eval. The CLI envelope selects direct or nemo_launcher execution, output rendering, dry-run, and operational paths without changing eval_config_hash. Direct mode dispatches to run_declared_eval_sync(...). Launcher mode requires one candidate, materializes the immutable adapter config, framework package, task entry, and merged eval/model_eval config, and optionally submits after the generated package is explicitly installed. stage=generate still refuses eval_config_path and inline eval blocks."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[strategies]]
@@ -486,6 +507,30 @@ recovery = "Each batch runner publishes one measurement: run_bfcl_eval executes 
 [[errors]]
 name = "eval_nemo_adapter_invalid"
 recovery = "Pin nemo-evaluator 0.2.8 in the evaluation image and nemo-evaluator-launcher 0.2.6 on the control plane, restore the exact six-file bundle tree and canonical BFCL source, use one candidate with the same model id, pass the mounted bundle path, and keep bundle, BFCL output, and native output trees disjoint."
+
+[[errors]]
+name = "eval_cli_invalid"
+recovery = "Start from config/eval.cli.yaml or config/eval.launcher.yaml, keep stage=eval and family=bfcl, and point eval_config_path at one resolved schema-1.1 BFCL eval config."
+
+[[errors]]
+name = "eval_cli_runtime_failed"
+recovery = "Inspect the chained BFCL exception and immutable source/contamination diagnostics; the CLI maps unknown runtime exceptions to this code rather than inventing a candidate score."
+
+[[errors]]
+name = "eval_cli_artifact_conflict"
+recovery = "Use a fresh orchestration output path or restore the byte-identical generated adapter, task, framework, and Launcher config. The CLI never overwrites conflicting evidence."
+
+[[errors]]
+name = "eval_cli_framework_not_installed"
+recovery = "Install the exact package path printed as framework_package into the NeMo Launcher environment, then rerun the same immutable orchestration config with launcher.submit=true."
+
+[[errors]]
+name = "eval_cli_framework_version_mismatch"
+recovery = "Remove the stale generated BFCL framework distribution and install the package whose version matches the native adapter contract before submitting."
+
+[[errors]]
+name = "byob_stage_unsupported"
+recovery = "Choose a stage implemented by the selected benchmark family. BFCL supports prepare, generate, eval, and all; eval does not accept generation resume controls."
 
 [reference]
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"

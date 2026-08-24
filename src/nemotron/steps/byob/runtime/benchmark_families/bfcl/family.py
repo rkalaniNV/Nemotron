@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from nemotron.steps.byob.runtime.benchmark_families.base import BenchmarkFamilySpec
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.cli_orchestration import (
+    run_bfcl_eval_cli,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
     generate_bfcl,
     prepare_bfcl,
@@ -14,4 +17,5 @@ SPEC = BenchmarkFamilySpec(
     prepare_data=prepare_bfcl,
     generate=generate_bfcl,
     translate=None,
+    evaluate=run_bfcl_eval_cli,
 )
