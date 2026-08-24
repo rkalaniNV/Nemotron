@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-ERROR_TAXONOMY_CONTRACT_VERSION: Final = "1.0"
+ERROR_TAXONOMY_CONTRACT_VERSION: Final = "1.1"
 ErrorAttribution = Literal[
     "success",
     "candidate",
@@ -115,12 +115,14 @@ FATAL_EVAL_ERROR_CODES: Final = frozenset(
         "eval_artifact_invalid",
         "eval_runner_invalid",
         "eval_runner_mode_unsupported",
+        "eval_nemo_adapter_invalid",
     }
 )
 METRIC_NOT_APPLICABLE_CODES: Final = frozenset(
     {
         "metric.all_assertions_not_applicable",
         "metric.assertion_evidence_incomplete",
+        "metric.gate_not_applicable",
         "metric.no_applicable_task",
         "metric.no_attempted_call",
         "metric.no_declared_assertion",

@@ -24,6 +24,9 @@ from pydantic import BaseModel, ConfigDict, StrictFloat, StrictStr, model_valida
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.contamination_contract import (
     EligibleEvalPlan,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.error_taxonomy import (
+    METRIC_NOT_APPLICABLE_CODES,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.trace_scoring_contract import (
     SCORING_GATES,
     TraceTaskScore,
@@ -83,6 +86,8 @@ class TraceMetricResult(_Frozen):
         if self.denominator == 0:
             if self.value is not None or not self.not_applicable_reason:
                 raise ValueError("a zero-denominator metric is N/A with a stable reason")
+            if self.not_applicable_reason not in METRIC_NOT_APPLICABLE_CODES:
+                raise ValueError("a metric N/A reason belongs to the registered taxonomy")
         else:
             if self.not_applicable_reason is not None:
                 raise ValueError("an applicable metric has no N/A reason")

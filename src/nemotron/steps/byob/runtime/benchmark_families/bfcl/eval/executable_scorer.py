@@ -215,7 +215,7 @@ def _gate_metric(
     gate: ExecutableGateResult,
 ) -> ExecutableMetricResult:
     if gate.outcome == "not_applicable":
-        return _metric(name, 0, 0, na_reason=gate.reason_code)
+        return _metric(name, 0, 0, na_reason="metric.gate_not_applicable")
     return _metric(name, int(gate.outcome == "passed"), 1)
 
 

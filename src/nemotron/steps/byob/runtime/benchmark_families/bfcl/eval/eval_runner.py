@@ -21,7 +21,7 @@ import tempfile
 import uuid
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
@@ -92,6 +92,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract im
     VerifiedEvalSource,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_verification import (
+    assert_source_unchanged,
     verify_eval_source,
     write_source_failure_diagnostic,
     write_source_verification_report,
@@ -234,11 +235,17 @@ def _resolve_eval_run_id(
         return existing
     if requested is not None:
         return requested
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     return f"bfcl-eval-{timestamp}-{uuid.uuid4().hex}"
 
 
 _ScoreT = TypeVar("_ScoreT")
+
+
+def _add_exception_note(error: BaseException, note: str) -> None:
+    add_note = getattr(error, "add_note", None)
+    if add_note is not None:
+        add_note(note)
 
 
 async def _cancel_on_failure(
@@ -255,9 +262,10 @@ async def _cancel_on_failure(
 
 
 @dataclass(frozen=True)
-class _AuthorizedRun:
+class AuthorizedEvalRun:
     """Everything both modes must establish before a candidate is contacted."""
 
+    eval_config_hash: str
     eval_run_id: str
     resolved_config_path: Path
     source: VerifiedEvalSource
@@ -265,12 +273,12 @@ class _AuthorizedRun:
     projection: CanonicalExportProjection
 
 
-def _authorize_run(
+def authorize_bfcl_eval(
     config: BfclEvalConfig,
     *,
     eval_run_id: str | None,
     probe_oracle: bool,
-) -> _AuthorizedRun:
+) -> AuthorizedEvalRun:
     """Pin the run identity, verify the source, and gate contamination.
 
     Every failed gate leaves its own diagnostic behind before the exception
@@ -303,13 +311,42 @@ def _authorize_run(
         expected_task_ids=source.task_ids,
     )
     assert_plan_unchanged(config, source, plan)
-    return _AuthorizedRun(
+    return AuthorizedEvalRun(
+        eval_config_hash=config.eval_config_hash,
         eval_run_id=run_id,
         resolved_config_path=resolved_config_path,
         source=source,
         plan=plan,
         projection=projection,
     )
+
+
+def _authorization(
+    config: BfclEvalConfig,
+    *,
+    eval_run_id: str | None,
+    probe_oracle: bool,
+    authorized: AuthorizedEvalRun | None,
+) -> AuthorizedEvalRun:
+    if authorized is None:
+        return authorize_bfcl_eval(
+            config,
+            eval_run_id=eval_run_id,
+            probe_oracle=probe_oracle,
+        )
+    if authorized.eval_config_hash != config.eval_config_hash:
+        raise EvalRunnerError(
+            "precomputed authorization belongs to another eval config",
+            recovery="authorize the exact config immediately before execution",
+        )
+    if eval_run_id is not None and authorized.eval_run_id != eval_run_id:
+        raise EvalRunnerError(
+            "precomputed authorization belongs to another eval run id",
+            recovery="reuse the authorization's run id or authorize a new run",
+        )
+    assert_source_unchanged(authorized.source)
+    assert_plan_unchanged(config, authorized.source, authorized.plan)
+    return authorized
 
 
 def _candidate_cache(
@@ -373,7 +410,8 @@ async def _run_candidate_tasks(
                     try:
                         await oracle.close()
                     except Exception as cleanup:
-                        primary.add_note(
+                        _add_exception_note(
+                            primary,
                             f"oracle cleanup also failed as {type(cleanup).__name__}"
                         )
                     raise
@@ -404,6 +442,7 @@ async def run_bfcl_eval(
     probe_oracle: bool = True,
     client_factory: ClientFactory = _default_client_factory,
     oracle_factory: OracleFactory = _default_oracle_factory,
+    authorized: AuthorizedEvalRun | None = None,
 ) -> BfclEvalRunResult:
     """Verify, authorize, execute, aggregate, and publish one bounded eval run."""
     if not config.settings.executable:
@@ -411,10 +450,11 @@ async def run_bfcl_eval(
             "the executable batch runner received a trace-only config",
             recovery="set eval.mode to [trace, executable] or use run_bfcl_trace_eval",
         )
-    authorized = _authorize_run(
+    authorized = _authorization(
         config,
         eval_run_id=eval_run_id,
         probe_oracle=probe_oracle,
+        authorized=authorized,
     )
     run_id = authorized.eval_run_id
     source = authorized.source
@@ -451,7 +491,8 @@ async def run_bfcl_eval(
                 try:
                     await client.aclose()
                 except Exception as cleanup:
-                    primary.add_note(
+                    _add_exception_note(
+                        primary,
                         f"candidate client cleanup also failed as {type(cleanup).__name__}"
                     )
                 raise
@@ -547,6 +588,7 @@ async def run_bfcl_trace_eval(
     eval_run_id: str | None = None,
     probe_oracle: bool = True,
     client_factory: ClientFactory = _default_client_factory,
+    authorized: AuthorizedEvalRun | None = None,
 ) -> BfclTraceEvalRunResult:
     """Verify, authorize, drive, score, aggregate, and publish one trace-only run.
 
@@ -563,10 +605,11 @@ async def run_bfcl_trace_eval(
                 "or set eval.mode to [trace]"
             ),
         )
-    authorized = _authorize_run(
+    authorized = _authorization(
         config,
         eval_run_id=eval_run_id,
         probe_oracle=probe_oracle,
+        authorized=authorized,
     )
     plan = authorized.plan
     candidate_cache, candidate_cache_path, temporary_cache = _candidate_cache(config)
@@ -590,7 +633,8 @@ async def run_bfcl_trace_eval(
                 try:
                     await client.aclose()
                 except Exception as cleanup:
-                    primary.add_note(
+                    _add_exception_note(
+                        primary,
                         f"candidate client cleanup also failed as {type(cleanup).__name__}"
                     )
                 raise
@@ -698,10 +742,12 @@ def run_declared_eval_sync(
 
 
 __all__ = [
+    "AuthorizedEvalRun",
     "BfclEvalRunResult",
     "BfclTraceEvalRunResult",
     "EvalRunnerError",
     "UnsupportedRunnerModeError",
+    "authorize_bfcl_eval",
     "run_bfcl_eval",
     "run_bfcl_eval_sync",
     "run_bfcl_trace_eval",

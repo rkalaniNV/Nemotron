@@ -38,6 +38,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     TraceAggregationError,
     TraceCandidateScore,
     TraceMetricName,
+    TraceMetricResult,
     TraceTaskScore,
     aggregate_trace_scores,
     build_candidate_request,
@@ -555,6 +556,11 @@ def test_an_aggregate_counts_a_gate_only_over_the_tasks_it_applied_to(
     success = aggregate.metric("task_success_rate")
     assert (success.numerator, success.denominator, success.value) == (2, 2, 1.0)
     assert aggregate.aggregate_hash.startswith("sha256:")
+    assert aggregate.aggregate_hash == aggregate_trace_scores(
+        scores=scores,
+        plan=_plan(),
+        candidate_alias="candidate_a",
+    ).aggregate_hash
 
 
 def test_a_gate_no_task_applied_is_reported_na_rather_than_a_vacuous_rate(
@@ -578,6 +584,17 @@ def test_a_gate_no_task_applied_is_reported_na_rather_than_a_vacuous_rate(
     assert (schema.numerator, schema.denominator, schema.value) == (0, 0, None)
     assert schema.not_applicable_reason == "metric.no_applicable_task"
     assert schema.not_applicable_reason in METRIC_NOT_APPLICABLE_CODES
+
+
+def test_trace_metric_na_reasons_must_belong_to_the_registered_taxonomy() -> None:
+    with pytest.raises(ValueError, match="registered taxonomy"):
+        TraceMetricResult(
+            metric="schema_valid_pass_rate",
+            numerator=0,
+            denominator=0,
+            value=None,
+            not_applicable_reason="schema_valid.not_applicable",
+        )
 
 
 def test_an_aggregate_refuses_a_partial_or_reordered_task_set(
@@ -663,6 +680,95 @@ def test_a_report_refuses_aggregates_that_measured_different_things(
         )
 
 
+def test_a_report_refuses_incomplete_duplicate_or_restamped_aggregates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scores = (
+        _scored(CALL_TASK, tmp_path, monkeypatch=monkeypatch),
+        _scored(TEXT_TASK, tmp_path, monkeypatch=monkeypatch),
+    )
+    aggregate = aggregate_trace_scores(
+        scores=scores,
+        plan=_plan(),
+        candidate_alias="candidate_a",
+    )
+    arguments = {
+        "eval_run_id": "eval-run-1",
+        "config": _config(tmp_path / "report"),
+        "plan": _plan(),
+    }
+
+    with pytest.raises(EvalArtifactError, match="do not cover the plan aliases"):
+        eval_report_document(candidate_scores=(), **arguments)  # type: ignore[arg-type]
+    with pytest.raises(EvalArtifactError, match="duplicate alias"):
+        eval_report_document(
+            candidate_scores=(aggregate, aggregate),
+            **arguments,  # type: ignore[arg-type]
+        )
+    with pytest.raises(EvalArtifactError, match="authorization boundary"):
+        eval_report_document(
+            candidate_scores=(
+                aggregate.model_copy(update={"plan_identity": "sha256:" + "9" * 64}),
+            ),
+            **arguments,  # type: ignore[arg-type]
+        )
+
+
+def test_publication_refuses_task_scores_that_do_not_match_their_aggregate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scores = (
+        _scored(CALL_TASK, tmp_path, monkeypatch=monkeypatch),
+        _scored(TEXT_TASK, tmp_path, monkeypatch=monkeypatch),
+    )
+    aggregate = aggregate_trace_scores(
+        scores=scores,
+        plan=_plan(),
+        candidate_alias="candidate_a",
+    )
+    restamped_hashes = aggregate.model_copy(
+        update={
+            "task_score_hashes": (
+                "sha256:" + "9" * 64,
+                aggregate.task_score_hashes[1],
+            )
+        }
+    )
+
+    with pytest.raises(EvalArtifactError, match="score identities"):
+        write_trace_eval_artifacts(
+            eval_run_id="eval-run-1",
+            config=_config(tmp_path / "output"),  # type: ignore[arg-type]
+            plan=_plan(),
+            candidate_scores=(restamped_hashes,),
+            task_scores=scores,
+            candidate_io_cache_path=None,
+        )
+
+    restamped_score = scores[0].model_copy(
+        update={"source_verification_identity": "sha256:" + "8" * 64}
+    )
+    aggregate_for_restamped_score = aggregate.model_copy(
+        update={
+            "task_score_hashes": (
+                restamped_score.score_hash,
+                aggregate.task_score_hashes[1],
+            )
+        }
+    )
+    with pytest.raises(EvalArtifactError, match="aggregate boundary"):
+        write_trace_eval_artifacts(
+            eval_run_id="eval-run-1",
+            config=_config(tmp_path / "restamped-output"),  # type: ignore[arg-type]
+            plan=_plan(),
+            candidate_scores=(aggregate_for_restamped_score,),
+            task_scores=(restamped_score, scores[1]),
+            candidate_io_cache_path=None,
+        )
+
+
 # --------------------------------------------------------------------------------------
 # Publication: the same three immutable files, stamped as a trace measurement.
 # --------------------------------------------------------------------------------------
@@ -693,6 +799,7 @@ def test_a_trace_run_publishes_one_immutable_artifact_set_it_can_account_for(
     report = json.loads(result.artifacts.report_path.read_text(encoding="utf-8"))
     assert report["eval_scope"] == "trace"
     assert report["eval_run_id"] == result.eval_run_id
+    assert report["candidates"][0]["scope"] == "trace"
     assert set(report["candidates"][0]["metrics"]) == set(TRACE_METRIC_TAXONOMY)
 
     assert result.artifacts.manifest_path is not None
@@ -769,6 +876,10 @@ def test_a_failed_trace_task_publishes_its_terminal_and_its_gate_records(
     )
     assert row["task_success"] is False
     assert row["episode_status"] == "candidate_mismatch"
+    assert row["execution_success"] is None
+    assert row["assertions_passed"] is None
+    assert row["milestones_correct"] is None
+    assert row["final_answer_passed"] is None
     layers = {record["layer"] for record in row["failure_records"]}
     assert layers == {"episode", "gate"}
     assert {record["attribution"] for record in row["failure_records"]} == {"candidate"}

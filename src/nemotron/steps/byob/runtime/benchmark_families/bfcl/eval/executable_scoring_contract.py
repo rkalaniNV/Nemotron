@@ -14,6 +14,11 @@ from pydantic import (
     model_validator,
 )
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.error_taxonomy import (
+    EXECUTABLE_NON_CANDIDATE_STOPS,
+    METRIC_NOT_APPLICABLE_CODES,
+    episode_attribution,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_contract import (
     AssertionCategory,
     AssertionStatus,
@@ -35,7 +40,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-EXECUTABLE_SCORING_CONTRACT_VERSION: Final = "1.2"
+EXECUTABLE_SCORING_CONTRACT_VERSION: Final = "1.3"
 EXECUTABLE_SCORING_GATES: Final = (
     "tool_selection",
     "arguments",
@@ -268,6 +273,8 @@ class ExecutableMetricResult(_Frozen):
                 raise ValueError(
                     "a zero-denominator metric is N/A with a stable reason"
                 )
+            if self.not_applicable_reason not in METRIC_NOT_APPLICABLE_CODES:
+                raise ValueError("a metric N/A reason belongs to the registered taxonomy")
         else:
             if self.not_applicable_reason is not None:
                 raise ValueError("an applicable metric has no N/A reason")
@@ -295,7 +302,7 @@ class ExecutableMetricResult(_Frozen):
 class ExecutableTaskScore(_Frozen):
     """One score derived only from an authorized executable episode."""
 
-    schema_version: Literal["1.2"] = EXECUTABLE_SCORING_CONTRACT_VERSION
+    schema_version: Literal["1.3"] = EXECUTABLE_SCORING_CONTRACT_VERSION
     scope: Literal["trace_and_executable"] = "trace_and_executable"
     task_id: StrictStr
     candidate_alias: StrictStr
@@ -375,6 +382,21 @@ class ExecutableTaskScore(_Frozen):
             raise ValueError("assertion evidence cannot exceed required_assertions")
         if self.expected_dependencies < len(self.dependencies):
             raise ValueError("dependency evidence cannot exceed expected_dependencies")
+        completion = self.gate("executable_completion")
+        if self.episode_status == "completed":
+            if completion.outcome != "passed":
+                raise ValueError(
+                    "a completed episode has a passed executable_completion gate"
+                )
+        else:
+            attribution = episode_attribution(self.episode_status, executable=True)
+            if (
+                completion.outcome != "failed"
+                or completion.failure_class != attribution
+            ):
+                raise ValueError(
+                    "an incomplete episode has an attributed executable_completion failure"
+                )
         mode = policy.get("task_success") if isinstance(policy, dict) else None
         if mode == "all_applicable_gates":
             expected = all(not gate.counts_against_all_gates for gate in self.gates)
@@ -389,11 +411,23 @@ class ExecutableTaskScore(_Frozen):
             raise ValueError("scoring_policy carries a supported task_success mode")
         if self.task_success != expected:
             raise ValueError("task_success must be derived from the pinned gate policy")
-        if self.non_candidate_stop != any(
-            gate.outcome == "failed" and gate.failure_class == "infrastructure"
-            for gate in self.gates
+        task_success_metric = self.metric("task_success_rate")
+        if (
+            task_success_metric.numerator != int(self.task_success)
+            or task_success_metric.denominator != 1
         ):
-            raise ValueError("non_candidate_stop identifies infrastructure gate failure")
+            raise ValueError("task_success_rate records the derived task verdict")
+        expected_non_candidate_stop = (
+            self.episode_status in EXECUTABLE_NON_CANDIDATE_STOPS
+            or any(
+                gate.outcome == "failed" and gate.failure_class == "infrastructure"
+                for gate in self.gates
+            )
+        )
+        if self.non_candidate_stop != expected_non_candidate_stop:
+            raise ValueError(
+                "non_candidate_stop identifies an infrastructure terminal or gate failure"
+            )
         return self
 
     @property

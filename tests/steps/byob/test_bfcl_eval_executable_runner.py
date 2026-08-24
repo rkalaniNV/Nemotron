@@ -77,8 +77,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scorer 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring_contract import (
     ExecutableMetricResult,
+    ExecutableTaskScore,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring_errors import (
+    ExecutableAggregationError,
     ExecutableEvidenceError,
     ExecutableScoringPolicyError,
 )
@@ -2437,6 +2439,132 @@ def test_executable_scorer_happy_path_is_deterministic(
         plan=_plan(),
         candidate_alias="candidate_a",
     ).aggregate_hash
+
+
+def test_executable_aggregation_refuses_duplicate_or_foreign_task_scores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    oracle_source = _oracle()
+    task = _task(oracle_source)
+    episode = asyncio.run(
+        _drive_score_fixture(
+            tmp_path,
+            monkeypatch,
+            task=task,
+            oracle=_FakeOracle(oracle_source.verification_identity),
+            responses=[
+                _response_with_call({"book_id": "BK-100"}),
+                _text_response("BK-100 is available."),
+            ],
+        )
+    )
+    score = score_executable_episode(
+        episode=episode,
+        task=task,
+        scoring=_scoring(),
+        plan=_plan(),
+    )
+
+    with pytest.raises(ExecutableAggregationError, match="publication order"):
+        aggregate_executable_scores(
+            scores=(score, score),
+            plan=_plan(),
+            candidate_alias="candidate_a",
+        )
+
+    foreign = score.model_copy(update={"plan_identity": "sha256:" + "9" * 64})
+    with pytest.raises(ExecutableAggregationError, match="authorization boundary"):
+        aggregate_executable_scores(
+            scores=(foreign,),
+            plan=_plan(),
+            candidate_alias="candidate_a",
+        )
+
+
+def test_executable_task_contract_binds_terminal_completion_and_infrastructure_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    oracle_source = _oracle()
+    task = _task(oracle_source)
+    episode = asyncio.run(
+        _drive_score_fixture(
+            tmp_path,
+            monkeypatch,
+            task=task,
+            oracle=_FakeOracle(oracle_source.verification_identity),
+            responses=[
+                _response_with_call({"book_id": "BK-100"}),
+                _text_response("BK-100 is available."),
+            ],
+        )
+    )
+    score = score_executable_episode(
+        episode=episode,
+        task=task,
+        scoring=_scoring(),
+        plan=_plan(),
+    )
+
+    completed_with_failed_completion = score.semantic_payload()
+    completion = next(
+        gate
+        for gate in completed_with_failed_completion["gates"]
+        if gate["gate"] == "executable_completion"
+    )
+    completion.update(
+        {
+            "outcome": "failed",
+            "failure_class": "candidate",
+            "reason_code": "executable.episode_incomplete",
+            "turn_index": 0,
+        }
+    )
+    with pytest.raises(ValueError, match="completed episode"):
+        ExecutableTaskScore.model_validate(completed_with_failed_completion)
+
+    infrastructure_without_stop = score.semantic_payload()
+    infrastructure_without_stop["episode_status"] = "oracle_timeout"
+    infrastructure_without_stop["task_success"] = False
+    task_success_metric = next(
+        metric
+        for metric in infrastructure_without_stop["metrics"]
+        if metric["metric"] == "task_success_rate"
+    )
+    task_success_metric.update({"numerator": 0, "value": 0.0})
+    completion = next(
+        gate
+        for gate in infrastructure_without_stop["gates"]
+        if gate["gate"] == "executable_completion"
+    )
+    completion.update(
+        {
+            "outcome": "failed",
+            "failure_class": "infrastructure",
+            "reason_code": "executable.episode_incomplete",
+            "turn_index": 0,
+        }
+    )
+    with pytest.raises(ValueError, match="non_candidate_stop"):
+        ExecutableTaskScore.model_validate(infrastructure_without_stop)
+
+
+def test_metric_na_reasons_must_belong_to_the_registered_taxonomy() -> None:
+    with pytest.raises(ValueError, match="registered taxonomy"):
+        ExecutableMetricResult(
+            metric="schema_valid_rate",
+            numerator=0,
+            denominator=0,
+            value=None,
+            not_applicable_reason="schema_valid.not_applicable",
+        )
+    metric = ExecutableMetricResult(
+        metric="schema_valid_rate",
+        numerator=0,
+        denominator=0,
+        value=None,
+        not_applicable_reason="metric.gate_not_applicable",
+    )
+    assert metric.not_applicable_reason == "metric.gate_not_applicable"
 
 
 def test_tool_trace_cache_replays_the_complete_episode_without_external_io(
