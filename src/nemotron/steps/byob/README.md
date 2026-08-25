@@ -110,9 +110,10 @@ Start from `bfcl/config/tiny.yaml` for a smoke run or
 - `execution_backend`: `direct` or `nemo_launcher` in an eval CLI envelope.
 - `output_format`: line-oriented `human` or machine-readable `json`.
 
-BFCL does not support `translate`; `skip_until` is generation-only and eval
-refuses it. Generation must validate the
-current pack and config before publishing output.
+BFCL does not support `translate`. Generation accepts `skip_until` only for its
+canonical generation stages; eval refuses it. A resumed run recursively verifies
+the predecessor checkpoint and revalidates the current pack, endpoint, config,
+task order, artifacts, and pipeline identity before continuing.
 
 ## Change Points
 
@@ -133,7 +134,7 @@ current pack and config before publishing output.
 - Do not drop staged rows inline during translation reassembly. Filtering belongs after rows are restored.
 - Do not add a translation mode selector; BYOB translation always uses Curator experimental translation.
 - Keep semantic dedup as a two-step flow: compute embeddings first, then run KMeans, pairwise similarity, and duplicate identification.
-- For MCQ, resume with `--skip-until` only when the expected cached parquet for the previous stage already exists. BFCL does not support stage resume.
+- For MCQ, resume with `--skip-until` only when the expected cached parquet for the previous stage already exists. BFCL resume additionally requires an intact verified checkpoint chain.
 - Use deterministic seeds for sampling and distractor shuffling when comparing benchmark runs.
 
 ## Validate

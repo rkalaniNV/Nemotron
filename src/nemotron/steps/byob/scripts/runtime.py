@@ -86,7 +86,10 @@ def run_byob(
     config_path = Path(config)
 
     if stage == "all":
-        spec.prepare_data(config_path)
+        # A generation resume must validate and restore its own checkpoint before
+        # any prepare hook can invalidate mutable stage caches.
+        if skip_until is None or family != "bfcl":
+            spec.prepare_data(config_path)
         return spec.generate(config_path, skip_until=skip_until)
     if stage == "prepare":
         return spec.prepare_data(config_path)

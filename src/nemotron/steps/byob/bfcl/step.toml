@@ -66,6 +66,10 @@ name = "config"
 description = "Path to a generation config, or to a CLI orchestration config when stage=eval."
 
 [[parameters]]
+name = "skip_until"
+description = "Generation resume target. Runs the named canonical BFCL stage and all later enabled stages after recursively verifying and restoring its immediate enabled predecessor checkpoint."
+
+[[parameters]]
 name = "eval_config_path"
 description = "Resolved BFCL scoring config referenced by an eval orchestration config; kept separate so CLI choices never change eval_config_hash."
 
@@ -218,8 +222,8 @@ name = "held_out_leak_detected"
 recovery = "A publication candidate bound a reserved template or fixture row, so stage=generate aborted before writing benchmark.parquet. Read stage_cache/held_out_scan.json for the offending task ids, then fix the pack sources or held_out.yaml and re-run stage=generate."
 
 [[errors]]
-name = "stage_resume_unavailable"
-recovery = "BFCL has no stage resume; drop skip_until and run stage=prepare followed by stage=generate."
+name = "stage_resume_invalid"
+recovery = "Use one canonical enabled stage name: reference_profile, expand, state_machine, render, expected_trace, schema_validation, executable_replay, surface_quality, dedup_balancing, or final_output. Optional targets must be enabled. Restore the untouched stage_cache/checkpoints parent chain or run a full generation without skip_until to create a new chain; do not edit checkpoint manifests, state, or snapshots."
 
 [[errors]]
 name = "non_gold_pack"
