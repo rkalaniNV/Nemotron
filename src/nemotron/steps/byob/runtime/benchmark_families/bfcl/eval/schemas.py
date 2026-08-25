@@ -58,6 +58,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
     PublicationPolicyError,
     UnsupportedEvalModeError,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.held_out_eval import (
+    HeldOutEvalConfig,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
     ContentHash,
     FrozenDict,
@@ -74,8 +77,8 @@ EVAL_CONFIG_SCHEMA_VERSION: Final = "1.1"
 # Canonical mode order. ``trace`` scores the calls a model proposed against the
 # gold trace; ``executable`` additionally replays them against the oracle. The
 # order is fixed so two configs that request the same work hash the same.
-EVAL_MODES: Final = ("trace", "executable")
-EvalMode = Literal["trace", "executable"]
+EVAL_MODES: Final = ("trace", "executable", "held_out_eval")
+EvalMode = Literal["trace", "executable", "held_out_eval"]
 
 # Refs that name "whatever is current" rather than a fixed set of weights. A
 # score taken against one of these cannot be reproduced next week, so a candidate
@@ -303,7 +306,11 @@ class EvalSettings(_Strict):
 
     @property
     def executable(self) -> bool:
-        return "executable" in self.modes
+        return "executable" in self.modes or "held_out_eval" in self.modes
+
+    @property
+    def held_out_eval(self) -> bool:
+        return "held_out_eval" in self.modes
 
     @property
     def scope(self) -> str:
@@ -703,6 +710,7 @@ class BfclEvalConfig(_Strict):
     contamination: ContaminationPolicy
     publication: EvalPublicationPolicy
     outputs: EvalOutputConfig
+    held_out_eval: HeldOutEvalConfig | None = None
 
     @field_validator("candidates")
     @classmethod
@@ -749,6 +757,48 @@ class BfclEvalConfig(_Strict):
                 recovery="evaluate trace-only, or configure source_oracle for the exact pack and backend/endpoint "
                 "used by the source run",
             )
+        if self.settings.held_out_eval != (self.held_out_eval is not None):
+            raise EvalConfigSchemaError(
+                "held_out_eval",
+                "must be present exactly when eval.mode includes held_out_eval",
+                value=self.held_out_eval is not None,
+                expected="a versioned policy pin for held_out_eval, otherwise no section",
+                recovery="add held_out_eval with the exact policy hash, ids, seed, and pack version",
+            )
+        if self.settings.held_out_eval:
+            if self.source.translation_manifest is not None:
+                raise EvalConfigSchemaError(
+                    "translation_manifest",
+                    "held_out_eval cannot compare a translated seen slice with an untranslated private slice",
+                    expected="the source benchmark directly, with no translation_manifest",
+                    recovery="evaluate the frozen source publication, or add a separately pinned private "
+                    "translation contract before comparing translated slices",
+                )
+            if self.contamination.comparison_set != "common_intersection":
+                raise EvalConfigSchemaError(
+                    "contamination.comparison_set",
+                    "held_out_eval requires one common seen task set for every candidate",
+                    value=self.contamination.comparison_set,
+                    expected="common_intersection",
+                    recovery="use common_intersection so every seen/private gap compares the same strata",
+                )
+            unsafe = [
+                name
+                for name in (
+                    "write_task_results",
+                    "cache_candidate_responses",
+                    "cache_tool_results",
+                )
+                if getattr(self.outputs, name)
+            ]
+            if unsafe:
+                raise EvalConfigSchemaError(
+                    "outputs",
+                    "held_out_eval may not persist private tasks, prompts, or replay caches: "
+                    + ", ".join(unsafe),
+                    expected="write_task_results, cache_candidate_responses, and cache_tool_results all false",
+                    recovery="publish only the aggregate held-out generalization report",
+                )
         if self.publication.requested:
             deviations = self.non_publication_reasons
             if deviations:
@@ -812,6 +862,11 @@ class BfclEvalConfig(_Strict):
             "schema_version": self.schema_version,
             "source": self.source.semantic_payload(),
             "eval": self.settings.semantic_payload(),
+            "held_out_eval": (
+                self.held_out_eval.semantic_payload()
+                if self.held_out_eval is not None
+                else None
+            ),
             "scoring": self.scoring.semantic_payload(),
             "limits": self.limits.semantic_payload(),
             "candidates": [

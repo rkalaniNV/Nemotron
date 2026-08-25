@@ -227,6 +227,41 @@ def test_executable_mode_is_canonically_ordered_and_needs_an_oracle(tmp_path: Pa
     assert config.source.oracle_kind == "python"
 
 
+def test_held_out_eval_mode_requires_a_versioned_pin_and_private_outputs(tmp_path: Path) -> None:
+    run_dir = _published_run(tmp_path)
+    data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
+    data["eval"]["mode"] = ["held_out_eval"]
+    data["held_out_eval"] = {
+        "contract_version": "1.0",
+        "policy_hash": "sha256:" + "7" * 64,
+        "fixture_refs": ['["things","T-2"]'],
+        "template_ids": ["tpl-held"],
+        "seed": 17,
+        "pack_version": "1.0.0",
+        "max_tasks_per_template": 4,
+    }
+    data["publication"]["requested"] = False
+    data["outputs"]["write_task_results"] = False
+    data["outputs"]["cache_candidate_responses"] = False
+    data["outputs"]["cache_tool_results"] = False
+
+    config = _load(tmp_path, data)
+
+    assert config.settings.held_out_eval is True
+    assert config.settings.executable is True
+    assert config.held_out_eval is not None
+    assert config.held_out_eval.selection_mode == "both"
+
+    data["outputs"]["cache_candidate_responses"] = True
+    with pytest.raises(EvalConfigSchemaError, match="may not persist private"):
+        _load(tmp_path, data, "unsafe-held-out.yaml")
+
+    data["outputs"]["cache_candidate_responses"] = False
+    data["contamination"]["comparison_set"] = "per_candidate"
+    with pytest.raises(EvalConfigSchemaError, match="common seen task set"):
+        _load(tmp_path, data, "incomparable-held-out.yaml")
+
+
 def test_executable_mode_is_refused_when_the_source_declares_no_oracle(tmp_path: Path) -> None:
     run_dir = _published_run(tmp_path, oracle=False)
     data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")

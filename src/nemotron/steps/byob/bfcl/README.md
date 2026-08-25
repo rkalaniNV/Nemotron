@@ -625,6 +625,49 @@ turns did not answer the same question as one given ten. Quoted booleans and
 numbers are refused rather than coerced, since a `"false"` that becomes `true`
 would silently switch off a correctness gate.
 
+### Private held-out generalization
+
+`eval.mode: [held_out_eval]` enables held-out contract `1.0`. It is executable
+evaluation and therefore requires the frozen, hash-verified source publication
+and the exact Oracle pack. The required `held_out_eval` section pins the
+normalized `held_out.yaml` policy hash, canonical fixture references, template
+ids, policy seed, pack version, and deterministic per-template cap:
+
+```yaml
+eval:
+  mode: [held_out_eval]
+held_out_eval:
+  contract_version: "1.0"
+  policy_hash: sha256:...
+  fixture_refs: ['["books","BK-HOLD-1"]']
+  template_ids: [lib_status_heldout_variant]
+  seed: 42
+  pack_version: "0.1.0"
+  max_tasks_per_template: 8
+```
+
+The three selection cases are explicit. Fixture-only policies use ordinary
+templates and require at least one declared held-out fixture binding.
+Template-only policies use declared templates while excluding held-out fixture
+rows. Policies declaring both evaluate the set union, with duplicates removed.
+Private tasks receive full SHA-256 ids and the ordered slice receives a content
+hash.
+
+For a private fixture slice, the evaluator intentionally opens the full verified
+fixture inventory even when public runtime policy used
+`fixtures_in_backend_state: false`; otherwise it would measure `not_found`
+behavior instead of held-out generalization. The override exists only in the
+ephemeral private process and never alters the pack or publication.
+
+Held-out mode may publish only aggregate diagnostics. Set
+`outputs.write_task_results`, `outputs.cache_candidate_responses`, and
+`outputs.cache_tool_results` to `false`; the loader rejects any configuration
+that could persist private tasks, prompts, tool traces, or candidate responses.
+The aggregate report contains seen/private success rates, 95% Wilson intervals,
+matched applicable-tool/turn-policy strata, and
+`held_out_generalization_gap = seen_success_rate - held_out_success_rate` with
+a conservative Newcombe 95% interval.
+
 A candidate separates two identities. `provider`, `model`, and `api.base_url` name
 the route a request takes; `model_identity` names the weights that answered, and
 must pin an immutable `revision` or a `weights_digest`. Branch-style refs such as
