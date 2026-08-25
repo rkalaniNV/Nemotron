@@ -555,8 +555,13 @@ without a held-out source keep `held_out_hit` null and record `evaluated: false`
 When `held_out.policy.fixtures_in_backend_state` is `false`, the same reserved fixture
 rows are also removed from every generation replay and executable-evaluation oracle
 reset. The full inventory remains available only to the trusted binding and publication
-checks that prove those rows were withheld. A value of `true` retains the reserved rows
-in backend state for packs whose oracle behavior intentionally depends on them.
+checks that prove those rows were withheld. Local Python episodes run from a temporary
+pack mirror whose fixture file contains that same projection, so backend or assertion
+code resolving `fixtures.json` relative to `__file__` cannot reopen the full inventory.
+This mirror protects the pack-relative contract; it is not an OS sandbox for hostile
+allowlisted code that deliberately names unrelated host paths. A value of `true`
+retains the reserved rows in backend state for packs whose oracle behavior intentionally
+depends on them.
 Validation does not reject a probe merely because one argument equals a reserved id:
 tool argument names do not prove which fixture, if any, the backend dereferences. If
 the executed probe instead returns `not_found`, a mismatch records the matching

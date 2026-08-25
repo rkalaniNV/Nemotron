@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import json
 import logging
 import multiprocessing as mp
 import os
 import queue as queue_module
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -875,6 +878,56 @@ def _stop_process(proc: mp.Process) -> None:
         proc.join(1.0)
 
 
+@contextmanager
+def _projected_pack_tree(
+    *,
+    backend_path: Path | str | None,
+    assertions_path: Path | str | None,
+    import_root: Path | str | None,
+    fixture_source_path: Path | str,
+    fixtures: dict[str, Any] | None,
+) -> Iterator[tuple[Path | None, Path | None, Path]]:
+    """Mirror a local pack with only the fixture rows this episode may observe.
+
+    This closes the common ``Path(__file__).with_name("fixtures.json")`` bypass.
+    It is not an OS sandbox: allowlisted pack code remains trusted and could access
+    unrelated host paths if it deliberately names them.
+    """
+    if import_root is None:
+        raise ValueError("fixture-file isolation requires import_root")
+    if fixtures is None:
+        raise ValueError("fixture-file isolation requires projected fixtures")
+    source_root = Path(import_root).resolve()
+
+    def relative(path: Path | str | None, *, label: str) -> Path | None:
+        if path is None:
+            return None
+        try:
+            return Path(path).resolve().relative_to(source_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"fixture-file isolation requires {label} to be inside import_root"
+            ) from exc
+
+    backend_relative = relative(backend_path, label="backend_path")
+    assertions_relative = relative(assertions_path, label="assertions_path")
+    fixtures_relative = relative(fixture_source_path, label="fixture_source_path")
+    assert fixtures_relative is not None
+    with tempfile.TemporaryDirectory(prefix="bfcl-oracle-pack-") as temporary:
+        projected_root = Path(temporary) / "pack"
+        shutil.copytree(source_root, projected_root, symlinks=True)
+        projected_fixtures = projected_root / fixtures_relative
+        projected_fixtures.write_text(
+            json.dumps(fixtures, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        yield (
+            None if backend_relative is None else projected_root / backend_relative,
+            None if assertions_relative is None else projected_root / assertions_relative,
+            projected_root,
+        )
+
+
 @dataclass
 class ProcessWorker:
     """Process-worker facade used by oracle validation / replay."""
@@ -917,6 +970,7 @@ class ProcessWorker:
         tool_timeout_s: float | None = None,
         assertion_timeout_s: float | None = None,
         episode_timeout_s: float | None = None,
+        fixture_source_path: Path | str | None = None,
     ) -> list[Any]:
         """Run one backend episode.
 
@@ -926,6 +980,31 @@ class ProcessWorker:
         without restarting the backend. Process workers enforce each operation timeout;
         debug-thread workers can only bound the caller's wait for the whole episode.
         """
+        if fixture_source_path is not None:
+            if endpoint_config is not None:
+                raise ValueError("fixture-file isolation applies only to local oracle packs")
+            with _projected_pack_tree(
+                backend_path=backend_path,
+                assertions_path=assertions_path,
+                import_root=import_root,
+                fixture_source_path=fixture_source_path,
+                fixtures=fixtures,
+            ) as (projected_backend, projected_assertions, projected_root):
+                return self.run_episode(
+                    backend_path=projected_backend,
+                    fixtures=fixtures,
+                    clock_iso=clock_iso,
+                    seed=seed,
+                    task_id=task_id,
+                    steps=steps,
+                    assertions_path=projected_assertions,
+                    import_root=projected_root,
+                    import_timeout_s=import_timeout_s,
+                    reset_timeout_s=reset_timeout_s,
+                    tool_timeout_s=tool_timeout_s,
+                    assertion_timeout_s=assertion_timeout_s,
+                    episode_timeout_s=episode_timeout_s,
+                )
         import_timeout = self.default_timeout_s if import_timeout_s is None else import_timeout_s
         reset_timeout = self.default_timeout_s if reset_timeout_s is None else reset_timeout_s
         tool_timeout = self.default_timeout_s if tool_timeout_s is None else tool_timeout_s
@@ -1114,8 +1193,24 @@ class ProcessWorker:
         *,
         import_root: Path | str | None = None,
         timeout_s: float | None = None,
+        fixture_source_path: Path | str | None = None,
+        fixtures: dict[str, Any] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Discover assertions and validate signatures without importing in the parent."""
+        if fixture_source_path is not None:
+            with _projected_pack_tree(
+                backend_path=None,
+                assertions_path=assertions_path,
+                import_root=import_root,
+                fixture_source_path=fixture_source_path,
+                fixtures=fixtures,
+            ) as (_, projected_assertions, projected_root):
+                assert projected_assertions is not None
+                return self.inspect_assertions(
+                    projected_assertions,
+                    import_root=projected_root,
+                    timeout_s=timeout_s,
+                )
         return self.call(
             _inspect_assertions_module,
             str(assertions_path),

@@ -21,6 +21,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
     confirmation_protocol,
+    oracle_fixture_source_path,
     oracle_runtime_fixtures,
     pack_fingerprint,
 )
@@ -256,6 +257,7 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
             tool_timeout_s=config.oracle_runtime.tool_timeout_s,
             assertion_timeout_s=config.oracle_runtime.assertion_timeout_s,
             episode_timeout_s=config.oracle_runtime.episode_timeout_s,
+            fixture_source_path=oracle_fixture_source_path(pack),
         )
 
     # --- Check 1: template tool names ---
@@ -486,6 +488,8 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
             import_root=pack.paths.pack_root,
             # Importing the module is what this pays for, not running an assertion.
             timeout_s=config.oracle_runtime.import_timeout_s,
+            fixture_source_path=oracle_fixture_source_path(pack),
+            fixtures=copy.deepcopy(runtime_fixtures),
         )
     except Exception as exc:  # noqa: BLE001
         failures_4.append({"reason": "assertions_import_failed", "detail": str(exc)})

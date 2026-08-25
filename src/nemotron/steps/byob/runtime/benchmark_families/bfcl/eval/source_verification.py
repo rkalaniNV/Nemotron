@@ -100,6 +100,8 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_projection impor
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import PackTrustError, ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     ResolvedPackPaths,
+    load_held_out_policy,
+    oracle_runtime_fixtures,
     pack_files,
     pack_fingerprint,
     resolve_declared_pack_paths,
@@ -1183,9 +1185,29 @@ def _probe_backend_interface(
 
     worker = ProcessWorker(default_timeout_s=limits.tool_timeout_s, worker="process")
     try:
+        fixtures = None
+        fixture_source_path = None
+        if paths.held_out_path is not None and paths.fixtures_path is not None:
+            pack_manifest = yaml.safe_load(paths.manifest_path.read_text(encoding="utf-8")) or {}
+            templates = yaml.safe_load(paths.templates_path.read_text(encoding="utf-8")) or []
+            fixtures = json.loads(paths.fixtures_path.read_text(encoding="utf-8"))
+            held_out = load_held_out_policy(
+                paths.held_out_path,
+                source=str(pack_manifest.get("held_out")),
+                manifest=pack_manifest,
+                fixtures=fixtures,
+                templates=templates,
+            )
+            fixtures = oracle_runtime_fixtures(
+                manifest=pack_manifest,
+                fixtures=fixtures,
+                held_out=held_out,
+            )
+            if (held_out.get("policy") or {}).get("fixtures_in_backend_state", True) is False:
+                fixture_source_path = paths.fixtures_path
         outputs = worker.run_episode(
             backend_path=backend_path,
-            fixtures=None,
+            fixtures=fixtures,
             clock_iso=clock,
             seed=0,
             task_id="__source_verification__",
@@ -1194,6 +1216,7 @@ def _probe_backend_interface(
             import_timeout_s=limits.tool_timeout_s,
             tool_timeout_s=limits.tool_timeout_s,
             episode_timeout_s=limits.episode_timeout_s,
+            fixture_source_path=fixture_source_path,
         )
     except (RuntimeError, TimeoutError, OSError) as exc:
         raise OracleResourceMismatchError(

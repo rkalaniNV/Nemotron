@@ -9,6 +9,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfi
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
+    oracle_fixture_source_path,
     oracle_reset_fixtures,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
@@ -72,6 +73,7 @@ def replay_once(
         tool_timeout_s=runtime.tool_timeout_s,
         assertion_timeout_s=runtime.assertion_timeout_s,
         episode_timeout_s=runtime.episode_timeout_s,
+        fixture_source_path=oracle_fixture_source_path(pack),
     )
     return {
         "results": outputs[first_call : first_call + len(expected_calls)],

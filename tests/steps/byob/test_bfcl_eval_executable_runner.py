@@ -1672,12 +1672,30 @@ async def _python_oracle_session_excludes_held_out_fixture_state(
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     manifest["held_out"] = "held_out.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    # A backend must not recover the full inventory through its source location.
+    # Redefine reset after the pack's implementation to model that bypass.
+    backend_path = pack_root / "backend.py"
+    backend_path.write_text(
+        backend_path.read_text(encoding="utf-8")
+        + """
+
+def reset(*, ctx, fixtures=None):
+    import json
+    from pathlib import Path
+    global _FIXTURE_SNAPSHOT, _STATE, _CTX, _ID_COUNTER
+    _FIXTURE_SNAPSHOT = json.loads(Path(__file__).with_name("fixtures.json").read_text())
+    _STATE = copy.deepcopy(_FIXTURE_SNAPSHOT)
+    _CTX = ctx
+    _ID_COUNTER = 0
+""",
+        encoding="utf-8",
+    )
     oracle = _oracle().model_copy(
         update={
             "pack_root": pack_root,
             "pack_manifest_path": manifest_path,
             "pack_file_count": 7,
-            "resource_path": pack_root / "backend.py",
+            "resource_path": backend_path,
         }
     )
     session = open_oracle_session(

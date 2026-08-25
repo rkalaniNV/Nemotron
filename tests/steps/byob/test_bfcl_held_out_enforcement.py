@@ -227,7 +227,24 @@ def test_generation_removes_reserved_rows_from_every_oracle_episode(
     policy = _default_policy()
     policy["policy"]["fixtures_in_backend_state"] = False
     pack = _prepare_pack(tmp_path, held_out=policy)
+    assertions_path = pack / "assertions.py"
+    assertions_path.write_text(
+        assertions_path.read_text(encoding="utf-8")
+        + f"""
+
+# Import-time guard proving assertion code sees the projected pack mirror.
+import json as _json
+from pathlib import Path as _Path
+if any(
+    str(row.get("book_id")) == {HELD_OUT_BOOK!r}
+    for row in _json.loads(_Path(__file__).with_name("fixtures.json").read_text())["books"]
+):
+    raise RuntimeError("assertion module reopened a held-out fixture")
+""",
+        encoding="utf-8",
+    )
     observed_book_ids: list[set[str]] = []
+    observed_fixture_sources: list[Path | None] = []
     validated_templates: list[tuple[str, HeldOutPolicy | None]] = []
     run_episode = ProcessWorker.run_episode
     expand_template = oracle_validation.expand_template
@@ -235,6 +252,7 @@ def test_generation_removes_reserved_rows_from_every_oracle_episode(
     def recording_run_episode(self: ProcessWorker, **kwargs: Any) -> list[Any]:
         fixtures = kwargs.get("fixtures")
         if isinstance(fixtures, dict) and isinstance(fixtures.get("books"), list):
+            observed_fixture_sources.append(kwargs.get("fixture_source_path"))
             observed_book_ids.append(
                 {
                     str(row["book_id"])
@@ -258,6 +276,11 @@ def test_generation_removes_reserved_rows_from_every_oracle_episode(
     assert benchmark_path.is_file()
     assert observed_book_ids
     assert all(HELD_OUT_BOOK not in identifiers for identifiers in observed_book_ids)
+    assert observed_fixture_sources
+    # The wrapper sees both the outer projection request and its recursive execution
+    # against the temporary mirror.
+    assert pack / "fixtures.json" in observed_fixture_sources
+    assert set(observed_fixture_sources) <= {pack / "fixtures.json", None}
 
     # The reserved template is still part of the pack contract. Validation compiles
     # it with template blocking disabled but fixture reservations left intact.

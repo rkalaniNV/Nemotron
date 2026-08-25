@@ -481,8 +481,12 @@ def load_held_out_policy(
     unknown = sorted(set(raw) - {"version", "fixtures", "templates", "policy"})
     if unknown:
         raise ValueError("held_out.yaml has unknown keys: " + ", ".join(unknown))
-    if not isinstance(raw.get("version"), (str, int, float)) or not str(raw["version"]).strip():
-        raise ValueError("held_out.yaml version must be non-empty")
+    if (
+        isinstance(raw.get("version"), bool)
+        or not isinstance(raw.get("version"), (str, int, float))
+        or not str(raw["version"]).strip()
+    ):
+        raise ValueError("held_out.yaml version must be a non-empty string or non-boolean number")
 
     held_fixtures = raw.get("fixtures") or {}
     if not isinstance(held_fixtures, dict):
@@ -567,8 +571,9 @@ def oracle_runtime_fixtures(
     """Project pack fixtures into the state an oracle is allowed to observe.
 
     Generation still needs the complete inventory to bind, validate, and reject
-    reserved rows. When a policy keeps those rows out of backend state, only this
-    projection crosses the worker or endpoint boundary.
+    reserved rows. When a policy keeps those rows out of backend state, this
+    projection is supplied to reset and mirrored over the local pack's fixture file
+    before Python code crosses the worker boundary.
     """
     if fixtures is None or held_out is None:
         return fixtures
@@ -611,6 +616,18 @@ def oracle_reset_fixtures(pack: LoadedPack) -> dict[str, Any] | None:
             held_out=pack.held_out,
         )
     )
+
+
+def oracle_fixture_source_path(pack: LoadedPack) -> Path | None:
+    """Return the fixture file that must be mirrored outside an oracle process."""
+    paths = pack.paths
+    backend_path = getattr(paths, "backend_path", None)
+    fixtures_path = getattr(paths, "fixtures_path", None)
+    held_out = getattr(pack, "held_out", None)
+    if backend_path is None or fixtures_path is None or held_out is None:
+        return None
+    settings = held_out.get("policy") or {}
+    return Path(fixtures_path) if settings.get("fixtures_in_backend_state", True) is False else None
 
 
 def _validate_generation_targets(
