@@ -48,7 +48,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
 )
 
 _FIXTURES_CACHE: dict[tuple[str, str], Any] = {}
-_RUNTIME_FIXTURES_CACHE: dict[tuple[str, ...], Any] = {}
+_RUNTIME_FIXTURES_CACHE: dict[tuple[str, ...], tuple[Any, bool]] = {}
 _FIXTURES_CACHE_LIMIT = 8
 
 
@@ -84,7 +84,7 @@ def _text_digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _load_runtime_fixtures(paths: ResolvedPackPaths) -> Any:
+def _load_runtime_fixture_projection(paths: ResolvedPackPaths) -> tuple[Any, bool]:
     """Return the fixtures this pack revision lets an oracle session observe.
 
     A pack that reserves rows outside backend state has them dropped here, before
@@ -93,10 +93,10 @@ def _load_runtime_fixtures(paths: ResolvedPackPaths) -> Any:
     read and hashed per session so a pack edited mid-run is caught.
     """
     if paths.fixtures_path is None:
-        return None
+        return None, False
     fixtures, fixtures_digest = _load_pack_fixtures_revision(paths.fixtures_path)
     if paths.held_out_path is None:
-        return fixtures
+        return fixtures, False
     manifest_text = paths.manifest_path.read_text(encoding="utf-8")
     templates_text = paths.templates_path.read_text(encoding="utf-8")
     held_out_text = paths.held_out_path.read_text(encoding="utf-8")
@@ -113,22 +113,33 @@ def _load_runtime_fixtures(paths: ResolvedPackPaths) -> Any:
     templates = yaml.safe_load(templates_text) or []
     if not isinstance(manifest, dict) or not isinstance(templates, list):
         raise ValueError("held-out isolation needs a manifest mapping and a template list")
+    held_out = load_held_out_policy(
+        paths.held_out_path,
+        source=str(manifest.get("held_out")),
+        manifest=manifest,
+        fixtures=fixtures,
+        templates=templates,
+        text=held_out_text,
+    )
     projected = oracle_runtime_fixtures(
         manifest=manifest,
         fixtures=fixtures,
-        held_out=load_held_out_policy(
-            paths.held_out_path,
-            source=str(manifest.get("held_out")),
-            manifest=manifest,
-            fixtures=fixtures,
-            templates=templates,
-            text=held_out_text,
-        ),
+        held_out=held_out,
+    )
+    isolates_fixture_file = bool(
+        held_out
+        and (held_out.get("policy") or {}).get("fixtures_in_backend_state", True) is False
+        and paths.backend_path is not None
     )
     if len(_RUNTIME_FIXTURES_CACHE) >= _FIXTURES_CACHE_LIMIT:
         _RUNTIME_FIXTURES_CACHE.clear()
-    _RUNTIME_FIXTURES_CACHE[key] = projected
-    return projected
+    result = (projected, isolates_fixture_file)
+    _RUNTIME_FIXTURES_CACHE[key] = result
+    return result
+
+
+def _load_runtime_fixtures(paths: ResolvedPackPaths) -> Any:
+    return _load_runtime_fixture_projection(paths)[0]
 
 
 @runtime_checkable
@@ -163,6 +174,7 @@ class _ProcessEpisodeBridge:
         paths: ResolvedPackPaths,
         oracle: VerifiedOracleSource,
         fixtures: dict[str, Any] | None,
+        isolate_fixture_file: bool,
         endpoint_config: Any,
         task: ExecutableTaskSpec,
         limits: EvalLimits,
@@ -171,6 +183,7 @@ class _ProcessEpisodeBridge:
         self._paths = paths
         self._oracle = oracle
         self._fixtures = fixtures
+        self._isolate_fixture_file = isolate_fixture_file
         self._endpoint_config = endpoint_config
         self._task = task
         self._limits = limits
@@ -213,6 +226,9 @@ class _ProcessEpisodeBridge:
                 tool_timeout_s=self._limits.tool_timeout_s,
                 assertion_timeout_s=self._limits.tool_timeout_s,
                 episode_timeout_s=self._limits.episode_timeout_s,
+                fixture_source_path=(
+                    self._paths.fixtures_path if self._isolate_fixture_file else None
+                ),
             )
         except BaseException as exc:  # noqa: BLE001 — handed to the waiting driver
             self._replies.put(("error", exc))
@@ -295,7 +311,7 @@ class _IsolatedOracleSession:
                 OraclePackRef(manifest_path=oracle.pack_manifest_path),
                 (oracle.pack_root,),
             )
-            fixtures = _load_runtime_fixtures(paths)
+            fixtures, isolate_fixture_file = _load_runtime_fixture_projection(paths)
             endpoint_config = (
                 load_endpoint_config(
                     paths.endpoint_config_path,
@@ -340,6 +356,7 @@ class _IsolatedOracleSession:
             paths=paths,
             oracle=oracle,
             fixtures=fixtures,
+            isolate_fixture_file=isolate_fixture_file,
             endpoint_config=endpoint_config,
             task=task,
             limits=limits,

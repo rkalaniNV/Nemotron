@@ -16,6 +16,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfi
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
+    oracle_fixture_source_path,
     oracle_reset_fixtures,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
@@ -415,6 +416,7 @@ def _oracle_trace_resolver(
                 reset_timeout_s=runtime.reset_timeout_s,
                 tool_timeout_s=runtime.tool_timeout_s,
                 episode_timeout_s=runtime.episode_timeout_s,
+                fixture_source_path=oracle_fixture_source_path(pack),
             )
         except Exception as exc:  # noqa: BLE001 — retain worker/backend failures as fatal
             raise ExpectedTraceError(

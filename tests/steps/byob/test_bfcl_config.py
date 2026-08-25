@@ -613,6 +613,36 @@ def test_held_out_pack_contract_validates_ids_and_enters_fingerprint(
         load_pack(config)
 
 
+def test_held_out_policy_version_rejects_boolean_yaml_scalars(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
+
+    pack_root = _copy_tiny_pack(tmp_path)
+    manifest_path = pack_root / "manifest.yaml"
+    _edit_pack_yaml(manifest_path, lambda manifest: manifest.update({"held_out": "held_out.yaml"}))
+    (pack_root / "held_out.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": True,
+                "fixtures": {},
+                "templates": [],
+                "policy": {"fixtures_in_backend_state": True, "seed": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "held-out-boolean-version.yaml",
+            oracle_pack={"manifest_path": str(manifest_path)},
+            oracle_runtime={"allowed_roots": [str(tmp_path)]},
+        )
+    )
+
+    with pytest.raises(ValueError, match="version must be a non-empty string"):
+        load_pack(config)
+
+
 def test_held_out_rejects_primary_ids_that_collapse_after_normalization(
     tmp_path: Path,
 ) -> None:
