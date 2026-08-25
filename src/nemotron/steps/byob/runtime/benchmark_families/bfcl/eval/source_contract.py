@@ -437,7 +437,7 @@ class VerifiedEvalSource(_Verified):
     def _consistent(self) -> VerifiedEvalSource:
         if not self.modes:
             raise ValueError("a verified source records the modes it was verified for")
-        executable = "executable" in self.modes
+        executable = "executable" in self.modes or "held_out_eval" in self.modes
         if self.claim_scope != ("trace_and_executable" if executable else "trace_only"):
             raise ValueError("claim scope must follow the modes the source was verified for")
         if executable and self.oracle is None:

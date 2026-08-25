@@ -38,8 +38,18 @@ translation_manifest: null
 
 eval:
   # trace scores the calls the model proposed; executable additionally replays them
-  # against the oracle pack and evaluates the pack's assertions.
+  # against the oracle pack and evaluates the pack's assertions. held_out_eval is
+  # the private executable path; it additionally requires the versioned block below.
   mode: [trace]
+
+# held_out_eval:
+#   contract_version: "1.0"
+#   policy_hash: REPLACE_ME_HELD_OUT_POLICY_SHA256
+#   fixture_refs: ['["collection","PRIMARY-ID"]']
+#   template_ids: [REPLACE_ME_HELD_OUT_TEMPLATE]
+#   seed: 42
+#   pack_version: REPLACE_ME_EXACT_PACK_VERSION
+#   max_tasks_per_template: 8
 
 scoring:
   # Content-hashed: editing the contract changes eval_config_hash, because two runs
@@ -135,3 +145,5 @@ outputs:
   # Conversation driving replays the tool results the benchmark recorded rather
   # than executing a tool, so a whole episode can be re-derived from this cache.
   cache_tool_results: true
+  # For held_out_eval all three fields above must be false. Only aggregate
+  # diagnostics may leave the private evaluation boundary.

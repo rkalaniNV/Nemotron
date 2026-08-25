@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import logging
 import math
 from collections import Counter
-from typing import Any
+from typing import Any, Literal
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.fixture_filter import evaluate_filter
@@ -192,6 +193,7 @@ def _candidates(
     *,
     held_out: HeldOutPolicy | None = None,
     ledger: BindingLedger | None = None,
+    fixture_selection: Literal["exclude", "include", "all"] = "exclude",
 ) -> list[tuple[Any, str | None]]:
     """Return ordered ``(value, fixture_ref)`` candidates for one slot.
 
@@ -226,24 +228,44 @@ def _candidates(
         referenced = [(row, fixture_ref(collection, row[key])) for row in matched]
         if ledger is not None:
             ledger.examined(len(referenced))
-        if held_out is not None:
+        if held_out is not None and fixture_selection != "all":
             reserved = sorted(
                 reference for _, reference in referenced if held_out.blocks_fixture(reference)
+            )
+            collection_has_reservations = (
+                fixture_selection == "include"
+                and any(
+                    json.loads(reference)[0] == collection
+                    for reference in getattr(held_out, "fixture_refs", ())
+                )
             )
             if reserved:
                 if ledger is not None:
                     ledger.blocked(reserved)
-                referenced = [
-                    (row, reference)
-                    for row, reference in referenced
-                    if not held_out.blocks_fixture(reference)
-                ]
+                if fixture_selection == "include":
+                    referenced = [
+                        (row, reference)
+                        for row, reference in referenced
+                        if held_out.blocks_fixture(reference)
+                    ]
+                else:
+                    referenced = [
+                        (row, reference)
+                        for row, reference in referenced
+                        if not held_out.blocks_fixture(reference)
+                    ]
                 if not referenced:
                     raise ExpansionError(
                         f"slot {slot_name!r} can bind no row of {collection!r}: the held-out policy "
                         f"reserves every row its filter matched ({', '.join(reserved)}); declare more "
                         "fixture rows or release some from held_out.fixtures"
                     )
+            elif fixture_selection == "include" and collection_has_reservations:
+                # This template simply contributes no fixture-held-out instance:
+                # another template may expose the reserved rows through a compatible
+                # filter, so private expansion must not turn this local miss into a
+                # pack-wide failure.
+                referenced = []
         return [(row[field], reference) for row, reference in referenced]
 
     if kind == "enum":
@@ -399,13 +421,19 @@ def expand_template(
     *,
     held_out: HeldOutPolicy | None = None,
     ledger: BindingLedger | None = None,
+    fixture_selection: Literal["exclude", "include", "all"] = "exclude",
+    allow_held_out_template: bool = False,
 ) -> list[dict]:
     """Bind one template into at most ``limit`` deterministic task instances."""
     slots = template.get("slots") or {}
     slot_names = sorted(slots)
     updates = declared_slot_updates(template)
     _check_correction_contract(template, slots, updates)
-    if held_out is not None and held_out.blocks_template(template.get("template_id")):
+    if (
+        held_out is not None
+        and held_out.blocks_template(template.get("template_id"))
+        and not allow_held_out_template
+    ):
         raise ExpansionError(
             f"template {template.get('template_id')!r} is reserved by the held-out policy and "
             "must not be bound"
@@ -419,7 +447,14 @@ def expand_template(
     update_keys = [(entry_index, name) for entry_index, name, _ in ordered_updates]
     keys: list[Any] = [*slot_names, *update_keys]
     candidate_lists = [
-        _candidates(pack, name, slots[name], held_out=held_out, ledger=ledger)
+        _candidates(
+            pack,
+            name,
+            slots[name],
+            held_out=held_out,
+            ledger=ledger,
+            fixture_selection=fixture_selection,
+        )
         for name in slot_names
     ]
     candidate_lists.extend(
@@ -429,6 +464,7 @@ def expand_template(
             definition,
             held_out=held_out,
             ledger=ledger,
+            fixture_selection=fixture_selection,
         )
         for _, name, definition in ordered_updates
     )

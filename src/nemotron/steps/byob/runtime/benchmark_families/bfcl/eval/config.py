@@ -46,6 +46,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
     SecretInConfigError,
     redact_value,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.held_out_eval import (
+    HeldOutEvalConfig,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
     EVAL_CONFIG_SCHEMA_VERSION,
     BfclEvalConfig,
@@ -76,6 +79,7 @@ EVAL_CONFIG_TOP_LEVEL_KEYS: Final = frozenset(
         "source_oracle",
         "translation_manifest",
         "eval",
+        "held_out_eval",
         "scoring",
         "limits",
         "candidates",
@@ -86,6 +90,17 @@ EVAL_CONFIG_TOP_LEVEL_KEYS: Final = frozenset(
 )
 _SOURCE_ORACLE_KEYS: Final = frozenset({"kind", "pack_manifest", "resource"})
 _EVAL_KEYS: Final = frozenset({"mode"})
+_HELD_OUT_EVAL_KEYS: Final = frozenset(
+    {
+        "contract_version",
+        "policy_hash",
+        "fixture_refs",
+        "template_ids",
+        "seed",
+        "pack_version",
+        "max_tasks_per_template",
+    }
+)
 _SCORING_KEYS: Final = frozenset(
     {
         "contract",
@@ -842,6 +857,18 @@ def load_eval_config_mapping(
             recovery="write eval.mode as a YAML list, even for a single mode",
         )
     settings = _model(EvalSettings, {"modes": tuple(modes)}, "eval")
+    held_out_settings = None
+    if "held_out_eval" in data:
+        held_out_settings = _model(
+            HeldOutEvalConfig,
+            _section(
+                data,
+                "held_out_eval",
+                _HELD_OUT_EVAL_KEYS,
+                optional=frozenset({"contract_version"}),
+            ),
+            "held_out_eval",
+        )
     scoring = _resolve_scoring(data, base_dir)
     limits = _model(EvalLimits, _section(data, "limits", _LIMITS_KEYS), "limits")
     candidates = _resolve_candidates(data)
@@ -864,6 +891,7 @@ def load_eval_config_mapping(
             "config_status": "resolved",
             "source": source,
             "settings": settings,
+            "held_out_eval": held_out_settings,
             "scoring": scoring,
             "limits": limits,
             "candidates": candidates,

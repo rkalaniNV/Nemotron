@@ -16,6 +16,7 @@ scores every trace gate as well.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import tempfile
 import uuid
@@ -57,8 +58,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.conversation_proje
     build_conversation_script,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.eval_artifacts import (
+    EVAL_MANIFEST_FILE,
     EVAL_REPORT_FILE,
     EvalArtifactSet,
+    executable_task_result,
     write_executable_eval_artifacts,
     write_trace_eval_artifacts,
 )
@@ -78,6 +81,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scorer 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_scoring_contract import (
     ExecutableTaskScore,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.held_out_eval import (
+    build_validated_private_slice,
+    held_out_generalization_report,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.oracle_session import (
     OracleSession,
@@ -179,6 +186,19 @@ class BfclTraceEvalRunResult:
     task_scores: tuple[TraceTaskScore, ...]
     candidate_scores: tuple[TraceCandidateScore, ...]
     artifacts: EvalArtifactSet
+    resolved_config_path: Path
+
+
+@dataclass(frozen=True)
+class BfclHeldOutEvalRunResult:
+    """Aggregate-only result; private rows and caches expire before return."""
+
+    eval_run_id: str
+    config: BfclEvalConfig
+    source: VerifiedEvalSource
+    report_path: Path
+    report_hash: str
+    report: dict[str, Any]
     resolved_config_path: Path
 
 
@@ -445,6 +465,11 @@ async def run_bfcl_eval(
     authorized: AuthorizedEvalRun | None = None,
 ) -> BfclEvalRunResult:
     """Verify, authorize, execute, aggregate, and publish one bounded eval run."""
+    if config.settings.held_out_eval:
+        raise UnsupportedRunnerModeError(
+            "the standard executable runner received a private held-out config",
+            recovery="use run_bfcl_held_out_eval so both slices run and private rows are not persisted",
+        )
     if not config.settings.executable:
         raise UnsupportedRunnerModeError(
             "the executable batch runner received a trace-only config",
@@ -535,6 +560,323 @@ async def run_bfcl_eval(
     finally:
         if temporary_cache is not None:
             temporary_cache.cleanup()
+
+
+async def run_bfcl_held_out_eval(
+    config: BfclEvalConfig,
+    *,
+    eval_run_id: str | None = None,
+    probe_oracle: bool = True,
+    client_factory: ClientFactory = _default_client_factory,
+    oracle_factory: OracleFactory = _default_oracle_factory,
+) -> BfclHeldOutEvalRunResult:
+    """Evaluate seen and private slices once, persisting aggregate evidence only."""
+    if not config.settings.held_out_eval or config.held_out_eval is None:
+        raise UnsupportedRunnerModeError(
+            "the held-out runner received a config without held_out_eval mode",
+            recovery="set eval.mode to [held_out_eval] and pin the held_out_eval section",
+        )
+    authorized = authorize_bfcl_eval(
+        config,
+        eval_run_id=eval_run_id,
+        probe_oracle=probe_oracle,
+    )
+    source = authorized.source
+    if source.oracle is None:
+        raise EvalRunnerError(
+            "held_out_eval has no verified Oracle pack",
+            recovery="configure source_oracle for the exact source pack",
+        )
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import (
+        BfclConfig,
+        LineageConfig,
+        OraclePackRef,
+        OracleRuntimeConfig,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.contamination_contract import (
+        CommonEvaluationTaskSet,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract import (
+        SourceTaskIndex,
+        VerifiedBenchmarkArtifact,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_verification import (
+        benchmark_schema_fingerprint,
+        write_eval_artifact,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_projection import (
+        ProjectionSource,
+        project_benchmark_rows,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.held_out_contract import (
+        HeldOutPolicy,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
+
+    manifest = json.loads(source.source_manifest_path.read_text(encoding="utf-8"))
+    generation = BfclConfig(
+        family="bfcl",
+        expt_name="private-held-out",
+        output_dir=config.outputs.output_dir,
+        oracle_pack=OraclePackRef(
+            manifest_path=source.oracle.pack_manifest_path,
+            backend_path=(
+                source.oracle.resource_path
+                if source.oracle.kind == "python"
+                else None
+            ),
+            endpoint_config_path=(
+                source.oracle.resource_path
+                if source.oracle.kind == "endpoint"
+                else None
+            ),
+        ),
+        oracle_runtime=OracleRuntimeConfig(
+            clock=str(manifest["oracle_clock"]),
+            tool_timeout_s=config.limits.tool_timeout_s,
+            assertion_timeout_s=config.limits.tool_timeout_s,
+            import_timeout_s=config.limits.tool_timeout_s,
+            reset_timeout_s=config.limits.tool_timeout_s,
+            episode_timeout_s=config.limits.episode_timeout_s,
+            worker="process",
+            allowed_roots=tuple(
+                dict.fromkeys(
+                    (
+                        source.oracle.pack_root,
+                        source.oracle.resource_path.parent,
+                    )
+                )
+            ),
+        ),
+        lineage=LineageConfig(policy="strict_separation"),
+        random_seed=config.held_out_eval.seed,
+        surface_generation={
+            "preserve_slot_values": True,
+            "prevent_tool_name_leakage": True,
+        },
+    )
+    pack = load_pack(generation)
+    private_rows, slice_hash = build_validated_private_slice(
+        generation,
+        pack,
+        config.held_out_eval,
+    )
+    private_ids = tuple(str(row["task_id"]) for row in private_rows)
+    private_projection = project_benchmark_rows(
+        private_rows,
+        source=ProjectionSource(
+            file="benchmark.parquet",
+            content_hash=slice_hash,
+            rows=len(private_rows),
+        ),
+    )
+    counts: dict[str, dict[str, int]] = {
+        "category": {},
+        "difficulty": {},
+        "turn_policy": {},
+    }
+    for row in private_projection.rows:
+        for field in counts:
+            value = getattr(row, field)
+            if value is not None:
+                counts[field][value] = counts[field].get(value, 0) + 1
+    private_index = SourceTaskIndex(
+        task_ids=private_ids,
+        gold_task_ids=private_ids,
+        category_counts=counts["category"],
+        difficulty_counts=counts["difficulty"],
+        turn_policy_counts=counts["turn_policy"],
+    )
+
+    with tempfile.TemporaryDirectory(prefix="bfcl-private-eval-") as private_root:
+        private_path = Path(private_root) / "benchmark.parquet"
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
+            benchmark_schema,
+        )
+
+        pq.write_table(pa.Table.from_pylist(private_rows, schema=benchmark_schema()), private_path)
+        private_bytes_hash = f"sha256:{hashlib.sha256(private_path.read_bytes()).hexdigest()}"
+        private_projection = project_benchmark_rows(
+            private_rows,
+            source=ProjectionSource(
+                file="benchmark.parquet",
+                content_hash=private_bytes_hash,
+                rows=len(private_rows),
+            ),
+        )
+        private_source = source.model_copy(
+            update={
+                "benchmark": VerifiedBenchmarkArtifact(
+                    file="benchmark.parquet",
+                    path=private_path,
+                    content_hash=private_bytes_hash,
+                    rows=len(private_rows),
+                    benchmark_schema_version=config.source.benchmark_schema_version,
+                    schema_fingerprint=benchmark_schema_fingerprint(
+                        config.source.benchmark_schema_version
+                    ),
+                ),
+                "task_index": private_index,
+                "translation": None,
+                "exposures": (),
+            }
+        )
+        private_candidates = tuple(
+            candidate.model_copy(
+                update={
+                    "eligible_task_ids": private_ids,
+                    "excluded_task_ids": (),
+                    "collisions": (),
+                }
+            )
+            for candidate in authorized.plan.candidates
+        )
+        private_plan = authorized.plan.model_copy(
+            update={
+                "source_verification_identity": private_source.verification_identity,
+                "source_task_ids_hash": private_index.task_ids_hash,
+                "exposures": (),
+                "candidates": private_candidates,
+                "common": CommonEvaluationTaskSet(
+                    comparison_set="common_intersection",
+                    task_ids=private_ids,
+                    candidate_aliases=authorized.plan.candidate_aliases,
+                ),
+            }
+        )
+
+        candidate_cache, _cache_path, temporary_cache = _candidate_cache(config)
+        try:
+            seen_scores: list[ExecutableTaskScore] = []
+            private_scores: list[ExecutableTaskScore] = []
+            for alias in authorized.plan.candidate_aliases:
+                candidate = config.candidate(alias)
+                client = client_factory(candidate, config.limits, candidate_cache)
+                try:
+                    seen_scores.extend(
+                        await _run_candidate_tasks(
+                            config=config,
+                            source=source,
+                            plan=authorized.plan,
+                            projection=authorized.projection,
+                            candidate=candidate,
+                            client=client,
+                            tool_trace_cache=None,
+                            oracle_factory=oracle_factory,
+                        )
+                    )
+                    private_scores.extend(
+                        await _run_candidate_tasks(
+                            config=config,
+                            source=private_source,
+                            plan=private_plan,
+                            projection=private_projection,
+                            candidate=candidate,
+                            client=client,
+                            tool_trace_cache=None,
+                            oracle_factory=oracle_factory,
+                        )
+                    )
+                finally:
+                    await client.aclose()
+            policy = HeldOutPolicy.from_normalized(pack.held_out)
+            report = held_out_generalization_report(
+                seen_results=[
+                    {
+                        "candidate_alias": score.candidate_alias,
+                        "task_id": score.task_id,
+                        "task_success": score.task_success,
+                        "failure_records": executable_task_result(score)[
+                            "failure_records"
+                        ],
+                    }
+                    for score in seen_scores
+                ],
+                held_out_results=[
+                    {
+                        "candidate_alias": score.candidate_alias,
+                        "task_id": score.task_id,
+                        "task_success": score.task_success,
+                        "failure_records": executable_task_result(score)[
+                            "failure_records"
+                        ],
+                    }
+                    for score in private_scores
+                ],
+                seen_tasks={
+                    row.task_id: {
+                        "required_tools": row.required_tools,
+                        "turn_policy": row.turn_policy,
+                    }
+                    for row in authorized.projection.rows
+                    if row.task_id in set(authorized.plan.common.task_ids)
+                },
+                held_out_tasks={
+                    row.task_id: {
+                        "required_tools": row.required_tools,
+                        "turn_policy": row.turn_policy,
+                    }
+                    for row in private_projection.rows
+                },
+                policy=policy,
+                pack_version=source.oracle.pack_version,
+                slice_content_hash=slice_hash,
+            )
+            report["eval_run_id"] = authorized.eval_run_id
+            report["source_run_id"] = source.source_run_id
+            report["eval_config_hash"] = config.eval_config_hash
+            report["verified_source"] = {
+                "benchmark_content_hash": source.evaluation_benchmark.content_hash,
+                "source_verification_identity": source.verification_identity,
+                "oracle_pack_content_hash": source.oracle.actual_pack_content_hash,
+                "oracle_verification_identity": source.oracle.verification_identity,
+            }
+            report_path, report_hash = write_eval_artifact(
+                config,
+                EVAL_REPORT_FILE,
+                report,
+            )
+            if config.outputs.write_eval_manifest:
+                write_eval_artifact(
+                    config,
+                    EVAL_MANIFEST_FILE,
+                    {
+                        "schema_version": "held_out_eval-1.0",
+                        "eval_run_id": authorized.eval_run_id,
+                        "source_run_id": source.source_run_id,
+                        "eval_config_hash": config.eval_config_hash,
+                        "mode": "held_out_eval",
+                        "policy_hash": config.held_out_eval.policy_hash,
+                        "private_slice": {
+                            "task_count": len(private_rows),
+                            "content_hash": slice_hash,
+                        },
+                        "candidate_aliases": list(authorized.plan.candidate_aliases),
+                        "artifacts": {
+                            "eval_report": {
+                                "file": EVAL_REPORT_FILE,
+                                "content_hash": report_hash,
+                            }
+                        },
+                        "privacy": report["privacy"],
+                    },
+                )
+        finally:
+            if temporary_cache is not None:
+                temporary_cache.cleanup()
+    return BfclHeldOutEvalRunResult(
+        eval_run_id=authorized.eval_run_id,
+        config=config,
+        source=source,
+        report_path=report_path,
+        report_hash=report_hash,
+        report=report,
+        resolved_config_path=authorized.resolved_config_path,
+    )
 
 
 async def _run_candidate_trace_tasks(
@@ -710,12 +1052,28 @@ def run_bfcl_trace_eval_sync(
     )
 
 
+def run_bfcl_held_out_eval_sync(
+    config_path: str | Path,
+    *,
+    eval_run_id: str | None = None,
+    probe_oracle: bool = True,
+) -> BfclHeldOutEvalRunResult:
+    config = load_eval_config(config_path)
+    return asyncio.run(
+        run_bfcl_held_out_eval(
+            config,
+            eval_run_id=eval_run_id,
+            probe_oracle=probe_oracle,
+        )
+    )
+
+
 def run_declared_eval_sync(
     config_path: str | Path,
     *,
     eval_run_id: str | None = None,
     probe_oracle: bool = True,
-) -> BfclEvalRunResult | BfclTraceEvalRunResult:
+) -> BfclEvalRunResult | BfclTraceEvalRunResult | BfclHeldOutEvalRunResult:
     """Run whichever evaluation ``eval.mode`` declares, and publish its artifacts.
 
     The mode is a property of the pinned config, so an operator should not have to
@@ -724,6 +1082,14 @@ def run_declared_eval_sync(
     other mode.
     """
     config = load_eval_config(config_path)
+    if config.settings.held_out_eval:
+        return asyncio.run(
+            run_bfcl_held_out_eval(
+                config,
+                eval_run_id=eval_run_id,
+                probe_oracle=probe_oracle,
+            )
+        )
     if config.settings.executable:
         return asyncio.run(
             run_bfcl_eval(
@@ -744,12 +1110,15 @@ def run_declared_eval_sync(
 __all__ = [
     "AuthorizedEvalRun",
     "BfclEvalRunResult",
+    "BfclHeldOutEvalRunResult",
     "BfclTraceEvalRunResult",
     "EvalRunnerError",
     "UnsupportedRunnerModeError",
     "authorize_bfcl_eval",
     "run_bfcl_eval",
     "run_bfcl_eval_sync",
+    "run_bfcl_held_out_eval",
+    "run_bfcl_held_out_eval_sync",
     "run_bfcl_trace_eval",
     "run_bfcl_trace_eval_sync",
     "run_declared_eval_sync",
