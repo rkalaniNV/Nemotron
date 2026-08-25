@@ -90,6 +90,14 @@ byob = [
     "bcp47>=0.1.0; python_version>='3.11' and python_version<'3.14'",
     "httpx",
 ]
+bfcl-mcp = [
+    # The 2026 protocol requires MCP Python SDK v2. Data Designer currently pins
+    # mcp<2, so the gateway/discovery runtime must live in a separate environment
+    # from the model-authoring `byob` extra.
+    "mcp>=2,<3; python_version>='3.11' and python_version<'3.14'",
+    "pyyaml>=6.0; python_version>='3.11'",
+    "pydantic>=2.0.0; python_version>='3.11'",
+]
 byob-gpu = [
     "torch>=2.10,<2.11; python_version>='3.11'",
     "transformers>=4.57.6,<5.0; python_version>='3.11'",
@@ -215,6 +223,13 @@ ignore = []
 
 [tool.uv]
 package = true
+conflicts = [
+    # Data Designer requires MCP SDK v1 while the 2026 BFCL gateway uses v2.
+    # They communicate across the documented gateway process boundary.
+    [{extra = "byob"}, {extra = "bfcl-mcp"}],
+    [{extra = "data-sdg"}, {extra = "bfcl-mcp"}],
+    [{extra = "all"}, {extra = "bfcl-mcp"}],
+]
 constraint-dependencies = [
     # Curator main currently keeps these constraints in its own uv config, but
     # they are not published transitively through package metadata.
@@ -258,6 +273,15 @@ required-imports = [
     "sacrebleu",
     "tabulate",
     "tqdm",
+    "yaml",
+]
+
+[tool.nemotron.runtime.bfcl-mcp]
+extras = ["bfcl-mcp"]
+venv-name = "bfcl-mcp"
+required-imports = [
+    "mcp",
+    "pydantic",
     "yaml",
 ]
 

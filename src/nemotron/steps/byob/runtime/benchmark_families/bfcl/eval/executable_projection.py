@@ -65,6 +65,8 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.fixture_filter import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     confirmation_protocol,
+    load_held_out_policy,
+    oracle_runtime_fixtures,
     project_model_facing_tools,
     resolve_declared_pack_paths,
 )
@@ -621,6 +623,35 @@ def _pack_metadata(
             ),
             recovery="restore the pack revision that source verification accepted",
         )
+    try:
+        # Slot recovery enumerates what the pack could have bound. A row the policy
+        # keeps out of backend state was never bindable, so leaving it out here keeps
+        # a tampered row from resolving against reserved state.
+        fixtures = (
+            oracle_runtime_fixtures(
+                manifest=pack_manifest,
+                fixtures=fixtures,
+                held_out=load_held_out_policy(
+                    paths.held_out_path,
+                    source=(
+                        str(pack_manifest.get("held_out"))
+                        if pack_manifest.get("held_out") is not None
+                        else None
+                    ),
+                    manifest=pack_manifest,
+                    fixtures=fixtures,
+                    templates=templates,
+                ),
+            )
+            or {}
+        )
+    except Exception as exc:
+        raise ExecutableProjectionError(
+            "source_oracle.pack held-out policy",
+            f"cannot isolate reserved fixture rows: {type(exc).__name__}",
+            expected="the held-out policy the pack declared at generation",
+            recovery="restore the pack revision that source verification accepted",
+        ) from exc
     try:
         confirm_parameter = confirmation_protocol(pack_manifest)["parameter"]
     except ValueError as exc:

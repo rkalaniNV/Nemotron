@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Sequence
@@ -463,17 +464,18 @@ def _fixture_primary_key(manifest: dict[str, Any], collection: str, rows: list[d
     )
 
 
-def _load_held_out_policy(
+def load_held_out_policy(
     path: Path | None,
     *,
     source: str | None,
     manifest: dict[str, Any],
     fixtures: dict[str, Any] | None,
     templates: list[dict[str, Any]],
+    text: str | None = None,
 ) -> dict[str, Any] | None:
     if path is None:
         return None
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(path.read_text(encoding="utf-8") if text is None else text) or {}
     if not isinstance(raw, dict):
         raise ValueError("held_out.yaml must be a mapping")
     unknown = sorted(set(raw) - {"version", "fixtures", "templates", "policy"})
@@ -554,6 +556,61 @@ def _load_held_out_policy(
         },
         "source": source,
     }
+
+
+def oracle_runtime_fixtures(
+    *,
+    manifest: dict[str, Any],
+    fixtures: dict[str, Any] | None,
+    held_out: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Project pack fixtures into the state an oracle is allowed to observe.
+
+    Generation still needs the complete inventory to bind, validate, and reject
+    reserved rows. When a policy keeps those rows out of backend state, only this
+    projection crosses the worker or endpoint boundary.
+    """
+    if fixtures is None or held_out is None:
+        return fixtures
+    settings = held_out.get("policy") or {}
+    if settings.get("fixtures_in_backend_state", True):
+        return fixtures
+
+    projected = dict(fixtures)
+    for collection, identifiers in (held_out.get("fixtures") or {}).items():
+        rows = fixtures.get(collection)
+        if not isinstance(rows, list):
+            raise ValueError(
+                f"held_out.fixtures names unknown fixture collection {collection!r}"
+            )
+        primary_key = _fixture_primary_key(manifest, str(collection), rows)
+        reserved = {str(identifier) for identifier in identifiers}
+        # A row the policy cannot identify stays: withholding it would remove state
+        # the pack never reserved.
+        projected[collection] = [
+            row
+            for row in rows
+            if not isinstance(row, dict)
+            or primary_key not in row
+            or str(row[primary_key]) not in reserved
+        ]
+    return projected
+
+
+def oracle_reset_fixtures(pack: LoadedPack) -> dict[str, Any] | None:
+    """Return the seed state one oracle episode may reset from.
+
+    Each episode gets its own copy, so a mutating backend cannot write back into
+    the loaded pack, and rows a policy keeps out of backend state never cross the
+    worker or endpoint boundary.
+    """
+    return copy.deepcopy(
+        oracle_runtime_fixtures(
+            manifest=pack.manifest,
+            fixtures=pack.fixtures,
+            held_out=pack.held_out,
+        )
+    )
 
 
 def _validate_generation_targets(
@@ -663,7 +720,7 @@ def load_pack(config: BfclConfig) -> LoadedPack:
         if paths.endpoint_config_path is not None
         else None
     )
-    held_out = _load_held_out_policy(
+    held_out = load_held_out_policy(
         paths.held_out_path,
         source=(
             str(manifest.get("held_out")).replace("\\", "/")

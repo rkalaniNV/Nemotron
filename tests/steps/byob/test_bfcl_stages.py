@@ -1194,7 +1194,9 @@ def test_replay_attempts_use_identical_task_context() -> None:
     )
     config = SimpleNamespace(oracle_runtime=runtime)
     pack = SimpleNamespace(
+        manifest={},
         fixtures={},
+        held_out=None,
         paths=SimpleNamespace(
             backend_path="backend.py",
             assertions_path="assertions.py",
@@ -1557,7 +1559,9 @@ def test_worker_failure_during_dependency_binding_is_fatal() -> None:
     )
     config = SimpleNamespace(oracle_runtime=runtime)
     pack = SimpleNamespace(
+        manifest={},
         fixtures={},
+        held_out=None,
         paths=SimpleNamespace(backend_path="third_backend.py", pack_root="."),
     )
     task = {"task_id": "third__timeout", "seed": 1}

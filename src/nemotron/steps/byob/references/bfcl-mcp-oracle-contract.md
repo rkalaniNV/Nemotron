@@ -150,13 +150,19 @@ vocabulary.
 
 | Operation | Input | Required output | Strategy alternatives |
 | --- | --- | --- | --- |
-| `describe_oracle` | none | `{oracle_id, oracle_version, content_digest}` | Absent, §9's fallback applies and the level is capped at `L1`. |
+| `describe_oracle` | none | `{oracle_id, oracle_version, content_digest}`, required but not exhaustive | Absent, §9's fallback applies and the level is capped at `L1`. |
 | `reset_episode` | `{fixtures, context{clock, seed, timeout_s, task_id}}` | `{episode_id}` | `control_tool`; or `process_restart` / `namespace` (mode `B`); or `no_op_verified` (mode `C`). |
 | `get_episode_state` | `{episode_id}` | a JSON object | `control_tool`; or `read_only_projection` — a declared, ordered list of non-mutating calls whose canonicalized results form the state document. |
 | `end_episode` | `{episode_id}` | any object | `control_tool`; or process termination / namespace teardown. Must be idempotent either way. |
 
 Whichever strategy is used, these hold:
 
+- **Control results are read from `structuredContent` only.** A control operation that
+  answers with `content` text alone is refused, even when that text happens to be
+  parseable JSON. Inferring a shape from prose would let an untrusted server steer the
+  identity checks that decide publication eligibility, and the fallback the profile
+  already defines is a reviewed Mode `B` shim that declares the structure (§6). This is
+  the same refusal §8 applies to business results, applied earlier.
 - **Reset replaces, never merges.** A second episode must not inherit the first's
   mutations. Under `no_op_verified` the strategy is only valid if no exposed tool can
   mutate observed state, and probe `P10` must confirm exactly that.
@@ -272,6 +278,7 @@ results:
   error_path: error                  # where the server puts it; republished as "error"
   status_field: status               # must equal the pack manifest confirmation vocabulary
   pending_status: awaiting_confirmation
+  confirmation_parameter: confirm    # must equal manifest confirmation.parameter
 
 isolation: process_per_episode        # process_per_episode | namespace_per_episode
 
@@ -290,6 +297,11 @@ limits:
 
 Validation rules the loader enforces:
 
+- YAML duplicate keys are refused in both `mcp_oracle.yaml` and the host-owned
+  `trusted_executables` policy. PyYAML otherwise keeps the last value silently, which
+  would let a file display one reviewed identity, mode, or digest while the runtime
+  uses another. Malformed YAML is reported as an `McpConfigError`, not leaked as an
+  uncaught parser exception.
 - `profile_version` must be a profile this build implements; an unknown value is
   refused instead of being treated as the current one.
 - `mode` must be consistent with the strategies it implies: `no_op_verified` requires
@@ -300,6 +312,9 @@ Validation rules the loader enforces:
   `streamable_http`. Mixing them is refused.
 - `url` must be `https` with no credentials, query, or fragment. `http` is allowed
   only for `localhost` and only under a non-publication lineage policy.
+- Custom HTTP header names are compared case-insensitively. A profile cannot declare
+  both `X-Tenant` and `x-tenant`, because HTTP treats them as the same field while a
+  Python mapping does not, leaving client behavior dependent on serialization order.
 - `command` must be an argument vector, never a shell string, and its executable must
   resolve through a separately configured `trusted_executables` policy. That policy
   pins the resolved executable path and artifact/package digest; it is not
@@ -311,7 +326,10 @@ Validation rules the loader enforces:
 - `expected.tool_catalog_digest` is required. `expected.server_content_digest` is
   required when `control.describe_oracle` is present and must equal its response.
   When the operation is absent, §9's fallback applies and a live endpoint is capped
-  at `L1`.
+  at `L1`. The three identity fields must be present in that response; additional
+  descriptive fields such as a build id are allowed, are recorded verbatim in the
+  discovery report as `oracle_declaration`, and therefore drift the report digest
+  rather than being silently dropped or hard-failing a conformant server.
 - The generated `endpoint_config.yaml`, not this intake file, pins the conformance
   attestation as shown below. Omitting that block caps the endpoint at `L1`; a pack
   file that merely says `level: L2` without a matching live endpoint attestation has
@@ -323,23 +341,95 @@ Validation rules the loader enforces:
   be unique, must not collide with an unaliased name, and must not name a control
   tool.
 - `mutates` and `requires_confirmation` must reference published names, and
-  `requires_confirmation` requires the tool to declare the manifest's confirmation
-  parameter.
-- `trust_annotations` must be `false` at `L2`.
+  `requires_confirmation` requires the tool to declare a boolean input named by
+  `results.confirmation_parameter`. That name is configuration, not a constant, so a
+  pack whose manifest gates on `confirmed` is expressible without editing BFCL. Its
+  schema must admit both `false` and `true`; `const: true`, `enum: [true]`, and their
+  false-only counterparts are refused because probe `P8` must exercise both decisions.
+- `trust_annotations` must be `false` at `L2`, and mode `C` refuses it outright:
+  deriving `x-mutates` from `readOnlyHint` would let the server contradict the
+  read-only surface the operator declared and the loader already validated.
 - `episode_argument` is required when and only when `episode_binding: argument`, and
   the named argument must be declared by every bound upstream tool, then removed from
   each published model-facing parameter schema. Removing it must leave a valid schema;
   the gateway injects it after model-argument validation.
 - `results.error_path` names where the server places its error object inside
-  `structuredContent`; the gateway republishes it under the key `error`, because
+  `structuredContent`, written as a dotted path such as `error` or `result.error`;
+  the gateway republishes it under the key `error`, because
   `_classify_result` classifies on exactly that key and nothing else.
-  `results.status_field` and `results.pending_status` must equal the pack manifest's
-  `confirmation.status_field` and `confirmation.pending_status`; disagreement is
+  `results.status_field`, `results.pending_status`, and
+  `results.confirmation_parameter` must equal the pack manifest's
+  `confirmation.{status_field, pending_status, parameter}`; disagreement is
   refused rather than resolved in favor of one file, since BFCL classifies with the
   manifest's vocabulary while the gateway would be mapping with another.
+  `results.confirmation_parameter` must also differ from `control.episode_argument`,
+  because the episode argument is stripped from every published schema and would
+  silently remove the gate the confirmation probe depends on.
 - Every value in `limits` must be a positive finite number; `NaN` and infinities are
-  refused before they reach deadline arithmetic, as elsewhere in BFCL config.
+  refused before they reach deadline arithmetic, as elsewhere in BFCL config. Each also
+  has a sanity ceiling — one hour for any duration, 256 MiB for `max_response_bytes`,
+  4096 tools, 1000 pages, 256 concurrent episodes. These are not policy: they exist so
+  that `tool_timeout_s: 5000` written in milliseconds, or a bound large enough to
+  disable itself while still looking configured, fails at load time rather than at the
+  first hung call.
 - No key may hold a secret-looking literal. Credentials are named, never inlined.
+
+The host-owned executable policy is a separate file, never part of the Oracle Pack:
+
+```yaml
+schema_version: bfcl-trusted-executables-v1
+policies:
+  acme-banking-server:
+    executable: /opt/acme/bin/python
+    sha256: "sha256:<64 hex>"
+    allowed_argv:
+      - ["-m", "acme_banking.mcp_server"]
+    allowed_cwd_roots:
+      - /srv/bfcl/mcp-packs
+```
+
+The launcher replaces the pack-provided executable token with the pinned absolute
+path, verifies the binary digest, requires an exact allowed argument vector, and
+requires `cwd` to remain under one of the policy roots. This prevents a reviewed
+interpreter policy from becoming permission to run arbitrary `-c` code or an
+unreviewed module.
+
+The implementation uses MCP Python SDK v2 for the 2026 protocol. Data Designer
+currently requires SDK v1, so the repository exposes a mutually exclusive
+`bfcl-mcp` runtime extra instead of installing v2 into the `byob` authoring
+environment. The two environments meet at the gateway process boundary defined by
+the ADR. Discovery is available through:
+
+```bash
+uv run --extra bfcl-mcp python -m \
+  nemotron.steps.byob.scripts.discover_mcp_oracle \
+  --config path/to/mcp_oracle.yaml \
+  --output path/to/mcp_discovery_report.json
+```
+
+For first-time pinning, `--bootstrap-catalog-digest` writes a non-conformant
+`needs_catalog_pin` report containing the observed digest and exits nonzero. The
+operator reviews that report, copies the digest into `expected`, and reruns without
+the bootstrap flag. Only the second, matching run attains `L0`.
+
+The report's `source_config_digest` covers the reviewed `mcp_oracle.yaml` document as
+written, not the loaded model. Loading resolves `cwd` and `ca_bundle_path` against the
+host filesystem, so digesting the model would make the same reviewed file hash
+differently on a developer laptop and in CI, and the surrounding `report_digest` would
+stop being reproducible evidence. `implementation.sdk_version` records the exact MCP
+SDK distribution observed at runtime in addition to the accepted range
+`sdk_requirement`; two minor SDK releases can negotiate the same protocol while
+changing serialization or transport behavior, so the range alone is not provenance.
+Before opening a connection, discovery reparses `raw_document`, resolves only those two
+host-relative paths, and proves it equals the effective validated model. The public API
+therefore cannot be given reviewed document A and runtime model B and produce a report
+that hashes A while executing B.
+
+`report_digest` covers the complete report before that field is added. Both
+`to_dict()` and the atomic writer recompute it and refuse export if the mutable report
+document changed after discovery. This prevents a caller from editing `status`,
+evidence, or checks while leaving a stale digest that appears to attest the edited
+content.
 
 For MCP-backed endpoints, Epic 4 extends the provider-neutral endpoint config with
 one optional block. Existing Python packs and endpoints that do not claim conformance
@@ -395,7 +485,7 @@ tool with a recorded reason. It never widens the subset and never guesses.
 | `description` | `function.description`, after the text rules below |
 | `inputSchema` | `function.parameters` |
 | `outputSchema` | not published; recorded as authoring evidence and as input for assertion drafting |
-| `annotations` | not published; recorded as unverified metadata only |
+| `annotations` | not published; recorded as unverified metadata, plus a `mutation_source` showing whether it influenced `x-mutates` |
 | `title`, `icons`, `_meta`, `x-mcp-header` | dropped |
 
 `x-mutates` and `x-requires-confirmation` are siblings of `function` on the tool
@@ -410,7 +500,10 @@ evaluation time instead. A discovered name is published unchanged when it matche
 `^[A-Za-z0-9_-]{1,64}$`; otherwise it needs an explicit `tools.aliases` entry that
 does, and the gateway keeps the alias-to-real mapping for its own `tools/call`. An
 unmatched, unaliased name is excluded as `name_not_publishable`. Names are
-case-sensitive and must be unique after aliasing.
+case-sensitive and must be unique after aliasing. A discovered name with leading or
+trailing whitespace is refused rather than trimmed: trimming would make discovery pin
+`inventory.lookup` while the server's callable route remains `inventory.lookup `, so
+the catalog would pass and every later call would address a different name.
 
 ### Parameter schemas
 
@@ -420,8 +513,10 @@ Allowed keywords are exactly the ones `validate_function_schema` accepts: `type`
 `pattern`, `minLength`, `maxLength`, `minimum`, `maximum`, `minItems`, `maxItems`.
 Allowed types are `string`, `integer`, `number`, `boolean`, `array`, `object`, `null`.
 
-- `inputSchema` must be `type: object`, or the tool is excluded as
-  `parameters_not_object`.
+- `inputSchema` must explicitly say `type: object`, or the tool is excluded as
+  `parameters_not_object`. Missing `type` is not repaired: under JSON Schema it means
+  “any type”, and synthesizing `object` would narrow the upstream contract while
+  claiming normalization never guesses.
 - `$ref`, `allOf`, `anyOf`, `oneOf`, and `not` are excluded as
   `unsupported_schema_keyword`. MCP permits them and BFCL refuses them, so the tool is
   reported rather than silently flattened — an incorrectly inlined `$ref` would ship a
@@ -431,7 +526,8 @@ Allowed types are `string`, `integer`, `number`, `boolean`, `array`, `object`, `
 - `additionalProperties` must be a boolean and is preserved as declared. It is never
   synthesized: adding `false` would make BFCL reject arguments the server accepts, and
   adding `true` would claim the opposite.
-- `required` must list declared properties only.
+- `required` must list declared properties only and must not contain duplicates.
+  Duplicates are invalid JSON Schema and are refused rather than silently deduplicated.
 - An unsatisfiable constraint is refused, not published: `minimum` above `maximum`, an
   empty `enum`, a duplicated `enum` value, or an `enum` or `const` value the declared
   `type` rejects. Check 3 would fail the pack anyway; failing at intake names the tool.
@@ -443,22 +539,58 @@ Allowed types are `string`, `integer`, `number`, `boolean`, `array`, `object`, `
   `properties` and `required` after verifying it is declared upstream. The unmodified
   upstream schema remains in evidence and is what the gateway uses after injection.
   This is the only parameter removed for transport purposes; arbitrary backend-only
-  parameter stripping is not allowed.
+  parameter stripping is not allowed. The removed property must explicitly declare
+  `type: string`, matching the identifier returned by `reset_episode`; otherwise the
+  gateway could inject a string into a schema that accepts only numbers and every
+  business call would fail after model-argument validation had already passed.
 
 ### Descriptions
 
 A description is model-facing text from an untrusted source, so it is treated as data.
-It is length-capped, must be plain text, and a description carrying imperative
-instructions to the assistant, tool-selection guidance, or anything resembling a
-system prompt is flagged for review before it can enter a published pack. See
-`bfcl-mcp-threat-model.md` §2.
+It is length-capped, and the primary control is that BFCL never executes it as an
+instruction. See `bfcl-mcp-threat-model.md` §2. Two further checks apply, and the
+difference between them matters:
+
+- **Invisible and direction-overriding characters are refused, not flagged.** C0/C1
+  controls other than tab, newline, and carriage return; the bidirectional overrides,
+  embeddings, and isolates `U+202A`–`U+202E` and `U+2066`–`U+2069`; and the zero-width
+  space and byte-order mark are rejected for a selected tool. A warning would be
+  incoherent here, because the reviewer it asks cannot see the characters in question,
+  and a bidi override can make one string read differently to a human and to a parser.
+  The directional marks `U+200E`/`U+200F` and the joiners `U+200C`/`U+200D` are
+  deliberately allowed: Arabic, Hebrew, Persian, Indic, and emoji text needs them, and
+  refusing them would make the profile usable only for Latin-script servers.
+- **Instruction-like phrasing is a warning, and the lexicon is English only.** Matching
+  words such as `ignore` or `system prompt` catches the most common phrasing and
+  nothing else; the same instruction in Vietnamese or Japanese passes. It is recorded
+  as `suspicious_description` for review and must not be read as a control. The
+  language-independent companions are `description_embeds_block` and
+  `description_embeds_url`, since prose in any script does not smuggle a fenced block,
+  an HTML comment, or a URL by accident.
 
 ### Mutation and confirmation
 
 `annotations.readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`
-may be shown to a reviewer as a suggestion and recorded as evidence, but they never
-become the declaration: check `M1` compares the declaration against observed state
-change, and an untrusted hint could certify a false claim.
+are unverified server claims. By default they are shown to a reviewer and recorded as
+evidence but do not become the declaration: check `M1` compares the declaration
+against observed state change, and an untrusted hint could certify a false claim.
+Modes `A` and `B` may explicitly opt into `trust_annotations`; mode `C` and eventual
+`L2` certification refuse that shortcut.
+
+Every published tool records a `mutation_source` of `config`, `server_annotation`, or
+null, so a reviewer can see whether a mutation flag came from the reviewed pack or from
+the server's claim about itself. Disagreement in either direction is reported rather
+than silently resolved in favor of the config:
+
+| Reviewed config | `readOnlyHint` | Result | Warning |
+| --- | --- | --- | --- |
+| lists the tool in `mutates` | `true` | mutating, `mutation_source: config` | `mutation_disagreement` |
+| omits the tool | `false`, `trust_annotations: true` | mutating, `mutation_source: server_annotation` | none |
+| omits the tool | `false`, `trust_annotations: false` | not mutating | `undeclared_mutation_hint` |
+
+The last row is the dangerous one: BFCL publishes a non-mutating surface while the
+server says otherwise, which is exactly the state that would make check `M1` certify a
+false claim, so it is surfaced at intake instead of being discovered later.
 
 ### Catalog paging
 
@@ -466,6 +598,15 @@ change, and an untrusted hint could certify a false claim.
 `limits.max_catalog_pages`; a truncated catalog is an error, not a smaller catalog.
 `listChanged` notifications are not subscribed to during a run: the catalog is pinned
 by digest, so a change is drift to report rather than an update to apply.
+
+Because MCP result models mirror the wire schema, the continuation cursor arrives as
+camelCase `nextCursor` while Python callers habitually reach for `next_cursor`. Both
+spellings are accepted and a result exposing neither is a hard failure, since treating
+an unreadable cursor as "no more pages" would end pagination after the first page and
+pin a digest over a catalog BFCL never finished reading — a silent partial catalog that
+still passes every other check as long as the selected tools happen to appear early.
+The same rule governs the rest of the SDK surface: a missing `serverInfo`,
+capabilities, or protocol version fails loudly rather than defaulting.
 
 ## 8. Result And Error Mapping
 
@@ -676,3 +817,5 @@ tell the difference.
 | Multi-server tool aggregation | MCP scopes name uniqueness per server, so aggregation needs a disambiguation and provenance scheme per tool, and `content_digest` would have to compose. |
 | MCP resources and prompts as oracle truth | Neither is executable state, and a prompt from an untrusted server entering a benchmark is threat `TM-01` with fewer controls. |
 | Sampling requests from the server | Would let the oracle call a model during certification, making the certified result model-dependent. |
+| Multilingual detection of instruction-like descriptions | The lexicon in §7 is English only and is a review aid, not a control. Extending it language by language would grow a list that is always incomplete while implying coverage it does not have. A real version needs a classifier plus a statement of what it does and does not catch; until then the load-bearing controls are that descriptions are inert data and that invisible characters are refused outright. |
+| Pre-deserialization enforcement of `max_response_bytes` | The limit is currently checked after the SDK has parsed a response, so it bounds what enters BFCL rather than what the transport will buffer. Enforcing it earlier means a byte-counting transport wrapper, which the SDK does not expose today; until then the child process or HTTP client remains the first line of defense. |

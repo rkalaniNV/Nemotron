@@ -59,17 +59,7 @@ def held_out_policy(pack: LoadedPack) -> HeldOutPolicy | None:
     """Return the run's held-out contract, or ``None`` when the pack declares none."""
     if pack.held_out is None:
         return None
-    policy = HeldOutPolicy.from_normalized(pack.held_out)
-    if not policy.fixtures_in_backend_state:
-        # Binding enforcement keeps reserved rows out of tasks, but the oracle still
-        # resets from the pack's full seed state. Accepting the flag would report an
-        # isolation this pipeline does not provide.
-        raise NotImplementedError(
-            "held_out.policy.fixtures_in_backend_state: false asks the oracle to reset "
-            "without the reserved fixture rows, which BFCL generation does not do; set it "
-            "to true, where reserved rows stay in oracle state but are never bound into a task"
-        )
-    return policy
+    return HeldOutPolicy.from_normalized(pack.held_out)
 
 
 def content_hash(path: Path) -> str:
