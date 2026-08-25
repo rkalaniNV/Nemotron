@@ -312,7 +312,13 @@ writes `oracle_validation_report.json` containing `tier`, `gold_eligible`,
    assertions. Gold means the pack generates, so a typoed argument, an unbound
    placeholder, a missing text block, a starved budget, a broken assertion, or a
    paraphrase that always drops its own rows is reported here instead of aborting a
-   run or silently publishing fewer rows than the pack declares.
+   run or silently publishing fewer rows than the pack declares. Only the budget is
+   settled over the templates generation may bind; a reserved template is still
+   compiled, because a private held-out run compiles it from this same pack. When
+   reserved fixtures remain in backend state, that private representative may use
+   them. Under `fixtures_in_backend_state: false`, only template blocking is disabled
+   and fixture reservations stay active, so replay uses exactly the state the oracle
+   may observe.
 
 Extra checks: `M1` mutation declaration (observed changes require `x-mutates`, and a
 tool declaring it must change state in at least one successful probe), `D1`
@@ -546,6 +552,16 @@ row, starves a category's `tasks_per_category`, or withholds every template is a
 error and stops generation with the shortfall named. The manifest records the policy
 lineage, the rows scanned, and the templates and fixture rows Stage 4 withheld. Packs
 without a held-out source keep `held_out_hit` null and record `evaluated: false`.
+When `held_out.policy.fixtures_in_backend_state` is `false`, the same reserved fixture
+rows are also removed from every generation replay and executable-evaluation oracle
+reset. The full inventory remains available only to the trusted binding and publication
+checks that prove those rows were withheld. A value of `true` retains the reserved rows
+in backend state for packs whose oracle behavior intentionally depends on them.
+Validation does not reject a probe merely because one argument equals a reserved id:
+tool argument names do not prove which fixture, if any, the backend dereferences. If
+the executed probe instead returns `not_found`, a mismatch records the matching
+argument, collection, and canonical held-out fixture reference in the validation
+report.
 Each row exposes exactly the tool definitions named by its `tools_present`.
 Rows from `lineage.policy: smoke_no_publication` retain the pack's validation
 `tier` but set `gold_eligible: false`.

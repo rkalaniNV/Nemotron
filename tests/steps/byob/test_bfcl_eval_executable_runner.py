@@ -4,12 +4,14 @@ import asyncio
 import hashlib
 import json
 import queue
+import shutil
 import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     eval_runner as batch_runner,
@@ -1648,6 +1650,56 @@ def test_python_oracle_session_keeps_state_in_one_isolated_worker(
     tmp_path: Path,
 ) -> None:
     asyncio.run(_python_oracle_session_keeps_state_in_one_isolated_worker(tmp_path))
+
+
+async def _python_oracle_session_excludes_held_out_fixture_state(
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "pack"
+    shutil.copytree(PACK_ROOT, pack_root)
+    (pack_root / "held_out.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": "1",
+                "fixtures": {"books": ["BK-200"]},
+                "templates": [],
+                "policy": {"fixtures_in_backend_state": False, "seed": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = pack_root / "manifest.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["held_out"] = "held_out.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    oracle = _oracle().model_copy(
+        update={
+            "pack_root": pack_root,
+            "pack_manifest_path": manifest_path,
+            "pack_file_count": 7,
+            "resource_path": pack_root / "backend.py",
+        }
+    )
+    session = open_oracle_session(
+        source=_source(tmp_path, oracle),
+        task=_task(oracle),
+        limits=_limits(),
+    )
+    try:
+        await session.reset()
+        state = await session.get_state()
+    finally:
+        await session.close()
+
+    book_ids = {book["book_id"] for book in state["books"]}
+    assert "BK-100" in book_ids
+    assert "BK-200" not in book_ids
+
+
+def test_python_oracle_session_excludes_held_out_fixture_state(
+    tmp_path: Path,
+) -> None:
+    asyncio.run(_python_oracle_session_excludes_held_out_fixture_state(tmp_path))
 
 
 def test_pack_fixtures_are_parsed_once_per_revision_across_task_sessions(

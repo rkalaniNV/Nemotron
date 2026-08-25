@@ -16,6 +16,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+import yaml
+
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import OraclePackRef
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import load_endpoint_config
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_errors import (
@@ -40,14 +42,17 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     ResolvedPackPaths,
+    load_held_out_policy,
+    oracle_runtime_fixtures,
     resolve_declared_pack_paths,
 )
 
 _FIXTURES_CACHE: dict[tuple[str, str], Any] = {}
+_RUNTIME_FIXTURES_CACHE: dict[tuple[str, ...], Any] = {}
 _FIXTURES_CACHE_LIMIT = 8
 
 
-def _load_pack_fixtures(path: Path) -> Any:
+def _load_pack_fixtures_revision(path: Path) -> tuple[Any, str]:
     """Parse and validate fixtures once per revision, not once per task.
 
     A batch run opens one session per task against the same pack, and validating
@@ -57,9 +62,10 @@ def _load_pack_fixtures(path: Path) -> Any:
     another's mutation of it.
     """
     raw = path.read_bytes()
-    key = (str(path), hashlib.sha256(raw).hexdigest())
+    digest = hashlib.sha256(raw).hexdigest()
+    key = (str(path), digest)
     if key in _FIXTURES_CACHE:
-        return _FIXTURES_CACHE[key]
+        return _FIXTURES_CACHE[key], digest
     fixtures = json.loads(raw.decode("utf-8"))
     if not isinstance(fixtures, dict):
         raise ValueError("fixtures.json is not an object")
@@ -67,7 +73,62 @@ def _load_pack_fixtures(path: Path) -> Any:
     if len(_FIXTURES_CACHE) >= _FIXTURES_CACHE_LIMIT:
         _FIXTURES_CACHE.clear()
     _FIXTURES_CACHE[key] = fixtures
-    return fixtures
+    return fixtures, digest
+
+
+def _load_pack_fixtures(path: Path) -> Any:
+    return _load_pack_fixtures_revision(path)[0]
+
+
+def _text_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _load_runtime_fixtures(paths: ResolvedPackPaths) -> Any:
+    """Return the fixtures this pack revision lets an oracle session observe.
+
+    A pack that reserves rows outside backend state has them dropped here, before
+    any session exists to receive them. The policy is settled once per revision
+    for the same reason the fixtures are parsed once, while every input is still
+    read and hashed per session so a pack edited mid-run is caught.
+    """
+    if paths.fixtures_path is None:
+        return None
+    fixtures, fixtures_digest = _load_pack_fixtures_revision(paths.fixtures_path)
+    if paths.held_out_path is None:
+        return fixtures
+    manifest_text = paths.manifest_path.read_text(encoding="utf-8")
+    templates_text = paths.templates_path.read_text(encoding="utf-8")
+    held_out_text = paths.held_out_path.read_text(encoding="utf-8")
+    key = (
+        str(paths.manifest_path),
+        _text_digest(manifest_text),
+        _text_digest(templates_text),
+        _text_digest(held_out_text),
+        fixtures_digest,
+    )
+    if key in _RUNTIME_FIXTURES_CACHE:
+        return _RUNTIME_FIXTURES_CACHE[key]
+    manifest = yaml.safe_load(manifest_text) or {}
+    templates = yaml.safe_load(templates_text) or []
+    if not isinstance(manifest, dict) or not isinstance(templates, list):
+        raise ValueError("held-out isolation needs a manifest mapping and a template list")
+    projected = oracle_runtime_fixtures(
+        manifest=manifest,
+        fixtures=fixtures,
+        held_out=load_held_out_policy(
+            paths.held_out_path,
+            source=str(manifest.get("held_out")),
+            manifest=manifest,
+            fixtures=fixtures,
+            templates=templates,
+            text=held_out_text,
+        ),
+    )
+    if len(_RUNTIME_FIXTURES_CACHE) >= _FIXTURES_CACHE_LIMIT:
+        _RUNTIME_FIXTURES_CACHE.clear()
+    _RUNTIME_FIXTURES_CACHE[key] = projected
+    return projected
 
 
 @runtime_checkable
@@ -234,11 +295,7 @@ class _IsolatedOracleSession:
                 OraclePackRef(manifest_path=oracle.pack_manifest_path),
                 (oracle.pack_root,),
             )
-            fixtures = (
-                _load_pack_fixtures(paths.fixtures_path)
-                if paths.fixtures_path is not None
-                else None
-            )
+            fixtures = _load_runtime_fixtures(paths)
             endpoint_config = (
                 load_endpoint_config(
                     paths.endpoint_config_path,

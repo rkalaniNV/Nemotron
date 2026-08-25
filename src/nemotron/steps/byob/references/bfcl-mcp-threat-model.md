@@ -120,6 +120,16 @@ in its own process, so the sanitized oracle worker never holds them — the work
 environment keeps only `LANG`, `LC_*`, and the temp-directory variables; headers and
 tokens redacted in every log, probe artifact, and validation report; error text
 returned to BFCL is a code plus a bounded message, never a raw upstream response.
+The client also checks capabilities, identity strings, every `tools/list` page, and
+every `tools/call` result for exact credential reflection before those values can
+enter a report. Reflection is refused rather than redacted in data, because silently
+rewriting a tool schema or oracle result would change the contract being certified.
+For values of eight characters or more, embedding inside a larger string is also
+detected. Short routing values such as `prod` are checked for exact equality only, so
+a tenant header does not reject an unrelated description such as `production`; such
+short values should not be treated as strong secrets.
+Typed integration failures retain their error class after redaction; preserving the
+taxonomy must not become a path around secret removal.
 
 ### `TM-07` Server-side egress and SSRF — *medium*
 
@@ -141,11 +151,13 @@ records. Held-out material is the sharper case: a held-out fixture row shipped t
 server that logs it has left the boundary that made it held-out.
 
 Controls: explicit operator acknowledgement in config before fixtures are sent to a
-non-local server; held-out rows never bound during expansion, as the existing policy
-enforces; the publication-time held-out re-scan retained unchanged; fixtures excluded
-from gateway logs; synthetic fixtures recommended for any server the operator does not
-run. Mode `C` removes this flow entirely by snapshotting instead of pushing, which
-trades it for `TM-15`.
+non-local server; `held_out.policy.fixtures_in_backend_state: false` removes reserved
+rows before the session payload crosses the gateway, while `true` explicitly retains
+the legacy present-but-unbound behavior; held-out rows never bound during expansion;
+the publication-time held-out re-scan retained unchanged; fixtures excluded from
+gateway logs; synthetic fixtures recommended for any server the operator does not run.
+Mode `C` removes this flow entirely by snapshotting instead of pushing, which trades it
+for `TM-15`.
 
 ### `TM-09` Cross-episode contamination — *medium, quiet*
 

@@ -207,7 +207,7 @@ recovery = "Place the reference JSONL under oracle_runtime.allowed_roots and pin
 
 [[errors]]
 name = "held_out_contract_invalid"
-recovery = "Reference held_out.yaml from the pack manifest, list existing fixture primary IDs and template IDs, keep them disjoint from absent_ids, and use a boolean fixtures_in_backend_state plus an integer seed. Generation supports fixtures_in_backend_state: true only: reserved rows stay in the oracle's seed state but are never bound into a task."
+recovery = "Reference held_out.yaml from the pack manifest, list existing fixture primary IDs and template IDs, keep them disjoint from absent_ids, and use a boolean fixtures_in_backend_state plus an integer seed. Set fixtures_in_backend_state: false to remove reserved rows from oracle reset state as well as generation bindings; validation-case mismatches caused by not_found identify arguments that match the removed rows."
 
 [[errors]]
 name = "held_out_binding_starved"

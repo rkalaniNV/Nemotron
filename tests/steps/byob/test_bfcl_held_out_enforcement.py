@@ -19,12 +19,21 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.held_out_contract impor
     HeldOutPolicy,
     fixture_ref,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.nemo_evaluator_export import (
     NEMO_DATASET_FILE,
     NEMO_EVALUATOR_ROOT,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+    oracle_runtime_fixtures,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import expand as expand_stage
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+    expand as expand_stage,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+    oracle_validation,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
     ExpansionError,
     run_expand,
@@ -33,8 +42,15 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.held_out import 
     HELD_OUT_BINDINGS,
     HELD_OUT_SCAN,
     HeldOutLeakError,
+    held_out_policy,
     load_binding_report,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
+    _held_out_not_found_context,
+    _representative_held_out_policy,
+)
+
+ORACLE_VALIDATION_REPORT = "oracle_validation_report.json"
 
 BYOB_ROOT = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob"
 BFCL_CONFIG_DIR = BYOB_ROOT / "bfcl" / "config"
@@ -204,15 +220,197 @@ def test_a_policy_that_reserves_nothing_is_enforced_but_proves_nothing(tmp_path:
     }
 
 
-def test_generation_refuses_a_reservation_it_cannot_honour_in_oracle_state(
+def test_generation_removes_reserved_rows_from_every_oracle_episode(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     policy = _default_policy()
     policy["policy"]["fixtures_in_backend_state"] = False
     pack = _prepare_pack(tmp_path, held_out=policy)
+    observed_book_ids: list[set[str]] = []
+    validated_templates: list[tuple[str, HeldOutPolicy | None]] = []
+    run_episode = ProcessWorker.run_episode
+    expand_template = oracle_validation.expand_template
 
-    with pytest.raises(NotImplementedError, match="fixtures_in_backend_state"):
-        generate_bfcl(_write_config(tmp_path, pack, "state-held-out.yaml"))
+    def recording_run_episode(self: ProcessWorker, **kwargs: Any) -> list[Any]:
+        fixtures = kwargs.get("fixtures")
+        if isinstance(fixtures, dict) and isinstance(fixtures.get("books"), list):
+            observed_book_ids.append(
+                {
+                    str(row["book_id"])
+                    for row in fixtures["books"]
+                    if isinstance(row, dict) and "book_id" in row
+                }
+            )
+        return run_episode(self, **kwargs)
+
+    monkeypatch.setattr(ProcessWorker, "run_episode", recording_run_episode)
+
+    def recording_expand_template(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        template = args[1]
+        validated_templates.append((str(template["template_id"]), kwargs.get("held_out")))
+        return expand_template(*args, **kwargs)
+
+    monkeypatch.setattr(oracle_validation, "expand_template", recording_expand_template)
+
+    benchmark_path = generate_bfcl(_write_config(tmp_path, pack, "state-held-out.yaml"))
+
+    assert benchmark_path.is_file()
+    assert observed_book_ids
+    assert all(HELD_OUT_BOOK not in identifiers for identifiers in observed_book_ids)
+
+    # The reserved template is still part of the pack contract. Validation compiles
+    # it with template blocking disabled but fixture reservations left intact.
+    report = json.loads(
+        (benchmark_path.parent / "stage_cache" / ORACLE_VALIDATION_REPORT).read_text(
+            encoding="utf-8"
+        )
+    )
+    check = next(item for item in report["checks"] if item["id"] == 7)
+    assert check["status"] == "pass"
+    assert "held_out_templates_not_compiled" not in check
+    assert report["gold_eligible"] is True
+    reserved_policy = next(
+        validation_policy
+        for template_id, validation_policy in validated_templates
+        if template_id == HELD_OUT_TEMPLATE
+    )
+    assert reserved_policy is not None
+    assert reserved_policy.template_ids == ()
+    assert fixture_ref("books", HELD_OUT_BOOK) in reserved_policy.fixture_refs
+
+
+def test_a_policy_that_keeps_rows_in_state_still_compiles_the_reserved_template(
+    held_out_run,
+) -> None:
+    _, output_dir = held_out_run
+    report = json.loads((output_dir / "stage_cache" / ORACLE_VALIDATION_REPORT).read_text(encoding="utf-8"))
+    check = next(item for item in report["checks"] if item["id"] == 7)
+
+    # Stage 4 never binds the reserved template, but the pack must still be able to
+    # state it: a private held-out run compiles it from this same pack.
+    assert check["status"] == "pass"
+    assert "held_out_templates_not_compiled" not in check
+    assert report["gold_eligible"] is True
+
+
+def test_reserved_template_validation_uses_the_state_each_policy_allows() -> None:
+    in_state = HeldOutPolicy.from_normalized(_default_policy())
+    out_of_state_data = _default_policy()
+    out_of_state_data["policy"]["fixtures_in_backend_state"] = False
+    out_of_state = HeldOutPolicy.from_normalized(out_of_state_data)
+
+    # A private representative may use reserved rows only when the oracle still has
+    # them. Otherwise only the template block opens and fixture reservations remain.
+    assert _representative_held_out_policy(in_state, HELD_OUT_TEMPLATE) is None
+    projected = _representative_held_out_policy(out_of_state, HELD_OUT_TEMPLATE)
+    assert projected is not None
+    assert projected.template_ids == ()
+    assert projected.fixture_refs == out_of_state.fixture_refs
+    assert _representative_held_out_policy(out_of_state, "public-template") is out_of_state
+
+
+def _probe_pack(*, result_class: str, book_id: str, rows_in_state: bool = False) -> SimpleNamespace:
+    policy = _default_policy()
+    policy["policy"]["fixtures_in_backend_state"] = rows_in_state
+    return SimpleNamespace(
+        held_out=policy,
+        validation_cases=[
+            {
+                "id": "probe_reserved_book",
+                "tool": "get_book_status",
+                "arguments": {"book_id": book_id},
+                "expect": {"result_class": result_class, "error_code": None},
+            }
+        ],
+    )
+
+
+def test_a_probe_that_names_a_reserved_value_is_not_rejected_statically() -> None:
+    pack = _probe_pack(result_class="success", book_id=HELD_OUT_BOOK)
+
+    policy = held_out_policy(pack)
+
+    # Validation cannot infer from an arbitrary argument name that the tool will
+    # dereference this value. It must run the probe before assigning blame.
+    assert policy.fixtures_in_backend_state is False
+
+
+def test_a_probe_a_removed_row_can_still_satisfy_stays_valid() -> None:
+    negative = _probe_pack(result_class="structured_error", book_id=HELD_OUT_BOOK)
+    unreserved = _probe_pack(result_class="success", book_id="BK-100")
+    # The same probe is honest while the rows stay in state, so the check must not fire.
+    in_state = _probe_pack(result_class="success", book_id=HELD_OUT_BOOK, rows_in_state=True)
+
+    assert held_out_policy(negative).fixtures_in_backend_state is False
+    assert held_out_policy(unreserved).fixtures_in_backend_state is False
+    assert held_out_policy(in_state).fixtures_in_backend_state is True
+
+
+def test_not_found_probe_failure_names_matching_held_out_arguments() -> None:
+    pack = _probe_pack(result_class="success", book_id=HELD_OUT_BOOK)
+    policy = held_out_policy(pack)
+    case = pack.validation_cases[0]
+
+    context = _held_out_not_found_context(case, policy, "not_found")
+
+    assert context == [
+        {
+            "argument": "book_id",
+            "value": HELD_OUT_BOOK,
+            "collection": "books",
+            "fixture_ref": fixture_ref("books", HELD_OUT_BOOK),
+        }
+    ]
+    assert _held_out_not_found_context(case, policy, "invalid_argument") == []
+
+
+def _projection_inputs(*, fixtures_in_backend_state: bool) -> dict[str, Any]:
+    return {
+        "manifest": {"primary_keys": {"books": "book_id"}},
+        "fixtures": {
+            "books": [{"book_id": "BK-100"}, {"book_id": HELD_OUT_BOOK}, {"title": "unkeyed"}],
+            "patrons": [{"patron_id": "P-1"}],
+        },
+        "held_out": {
+            "fixtures": {"books": [HELD_OUT_BOOK]},
+            "templates": [],
+            "policy": {
+                "fixtures_in_backend_state": fixtures_in_backend_state,
+                "seed": 0,
+            },
+        },
+    }
+
+
+def test_a_policy_that_keeps_reserved_rows_in_state_projects_nothing() -> None:
+    inputs = _projection_inputs(fixtures_in_backend_state=True)
+
+    assert oracle_runtime_fixtures(**inputs) is inputs["fixtures"]
+
+
+def test_isolating_oracle_state_drops_only_the_reserved_rows() -> None:
+    inputs = _projection_inputs(fixtures_in_backend_state=False)
+
+    projected = oracle_runtime_fixtures(**inputs)
+
+    # A row the policy cannot identify stays: dropping it would withhold state the
+    # pack never reserved.
+    assert projected["books"] == [{"book_id": "BK-100"}, {"title": "unkeyed"}]
+    assert projected["patrons"] == inputs["fixtures"]["patrons"]
+    # Binding and publication enforcement still need the complete inventory.
+    assert [row.get("book_id") for row in inputs["fixtures"]["books"]] == [
+        "BK-100",
+        HELD_OUT_BOOK,
+        None,
+    ]
+
+
+def test_a_pack_without_a_policy_keeps_its_whole_seed_state() -> None:
+    fixtures = {"books": [{"book_id": HELD_OUT_BOOK}]}
+
+    assert oracle_runtime_fixtures(manifest={}, fixtures=fixtures, held_out=None) is fixtures
+    assert oracle_runtime_fixtures(manifest={}, fixtures=None, held_out=None) is None
 
 
 def test_run_invalidation_removes_the_normalized_held_out_policy(tmp_path: Path) -> None:

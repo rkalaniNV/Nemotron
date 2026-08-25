@@ -14,7 +14,10 @@ from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import LoadedPack
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+    LoadedPack,
+    oracle_reset_fixtures,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     EXPECTED_TRACES,
     expected_trace_row,
@@ -395,11 +398,14 @@ def _oracle_trace_resolver(
     runtime = config.oracle_runtime
 
     def resolve(steps: EpisodeSteps) -> list[Any]:
+        # Resolved before the guarded call: a pack that cannot state its seed state is
+        # a pack defect, not a trace the oracle declined to resolve.
+        fixtures = oracle_reset_fixtures(pack)
         try:
             outputs = worker.run_episode(
                 backend_path=pack.paths.backend_path,
                 endpoint_config=getattr(pack, "endpoint_config", None),
-                fixtures=copy.deepcopy(pack.fixtures),
+                fixtures=fixtures,
                 clock_iso=runtime.clock,
                 seed=int(task.get("seed") or 0),
                 task_id=str(task["task_id"]),

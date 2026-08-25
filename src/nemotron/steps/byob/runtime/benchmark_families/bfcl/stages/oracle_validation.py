@@ -12,6 +12,7 @@ from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.fixture_filter import evaluate_filter
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.held_out_contract import HeldOutPolicy
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
     validate_function_arguments,
@@ -20,6 +21,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
     confirmation_protocol,
+    oracle_runtime_fixtures,
     pack_fingerprint,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
@@ -37,6 +39,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expected_trace i
     _oracle_trace_resolver,
     build_expected_calls,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.held_out import (
+    held_out_policy,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
     render_task,
     resolve_render_contract,
@@ -53,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 # Bump whenever a check is added or tightened: a cached report was produced by the
 # older rules and must not stand in for the newer ones.
-VALIDATION_LOGIC_VERSION = 7
+VALIDATION_LOGIC_VERSION = 10
 
 _PROBES = Path(__file__).resolve().parent.parent / "probes"
 SLOW_BACKEND_PATH = _PROBES / "slow_backend.py"
@@ -152,6 +157,58 @@ def _classify_result(result: dict[str, Any], protocol: dict[str, str]) -> tuple[
     return "success", None
 
 
+def _held_out_not_found_context(
+    case: dict[str, Any],
+    policy: HeldOutPolicy | None,
+    error_code: str | None,
+) -> list[dict[str, str]]:
+    """Identify probe arguments that equal rows removed from oracle state.
+
+    Equality alone cannot prove an argument dereferences a fixture, so this is
+    diagnostic context on an observed ``not_found``, never a static pack rejection.
+    """
+    if (
+        policy is None
+        or policy.fixtures_in_backend_state
+        or error_code != "not_found"
+        or not isinstance(case.get("arguments"), dict)
+    ):
+        return []
+    matches: list[dict[str, str]] = []
+    for reference in policy.fixture_refs:
+        collection, primary_id = json.loads(reference)
+        for argument, value in case["arguments"].items():
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                continue
+            if str(value) == str(primary_id):
+                matches.append(
+                    {
+                        "argument": str(argument),
+                        "value": str(value),
+                        "collection": str(collection),
+                        "fixture_ref": reference,
+                    }
+                )
+    return matches
+
+
+def _representative_held_out_policy(
+    policy: HeldOutPolicy | None,
+    template_id: str,
+) -> HeldOutPolicy | None:
+    """Select the reservation contract for one validation representative.
+
+    Public templates follow the generation policy. A reserved template is opened
+    for validation; when reserved rows remain in backend state its private fixture
+    inventory opens too, otherwise fixture blocking must stay aligned with runtime.
+    """
+    if policy is None or not policy.blocks_template(template_id):
+        return policy
+    if policy.fixtures_in_backend_state:
+        return None
+    return policy.model_copy(update={"template_ids": ()})
+
+
 def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any]:
     """Run contract, determinism, timeout, and isolation checks."""
     checks: list[dict[str, Any]] = []
@@ -168,6 +225,14 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
     clock_iso = config.oracle_runtime.clock
     seed = int(config.random_seed or 0)
     protocol = confirmation_protocol(pack.manifest)
+    held_out = held_out_policy(pack)
+    # Validation must probe the state generation will actually run against, or it
+    # would grant gold on rows the oracle never sees.
+    runtime_fixtures = oracle_runtime_fixtures(
+        manifest=pack.manifest,
+        fixtures=pack.fixtures,
+        held_out=pack.held_out,
+    )
 
     def run_episode(
         *,
@@ -178,7 +243,9 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
         return worker.run_episode(
             backend_path=backend_path,
             endpoint_config=endpoint_config,
-            fixtures=copy.deepcopy(pack.fixtures) if fixtures_override is None else fixtures_override,
+            fixtures=(
+                copy.deepcopy(runtime_fixtures) if fixtures_override is None else fixtures_override
+            ),
             clock_iso=clock_iso,
             seed=seed,
             task_id=task_id,
@@ -603,25 +670,28 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
                     ) == "negative":
                         coverage.setdefault(tool, set()).add("negative")
 
+                    held_out_context = _held_out_not_found_context(case, held_out, error_code)
                     if expect.get("result_class") and result_class != expect["result_class"]:
-                        failures_5.append(
-                            {
-                                "id": case_id,
-                                "reason": "result_class_mismatch",
-                                "expected": expect.get("result_class"),
-                                "got": result_class,
-                                "result": result,
-                            }
-                        )
+                        failure = {
+                            "id": case_id,
+                            "reason": "result_class_mismatch",
+                            "expected": expect.get("result_class"),
+                            "got": result_class,
+                            "result": result,
+                        }
+                        if held_out_context:
+                            failure["held_out_fixture_arguments"] = held_out_context
+                        failures_5.append(failure)
                     if "error_code" in expect and expect["error_code"] != error_code:
-                        failures_5.append(
-                            {
-                                "id": case_id,
-                                "reason": "error_code_mismatch",
-                                "expected": expect.get("error_code"),
-                                "got": error_code,
-                            }
-                        )
+                        failure = {
+                            "id": case_id,
+                            "reason": "error_code_mismatch",
+                            "expected": expect.get("error_code"),
+                            "got": error_code,
+                        }
+                        if held_out_context:
+                            failure["held_out_fixture_arguments"] = held_out_context
+                        failures_5.append(failure)
                     for field, expected_value in expect.items():
                         if field in {"result_class", "error_code", "state_unchanged"}:
                             continue
@@ -767,13 +837,25 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
     if prerequisites:
         skipped_7 = "template, source, or backend-schema validation failed"
     else:
+        reserved_templates = {
+            str(template.get("template_id"))
+            for template in pack.templates
+            if held_out is not None and held_out.blocks_template(template.get("template_id"))
+        }
+        # Only the budget is settled over what generation may bind: a category a
+        # reserved template cannot fill is a shortfall Stage 4 would hit.
+        bindable = [
+            template
+            for template in pack.templates
+            if str(template.get("template_id")) not in reserved_templates
+        ]
         templates_by_id = {str(template.get("template_id")): template for template in pack.templates}
         render_contract: dict[str, Any] | None = None
         # The budget and the run-wide render inputs govern the whole run rather than one
         # template, so a pack that cannot satisfy them has no template worth compiling.
         try:
             check_category_budgets(
-                pack.templates, int(config.task_generation.get("tasks_per_category", 1) or 1)
+                bindable, int(config.task_generation.get("tasks_per_category", 1) or 1)
             )
             render_contract = resolve_render_contract(config, pack, templates_by_id)
         except Exception as exc:  # noqa: BLE001 — report the run-wide contract failure
@@ -782,7 +864,13 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
         for template in representative:
             template_id = str(template.get("template_id"))
             try:
-                instances = expand_template(pack, template, 1, seed)
+                instances = expand_template(
+                    pack,
+                    template,
+                    1,
+                    seed,
+                    held_out=_representative_held_out_policy(held_out, template_id),
+                )
                 if not instances:
                     raise ExpansionError("template produced no representative instance")
                 task = instances[0]

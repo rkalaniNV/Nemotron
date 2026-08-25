@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import ProcessWorker
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import LoadedPack
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+    LoadedPack,
+    oracle_reset_fixtures,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     REPLAY_VALIDATED_TASKS,
@@ -56,7 +58,7 @@ def replay_once(
     outputs = worker.run_episode(
         backend_path=pack.paths.backend_path,
         endpoint_config=getattr(pack, "endpoint_config", None),
-        fixtures=copy.deepcopy(pack.fixtures),
+        fixtures=oracle_reset_fixtures(pack),
         clock_iso=runtime.clock,
         seed=int(task.get("seed") or 0),
         # Determinism attempts must receive byte-identical context. Attempt
