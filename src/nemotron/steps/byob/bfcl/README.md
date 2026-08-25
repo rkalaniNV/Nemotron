@@ -43,11 +43,24 @@ BFCL supports three stage values:
 Generation runs:
 
 ```text
-expand -> state_machine -> render -> expected_trace
-       -> schema_validation -> executable_replay -> final_output
+reference_profile -> expand -> state_machine -> render (including paraphrase)
+                  -> expected_trace -> schema_validation -> executable_replay
+                  -> [surface_quality] -> [dedup_balancing] -> final_output
 ```
 
-BFCL does not currently support `translate` or `skip_until`.
+`skip_until=<stage>` resumes by running the named stage and every later enabled
+stage. It recursively verifies the named stage's immediate enabled predecessor:
+the versioned manifest and canonical state, immutable artifact snapshots,
+JSON/Parquet schemas, hashes, counts and task order, portable generation-config
+hash, pack and endpoint identities, and pipeline source/dependency identity.
+Unknown stages, disabled optional stages, missing parents, and any drift fail
+closed. Resume revalidates the pack and endpoint and removes any old Stage 12
+publication before restoration; `stage=all` therefore does not run `prepare`
+first when `skip_until` is set. A run without `skip_until` clears old checkpoints.
+Restoration removes only the stage outputs that run again and keeps the
+append-only model I/O caches, so a re-run stage replays the recorded responses
+instead of paying for new ones that would render different surfaces.
+BFCL still does not support `translate`.
 
 ## Oracle Pack
 
@@ -112,6 +125,9 @@ Artifacts are written to `output_dir/expt_name/`:
   at least one compatibility export is enabled.
 - `stage_cache/`: normalized inputs and one table per generation stage, keyed by
   `task_id`.
+- `stage_cache/checkpoints/<stage>/`: contract `bfcl-generation-checkpoint/1.0`
+  manifest, canonical state snapshot, and immutable copies of mutable stage
+  artifacts used for verified resume.
 
 Both parquets carry the same schema, and the difference between them is a
 selection, never a rewrite. `publication_contract` (`1.0`) re-derives the
@@ -528,8 +544,9 @@ nemotron steps run byob/bfcl -c eval.cli
 verifies source and contamination and reports authorized task counts without
 candidate inference. `output_format: json` emits stable machine-readable run and
 artifact locations, and `human` renders the same payload one key per line with
-JSON-rendered values. `stage=all` remains prepare plus generate and never spends
-candidate tokens.
+JSON-rendered values. `stage=all` runs prepare plus generate for a full run and
+dispatches directly to verified generation restoration when `skip_until` is set;
+neither path spends candidate tokens.
 
 Every failure, including projecting a finished run into CLI output, leaves through
 one published exit status: `2` for a config the operator has to edit, `3` for a
@@ -1252,7 +1269,7 @@ ignored.
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, optionally remove them from Oracle runtime state, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |
-| Stage resume | **Partial** | Resume from a verified intermediate artifact without accepting stale pack, endpoint, or config state. |
+| Stage resume | **Implemented** | Resume Stages 3–12 from a recursively verified predecessor checkpoint without accepting stale state, artifacts, pack, endpoint, config, task order, schema, or pipeline identity. |
 
 The final evaluation interface, metric names, artifact schemas, and CLI stage
 names may change while implementation is in progress. Until they are promoted

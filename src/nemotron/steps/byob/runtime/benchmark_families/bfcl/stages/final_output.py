@@ -348,6 +348,11 @@ def _generation_config(config: BfclConfig) -> dict[str, Any]:
     return _jsonable(_without_eval_reference(dict(config.raw or {})), roots=_config_roots(config))
 
 
+def generation_config_hash(config: BfclConfig) -> str:
+    """Return the exact portable generation-config identity used by Stage 12."""
+    return _sha256(canonical_json(_generation_config(config)))
+
+
 def generation_mode(config: BfclConfig) -> str:
     """Derive the manifest generation_mode from lineage roles and surface flags."""
     if config.lineage.policy == "smoke_no_publication":
@@ -597,6 +602,7 @@ def run_final_output(
     dedup_balancing_decisions: list[Any] | None = None,
     dedup_balancing_report: dict[str, Any] | None = None,
     expected_artifact_hashes: dict[str, str] | None = None,
+    before_publication_commit: Callable[[Path], None] | None = None,
 ) -> Path:
     """Write benchmark_raw.parquet, benchmark.parquet, and run_manifest.json."""
     import pyarrow as pa
@@ -1006,7 +1012,7 @@ def run_final_output(
         "oracle_clock": config.oracle_runtime.clock,
         "generation_mode": generation_mode(config),
         "pipeline_version": "bfcl-runtime-0.1.0",
-        "generation_config_hash": _sha256(canonical_json(_generation_config(config))),
+        "generation_config_hash": generation_config_hash(config),
         "resolved_config_hash": _sha256(canonical_json(_resolved_config(config))),
         "runtime": {
             "python": platform.python_version(),
@@ -1129,6 +1135,8 @@ def run_final_output(
         expected_endpoint_metadata=validation_report.get("endpoint_metadata"),
         cleanup=(staging_dir,),
     )
+    if before_publication_commit is not None:
+        before_publication_commit(staging_dir)
     final_benchmark_path = _commit_staged_publication(staging_dir, output_dir)
     logger.info(
         "BFCL final_output wrote %d rows (%d published) to %s",

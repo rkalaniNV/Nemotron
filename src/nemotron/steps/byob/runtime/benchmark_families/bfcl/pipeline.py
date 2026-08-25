@@ -179,7 +179,7 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     return requested
 
 
-def _validate_pack(config: BfclConfig) -> tuple[dict, Path]:
+def _validate_pack(config: BfclConfig, *, force: bool = False) -> tuple[dict, Path]:
     """Validate the pack, reusing only results this process computed itself."""
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import pack_fingerprint
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
@@ -209,7 +209,7 @@ def _validate_pack(config: BfclConfig) -> tuple[dict, Path]:
             else str(endpoint_identity_key or "")
         ),
     )
-    remembered = _VALIDATED_THIS_PROCESS.get(key)
+    remembered = None if force else _VALIDATED_THIS_PROCESS.get(key)
     if remembered is not None:
         # The in-process verdict is authoritative; repair a deleted or edited
         # report so the manifest cannot hash evidence different from that verdict.
@@ -237,8 +237,16 @@ def _invalidate_final_outputs(config: BfclConfig) -> None:
     The manifest is removed first: if this generation later fails, no old manifest can
     make stale parquets look like the result of the failed invocation.
     """
+    _invalidate_publication_outputs(config)
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
 
+    cache = stage_cache_dir(config)
+    for name in (*_SURFACE_QUALITY_ARTIFACTS, *_DEDUP_BALANCING_ARTIFACTS, *_HELD_OUT_ARTIFACTS):
+        (cache / name).unlink(missing_ok=True)
+
+
+def _invalidate_publication_outputs(config: BfclConfig) -> None:
+    """Remove only Stage 12 publication commit artifacts, preserving checkpoints."""
     output_dir = Path(config.output_dir) / config.expt_name
     for name in _FINAL_ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
@@ -246,9 +254,6 @@ def _invalidate_final_outputs(config: BfclConfig) -> None:
         shutil.rmtree(output_dir / name, ignore_errors=True)
     for staging_dir in output_dir.glob(".stage12-*"):
         shutil.rmtree(staging_dir, ignore_errors=True)
-    cache = stage_cache_dir(config)
-    for name in (*_SURFACE_QUALITY_ARTIFACTS, *_DEDUP_BALANCING_ARTIFACTS, *_HELD_OUT_ARTIFACTS):
-        (cache / name).unlink(missing_ok=True)
 
 
 def _endpoint_metadata(config: BfclConfig, pack: LoadedPack) -> dict[str, str] | None:
@@ -290,6 +295,11 @@ def _prepare_bfcl_unlocked(config_path: str | os.PathLike[str]) -> Path:
     # Prepare rewrites the lineage cache. Remove any completed publication first
     # so an old benchmark cannot remain beside validation evidence for a new pack.
     _invalidate_final_outputs(config)
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.checkpoint import (
+        clear_checkpoints,
+    )
+
+    clear_checkpoints(config)
     report, report_path = _validate_pack(config)
     gold_eligible, tier = derive_pack_tier(report)
     if not gold_eligible:
@@ -353,13 +363,22 @@ def _generate_bfcl_unlocked(
         run_surface_quality_validation,
     )
 
-    if skip_until is not None:
-        raise NotImplementedError(
-            f"BFCL does not expose stage resume (skip_until={skip_until!r}); "
-            "run stage=prepare followed by stage=generate"
-        )
-
     config = BfclConfig.from_yaml(str(config_path))
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.checkpoint import (
+        APPEND_ONLY_CACHES,
+        clear_checkpoints,
+        clear_from_stage,
+        current_identity,
+        enabled_stages,
+        restore_predecessor,
+        validate_resume_target,
+        write_checkpoint,
+    )
+
+    stages = enabled_stages(config)
+    target = skip_until or stages[0]
+    if skip_until is not None:
+        validate_resume_target(config, skip_until)
     unsupported = _unsupported_requests(config)
     if unsupported:
         raise NotImplementedError(
@@ -367,8 +386,13 @@ def _generate_bfcl_unlocked(
             + ", ".join(unsupported)
             + ". Disable them to run the template-only path."
         )
-    _invalidate_final_outputs(config)
-    report, _ = _validate_pack(config)
+    if skip_until is None:
+        _invalidate_final_outputs(config)
+        clear_checkpoints(config)
+    else:
+        # A failed resume must never leave a previous publication looking current.
+        _invalidate_publication_outputs(config)
+    report, _ = _validate_pack(config, force=skip_until is not None)
     cache = stage_cache_dir(config)
     expected_artifact_hashes: dict[str, str] = {}
 
@@ -400,32 +424,128 @@ def _generate_bfcl_unlocked(
             "Re-run stage=prepare and fix oracle_validation failures."
         )
     pack = load_pack(config)
-    profile = run_reference_profile(config)
-    pin_artifacts("reference_samples.parquet", "reference_profile.json")
+    current_fingerprint = pack_fingerprint(pack.paths)
     expected_endpoint_metadata = report.get("endpoint_metadata")
     if _endpoint_metadata(config, pack) != expected_endpoint_metadata:
         raise RuntimeError(
             "endpoint metadata changed after validation; refusing to generate from "
             "an oracle revision the gold report did not certify"
         )
+    identity = current_identity(
+        config,
+        pack_fingerprint=current_fingerprint,
+        endpoint_metadata=expected_endpoint_metadata,
+        endpoint_config_path=pack.paths.endpoint_config_path,
+    )
+    state = (
+        restore_predecessor(config, target, identity=identity)
+        if skip_until is not None
+        else {}
+    )
+    if skip_until is not None:
+        clear_from_stage(config, target)
+        # Pin the restored cache before any resumed stage can consume it. Append-only
+        # caches stay unpinned exactly as on a full run, because a resumed stage may
+        # still record a miss the earlier run never reached.
+        for path in sorted(cache.iterdir()):
+            if (
+                path.is_file()
+                and not path.name.endswith(".tmp")
+                and path.name not in APPEND_ONLY_CACHES
+            ):
+                expected_artifact_hashes[path.name] = _artifact_hash(path)
+
     templates_by_id = {str(template["template_id"]): template for template in pack.templates}
 
-    tasks = run_expand(config, pack)
+    if "reference_profile" in stages[stages.index(target) :]:
+        profile = run_reference_profile(config)
+        state["profile"] = profile
+        pin_artifacts("reference_samples.parquet", "reference_profile.json")
+        write_checkpoint(
+            config,
+            "reference_profile",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+        )
+    else:
+        profile = state["profile"]
+
+    if "expand" in stages[stages.index(target) :]:
+        tasks = run_expand(config, pack)
+        state["tasks"] = tasks
+        state["canonical_expanded"] = len(tasks)
+        pin_artifacts("task_instances.parquet", "held_out_bindings.json")
+        write_checkpoint(
+            config,
+            "expand",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+        )
+    else:
+        tasks = state["tasks"]
     pin_artifacts("task_instances.parquet", "held_out_bindings.json")
-    canonical_expanded = len(tasks)
-    plans = run_state_machine(config, templates_by_id, tasks)
+    canonical_expanded = int(state["canonical_expanded"])
+
+    if "state_machine" in stages[stages.index(target) :]:
+        plans = run_state_machine(config, templates_by_id, tasks)
+        state["plans"] = plans
+        pin_artifacts("conversation_plans.parquet")
+        write_checkpoint(
+            config,
+            "state_machine",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+        )
+    else:
+        plans = state["plans"]
     pin_artifacts("conversation_plans.parquet")
-    surfaces, prompt_bundle = run_render(config, pack, templates_by_id, tasks, plans)
-    pin_artifacts("rendered_conversations.parquet")
-    tasks, plans, surfaces, paraphrase_report = run_paraphrase(
-        config,
-        pack,
-        templates_by_id,
-        tasks,
-        plans,
-        surfaces,
-        profile,
-    )
+
+    if "render" in stages[stages.index(target) :]:
+        surfaces, prompt_bundle = run_render(config, pack, templates_by_id, tasks, plans)
+        pin_artifacts("rendered_conversations.parquet")
+        tasks, plans, surfaces, paraphrase_report = run_paraphrase(
+            config,
+            pack,
+            templates_by_id,
+            tasks,
+            plans,
+            surfaces,
+            profile,
+        )
+        pin_artifacts(
+            "task_instances.parquet",
+            "conversation_plans.parquet",
+            "rendered_conversations.parquet",
+            "paraphrase_rejections.json",
+            "paraphrase_io_cache.jsonl",
+        )
+        state.update(
+            {
+                "tasks": tasks,
+                "plans": plans,
+                "surfaces": surfaces,
+                "prompt_bundle": prompt_bundle,
+                "paraphrase_report": paraphrase_report,
+                "expanded_tasks": list(tasks),
+                "expanded": len(tasks),
+            }
+        )
+        write_checkpoint(
+            config,
+            "render",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+        )
+    else:
+        tasks = state["tasks"]
+        plans = state["plans"]
+        surfaces = state["surfaces"]
+        prompt_bundle = state["prompt_bundle"]
+        paraphrase_report = state["paraphrase_report"]
     pin_artifacts(
         "task_instances.parquet",
         "conversation_plans.parquet",
@@ -433,34 +553,103 @@ def _generate_bfcl_unlocked(
         "paraphrase_rejections.json",
         "paraphrase_io_cache.jsonl",
     )
-    expanded_tasks = list(tasks)
-    expanded = len(expanded_tasks)
+    expanded_tasks = list(state["expanded_tasks"])
+    expanded = int(state["expanded"])
     # Drops an instance whose own fixture data cannot bind a trace, so `tasks` shrinks
     # to the kept set. Schema/replay still receive every expanded task so stage tables
     # keep a joinable row for each drop.
-    traces, drop_reasons = run_expected_trace(config, pack, tasks, plans)
+    if "expected_trace" in stages[stages.index(target) :]:
+        traces, drop_reasons = run_expected_trace(config, pack, tasks, plans)
+        state["traces"] = traces
+        state["drop_reasons"] = drop_reasons
+        pin_artifacts("expected_traces.parquet")
+        write_checkpoint(
+            config,
+            "expected_trace",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+        )
+    else:
+        traces = state["traces"]
+        drop_reasons = state["drop_reasons"]
     pin_artifacts("expected_traces.parquet")
-    schema_failures = run_schema_validation(config, pack, expanded_tasks, traces, skipped=drop_reasons)
+
+    if "schema_validation" in stages[stages.index(target) :]:
+        schema_failures = run_schema_validation(
+            config, pack, expanded_tasks, traces, skipped=drop_reasons
+        )
+        state["schema_failures"] = schema_failures
+        pin_artifacts("schema_validated_traces.parquet")
+        write_checkpoint(
+            config,
+            "schema_validation",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+        )
+    else:
+        schema_failures = state["schema_failures"]
     pin_artifacts("schema_validated_traces.parquet")
-    verdicts = run_executable_replay(config, pack, expanded_tasks, traces, schema_failures, skipped=drop_reasons)
+
+    if "executable_replay" in stages[stages.index(target) :]:
+        verdicts = run_executable_replay(
+            config,
+            pack,
+            expanded_tasks,
+            traces,
+            schema_failures,
+            skipped=drop_reasons,
+        )
+        paraphrase_report = apply_expected_result_guards(
+            config,
+            expanded_tasks,
+            surfaces,
+            verdicts,
+            paraphrase_report,
+        )
+        state["verdicts"] = verdicts
+        state["paraphrase_report"] = paraphrase_report
+        pin_artifacts("replay_validated_tasks.parquet", "paraphrase_rejections.json")
+        write_checkpoint(
+            config,
+            "executable_replay",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+        )
+    else:
+        verdicts = state["verdicts"]
+        paraphrase_report = state["paraphrase_report"]
     pin_artifacts("replay_validated_tasks.parquet")
-    paraphrase_report = apply_expected_result_guards(
-        config,
-        expanded_tasks,
-        surfaces,
-        verdicts,
-        paraphrase_report,
-    )
     replay_tasks = [task for task in expanded_tasks if (verdicts.get(str(task["task_id"])) or {}).get("passed")]
     surface_quality_records: list[dict] | None = None
     surface_quality_report: dict | None = None
     if config.surface_quality_validation.get("enabled"):
-        surface_quality_records, surface_quality_report = run_surface_quality_validation(
-            config,
-            replay_tasks,
-            surfaces,
-            profile=profile,
-        )
+        if "surface_quality" in stages[stages.index(target) :]:
+            surface_quality_records, surface_quality_report = run_surface_quality_validation(
+                config,
+                replay_tasks,
+                surfaces,
+                profile=profile,
+            )
+            state["surface_quality_records"] = surface_quality_records
+            state["surface_quality_report"] = surface_quality_report
+            pin_artifacts(
+                "surface_validated_tasks.parquet",
+                "surface_quality_rejections.json",
+                "surface_judge_cache_usage.json",
+            )
+            write_checkpoint(
+                config,
+                "surface_quality",
+                state,
+                identity=identity,
+                artifact_names=tuple(expected_artifact_hashes),
+            )
+        else:
+            surface_quality_records = state["surface_quality_records"]
+            surface_quality_report = state["surface_quality_report"]
         pin_artifacts(
             "surface_validated_tasks.parquet",
             "surface_quality_rejections.json",
@@ -483,12 +672,24 @@ def _generate_bfcl_unlocked(
             quality_by_task[str(task["task_id"])]
             for task in stage_eleven_tasks
         ]
-        dedup_balancing_result = run_dedup_balancing_stage(
-            config,
-            stage_eleven_tasks,
-            surfaces,
-            stage_eleven_quality,
-        )
+        if "dedup_balancing" in stages[stages.index(target) :]:
+            dedup_balancing_result = run_dedup_balancing_stage(
+                config,
+                stage_eleven_tasks,
+                surfaces,
+                stage_eleven_quality,
+            )
+            state["dedup_balancing_result"] = dedup_balancing_result
+            pin_artifacts("balanced_tasks.parquet", "dedup_balancing_report.json")
+            write_checkpoint(
+                config,
+                "dedup_balancing",
+                state,
+                identity=identity,
+                artifact_names=tuple(expected_artifact_hashes),
+            )
+        else:
+            dedup_balancing_result = state["dedup_balancing_result"]
         pin_artifacts("balanced_tasks.parquet", "dedup_balancing_report.json")
     current_fingerprint = pack_fingerprint(pack.paths)
     if current_fingerprint != report.get("pack_fingerprint"):
@@ -539,32 +740,56 @@ def _generate_bfcl_unlocked(
                 "dedup_balancing_dropped": int(dedup_report["counts"]["dropped"]),
             }
         )
-    return run_final_output(
-        config,
-        pack,
-        tasks,
-        surfaces,
-        traces,
-        verdicts,
-        report,
-        prompt_bundle,
-        stage_counts,
-        trace_drop_reasons=drop_reasons,
-        surface_quality_records=surface_quality_records,
-        surface_quality_report=surface_quality_report,
-        dedup_balancing_decisions=(
-            dedup_balancing_result["decisions"]
-            if dedup_balancing_result is not None
-            else None
-        ),
-        dedup_balancing_report=(
-            dedup_balancing_result["artifacts"]["report"]
-            if dedup_balancing_result is not None
-            else None
-        ),
-        expected_pack_fingerprint=current_fingerprint,
-        expected_artifact_hashes=expected_artifact_hashes,
-    )
+    state["stage_counts"] = stage_counts
+
+    def checkpoint_staged_publication(staging_dir: Path) -> None:
+        publication_paths = tuple(
+            path for path in sorted(staging_dir.rglob("*")) if path.is_file()
+        )
+        write_checkpoint(
+            config,
+            "final_output",
+            state,
+            identity=identity,
+            artifact_names=tuple(expected_artifact_hashes),
+            publication_paths=publication_paths,
+            publication_root=staging_dir,
+        )
+
+    try:
+        final_path = run_final_output(
+            config,
+            pack,
+            tasks,
+            surfaces,
+            traces,
+            verdicts,
+            report,
+            prompt_bundle,
+            stage_counts,
+            trace_drop_reasons=drop_reasons,
+            surface_quality_records=surface_quality_records,
+            surface_quality_report=surface_quality_report,
+            dedup_balancing_decisions=(
+                dedup_balancing_result["decisions"]
+                if dedup_balancing_result is not None
+                else None
+            ),
+            dedup_balancing_report=(
+                dedup_balancing_result["artifacts"]["report"]
+                if dedup_balancing_result is not None
+                else None
+            ),
+            expected_pack_fingerprint=current_fingerprint,
+            expected_artifact_hashes=expected_artifact_hashes,
+            before_publication_commit=checkpoint_staged_publication,
+        )
+    except BaseException:
+        # Stage 12 is complete only when its checkpoint can prove the publication.
+        clear_from_stage(config, "final_output")
+        _invalidate_publication_outputs(config)
+        raise
+    return final_path
 
 
 def generate_bfcl(config_path: str | os.PathLike[str], *, skip_until: str | None = None) -> Path:

@@ -1796,12 +1796,15 @@ def test_malformed_range_source_fails_prepare_check(tmp_path: Path) -> None:
     assert any(failure["reason"] == "invalid_source" for failure in check["failures"])
 
 
-def test_generate_rejects_stage_resume(tmp_path: Path) -> None:
+def test_generate_rejects_noncanonical_resume_stage(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.checkpoint import (
+        CheckpointError,
+    )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
 
     temp_config = _write_tiny_config(tmp_path, "resume.yaml")
 
-    with pytest.raises(NotImplementedError, match="skip_until"):
+    with pytest.raises(CheckpointError, match="unknown BFCL resume stage"):
         generate_bfcl(temp_config, skip_until="RENDER")
 
 
