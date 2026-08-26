@@ -992,6 +992,88 @@ not implemented, the gateway honestly reports `L0` (`P4` is the executable-L1 bo
 `A1` and cannot publish today. That is the correct state, not a defect. It becomes publishable
 when the probe suite in `MCP-402` and `MCP-404`–`408` exists and BFCL runs it itself.
 
+### 10.5 Epic 5 review boundary
+
+`runtime/mcp/release/review.py` implements the first handoff boundary. MCP-501 does not produce
+an informal summary: it builds a canonical, content-addressed packet that pins the evidence
+bundle, intake and draft provenance, live gateway attestation, validation report, reviewed MCP
+profile, complete canonical pack fingerprint, and optional held-out policy. The canonical
+manifest, tools, fixtures, templates, validation cases, assertion source, endpoint config, and
+held-out document are embedded in the packet so accepting “semantics” refers to visible bytes,
+not only to draft artifact names.
+The packet exposes the exact tool descriptions and schemas, exclusions, mutation and
+confirmation declarations, control mapping, fixture and held-out policy, model calls,
+assumptions, validation failures, endpoint conformance verdict, observed oracle calls, and
+before/after state deltas. Stable risk IDs make a newly appearing warning require a new
+decision rather than inheriting an older blanket acceptance.
+
+A packet is still written when evidence is incomplete, because failed review evidence is useful
+to a reviewer. Its status is then `blocked`, with named reasons. Missing complete call or state
+delta logs, unresolved drafting unknowns, uncompiled assertions, a non-Gold validation report,
+or an endpoint below independently verified `L2` are blockers. This is intentionally stricter
+than treating a review meeting as proof: with P4–P11 still absent, current MCP packs can generate
+a packet explaining the gap but cannot acquire a freeze approval.
+
+The call and state-delta evidence is read from an `mcp_observations` object in the oracle
+validation report, carrying `calls`, `calls_complete`, `state_deltas`, and `state_deltas_complete`.
+No code writes that key yet, which is why the `observed_calls_missing` and `state_deltas_missing`
+blockers currently fire for every pack. Producing it is the publication-facing half of `MCP-402`
+and `MCP-404`–`408`; the key is named here so that work has a fixed target instead of inventing a
+second review contract.
+
+MCP-502 records a second, domain-level approval distinct from the earlier approval to let a
+model read an intake bundle. The reviewer must name themselves, provide a timezone-qualified
+timestamp, pin one exact review packet digest, acknowledge every risk ID, and explicitly accept
+semantics, control mapping, descriptions and snapshots, held-out policy, assumptions, and
+validation evidence. The approval has its own digest. A changed packet, omitted checklist item,
+unknown acknowledgement, or blocked packet is refused. `scripts/build_mcp_review.py` and
+`scripts/approve_mcp_review.py` expose these gates without adding another publication path.
+
+The packet also refuses a canonical pack whose `endpoint_config.yaml` pins an effective content
+digest other than the one discovery observed. Freeze asserts only the one property it owns, that
+an MCP release is endpoint-backed rather than `backend.py`; every other pack requirement stays the
+Gold Gate's decision, because a freeze that re-litigates those rules becomes a second gate free to
+drift from the first.
+
+`runtime/mcp/release/freeze.py` implements MCP-503 and MCP-504. Freeze accepts only a canonical
+endpoint pack whose fingerprint is in an approved packet and whose approval covers exactly that
+packet. It refuses symbolic links, special files, external declared pack paths, reserved release
+paths, source drift during copying, and an existing destination. Files are opened with
+`O_NOFOLLOW`, copied into a private staging directory, and renamed into place only after all
+provenance has been written and the final fingerprint is stable. The resulting `pack/` includes
+the reviewed MCP profile and canonical provenance records, is made read-only, and is accompanied
+by `freeze_manifest.json`. The manifest pins the final pack fingerprint, effective-content,
+conformance, catalog, review, approval, and lineage digests without introducing a self-referential
+digest inside the pack. Because the manifest sits outside the fingerprinted tree, reopening a
+release recomputes the lineage, review-packet, and approval digests from the sealed files instead
+of trusting the manifest's own word for them.
+
+MCP-505 and MCP-506 live in `runtime/mcp/release/handoff.py`. The supplied BFCL config must
+resolve to the frozen tree and exact final fingerprint. Handoff forces a new oracle validation
+rather than accepting the same-process memoized verdict, requires freshly derived Gold plus an
+independently verified publishable `L2`, verifies the freeze again, and then calls the existing
+BFCL prepare/generate implementation. There is no MCP generator. Publication must produce
+`benchmark.parquet`, `benchmark_raw.parquet`, and `run_manifest.json`, and all three are checked
+before success is returned.
+
+For MCP-507, freeze writes `provenance/mcp_lineage.json` inside the fingerprinted pack.
+`origin_provenance.py` validates it against `endpoint_config.yaml` and projects only non-secret
+origin fields into `run_manifest.json`: provider/profile/mode, frozen and pre-freeze pack
+fingerprints, effective content, conformance, catalog, lineage, review-packet, and approval
+digests. Reviewer identity, endpoint URL, headers, and credential values are not published. Eval
+source verification re-derives that projection from the frozen pack and rejects a manifest whose
+MCP provenance was removed or changed.
+
+A lineage file is one copyable JSON document, so it is never believed on its own. Publication
+accepts it only when it names this pack's own `pack_id` and version, and when the review packet
+and approval sealed beside it recompute to the digests the lineage cites, the approval covers that
+same packet, and the packet's approved pre-freeze fingerprint is the one the lineage records.
+Lifting the record into an unrelated endpoint pack therefore fails rather than inheriting someone
+else's approval. The claim is provenance, not a gate: a pack still cannot publish unless the Gold
+Gate independently verifies the live endpoint at `L2`. To keep this layering intact,
+`origin_provenance.py` reads these records structurally and imports nothing from the MCP release
+path.
+
 ## 11. Deferred Extension Points
 
 Each of these is a decision, not an omission. They are listed so a later reader can

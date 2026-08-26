@@ -861,11 +861,9 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
         # The budget and the run-wide render inputs govern the whole run rather than one
         # template, so a pack that cannot satisfy them has no template worth compiling.
         try:
-            target_value = config.task_generation.get("target_published_tasks")
             check_category_budgets(
                 bindable,
                 int(config.task_generation.get("tasks_per_category", 1) or 1),
-                int(target_value) if target_value is not None else None,
             )
             render_contract = resolve_render_contract(config, pack, templates_by_id)
         except Exception as exc:  # noqa: BLE001 — report the run-wide contract failure

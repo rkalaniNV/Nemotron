@@ -150,7 +150,7 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     requested.extend(
         f"exports.{name}" for name, on in sorted(config.exports.items()) if on and name not in EXPORT_WRITERS
     )
-    supported_task_generation = {"tasks_per_category"}
+    supported_task_generation = {"tasks_per_category", "target_published_tasks"}
     if config.semantic_deduplication_config.get("enabled"):
         supported_task_generation.update(
             {
@@ -300,7 +300,11 @@ def _endpoint_metadata(config: BfclConfig, pack: LoadedPack) -> dict[str, str] |
     return {str(key): str(value) for key, value in metadata.items()}
 
 
-def _prepare_bfcl_unlocked(config_path: str | os.PathLike[str]) -> Path:
+def _prepare_bfcl_unlocked(
+    config_path: str | os.PathLike[str],
+    *,
+    force_validation: bool = False,
+) -> Path:
     """Normalize and validate the configured oracle pack."""
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
@@ -316,7 +320,7 @@ def _prepare_bfcl_unlocked(config_path: str | os.PathLike[str]) -> Path:
     )
 
     clear_checkpoints(config)
-    report, report_path = _validate_pack(config)
+    report, report_path = _validate_pack(config, force=force_validation)
     gold_eligible, tier = derive_pack_tier(report)
     if not gold_eligible:
         logger.warning(
@@ -326,13 +330,20 @@ def _prepare_bfcl_unlocked(config_path: str | os.PathLike[str]) -> Path:
     return report_path
 
 
-def prepare_bfcl(config_path: str | os.PathLike[str]) -> Path:
+def prepare_bfcl(
+    config_path: str | os.PathLike[str],
+    *,
+    force_validation: bool = False,
+) -> Path:
     """Normalize and validate an oracle pack under an output lock."""
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 
     config = BfclConfig.from_yaml(str(config_path))
     with _output_lock(config):
-        return _prepare_bfcl_unlocked(config_path)
+        return _prepare_bfcl_unlocked(
+            config_path,
+            force_validation=force_validation,
+        )
 
 
 def _generate_bfcl_unlocked(

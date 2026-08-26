@@ -17,7 +17,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
     EndpointConfig,
     load_endpoint_config,
 )
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import assert_pack_allowed
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import (
+    PackTrustError,
+    assert_pack_allowed,
+)
 
 
 @dataclass(frozen=True)
@@ -230,6 +233,13 @@ def pack_files(paths: ResolvedPackPaths) -> list[Path]:
     """
     collected: dict[Path, None] = {}
     for path in sorted(paths.pack_root.rglob("*")):
+        if path.is_symlink():
+            # A digest of the target is not a freeze of the pack: the target can be
+            # replaced independently and may sit outside the reviewed tree. Reject links
+            # even when they currently resolve to an allowlisted regular file.
+            raise PackTrustError(
+                f"oracle pack must not contain symbolic links: {path}"
+            )
         if not path.is_file():
             continue
         if any(part in IGNORED_PACK_DIRS for part in path.relative_to(paths.pack_root).parts):

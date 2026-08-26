@@ -87,14 +87,19 @@ _UniqueKeySafeLoader.add_constructor(
 )
 
 
-def load_unique_yaml_mapping(source: Path, label: str) -> dict[str, Any]:
+def load_unique_yaml_document(source: Path, label: str) -> Any:
+    """Load YAML while rejecting duplicate keys at every mapping depth."""
     try:
-        raw = yaml.load(
+        return yaml.load(
             source.read_text(encoding="utf-8"),
             Loader=_UniqueKeySafeLoader,
         )
     except (OSError, yaml.YAMLError) as exc:
         raise McpConfigError(f"cannot load {label} {source}: {exc}") from exc
+
+
+def load_unique_yaml_mapping(source: Path, label: str) -> dict[str, Any]:
+    raw = load_unique_yaml_document(source, label)
     if not isinstance(raw, dict):
         raise McpConfigError(f"{label} must be a YAML mapping: {source}")
     return raw

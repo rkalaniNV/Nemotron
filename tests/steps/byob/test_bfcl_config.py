@@ -47,9 +47,43 @@ def test_list_families_includes_bfcl_and_mcq() -> None:
 
 
 def test_all_bfcl_configs_pin_family() -> None:
-    for name in ("tiny.yaml", "default.yaml", "translate.yaml", "banking_vn.yaml"):
+    for name in (
+        "tiny.yaml",
+        "default.yaml",
+        "translate.yaml",
+        "banking_vn.yaml",
+        "banking_vn.gold.yaml",
+    ):
         data = yaml.safe_load((BFCL_CONFIG_DIR / name).read_text(encoding="utf-8"))
         assert data["family"] == "bfcl", name
+
+
+def test_banking_gold_config_requests_the_closest_uniform_bfcl_v1_scale() -> None:
+    path = BFCL_CONFIG_DIR / "banking_vn.gold.yaml"
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    templates = yaml.safe_load(
+        (BYOB_DIR / "data" / "banking_vn_oracle_pack" / "task_templates.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    category_count = len({str(template["category"]) for template in templates})
+    requested_samples = category_count * int(raw["task_generation"]["tasks_per_category"])
+
+    config = BfclConfig.from_yaml(path)
+
+    assert category_count == 6
+    assert requested_samples == 1_392
+    assert abs(requested_samples - 1_390) == 2
+    assert config.config_status == "resolved"
+    assert config.lineage.policy == "strict_separation"
+    assert config.oracle_runtime.worker == "process"
+    assert config.surface_quality_validation["enabled"] is True
+    assert config.semantic_deduplication_config["enabled"] is True
+    assert config.semantic_deduplication_config["unmet_target_policy"] == "abort"
+    assert config.exports == {
+        "bfcl_json": True,
+        "nemo_evaluator_bundle": True,
+    }
 
 
 def test_tiny_config_loads_as_smoke(tmp_path: Path) -> None:
@@ -2050,6 +2084,35 @@ def test_pack_fingerprint_covers_files_the_backend_reads(tmp_path: Path) -> None
     assert pack_fingerprint(paths) == edited
 
 
+def test_pack_fingerprint_refuses_symbolic_links_in_the_pack_tree(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import (
+        PackTrustError,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        pack_fingerprint,
+        resolve_pack_paths,
+    )
+
+    pack = _copy_tiny_pack(tmp_path)
+    outside = tmp_path / "mutable-policy.json"
+    outside.write_text('{"late_fee": 1}\n', encoding="utf-8")
+    (pack / "policy.json").symlink_to(outside)
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "symlink-fingerprint.yaml",
+            oracle_pack={"manifest_path": str(pack / "manifest.yaml")},
+            oracle_runtime={"allowed_roots": [str(tmp_path)]},
+        )
+    )
+
+    with pytest.raises(PackTrustError, match="must not contain symbolic links"):
+        pack_fingerprint(resolve_pack_paths(config))
+
+
 def test_pack_fingerprint_uses_semantic_names_for_external_files(tmp_path: Path) -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
         ResolvedPackPaths,
@@ -2294,6 +2357,10 @@ def test_stage_all_validates_once_but_a_new_run_revalidates(tmp_path: Path) -> N
         pipeline._VALIDATED_THIS_PROCESS.clear()
         assert generate_bfcl(config).exists()
         assert len(calls) == 2
+        # A release revalidation must not be answerable from this process's own memory,
+        # otherwise a frozen pack would inherit a verdict computed before it was frozen.
+        prepare_bfcl(config, force_validation=True)
+        assert len(calls) == 3
     finally:
         oracle_validation.run_oracle_validation = real_run
 
