@@ -315,7 +315,7 @@ def _config(
 ) -> Any:
     candidate = _candidate()
     return SimpleNamespace(
-        settings=SimpleNamespace(executable=executable),
+        settings=SimpleNamespace(executable=executable, held_out_eval=False),
         eval_config_hash=EVAL_CONFIG_HASH,
         publication_allowed=True,
         non_publication_reasons=(),
@@ -996,7 +996,7 @@ def test_the_declared_mode_chooses_the_runner_rather_than_the_caller(
         eval_runner,
         "load_eval_config",
         lambda _path: SimpleNamespace(
-            settings=SimpleNamespace(executable=next(modes))
+            settings=SimpleNamespace(executable=next(modes), held_out_eval=False)
         ),
     )
 

@@ -94,9 +94,12 @@ bfcl-mcp = [
     # The 2026 protocol requires MCP Python SDK v2. Data Designer currently pins
     # mcp<2, so the gateway/discovery runtime must live in a separate environment
     # from the model-authoring `byob` extra.
+    "jsonschema>=4.0; python_version>='3.11'",
     "mcp>=2,<3; python_version>='3.11' and python_version<'3.14'",
     "pyyaml>=6.0; python_version>='3.11'",
     "pydantic>=2.0.0; python_version>='3.11'",
+    "starlette>=0.50.0; python_version>='3.11'",
+    "uvicorn>=0.38.0; python_version>='3.11'",
 ]
 byob-gpu = [
     "torch>=2.10,<2.11; python_version>='3.11'",
@@ -208,6 +211,16 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# These modules import PyYAML and jsonschema, neither of which ships inline types, and
+# whose stub packages are not in the pinned dev environment. The note carries nothing
+# beyond that fact, and left on it crowds out real findings in the BFCL MCP package.
+module = [
+    "nemotron.steps.byob.runtime.mcp.config",
+    "nemotron.steps.byob.runtime.mcp.gateway.result_mapping",
+]
+disable_error_code = ["import-untyped"]
 
 [tool.ruff]
 line-length = 119

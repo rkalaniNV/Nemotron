@@ -624,14 +624,19 @@ looser than that, so the mapping is total and explicit.
 | `isError: true` without a machine-readable code | route failure `mcp_unstructured_error` | none |
 | `structuredContent` absent, or not a JSON object | route failure `mcp_result_not_object` | none |
 | `InputRequiredResult` | route failure `mcp_input_required_unsupported` | none |
-| A task handle (Tasks extension) | route failure `mcp_async_task_unsupported` | none |
+| A task handle (Tasks extension), recognized by a `task` or `taskId` member rather than by a `resultType` value | route failure `mcp_async_task_unsupported` | none |
+| Any other `resultType`, which the specification leaves as an open string | route failure `mcp_unsupported_result_type` | none |
 | JSON-RPC protocol error | route failure `mcp_protocol_error` | none |
 | Timeout or cancellation | route failure `mcp_call_timeout` | none |
 | Transport failure mid-call | route failure `mcp_call_failed`, never a retry | none |
 
-The precedence is fixed: reject protocol and shape errors first; then, only when
-`isError: true`, map a valid structured error; then map pending confirmation; finally
-map success. An object cannot be both a pending confirmation and an error. A legacy
+The precedence is fixed: reject unsupported result shapes, then protocol and shape
+errors; then, only when `isError: true`, map a valid structured error; then map pending
+confirmation; finally map success. `resultType` is allowlisted rather than
+denylisted — `complete` and an absent value are the only mappable ones — because an
+unrecognized extension that happened to carry `structuredContent` would otherwise be
+published as a business outcome the server never asserted. The same allowlist guards
+control results, so a reset or state read cannot be satisfied by an extension shape. An object cannot be both a pending confirmation and an error. A legacy
 server that returns an error envelope without `isError` needs a reviewed mode-`B`
 shim that supplies the missing protocol signal; the gateway does not reinterpret a
 domain field by itself.
@@ -803,6 +808,48 @@ inapplicable — for example, `P8` when no tool is gated or `P7` when no structu
 error case is declared. `not_applicable` does not claim coverage. The attestation
 contains the per-tool paths actually observed, so `P11` cannot be read as a universal
 claim about outputs no test exercised.
+
+### 10.1 Epic 2 executable gateway boundary
+
+The initial Epic 2 implementation is the **mode-A, L1-capable gateway MVP**. It lives
+under `runtime/mcp/gateway/` and exposes the six execution routes in §3 through a
+Starlette adapter while keeping the session lifecycle in a transport-neutral service.
+`scripts/run_mcp_gateway.py` is the operator entry point and must run in the isolated
+`bfcl-mcp` dependency environment.
+
+This implementation:
+
+- reruns identity and complete-catalog discovery on each fresh MCP connection before
+  reset, so startup success cannot authorize a later drifted connection;
+- assigns one opaque BFCL session to one MCP episode; a dedicated episode worker owns
+  the MCP context from enter through exit so reset, calls, state, cancellation, expiry,
+  and teardown cannot violate the transport's task-affinity rules;
+- supports `argument`, `_meta`, and transport-scoped episode binding for business
+  calls without publishing the gateway-owned episode argument;
+- validates inbound BFCL payloads, rejects duplicate JSON keys, enforces request,
+  session, idle, episode, call, and reset bounds, and permits at least two isolated
+  episodes up to the configured ceiling;
+- uses the SDK's low-level one-round call surface, exposes rather than auto-drives
+  `InputRequiredResult`, and never retries `tools/call`; a timeout, transport failure,
+  or ambiguous result poisons the session and closes its upstream connection;
+- lets a poisoned worker close its own transport within a bounded grace period derived
+  from `limits.tool_timeout_s` before cancelling it, because cancelling a connection
+  that is already terminating is what orphans an upstream episode;
+- maps only object `structuredContent` from an allowlisted result shape, validates
+  declared output schemas, and returns infrastructure failures as bounded non-2xx
+  `mcp_*` error envelopes;
+- publishes the §9 effective digest and requires the operator to pin the reviewed
+  `gateway_artifact_digest`; how a build system derives that artifact digest remains
+  a packaging decision, not a runtime guess; and
+- supports optional constant-time bearer authentication and requires TLS unless the
+  CLI is explicitly placed in loopback-only debug mode.
+
+Mode B remains blocked on a fingerprinted shim interface and namespace contract. Mode
+C remains blocked on a pinned snapshot artifact and an enforceable read-only boundary.
+The gateway fails startup for either mode instead of silently approximating reset or
+state behavior. `GET /v1/conformance`, attestation generation, and P4–P11 orchestration
+remain Epic 4 work; the Epic 2 runtime mechanics are directly unit- and HTTP-contract
+tested but do not self-assert L2.
 
 ## 11. Deferred Extension Points
 

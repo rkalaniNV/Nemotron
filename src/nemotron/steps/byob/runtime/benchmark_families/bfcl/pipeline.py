@@ -30,6 +30,22 @@ def _artifact_hash(path: Path) -> str:
     return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
 
 
+def _verify_stage_artifact_matches_report(artifact: Path, report: Path) -> None:
+    """Refuse a stage artifact that no longer matches the hash its report declares.
+
+    Stage 12 repeats this before publishing, but the checkpoint written right after a
+    stage reads its artifacts, so tampering has to be named by the integrity check
+    rather than by whichever reader happens to touch the bytes first.
+    """
+    declared = (
+        (json.loads(report.read_text(encoding="utf-8")).get("artifacts") or {})
+        .get(artifact.name, {})
+        .get("content_hash")
+    )
+    if declared != _artifact_hash(artifact):
+        raise ValueError(f"{artifact.name} content hash does not match the {report.name} report")
+
+
 def _write_json_atomic(path: Path, value: dict) -> None:
     temporary = path.with_suffix(f"{path.suffix}.tmp")
     try:
@@ -680,6 +696,10 @@ def _generate_bfcl_unlocked(
                 stage_eleven_quality,
             )
             state["dedup_balancing_result"] = dedup_balancing_result
+            _verify_stage_artifact_matches_report(
+                cache / "balanced_tasks.parquet",
+                cache / "dedup_balancing_report.json",
+            )
             pin_artifacts("balanced_tasks.parquet", "dedup_balancing_report.json")
             write_checkpoint(
                 config,

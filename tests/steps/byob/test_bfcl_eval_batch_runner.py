@@ -210,7 +210,7 @@ def test_run_pipeline_orders_gates_candidates_aggregation_and_artifacts(
         alias: SimpleNamespace(alias=alias) for alias in plan.candidate_aliases
     }
     config = SimpleNamespace(
-        settings=SimpleNamespace(executable=True),
+        settings=SimpleNamespace(executable=True, held_out_eval=False),
         eval_config_hash="sha256:" + "1" * 64,
         outputs=SimpleNamespace(
             output_dir=tmp_path,
@@ -363,7 +363,7 @@ def test_batch_runner_rejects_trace_only_before_writing(
         lambda *_args: pytest.fail("trace-only mode must fail before writing"),
     )
     config = SimpleNamespace(
-        settings=SimpleNamespace(executable=False),
+        settings=SimpleNamespace(executable=False, held_out_eval=False),
         outputs=SimpleNamespace(output_dir=tmp_path),
     )
     with pytest.raises(eval_runner.UnsupportedRunnerModeError) as caught:

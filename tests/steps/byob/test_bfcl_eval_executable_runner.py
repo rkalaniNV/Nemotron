@@ -3104,7 +3104,7 @@ def test_batch_pipeline_replays_end_to_end_from_both_valid_caches(
             await super().reset()
 
     config = SimpleNamespace(
-        settings=SimpleNamespace(executable=True),
+        settings=SimpleNamespace(executable=True, held_out_eval=False),
         eval_config_hash=HASH,
         publication_allowed=True,
         non_publication_reasons=(),
