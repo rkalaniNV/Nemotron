@@ -33,14 +33,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
 from nemotron.steps.byob.runtime.mcp.authoring.intake import LoadedMcpIntake
 from nemotron.steps.byob.runtime.mcp.discovery import DiscoveryReport
 from nemotron.steps.byob.runtime.mcp.errors import McpConfigError
-from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
-    build_attestation,
-    discovery_evidence,
-)
-from nemotron.steps.byob.runtime.mcp.gateway.identity import (
-    GatewayArtifacts,
-    GatewayIdentity,
-)
+from nemotron.steps.byob.runtime.mcp.gateway.identity import GatewayIdentity
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_text,
     write_canonical_json,
@@ -87,27 +80,15 @@ def _dump_yaml(document: dict[str, Any]) -> str:
 
 def _endpoint_document(
     intake: LoadedMcpIntake,
-    report: DiscoveryReport,
     identity: GatewayIdentity,
+    attestation_document: dict[str, Any],
     *,
     ca_bundle_written: bool,
 ) -> dict[str, Any]:
     gateway = intake.value.gateway
-    # Predict the attestation from the same inputs and the same function the gateway serves
-    # it from, then pin its digest. Pinning a prediction is the point: if the deployed
-    # gateway is a different build, or discovered a different catalog, the digest it serves
-    # will not match this one and the Gold Gate refuses instead of certifying the difference.
-    predicted = build_attestation(
-        intake.oracle.value,
-        report,
-        GatewayArtifacts(
-            gateway_artifact_digest=gateway.gateway_artifact_digest,
-            shim_artifact_digest=gateway.shim_artifact_digest,
-            snapshot_digest=gateway.snapshot_digest,
-        ),
-        identity,
-        discovery_evidence(report),
-    )
+    # Pin what the live gateway actually served, never a discovery-only prediction. The
+    # latter creates a cycle: once P4-P11 turn the route into an L2 document its digest no
+    # longer matches the L0/L1 prediction emitted here.
     document: dict[str, Any] = {
         "protocol_version": PROTOCOL_VERSION,
         "base_url": gateway.base_url,
@@ -118,7 +99,7 @@ def _endpoint_document(
         },
         "attestation": {
             "kind": ATTESTATION_KIND,
-            "expected_digest": attestation_digest(predicted),
+            "expected_digest": attestation_digest(attestation_document),
         },
         "max_request_bytes": gateway.max_request_bytes,
         "max_response_bytes": gateway.max_response_bytes,
@@ -159,6 +140,7 @@ def emit_pack_artifacts(
     intake: LoadedMcpIntake,
     report: DiscoveryReport,
     identity: GatewayIdentity,
+    attestation_document: dict[str, Any],
     pack_root: Path,
 ) -> list[EmittedArtifact]:
     """Write tools.json, manifest.yaml, endpoint_config.yaml, and any pinned CA bundle."""
@@ -205,7 +187,12 @@ def emit_pack_artifacts(
         ("manifest.yaml", _manifest_document(intake)),
         (
             "endpoint_config.yaml",
-            _endpoint_document(intake, report, identity, ca_bundle_written=ca_written),
+            _endpoint_document(
+                intake,
+                identity,
+                attestation_document,
+                ca_bundle_written=ca_written,
+            ),
         ),
     ):
         text = _dump_yaml(document)

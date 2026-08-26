@@ -29,6 +29,7 @@ from nemotron.steps.byob.runtime.mcp.discovery import (
     discover_mcp_oracle,
 )
 from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
+    ConformanceEvidence,
     build_attestation,
     discovery_evidence,
 )
@@ -104,6 +105,7 @@ class GatewayService:
         executable_policies: TrustedExecutablePolicies | None = None,
         environ: Mapping[str, str] | None = None,
         connection_factory: ConnectionFactory | None = None,
+        conformance_evidence: ConformanceEvidence | None = None,
     ) -> None:
         self.loaded = loaded
         self.config = loaded.value
@@ -111,6 +113,7 @@ class GatewayService:
         self.executable_policies = executable_policies
         self.environ = environ
         self._injected_factory = connection_factory
+        self._injected_conformance_evidence = conformance_evidence
         self._sessions: dict[str, GatewaySession] = {}
         self._registry_lock = asyncio.Lock()
         self._start_lock = asyncio.Lock()
@@ -121,6 +124,7 @@ class GatewayService:
         self._started = False
         self._report: DiscoveryReport | None = None
         self._identity: GatewayIdentity | None = None
+        self._conformance_evidence: ConformanceEvidence | None = None
         self._tool_definitions: dict[str, dict[str, Any]] = {}
         self._output_schemas: dict[str, dict[str, Any] | None] = {}
         self._published_to_source: dict[str, str] = {}
@@ -160,6 +164,11 @@ class GatewayService:
                 self.artifacts,
             )
             self._report = report
+            self._conformance_evidence = (
+                self._injected_conformance_evidence
+                if self._injected_conformance_evidence is not None
+                else discovery_evidence(report)
+            )
             self._shutting_down = False
             self._started = True
 
@@ -192,7 +201,12 @@ class GatewayService:
             )
 
     def _require_started(self) -> None:
-        if not self._started or self._identity is None or self._report is None:
+        if (
+            not self._started
+            or self._identity is None
+            or self._report is None
+            or self._conformance_evidence is None
+        ):
             raise unavailable(
                 "mcp_gateway_not_ready",
                 "gateway startup discovery has not completed",
@@ -211,13 +225,17 @@ class GatewayService:
         instead of a level someone typed in.
         """
         self._require_started()
-        assert self._identity is not None and self._report is not None
+        assert (
+            self._identity is not None
+            and self._report is not None
+            and self._conformance_evidence is not None
+        )
         return build_attestation(
             self.config,
             self._report,
             self.artifacts,
             self._identity,
-            discovery_evidence(self._report),
+            self._conformance_evidence,
         )
 
     def list_tools(self) -> list[str]:

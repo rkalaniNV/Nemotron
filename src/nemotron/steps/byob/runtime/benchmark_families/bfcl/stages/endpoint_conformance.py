@@ -1,10 +1,9 @@
 """The Gold Gate check that decides whether an attested endpoint may publish.
 
-The check runs only when a pack actually pins an attestation. That is deliberate: pinning is
-how a pack claims certifiable conformance, and a pack making no claim should not be measured
-against one. It also means a hand-written endpoint pack that never pins anything is never
-audited here — worth stating plainly, because the protection comes from intake always pinning,
-not from this function being able to tell an MCP-backed endpoint from any other.
+The check runs for every endpoint oracle. Omitting an attestation is legal for smoke execution
+but is an explicit non-Gold result; otherwise deleting the block from a generated pack would
+remove the check that was supposed to protect it. Local Python oracles remain outside this
+endpoint-specific gate.
 
 Three digests have to agree before anything is published: the one the pack pinned at intake,
 the one the live endpoint reports at `GET /v1/metadata`, and the one inside the attestation
@@ -14,11 +13,12 @@ evidence that the build being certified is the build answering calls.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
     ConformanceVerdict,
+    attestation_digest,
     verify_conformance,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
@@ -50,14 +50,20 @@ def run_endpoint_conformance_check(
     *,
     fetch: AttestationFetcher | None = None,
     timeout_s: float = 30.0,
-    trusted_issuers: Sequence[str] = (),
-    local_conformance_report_digest: str | None = None,
+    probe_report: Mapping[str, Any] | None = None,
+    gateway_conformance_report: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Return the `A1` check entry, or None when the pack pins no attestation."""
-    if endpoint_config is None or endpoint_config.attestation is None:
+    """Return the `A1` check entry, or None for a local Python oracle."""
+    if endpoint_config is None:
         return None
 
-    def _entry(status: str, failures: list[dict[str, Any]], verdict: ConformanceVerdict | None) -> dict[str, Any]:
+    def _entry(
+        status: str,
+        failures: list[dict[str, Any]],
+        verdict: ConformanceVerdict | None,
+        *,
+        document: Any | None = None,
+    ) -> dict[str, Any]:
         entry: dict[str, Any] = {
             "id": CHECK_ID,
             "name": CHECK_NAME,
@@ -66,7 +72,17 @@ def run_endpoint_conformance_check(
         }
         if verdict is not None:
             entry["conformance"] = verdict.as_dict()
+        if document is not None:
+            # Preserve exactly what was judged in oracle_validation_report.json. A summary
+            # cannot later prove which check list or identity components were verified.
+            entry["attestation_document"] = document
+            if isinstance(document, Mapping):
+                entry["attestation_digest"] = attestation_digest(document)
         return entry
+
+    if endpoint_config.attestation is None:
+        # Omitting the pin is legal for smoke execution, but never for publication.
+        return _entry("fail", [{"reason": "endpoint_attestation_missing"}], None)
 
     if endpoint_metadata is None:
         # Without live metadata there is nothing to compare the attestation against, and a
@@ -94,11 +110,11 @@ def run_endpoint_conformance_check(
             # Closes the chain: what the pack pinned must be what the attestation attests.
             "effective_content_digest": endpoint_config.expected.content_digest,
         },
-        local_conformance_report_digest=local_conformance_report_digest,
-        trusted_issuers=trusted_issuers,
+        probe_report=probe_report,
+        gateway_conformance_report=gateway_conformance_report,
     )
     if verdict.publishable:
-        return _entry("pass", [], verdict)
+        return _entry("pass", [], verdict, document=document)
 
     failures = [{"reason": finding} for finding in verdict.findings]
     failures.extend(
@@ -109,4 +125,4 @@ def run_endpoint_conformance_check(
     )
     if not failures:
         failures = [{"reason": "level_below_l2", "effective_level": verdict.effective_level}]
-    return _entry("fail", failures, verdict)
+    return _entry("fail", failures, verdict, document=document)

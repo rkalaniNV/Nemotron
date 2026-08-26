@@ -861,21 +861,25 @@ about the server has to be written down first, which makes the evidence bundle a
 boundary rather than a convenience. A file can be diffed, digested, and approved; a live
 connection cannot.
 
-`scripts/build_mcp_intake.py` turns a reviewed `mcp_intake.yaml` into four things: a
+`scripts/build_mcp_intake.py` turns a reviewed `mcp_intake.yaml` into five things: a
 sanitized evidence bundle, the three pack files intake can derive without a model
 (`tools.json`, `manifest.yaml`, `endpoint_config.yaml`), the discovery report they came
-from, and a provenance record. The declaration itself is deliberately small — pack
+from, the live gateway attestation whose digest the endpoint config pins, and a provenance
+record. The declaration itself is deliberately small — pack
 identity, which MCP profile to discover, and which gateway will serve the result — because
 everything else is derived, and a derived value that was also declared is a value that can
 disagree with itself.
 
-Three properties carry the trust:
+Four properties carry the trust:
 
 - `tools.json` is the normalized catalog copied through, not re-derived. Re-deriving it
   would risk publishing something the pinned `tool_catalog_digest` does not cover.
 - `endpoint_config.yaml` pins its `expected.content_digest` from the same §9 identity
   function the gateway serves at `GET /v1/metadata`, so the pack and the gateway cannot
   drift into two separate calculations of the same digest.
+- The attestation pin covers the document fetched from the live gateway after every identity
+  component is compared with discovery. It is preserved beside the evidence bundle and
+  digested in intake provenance; no L0 prediction stands in for a later L2 document.
 - Every prose string reaching the bundle is scanned, not just the `function.description`
   that §7 already covers. `outputSchema` descriptions and `annotations` are injection
   surface for the drafting model even though BFCL never publishes them; text a reviewer
@@ -952,38 +956,39 @@ encoder on either side would break verification while changing nothing semantica
 Three digests must agree before anything publishes: the one the pack pinned at intake, the one
 the live endpoint reports at `GET /v1/metadata`, and the one inside the attestation. They are
 produced by different parties at different times, so agreement is the only available evidence
-that the build being certified is the build answering calls. Intake pins a *prediction* — it
-computes the attestation from the same function and the same inputs the gateway will use, then
-records its digest — which turns a deployed gateway of a different build into a digest mismatch
-rather than a silent substitution.
+that the build being certified is the build answering calls. Intake fetches and preserves the
+document the live gateway actually serves, verifies every identity component against discovery,
+and pins that document's digest. It does not predict a discovery-only document: adding P4–P11
+would necessarily change such a prediction and make the pack unable to move from L0 to L2.
 
 The verifier never reads `level` as a verdict. It re-derives what the document has earned and
 reports both, so `attested_level` and `effective_level` can disagree, and only `L2` with no
 findings publishes. Two outcomes are distinguished on purpose. A **finding** is a
 contradiction — a digest mismatch, a failed or skipped probe, a required check declared
 inapplicable — and drops the document to `L0`. A **cap** is missing evidence rather than a
-defect: no `server_content_digest`, incomplete state observability, or an untrusted issuer.
+defect: no `server_content_digest` outside an immutable snapshot sandbox, or incomplete state
+observability.
 Caps lower `L2` to `L1`, which still blocks publication but says something different to a
 reviewer, and both appear in the report as named reasons rather than as a silent downgrade.
 
 The rule that matters most is that a gateway cannot certify itself. `locally_verified` asserts
-that BFCL ran the conformance suite against that exact artifact digest, so the verifier only
-believes it when the caller supplies a matching locally-computed report digest; otherwise the
-claim is self-reported and capped. A `signed_release` needs an issuer the verifier was
-configured to trust. Consequently a gateway serving a technically perfect `L2` document, with
-every digest agreeing, still cannot publish on its own word.
+that BFCL ran the conformance suite against that exact artifact digest, so the verifier requires
+the exact probe and gateway-conformance report documents and independently hashes both. Repeating
+the digests from the endpoint is not evidence. `signed_release` remains capped until a
+cryptographic verifier backed by a configured trust root exists; matching an issuer name is not
+a signature. Consequently a gateway serving a technically perfect `L2` document, with every
+identity digest agreeing, still cannot publish on its own word.
 
 Gold eligibility is enforced through the machinery that already exists rather than beside it.
 Check `A1` `endpoint_conformance` joins `extra_checks`, and `derive_pack_tier` refuses gold for
 any non-passing check, so there is no second gate to keep in step with the first. `A1` is
-emitted only when a pack actually pins an attestation: pinning is how a pack claims certifiable
-conformance, and a pack making no claim should not be measured against one. That also means a
-hand-written endpoint pack that pins nothing is never audited here — the protection comes from
-intake always pinning, not from the check being able to recognise an MCP-backed endpoint on its
-own.
+emitted for every endpoint pack. An endpoint with no attestation may be exercised in a smoke
+run, but `A1` records `endpoint_attestation_missing` and caps it below publication; removing the
+block from a generated pack is therefore not a Gold bypass. Local Python oracles do not receive
+an endpoint check.
 
-One consequence is worth stating plainly rather than discovering later: because `P4`–`P7` are
-not implemented, the gateway honestly reports `L1`, and every MCP-backed pack therefore fails
+One consequence is worth stating plainly rather than discovering later: because `P4`–`P11` are
+not implemented, the gateway honestly reports `L0` (`P4` is the executable-L1 boundary), and every MCP-backed pack therefore fails
 `A1` and cannot publish today. That is the correct state, not a defect. It becomes publishable
 when the probe suite in `MCP-402` and `MCP-404`–`408` exists and BFCL runs it itself.
 

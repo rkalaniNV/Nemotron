@@ -55,6 +55,8 @@ def build_intake_provenance(
     *,
     output_root: Path,
     evidence_path: Path,
+    attestation_path: Path,
+    attestation_document: dict[str, Any],
 ) -> IntakeProvenance:
     """Record the inputs, the outputs, and what remains unauthored."""
     bundle.verify_digest()
@@ -84,6 +86,10 @@ def build_intake_provenance(
             "path": evidence_path.resolve().relative_to(root).as_posix(),
             "digest": bundle.bundle_digest,
         },
+        "gateway_attestation": {
+            "path": attestation_path.resolve().relative_to(root).as_posix(),
+            "digest": sha256_json(attestation_document),
+        },
         "artifacts": [artifact.as_dict(root=root) for artifact in artifacts],
         "excluded_tools": list(bundle.document["catalog"]["exclusions"]),
         "review": {
@@ -102,4 +108,4 @@ def build_intake_provenance(
 
 def write_intake_provenance(provenance: IntakeProvenance, path: Path) -> Path:
     provenance.verify_digest()
-    return write_canonical_json(provenance.document, path)
+    return Path(write_canonical_json(provenance.document, path))

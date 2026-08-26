@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 # Bump whenever a check is added or tightened: a cached report was produced by the
 # older rules and must not stand in for the newer ones.
-VALIDATION_LOGIC_VERSION = 11
+VALIDATION_LOGIC_VERSION = 12
 
 _PROBES = Path(__file__).resolve().parent.parent / "probes"
 SLOW_BACKEND_PATH = _PROBES / "slow_backend.py"

@@ -11,10 +11,18 @@ from typing import Any
 import pytest
 import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
+    ATTESTATION_KIND,
+    attestation_digest,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+    EndpointConfig,
     load_endpoint_config,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
+from nemotron.steps.byob.runtime.mcp.authoring.attestation import (
+    validate_gateway_attestation,
+)
 from nemotron.steps.byob.runtime.mcp.authoring.evidence import (
     EVIDENCE_BUNDLE_VERSION,
     EvidenceBundle,
@@ -234,11 +242,45 @@ def _intake(
         mode=mode,
         intake=intake,
     )
+    profile = yaml.safe_load((path.parent / "mcp_oracle.yaml").read_text(encoding="utf-8"))
+    intake_document = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    def attestation(config: EndpointConfig) -> dict[str, Any]:
+        gateway = intake_document["gateway"]
+        return {
+            "schema_version": ATTESTATION_KIND,
+            "provider_kind": "mcp",
+            "profile_version": "bfcl-mcp-oracle-v1",
+            "level": "L0",
+            "effective_content_digest": config.expected.content_digest,
+            "gateway_artifact_digest": gateway["gateway_artifact_digest"],
+            "shim_artifact_digest": gateway.get("shim_artifact_digest"),
+            "tool_catalog_digest": profile["expected"]["tool_catalog_digest"],
+            "server_content_digest": profile["expected"].get("server_content_digest"),
+            "snapshot_digest": gateway.get("snapshot_digest"),
+            "probe_report_digest": "sha256:" + "d" * 64,
+            "gateway_conformance_report_digest": "sha256:" + "e" * 64,
+            "gateway_evidence_kind": "locally_verified",
+            "gateway_evidence_issuer": "bfcl-mcp-conformance-v1",
+            "state_observability": "complete",
+            "read_only_boundary": None,
+            "checks": [
+                {
+                    "id": f"P{index}",
+                    "requirement": "required",
+                    "status": "pass",
+                    "reason": None,
+                }
+                for index in range(1, 4)
+            ],
+        }
+
     return asyncio.run(
         run_intake(
             path,
             tmp_path / output,
             connection_factory=_factory(catalog_tools),
+            attestation_fetcher=attestation,
         )
     )
 
@@ -270,6 +312,14 @@ def test_intake_emits_a_pack_draft_pinned_to_the_gateway_identity(tmp_path: Path
     assert endpoint.expected.content_digest == result.bundle.document["identity"][
         "effective_content_digest"
     ]
+    assert endpoint.attestation is not None
+    assert endpoint.attestation.expected_digest == attestation_digest(result.attestation)
+    assert json.loads(
+        (result.output_root / "gateway_attestation.json").read_text(encoding="utf-8")
+    ) == result.attestation
+    assert result.provenance.document["gateway_attestation"]["digest"] == attestation_digest(
+        result.attestation
+    )
 
 
 def test_a_second_run_against_an_unchanged_server_writes_identical_bytes(
@@ -287,6 +337,22 @@ def test_a_second_run_against_an_unchanged_server_writes_identical_bytes(
         first.provenance.document["record_digest"]
         == second.provenance.document["record_digest"]
     )
+
+
+def test_intake_refuses_a_live_attestation_for_a_different_gateway_build(
+    tmp_path: Path,
+) -> None:
+    result = _intake(tmp_path)
+    changed = copy.deepcopy(result.attestation)
+    changed["gateway_artifact_digest"] = "sha256:" + "9" * 64
+
+    with pytest.raises(McpProtocolError, match="gateway_artifact_digest"):
+        validate_gateway_attestation(
+            changed,
+            intake=result.intake,
+            report=result.report,
+            identity=result.identity,
+        )
 
 
 def test_the_bundle_tags_untrusted_text_and_names_what_it_cannot_know(

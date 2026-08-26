@@ -9,10 +9,18 @@ exist.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from nemotron.steps.byob.runtime.mcp.authoring.attestation import (
+    AttestationFetcher,
+    fetch_gateway_attestation,
+    temporary_endpoint_config,
+    validate_gateway_attestation,
+)
 from nemotron.steps.byob.runtime.mcp.authoring.evidence import (
     EvidenceBundle,
     build_evidence_bundle,
@@ -43,11 +51,13 @@ from nemotron.steps.byob.runtime.mcp.gateway.identity import (
     GatewayIdentity,
     build_gateway_identity,
 )
+from nemotron.steps.byob.runtime.pack_authoring.artifacts import write_canonical_json
 
 PACK_DIRECTORY_NAME = "pack"
 EVIDENCE_FILE_NAME = "evidence_bundle.json"
 DISCOVERY_FILE_NAME = "discovery_report.json"
 PROVENANCE_FILE_NAME = "intake_provenance.json"
+ATTESTATION_FILE_NAME = "gateway_attestation.json"
 
 
 @dataclass(frozen=True)
@@ -55,6 +65,7 @@ class IntakeResult:
     intake: LoadedMcpIntake
     report: DiscoveryReport
     identity: GatewayIdentity
+    attestation: dict[str, Any]
     bundle: EvidenceBundle
     provenance: IntakeProvenance
     artifacts: list[EmittedArtifact]
@@ -72,6 +83,7 @@ async def run_intake(
     environ: Mapping[str, str] | None = None,
     executable_policies: TrustedExecutablePolicies | None = None,
     connection_factory: ConnectionFactory | None = None,
+    attestation_fetcher: AttestationFetcher | None = None,
     allow_insecure_localhost: bool = False,
 ) -> IntakeResult:
     """Turn a reviewed MCP intake declaration into a reviewable pack draft."""
@@ -94,13 +106,37 @@ async def run_intake(
             snapshot_digest=intake.value.gateway.snapshot_digest,
         ),
     )
+    temporary_endpoint = temporary_endpoint_config(intake, identity)
+    if attestation_fetcher is None:
+        raw_attestation = await asyncio.to_thread(
+            fetch_gateway_attestation,
+            temporary_endpoint,
+            environ=environ,
+            timeout_s=float(intake.oracle.value.limits.handshake_timeout_s),
+        )
+    else:
+        raw_attestation = await asyncio.to_thread(
+            attestation_fetcher,
+            temporary_endpoint,
+        )
+    attestation = validate_gateway_attestation(
+        raw_attestation,
+        intake=intake,
+        report=report,
+        identity=identity,
+    )
     bundle = build_evidence_bundle(intake, report, identity)
 
     root = output_root.resolve()
+    attestation_path = write_canonical_json(
+        attestation,
+        root / ATTESTATION_FILE_NAME,
+    )
     artifacts = emit_pack_artifacts(
         intake,
         report,
         identity,
+        attestation,
         root / PACK_DIRECTORY_NAME,
     )
     write_discovery_report(report, root / DISCOVERY_FILE_NAME)
@@ -112,12 +148,15 @@ async def run_intake(
         artifacts,
         output_root=root,
         evidence_path=evidence_path,
+        attestation_path=attestation_path,
+        attestation_document=attestation,
     )
     write_intake_provenance(provenance, root / PROVENANCE_FILE_NAME)
     return IntakeResult(
         intake=intake,
         report=report,
         identity=identity,
+        attestation=attestation,
         bundle=bundle,
         provenance=provenance,
         artifacts=artifacts,

@@ -28,6 +28,10 @@ from nemotron.steps.byob.runtime.mcp.gateway import (
     GatewayService,
     create_gateway_app,
 )
+from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
+    ConformanceEvidence,
+    ProbeOutcome,
+)
 from nemotron.steps.byob.runtime.mcp.gateway.identity import (
     BFCL_ORACLE_PROTOCOL_VERSION,
 )
@@ -305,6 +309,7 @@ def _service(
     *,
     factory: _Factory | None = None,
     tool_timeout_s: float = 1.0,
+    conformance_evidence: ConformanceEvidence | None = None,
 ) -> tuple[GatewayService, _Factory]:
     factory = factory or _Factory()
     return (
@@ -312,6 +317,7 @@ def _service(
             _loaded(tool_timeout_s=tool_timeout_s),
             artifacts=GatewayArtifacts(GATEWAY_DIGEST),
             connection_factory=factory,
+            conformance_evidence=conformance_evidence,
         ),
         factory,
     )
@@ -605,11 +611,33 @@ def test_the_conformance_route_serves_the_exact_bytes_its_digest_covers() -> Non
         assert document["effective_content_digest"] == client.get("/v1/metadata").json()["content_digest"]
         assert document["gateway_artifact_digest"] == GATEWAY_DIGEST
 
-        # The gateway declares only what it ran. P4-P11 are not implemented, so it reports
-        # the executable level rather than claiming to be certifiable.
-        assert document["level"] == "L1"
+        # The gateway declares only what it ran. P4 is not implemented, so discovery alone
+        # remains L0 rather than claiming the executable level.
+        assert document["level"] == "L0"
         assert document["gateway_evidence_kind"] == "locally_verified"
         assert {check["id"] for check in document["checks"]} == {"P1", "P2", "P3"}
+
+
+def test_verified_probe_evidence_can_move_the_live_route_to_l2() -> None:
+    evidence = ConformanceEvidence(
+        probes=tuple(
+            ProbeOutcome(
+                id=f"P{index}",
+                requirement="conditional" if index in {7, 8} else "required",
+                status="pass",
+            )
+            for index in range(1, 12)
+        ),
+        suite={"kind": "bfcl-owned", "version": "1"},
+    )
+    service, _ = _service(conformance_evidence=evidence)
+    with TestClient(create_gateway_app(service)) as client:
+        document = client.get("/v1/conformance").json()
+
+    assert document["level"] == "L2"
+    assert {check["id"] for check in document["checks"]} == {
+        f"P{index}" for index in range(1, 12)
+    }
 
 
 def test_a_gateway_attestation_cannot_publish_on_its_own_word() -> None:
@@ -624,9 +652,13 @@ def test_a_gateway_attestation_cannot_publish_on_its_own_word() -> None:
         expected_digest=attestation_digest(document),
         metadata_content_digest=metadata["content_digest"],
     )
-    # Digests all agree, and it still cannot publish: the gateway is the subject under test.
-    assert verdict.findings == ()
-    assert verdict.attested_level == "L1"
+    # Digests all agree, and it still cannot publish: the reports referenced by the gateway
+    # were not independently supplied to the verifier.
+    assert verdict.findings == (
+        "probe_report_missing",
+        "gateway_conformance_report_missing",
+    )
+    assert verdict.attested_level == "L0"
     assert verdict.publishable is False
 
 

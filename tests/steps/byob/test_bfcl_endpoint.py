@@ -368,7 +368,7 @@ def test_endpoint_preflight_failure_is_recorded_by_validation(
     assert report_path == tmp_path / "oracle_validation_report.json"
 
 
-def test_endpoint_pack_runs_prepare_and_generate_through_common_oracle_path(
+def test_endpoint_pack_without_attestation_prepares_but_cannot_publish(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -420,11 +420,13 @@ expected:
     monkeypatch.setattr(ProcessWorker, "run_episode", fake_endpoint_episode)
 
     report = json.loads(prepare_bfcl(config_path).read_text(encoding="utf-8"))
-    assert report["tier"] == "gold"
+    assert report["tier"] == "silver"
     assert report["endpoint_metadata"] == IDENTITY
-    benchmark = generate_bfcl(config_path)
-    run_manifest = json.loads((benchmark.parent / "run_manifest.json").read_text(encoding="utf-8"))
-    assert run_manifest["oracle"] == {
-        "kind": "endpoint",
-        "endpoint_metadata": IDENTITY,
+    assert report["extra_checks"][-1] == {
+        "id": "A1",
+        "name": "endpoint_conformance",
+        "status": "fail",
+        "failures": [{"reason": "endpoint_attestation_missing"}],
     }
+    with pytest.raises(RuntimeError, match="refuses non-gold pack"):
+        generate_bfcl(config_path)
