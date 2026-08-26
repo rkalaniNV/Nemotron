@@ -16,17 +16,22 @@ from typing import Any
 
 import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
+    ATTESTATION_KIND,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import (
     assert_pack_allowed,
 )
 
 PROTOCOL_VERSION = "bfcl-oracle-http-v1"
+_ATTESTATION_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONFIG_KEYS = frozenset(
     {
         "protocol_version",
         "base_url",
         "auth",
         "expected",
+        "attestation",
         "tls",
         "max_request_bytes",
         "max_response_bytes",
@@ -34,6 +39,7 @@ _CONFIG_KEYS = frozenset(
 )
 _AUTH_KEYS = frozenset({"bearer_token_env", "headers"})
 _EXPECTED_KEYS = frozenset({"oracle_id", "oracle_version", "content_digest"})
+_ATTESTATION_KEYS = frozenset({"kind", "expected_digest"})
 _TLS_KEYS = frozenset({"ca_bundle_path"})
 _HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
@@ -87,10 +93,21 @@ class EndpointIdentity:
 
 
 @dataclass(frozen=True)
+class ExpectedAttestation:
+    """The conformance document a pack pins, identified by digest rather than by trust."""
+
+    kind: str
+    expected_digest: str
+
+
+@dataclass(frozen=True)
 class EndpointConfig:
     path: Path
     base_url: str
     expected: EndpointIdentity
+    # Absent means the pack is not claiming certifiable conformance. That is a legal
+    # configuration for a smoke run, and it caps the endpoint below publication.
+    attestation: ExpectedAttestation | None = None
     bearer_token_env: str | None = None
     header_env: tuple[tuple[str, str], ...] = ()
     ca_bundle_path: Path | None = None
@@ -179,6 +196,21 @@ def load_endpoint_config(
     if not isinstance(expected, dict):
         raise ValueError("endpoint expected must be a mapping")
     _reject_unknown(expected, _EXPECTED_KEYS, "endpoint expected")
+
+    attestation = None
+    if raw.get("attestation") is not None:
+        declared = raw["attestation"]
+        if not isinstance(declared, dict):
+            raise ValueError("endpoint attestation must be a mapping")
+        _reject_unknown(declared, _ATTESTATION_KEYS, "endpoint attestation")
+        kind = _nonempty_string(declared.get("kind"), "endpoint attestation.kind")
+        if kind != ATTESTATION_KIND:
+            raise ValueError(f"endpoint attestation.kind must be {ATTESTATION_KIND!r}, got {kind!r}")
+        digest = _nonempty_string(declared.get("expected_digest"), "endpoint attestation.expected_digest")
+        if _ATTESTATION_DIGEST.fullmatch(digest) is None:
+            raise ValueError("endpoint attestation.expected_digest must be sha256:<64 lowercase hex characters>")
+        attestation = ExpectedAttestation(kind=kind, expected_digest=digest)
+
     return EndpointConfig(
         path=path,
         base_url=base_url,
@@ -186,6 +218,7 @@ def load_endpoint_config(
             {"protocol_version": protocol, **expected},
             source="endpoint expected",
         ),
+        attestation=attestation,
         bearer_token_env=bearer,
         header_env=tuple(sorted(header_env)),
         ca_bundle_path=ca_bundle_path,
@@ -284,6 +317,15 @@ class EndpointOracleClient:
         if identity != self.config.expected:
             raise RuntimeError("endpoint metadata does not match the expected oracle identity or content digest")
         return identity.as_dict()
+
+    def conformance(self) -> Any:
+        """Fetch the attestation verbatim, without judging it.
+
+        Returned unparsed on purpose. The digest the pack pinned is taken over the exact
+        document the endpoint served, so anything this method normalised on the way through
+        would be a digest over something the endpoint never said.
+        """
+        return self._request("GET", "/v1/conformance")
 
     def list_tools(self) -> list[str]:
         self.metadata()

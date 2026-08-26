@@ -27,6 +27,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.endpoint_conformance import (
+    run_endpoint_conformance_check,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.executable_replay import replay_task
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
     ExpansionError,
@@ -59,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 # Bump whenever a check is added or tightened: a cached report was produced by the
 # older rules and must not stand in for the newer ones.
-VALIDATION_LOGIC_VERSION = 10
+VALIDATION_LOGIC_VERSION = 11
 
 _PROBES = Path(__file__).resolve().parent.parent / "probes"
 SLOW_BACKEND_PATH = _PROBES / "slow_backend.py"
@@ -102,7 +105,7 @@ def validation_config_fingerprint(config: BfclConfig) -> str:
         # The representative-generation check compiles and renders one instance per
         # template, so the budget, the surface settings and the lineage policy that
         # decide those outcomes are part of what a cached verdict was granted under.
-        "tasks_per_category": int(config.task_generation.get("tasks_per_category", 1) or 1),
+        "task_generation": config.task_generation,
         "surface_generation": config.surface_generation,
         "lineage_policy": config.lineage.policy,
         "lineage_roles": {
@@ -858,8 +861,11 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
         # The budget and the run-wide render inputs govern the whole run rather than one
         # template, so a pack that cannot satisfy them has no template worth compiling.
         try:
+            target_value = config.task_generation.get("target_published_tasks")
             check_category_budgets(
-                bindable, int(config.task_generation.get("tasks_per_category", 1) or 1)
+                bindable,
+                int(config.task_generation.get("tasks_per_category", 1) or 1),
+                int(target_value) if target_value is not None else None,
             )
             render_contract = resolve_render_contract(config, pack, templates_by_id)
         except Exception as exc:  # noqa: BLE001 — report the run-wide contract failure
@@ -1137,6 +1143,10 @@ def run_oracle_validation(config: BfclConfig, pack: LoadedPack) -> dict[str, Any
             "failures": isolation_failures,
         }
     )
+
+    conformance_check = run_endpoint_conformance_check(endpoint_config, endpoint_metadata)
+    if conformance_check is not None:
+        extras.append(conformance_check)
 
     report = {
         "pack_id": pack.manifest.get("pack_id"),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,10 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
+    attestation_digest,
+    verify_conformance,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.mcp.client import (
     McpServerIdentity,
@@ -579,6 +584,50 @@ def test_reset_receives_the_bfcl_context_verbatim() -> None:
             await service.shutdown()
 
     asyncio.run(run())
+
+
+def test_the_conformance_route_serves_the_exact_bytes_its_digest_covers() -> None:
+    service, _ = _service()
+    app = create_gateway_app(service)
+    with TestClient(app) as client:
+        response = client.get("/v1/conformance")
+        assert response.status_code == 200
+        document = response.json()
+
+        # The pack pins a digest over the served bytes, so re-encoding on either side would
+        # break verification even though the JSON is semantically identical.
+        assert response.content == canonical_json(document).encode("utf-8")
+        assert attestation_digest(document) == attestation_digest(
+            json.loads(response.content)
+        )
+
+        # Both routes must describe the same build.
+        assert document["effective_content_digest"] == client.get("/v1/metadata").json()["content_digest"]
+        assert document["gateway_artifact_digest"] == GATEWAY_DIGEST
+
+        # The gateway declares only what it ran. P4-P11 are not implemented, so it reports
+        # the executable level rather than claiming to be certifiable.
+        assert document["level"] == "L1"
+        assert document["gateway_evidence_kind"] == "locally_verified"
+        assert {check["id"] for check in document["checks"]} == {"P1", "P2", "P3"}
+
+
+def test_a_gateway_attestation_cannot_publish_on_its_own_word() -> None:
+    service, _ = _service()
+    app = create_gateway_app(service)
+    with TestClient(app) as client:
+        document = client.get("/v1/conformance").json()
+        metadata = client.get("/v1/metadata").json()
+
+    verdict = verify_conformance(
+        document,
+        expected_digest=attestation_digest(document),
+        metadata_content_digest=metadata["content_digest"],
+    )
+    # Digests all agree, and it still cannot publish: the gateway is the subject under test.
+    assert verdict.findings == ()
+    assert verdict.attested_level == "L1"
+    assert verdict.publishable is False
 
 
 def test_http_adapter_matches_bfcl_oracle_v1_routes() -> None:
