@@ -89,6 +89,8 @@ class ConnectedMcpClient(Protocol):
         self,
         name: str,
         arguments: Mapping[str, Any],
+        *,
+        meta: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -106,41 +108,29 @@ def resolve_stdio_launch(
 ) -> tuple[str, list[str]]:
     """Replace the untrusted executable token with a host-pinned executable."""
     if policies is None:
-        raise McpExecutablePolicyError(
-            "stdio transport requires a host-owned trusted executable policy file"
-        )
+        raise McpExecutablePolicyError("stdio transport requires a host-owned trusted executable policy file")
     policy = policies.policies.get(config.executable_policy)
     if policy is None:
-        raise McpExecutablePolicyError(
-            f"unknown trusted executable policy {config.executable_policy!r}"
-        )
+        raise McpExecutablePolicyError(f"unknown trusted executable policy {config.executable_policy!r}")
     executable = policy.executable.resolve()
     if not executable.is_file():
         raise McpExecutablePolicyError(f"trusted executable is not a file: {executable}")
     configured = Path(config.command[0])
     if configured.is_absolute():
         if configured.resolve() != executable:
-            raise McpExecutablePolicyError(
-                f"configured executable {configured} does not match policy {executable}"
-            )
+            raise McpExecutablePolicyError(f"configured executable {configured} does not match policy {executable}")
     elif configured.name != executable.name:
         raise McpExecutablePolicyError(
             f"configured executable {configured!s} does not name policy binary {executable.name!r}"
         )
     observed_digest = _sha256_file(executable)
     if observed_digest != policy.sha256:
-        raise McpExecutablePolicyError(
-            f"trusted executable digest mismatch for policy {config.executable_policy!r}"
-        )
+        raise McpExecutablePolicyError(f"trusted executable digest mismatch for policy {config.executable_policy!r}")
     arguments = tuple(config.command[1:])
     if arguments not in policy.allowed_argv:
-        raise McpExecutablePolicyError(
-            f"stdio argv is not explicitly allowed by policy {config.executable_policy!r}"
-        )
+        raise McpExecutablePolicyError(f"stdio argv is not explicitly allowed by policy {config.executable_policy!r}")
     if not path_is_inside(config.cwd, *policy.allowed_cwd_roots):
-        raise McpExecutablePolicyError(
-            f"stdio cwd {config.cwd} is outside policy {config.executable_policy!r} roots"
-        )
+        raise McpExecutablePolicyError(f"stdio cwd {config.cwd} is outside policy {config.executable_policy!r} roots")
     return str(executable), list(arguments)
 
 
@@ -152,9 +142,7 @@ def build_stdio_environment(
     selected = _SAFE_STDIO_ENV | set(config.env_passthrough)
     missing = sorted(set(config.env_passthrough) - set(environ))
     if missing:
-        raise McpCredentialError(
-            f"stdio environment references missing variable(s): {missing}"
-        )
+        raise McpCredentialError(f"stdio environment references missing variable(s): {missing}")
     return {name: environ[name] for name in sorted(selected) if name in environ}
 
 
@@ -169,22 +157,17 @@ def resolve_http_headers(
     if token_env is not None:
         token = environ.get(token_env)
         if not token:
-            raise McpCredentialError(
-                f"HTTP auth references missing or empty environment variable {token_env!r}"
-            )
+            raise McpCredentialError(f"HTTP auth references missing or empty environment variable {token_env!r}")
         headers["Authorization"] = f"Bearer {token}"
         secrets.append(token)
     for header, env_name in sorted(config.auth.headers.items()):
         value = environ.get(env_name)
         if not value:
             raise McpCredentialError(
-                f"HTTP header {header!r} references missing or empty environment variable "
-                f"{env_name!r}"
+                f"HTTP header {header!r} references missing or empty environment variable {env_name!r}"
             )
         if "\r" in value or "\n" in value:
-            raise McpCredentialError(
-                f"HTTP header environment variable {env_name!r} contains a line break"
-            )
+            raise McpCredentialError(f"HTTP header environment variable {env_name!r} contains a line break")
         headers[header] = value
         secrets.append(value)
     return headers, tuple(secrets)
@@ -220,9 +203,7 @@ async def mcp_error_boundary(secrets: SecretRegistry) -> AsyncIterator[None]:
             raise
         raise type(exc)(redacted) from exc
     except Exception as exc:
-        raise McpTransportError(
-            _redact(f"MCP transport failed: {type(exc).__name__}: {exc}", secrets.values)
-        ) from exc
+        raise McpTransportError(_redact(f"MCP transport failed: {type(exc).__name__}: {exc}", secrets.values)) from exc
 
 
 def require_mcp_sdk_v2() -> str:
@@ -237,8 +218,7 @@ def require_mcp_sdk_v2() -> str:
     major = version.split(".", 1)[0]
     if not major.isdigit() or int(major) != 2:
         raise McpTransportError(
-            f"BFCL MCP runtime requires mcp>=2,<3, found {version}; "
-            "use the isolated bfcl-mcp runtime"
+            f"BFCL MCP runtime requires mcp>=2,<3, found {version}; use the isolated bfcl-mcp runtime"
         )
     return version
 
@@ -253,38 +233,22 @@ def _strict_json_size(
     try:
         encoded = canonical_json(value).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise McpProtocolError(
-            f"{label} is not strict JSON: {exc}"
-        ) from exc
+        raise McpProtocolError(f"{label} is not strict JSON: {exc}") from exc
     if len(encoded) > limit:
-        raise McpProtocolError(
-            f"{label} exceeds configured max_response_bytes ({len(encoded)} > {limit})"
-        )
+        raise McpProtocolError(f"{label} exceeds configured max_response_bytes ({len(encoded)} > {limit})")
     if _reflects_secret(value, secrets):
-        raise McpCredentialError(
-            f"{label} reflected a configured credential; refusing to persist or report it"
-        )
+        raise McpCredentialError(f"{label} reflected a configured credential; refusing to persist or report it")
 
 
 def _reflects_secret(value: Any, secrets: tuple[str, ...]) -> bool:
     """Detect exact reflection, plus embedding for secrets long enough to be distinctive."""
     if isinstance(value, str):
         return any(
-            secret
-            and (
-                value == secret
-                or (
-                    len(secret) >= _MIN_EMBEDDED_SECRET_CHARS
-                    and secret in value
-                )
-            )
+            secret and (value == secret or (len(secret) >= _MIN_EMBEDDED_SECRET_CHARS and secret in value))
             for secret in secrets
         )
     if isinstance(value, Mapping):
-        return any(
-            _reflects_secret(key, secrets) or _reflects_secret(child, secrets)
-            for key, child in value.items()
-        )
+        return any(_reflects_secret(key, secrets) or _reflects_secret(child, secrets) for key, child in value.items())
     if isinstance(value, Sequence) and not isinstance(value, bytes):
         return any(_reflects_secret(child, secrets) for child in value)
     return False
@@ -297,9 +261,7 @@ def _reject_secret_text(
     label: str,
 ) -> None:
     if value is not None and _reflects_secret(value, secrets):
-        raise McpCredentialError(
-            f"{label} reflected a configured credential; refusing to persist or report it"
-        )
+        raise McpCredentialError(f"{label} reflected a configured credential; refusing to persist or report it")
 
 
 _MISSING = object()
@@ -446,8 +408,19 @@ class SdkConnectedMcpClient:
         self,
         name: str,
         arguments: Mapping[str, Any],
+        *,
+        meta: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        result = await self._client.call_tool(name, dict(arguments))
+        # The high-level SDK method automatically drives InputRequiredResult and
+        # may issue up to ten additional tools/call requests. BFCL v1 requires one
+        # call and one result, so expose extension shapes to the gateway unchanged.
+        result = await self._client.session.call_tool(
+            name,
+            dict(arguments),
+            meta=None if meta is None else dict(meta),
+            allow_input_required=True,
+            allow_claimed=True,
+        )
         dumped = _model_dump(result)
         _strict_json_size(
             dumped,
@@ -472,6 +445,16 @@ async def open_mcp_connection(
         sdk_version = require_mcp_sdk_v2()
         from mcp import Client, StdioServerParameters
 
+        operation_timeout = max(
+            float(config.limits.tool_timeout_s),
+            float(config.limits.reset_timeout_s),
+        )
+        handshake_timeout = float(config.limits.connect_timeout_s) + float(config.limits.handshake_timeout_s)
+        outer_timeout_ceiling = max(operation_timeout, handshake_timeout)
+        sdk_read_timeout = outer_timeout_ceiling + max(
+            1.0,
+            outer_timeout_ceiling * 0.1,
+        )
         async with AsyncExitStack() as stack:
             if isinstance(config.transport, StdioTransportConfig):
                 from mcp.client.stdio import stdio_client
@@ -482,9 +465,7 @@ async def open_mcp_connection(
                 )
                 child_env = build_stdio_environment(config.transport, environ)
                 secrets.values = tuple(
-                    child_env[name]
-                    for name in config.transport.env_passthrough
-                    if name in child_env
+                    child_env[name] for name in config.transport.env_passthrough if name in child_env
                 )
                 errlog = _BoundedRedactingTextSink(secrets.values)
                 target = stdio_client(
@@ -504,14 +485,10 @@ async def open_mcp_connection(
                 # Every request is already bounded by asyncio.wait_for, so the transport
                 # budget stays the looser one; otherwise raw httpx timeouts would preempt
                 # the typed catalog and control failures operators need to diagnose.
-                request_timeout = max(
-                    float(config.limits.tool_timeout_s),
-                    float(config.limits.reset_timeout_s),
-                )
                 timeout = httpx2.Timeout(
                     float(config.limits.connect_timeout_s),
-                    read=request_timeout,
-                    write=request_timeout,
+                    read=sdk_read_timeout,
+                    write=sdk_read_timeout,
                     pool=float(config.limits.connect_timeout_s),
                 )
                 http_client = await stack.enter_async_context(
@@ -534,11 +511,7 @@ async def open_mcp_connection(
                 )
             sdk_client = Client(
                 target,
-                read_timeout_seconds=float(config.limits.tool_timeout_s),
-            )
-            handshake_timeout = (
-                float(config.limits.connect_timeout_s)
-                + float(config.limits.handshake_timeout_s)
+                read_timeout_seconds=sdk_read_timeout,
             )
             try:
                 connected = await asyncio.wait_for(
@@ -546,9 +519,7 @@ async def open_mcp_connection(
                     timeout=handshake_timeout,
                 )
             except TimeoutError as exc:
-                raise McpTransportError(
-                    f"MCP connect/handshake exceeded {handshake_timeout:g} seconds"
-                ) from exc
+                raise McpTransportError(f"MCP connect/handshake exceeded {handshake_timeout:g} seconds") from exc
             yield SdkConnectedMcpClient(
                 connected,
                 max_response_bytes=config.limits.max_response_bytes,
