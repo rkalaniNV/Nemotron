@@ -8,7 +8,7 @@ is willing to act on, and the two answers are allowed to differ.
 Two rules carry most of the weight. A `level` field is never read as a verdict — the level a
 document may keep is re-derived from the evidence beside it, so a gateway that writes `"L2"`
 without complete state observability or without BFCL having run the conformance suite itself
-lands at `L1` and cannot publish. And the digests in the attestation must agree with the
+cannot publish. And the digests in the attestation must agree with the
 digests the pack pinned and with what `GET /v1/metadata` reports live; a document that
 describes a different build than the one answering calls is the drift this exists to catch.
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,6 +38,8 @@ STATE_OBSERVABILITY = frozenset({"complete", "diagnostic"})
 # A mode-C attestation has to name its boundary from a closed set. Free-form prose here would
 # be a claim no verifier can check, which is the same as no boundary at all.
 READ_ONLY_BOUNDARIES = frozenset({"upstream_authorization", "immutable_snapshot_sandbox"})
+MCP_L1_PROBES = tuple(f"P{index}" for index in range(1, 5))
+MCP_L2_PROBES = tuple(f"P{index}" for index in range(1, 12))
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -240,6 +242,83 @@ class ConformanceVerdict:
         }
 
 
+def _document_digest(document: Mapping[str, Any]) -> str:
+    return attestation_digest(document)
+
+
+def _evidence_findings(
+    attestation: ConformanceAttestation,
+    *,
+    probe_report: Mapping[str, Any] | None,
+    gateway_conformance_report: Mapping[str, Any] | None,
+) -> list[str]:
+    """Verify the artifacts whose digests the attestation cites.
+
+    A digest-shaped string is a reference, not evidence.  The referenced document has to be
+    present and hash to that value before a Gold verdict can rely on it.
+    """
+    findings: list[str] = []
+    if probe_report is None:
+        findings.append("probe_report_missing")
+    elif _document_digest(probe_report) != attestation.probe_report_digest:
+        findings.append("probe_report_digest_mismatch")
+    else:
+        expected_checks = [
+            {
+                "id": check.id,
+                "requirement": check.requirement,
+                "status": check.status,
+                "reason": check.reason,
+            }
+            for check in attestation.checks
+        ]
+        if probe_report.get("probes") != expected_checks:
+            findings.append("probe_report_checks_mismatch")
+
+    if gateway_conformance_report is None:
+        findings.append("gateway_conformance_report_missing")
+    elif (
+        _document_digest(gateway_conformance_report)
+        != attestation.gateway_conformance_report_digest
+    ):
+        findings.append("gateway_conformance_report_digest_mismatch")
+    else:
+        if (
+            gateway_conformance_report.get("gateway_artifact_digest")
+            != attestation.gateway_artifact_digest
+        ):
+            findings.append("gateway_report_artifact_mismatch")
+        if (
+            gateway_conformance_report.get("effective_content_digest")
+            != attestation.effective_content_digest
+        ):
+            findings.append("gateway_report_effective_digest_mismatch")
+        if (
+            gateway_conformance_report.get("tool_catalog_digest")
+            != attestation.tool_catalog_digest
+        ):
+            findings.append("gateway_report_catalog_digest_mismatch")
+        if (
+            gateway_conformance_report.get("issuer")
+            != attestation.gateway_evidence_issuer
+        ):
+            findings.append("gateway_report_issuer_mismatch")
+    return findings
+
+
+def _identity_semantic_findings(attestation: ConformanceAttestation) -> list[str]:
+    """Enforce the mode information encoded by optional identity components."""
+    findings: list[str] = []
+    is_snapshot = attestation.snapshot_digest is not None
+    if is_snapshot and attestation.shim_artifact_digest is not None:
+        findings.append("snapshot_and_shim_digests_both_present")
+    if is_snapshot and attestation.read_only_boundary is None:
+        findings.append("snapshot_read_only_boundary_missing")
+    if not is_snapshot and attestation.read_only_boundary is not None:
+        findings.append("read_only_boundary_without_snapshot")
+    return findings
+
+
 def _check_findings(attestation: ConformanceAttestation) -> list[str]:
     findings: list[str] = []
     for check in attestation.checks:
@@ -259,21 +338,36 @@ def _check_findings(attestation: ConformanceAttestation) -> list[str]:
     return findings
 
 
+def _probe_coverage_findings(attestation: ConformanceAttestation) -> list[str]:
+    """Independently enforce the MCP profile's level-to-probe contract."""
+    expected: tuple[str, ...] = ()
+    if attestation.level == "L1":
+        expected = MCP_L1_PROBES
+    elif attestation.level == "L2":
+        expected = MCP_L2_PROBES
+    present = {check.id for check in attestation.checks}
+    return [
+        f"probe_missing_for_{attestation.level.lower()}:{identifier}"
+        for identifier in expected
+        if identifier not in present
+    ]
+
+
 def verify_conformance(
     document: Any,
     *,
     expected_digest: str,
     metadata_content_digest: str,
     expected_identity: Mapping[str, str | None] | None = None,
-    local_conformance_report_digest: str | None = None,
-    trusted_issuers: Sequence[str] = (),
+    probe_report: Mapping[str, Any] | None = None,
+    gateway_conformance_report: Mapping[str, Any] | None = None,
 ) -> ConformanceVerdict:
     """Decide which level an attestation earns, and whether it may publish.
 
     `expected_digest` is what the pack pinned, `metadata_content_digest` is what the live
     endpoint reports now, and `expected_identity` is the set of digests the pack recorded at
-    intake. Supplying `local_conformance_report_digest` is how a caller states that BFCL ran
-    the conformance suite itself; without it a `locally_verified` claim is self-reported.
+    intake. The two report documents are required evidence, not optional digest strings:
+    callers cannot upgrade an endpoint by repeating a hash the endpoint supplied.
     """
     findings: list[str] = []
     caps: list[str] = []
@@ -303,18 +397,30 @@ def verify_conformance(
             findings.append(f"identity_mismatch:{name}")
 
     findings.extend(_check_findings(attestation))
+    findings.extend(_probe_coverage_findings(attestation))
+    findings.extend(_identity_semantic_findings(attestation))
 
     if attestation.gateway_evidence_kind == "locally_verified":
-        if local_conformance_report_digest is None:
-            caps.append("gateway_evidence_self_reported")
-        elif local_conformance_report_digest != attestation.gateway_conformance_report_digest:
-            findings.append("gateway_conformance_report_digest_mismatch")
-    elif attestation.gateway_evidence_issuer not in set(trusted_issuers):
-        caps.append("gateway_evidence_issuer_untrusted")
+        findings.extend(
+            _evidence_findings(
+                attestation,
+                probe_report=probe_report,
+                gateway_conformance_report=gateway_conformance_report,
+            )
+        )
+    else:
+        # Issuer names are not signatures. Signed releases remain L1 until a verifier backed
+        # by a configured trust root returns the verified payload and report documents.
+        caps.append("signed_release_verification_unavailable")
 
-    if attestation.server_content_digest is None:
+    immutable_snapshot = (
+        attestation.snapshot_digest is not None
+        and attestation.read_only_boundary == "immutable_snapshot_sandbox"
+    )
+    if attestation.server_content_digest is None and not immutable_snapshot:
         # Without a server content statement the effective digest still catches adapter and
-        # catalog drift, but not the server's own business logic changing underneath.
+        # catalog drift, but not the server's own business logic changing underneath. An
+        # immutable local snapshot is the one contract-defined exception.
         caps.append("server_content_digest_absent")
     if attestation.state_observability != "complete":
         caps.append("state_observability_incomplete")

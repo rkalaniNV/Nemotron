@@ -21,6 +21,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.endpoint_conformance import (
     run_endpoint_conformance_check,
 )
+from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
+    ProbeOutcome,
+    _attained_level,
+)
 
 DIGESTS = {name: f"sha256:{chr(97 + index) * 64}" for index, name in enumerate("abcdefgh")}
 EFFECTIVE = "sha256:" + "1" * 64
@@ -28,6 +32,15 @@ METADATA_DIGEST = EFFECTIVE
 
 
 def _attestation(**overrides: Any) -> dict[str, Any]:
+    checks = [
+        {
+            "id": f"P{index}",
+            "requirement": "conditional" if index in {7, 8} else "required",
+            "status": "pass",
+            "reason": None,
+        }
+        for index in range(1, 12)
+    ]
     document: dict[str, Any] = {
         "schema_version": ATTESTATION_KIND,
         "provider_kind": "mcp",
@@ -45,21 +58,41 @@ def _attestation(**overrides: Any) -> dict[str, Any]:
         "gateway_evidence_issuer": "bfcl-mcp-conformance-v1",
         "state_observability": "complete",
         "read_only_boundary": None,
-        "checks": [
-            {"id": "P1", "requirement": "required", "status": "pass", "reason": None},
-            {"id": "P7", "requirement": "conditional", "status": "not_applicable", "reason": "no mutating tool"},
-        ],
+        "checks": checks,
     }
     document.update(overrides)
+    if "probe_report_digest" not in overrides:
+        document["probe_report_digest"] = attestation_digest(_probe_report(document))
+    if "gateway_conformance_report_digest" not in overrides:
+        document["gateway_conformance_report_digest"] = attestation_digest(
+            _gateway_report(document)
+        )
     return document
+
+
+def _probe_report(document: dict[str, Any]) -> dict[str, Any]:
+    return {"probes": copy.deepcopy(document["checks"])}
+
+
+def _gateway_report(document: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "issuer": document["gateway_evidence_issuer"],
+        "gateway_artifact_digest": document["gateway_artifact_digest"],
+        "effective_content_digest": document["effective_content_digest"],
+        "tool_catalog_digest": document["tool_catalog_digest"],
+        "suite": {"kind": "test"},
+    }
 
 
 def _verify(document: dict[str, Any], **overrides: Any):
     kwargs: dict[str, Any] = {
         "expected_digest": attestation_digest(document),
         "metadata_content_digest": METADATA_DIGEST,
-        "local_conformance_report_digest": DIGESTS["e"],
     }
+    if "checks" in document:
+        kwargs["probe_report"] = _probe_report(document)
+    if "gateway_artifact_digest" in document:
+        kwargs["gateway_conformance_report"] = _gateway_report(document)
     kwargs.update(overrides)
     return verify_conformance(document, **kwargs)
 
@@ -136,36 +169,62 @@ def test_the_pack_pin_the_live_metadata_and_the_attestation_must_all_agree() -> 
 
 
 def test_a_gateway_cannot_certify_itself() -> None:
-    # locally_verified means BFCL ran the suite. Without BFCL's own report digest the claim
-    # is self-reported, which caps the endpoint below publication.
-    verdict = _verify(_attestation(), local_conformance_report_digest=None)
+    # locally_verified means BFCL ran the suite. Repeating the endpoint's digest is not
+    # enough; the exact reports have to be supplied and hashed by the verifier.
+    verdict = _verify(
+        _attestation(),
+        probe_report=None,
+        gateway_conformance_report=None,
+    )
     assert verdict.attested_level == "L2"
-    assert verdict.effective_level == "L1"
+    assert verdict.effective_level == "L0"
     assert verdict.publishable is False
-    assert verdict.caps == ("gateway_evidence_self_reported",)
-    assert verdict.findings == ()
+    assert verdict.findings == (
+        "probe_report_missing",
+        "gateway_conformance_report_missing",
+    )
 
 
 def test_a_locally_verified_report_for_another_build_is_a_hard_failure() -> None:
-    verdict = _verify(_attestation(), local_conformance_report_digest="sha256:" + "4" * 64)
+    verdict = _verify(
+        _attestation(),
+        gateway_conformance_report={"different": "build"},
+    )
     assert "gateway_conformance_report_digest_mismatch" in verdict.findings
 
 
-def test_a_signed_release_needs_an_issuer_the_verifier_trusts() -> None:
+def test_matching_report_digests_do_not_hide_semantically_different_evidence() -> None:
+    probe_report = {"probes": []}
+    gateway_report = {
+        "issuer": "different-suite",
+        "gateway_artifact_digest": DIGESTS["h"],
+    }
+    document = _attestation(
+        probe_report_digest=attestation_digest(probe_report),
+        gateway_conformance_report_digest=attestation_digest(gateway_report),
+    )
+    verdict = _verify(
+        document,
+        probe_report=probe_report,
+        gateway_conformance_report=gateway_report,
+    )
+    assert "probe_report_checks_mismatch" in verdict.findings
+    assert "gateway_report_artifact_mismatch" in verdict.findings
+    assert "gateway_report_issuer_mismatch" in verdict.findings
+
+
+def test_a_signed_release_cannot_be_trusted_by_issuer_name_alone() -> None:
     document = _attestation(
         gateway_evidence_kind="signed_release",
         gateway_evidence_issuer="vendor-self-signed",
     )
-    untrusted = _verify(document, local_conformance_report_digest=None)
-    assert untrusted.caps == ("gateway_evidence_issuer_untrusted",)
-    assert untrusted.publishable is False
-
-    trusted = _verify(
+    verdict = _verify(
         document,
-        local_conformance_report_digest=None,
-        trusted_issuers=("vendor-self-signed",),
+        probe_report=None,
+        gateway_conformance_report=None,
     )
-    assert trusted.publishable is True
+    assert verdict.caps == ("signed_release_verification_unavailable",)
+    assert verdict.publishable is False
 
 
 @pytest.mark.parametrize(
@@ -223,6 +282,70 @@ def test_a_lower_attested_level_is_reported_as_itself() -> None:
     assert verdict.effective_level == "L1"
     assert verdict.publishable is False
     assert verdict.findings == ()
+
+
+def test_mcp_levels_require_p4_for_l1_and_every_p1_to_p11_entry_for_l2() -> None:
+    discovery = [
+        ProbeOutcome(f"P{index}", "required", "pass") for index in range(1, 4)
+    ]
+    assert _attained_level(discovery, state_observability="complete") == "L0"
+
+    executable = [
+        ProbeOutcome(f"P{index}", "required", "pass") for index in range(1, 5)
+    ]
+    assert _attained_level(executable, state_observability="complete") == "L1"
+
+    complete = [
+        ProbeOutcome(
+            f"P{index}",
+            "conditional" if index in {7, 8} else "required",
+            "not_applicable" if index in {7, 8} else "pass",
+            "no applicable case" if index in {7, 8} else None,
+        )
+        for index in range(1, 12)
+    ]
+    assert _attained_level(complete, state_observability="complete") == "L2"
+    assert (
+        _attained_level(
+            [probe for probe in complete if probe.id != "P10"],
+            state_observability="complete",
+        )
+        == "L1"
+    )
+
+
+def test_gold_independently_rejects_an_l2_document_missing_any_profile_probe() -> None:
+    document = _attestation(
+        checks=[
+            check
+            for check in _attestation()["checks"]
+            if check["id"] != "P10"
+        ]
+    )
+    verdict = _verify(document)
+    assert "probe_missing_for_l2:P10" in verdict.findings
+    assert verdict.publishable is False
+
+
+def test_mode_c_allows_no_server_digest_only_for_an_immutable_snapshot() -> None:
+    document = _attestation(
+        server_content_digest=None,
+        snapshot_digest=DIGESTS["f"],
+        read_only_boundary="immutable_snapshot_sandbox",
+    )
+    verdict = _verify(document)
+    assert "server_content_digest_absent" not in verdict.caps
+    assert verdict.publishable is True
+
+
+def test_mode_c_requires_a_named_boundary_for_a_snapshot() -> None:
+    document = _attestation(
+        snapshot_digest=DIGESTS["f"],
+        read_only_boundary=None,
+    )
+    verdict = _verify(document)
+    assert "snapshot_read_only_boundary_missing" in verdict.findings
+    assert verdict.publishable is False
 
 
 # --- Endpoint config pinning (MCP-401) ---------------------------------------------------
@@ -302,20 +425,18 @@ class _Expected:
         self.content_digest = content_digest
 
 
-def test_a_pack_that_pins_nothing_is_not_audited_here() -> None:
-    # A local Python oracle, or an endpoint making no conformance claim, must not acquire a
-    # fabricated passing check just because this code ran.
+def test_a_local_oracle_has_no_endpoint_check_but_an_unattested_endpoint_fails() -> None:
     assert run_endpoint_conformance_check(None, {"content_digest": EFFECTIVE}) is None
-    assert (
-        run_endpoint_conformance_check(
-            _Config(expected_digest=None),  # type: ignore[arg-type]
-            {"content_digest": EFFECTIVE},
-        )
-        is None
+    entry = run_endpoint_conformance_check(
+        _Config(expected_digest=None),  # type: ignore[arg-type]
+        {"content_digest": EFFECTIVE},
     )
+    assert entry is not None
+    assert entry["status"] == "fail"
+    assert entry["failures"] == [{"reason": "endpoint_attestation_missing"}]
 
 
-def test_a_self_reported_l2_endpoint_fails_the_gate_with_the_cap_named() -> None:
+def test_a_self_reported_l2_endpoint_fails_without_the_referenced_reports() -> None:
     document = _attestation()
     entry = run_endpoint_conformance_check(
         _Config(expected_digest=attestation_digest(document)),  # type: ignore[arg-type]
@@ -325,14 +446,12 @@ def test_a_self_reported_l2_endpoint_fails_the_gate_with_the_cap_named() -> None
     assert entry is not None
     assert entry["id"] == "A1"
     assert entry["status"] == "fail"
-    assert entry["conformance"]["effective_level"] == "L1"
+    assert entry["conformance"]["effective_level"] == "L0"
     assert entry["failures"] == [
-        {
-            "reason": "level_capped",
-            "detail": "gateway_evidence_self_reported",
-            "effective_level": "L1",
-        }
+        {"reason": "probe_report_missing"},
+        {"reason": "gateway_conformance_report_missing"},
     ]
+    assert entry["attestation_document"] == document
 
 
 def test_an_endpoint_verified_by_bfcl_itself_passes_the_gate() -> None:
@@ -341,7 +460,8 @@ def test_an_endpoint_verified_by_bfcl_itself_passes_the_gate() -> None:
         _Config(expected_digest=attestation_digest(document)),  # type: ignore[arg-type]
         {"content_digest": METADATA_DIGEST},
         fetch=lambda _config: document,
-        local_conformance_report_digest=DIGESTS["e"],
+        probe_report=_probe_report(document),
+        gateway_conformance_report=_gateway_report(document),
     )
     assert entry is not None
     assert entry["status"] == "pass"

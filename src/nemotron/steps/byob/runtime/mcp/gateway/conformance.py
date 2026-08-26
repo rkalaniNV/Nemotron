@@ -7,9 +7,9 @@ unimplemented probe lowers the claim instead of being assumed to pass.
 
 Nothing here decides whether the pack may publish. The gateway is the subject under test, and
 a subject grading itself is not evidence, so it declares `locally_verified` and leaves the
-consequence to `benchmark_families/bfcl/conformance.py`, which caps a self-reported claim at
-`L1`. Both sides share one schema so the document cannot be valid to produce and invalid to
-read.
+consequence to `benchmark_families/bfcl/conformance.py`, which requires the independently
+supplied reports whose digests this document cites. Both sides share one schema so the document
+cannot be valid to produce and invalid to read.
 """
 
 from __future__ import annotations
@@ -37,10 +37,13 @@ from nemotron.steps.byob.runtime.mcp.gateway.identity import (
 # trust a signed release can tell one issuer from another.
 GATEWAY_EVIDENCE_ISSUER = "bfcl-mcp-conformance-v1"
 
-# Probes that must pass before an endpoint can claim to be certifiable. Discovery covers
-# P1-P3 today; the rest are execution probes, and each one absent is a reason this gateway
-# reports `L1` rather than a reason to report `L2` quietly.
-L2_REQUIRED_PROBES = ("P1", "P2", "P3", "P4", "P5", "P6", "P7")
+# P1-P3 establish discovery, P4 establishes executable L1, and P5-P11 establish L2.
+# P7 and P8 are conditional, but they still have to be present as either pass or an explicit
+# not_applicable with a reason. Absence never means not applicable.
+DISCOVERY_PROBES = ("P1", "P2", "P3")
+EXECUTABLE_PROBE = "P4"
+L2_PROBES = tuple(f"P{index}" for index in range(5, 12))
+CONDITIONAL_PROBES = frozenset({"P7", "P8"})
 
 
 @dataclass(frozen=True)
@@ -72,16 +75,41 @@ class ConformanceEvidence:
     suite: Mapping[str, Any] = field(default_factory=dict)
 
     @property
-    def report_digest(self) -> str:
-        return attestation_digest({"probes": [probe.as_check() for probe in self.probes]})
+    def probe_report(self) -> dict[str, Any]:
+        return {"probes": [probe.as_check() for probe in self.probes]}
 
-    def suite_digest(self, gateway_artifact_digest: str) -> str:
+    @property
+    def report_digest(self) -> str:
+        return attestation_digest(self.probe_report)
+
+    def gateway_report(
+        self,
+        gateway_artifact_digest: str,
+        *,
+        effective_content_digest: str,
+        tool_catalog_digest: str,
+    ) -> dict[str, Any]:
+        return {
+            "issuer": GATEWAY_EVIDENCE_ISSUER,
+            "gateway_artifact_digest": gateway_artifact_digest,
+            "effective_content_digest": effective_content_digest,
+            "tool_catalog_digest": tool_catalog_digest,
+            "suite": dict(self.suite),
+        }
+
+    def suite_digest(
+        self,
+        gateway_artifact_digest: str,
+        *,
+        effective_content_digest: str,
+        tool_catalog_digest: str,
+    ) -> str:
         return attestation_digest(
-            {
-                "issuer": GATEWAY_EVIDENCE_ISSUER,
-                "gateway_artifact_digest": gateway_artifact_digest,
-                "suite": dict(self.suite),
-            }
+            self.gateway_report(
+                gateway_artifact_digest,
+                effective_content_digest=effective_content_digest,
+                tool_catalog_digest=tool_catalog_digest,
+            )
         )
 
 
@@ -118,29 +146,63 @@ def discovery_evidence(report: DiscoveryReport) -> ConformanceEvidence:
 
 def _attained_level(probes: Sequence[ProbeOutcome], *, state_observability: str) -> str:
     """Derive the level from evidence, never from intent."""
-    passed = {probe.id for probe in probes if probe.status == "pass"}
-    if not {"P1", "P2", "P3"} <= passed:
+    by_id = {probe.id: probe for probe in probes}
+
+    def satisfies(identifier: str) -> bool:
+        probe = by_id.get(identifier)
+        if probe is None:
+            return False
+        if probe.status == "pass":
+            return True
+        return (
+            identifier in CONDITIONAL_PROBES
+            and probe.requirement == "conditional"
+            and probe.status == "not_applicable"
+            and isinstance(probe.reason, str)
+            and bool(probe.reason.strip())
+        )
+
+    if not all(satisfies(identifier) for identifier in DISCOVERY_PROBES):
+        return "L0"
+    if not satisfies(EXECUTABLE_PROBE):
         return "L0"
     if state_observability != "complete":
         # Without complete observable state, replay and isolation cannot be proven, which is
         # the whole basis of a publishable verdict.
         return "L1"
-    if not set(L2_REQUIRED_PROBES) <= passed:
+    if not all(satisfies(identifier) for identifier in L2_PROBES):
         return "L1"
     return "L2"
 
 
-def state_observability_for(config: McpOracleConfig) -> str:
-    """Complete state requires the server to hand over episode state, not a projection."""
-    return "complete" if config.control.state_strategy == "control_tool" else "diagnostic"
+def state_observability_for(
+    config: McpOracleConfig,
+    evidence: ConformanceEvidence,
+) -> str:
+    """Derive completeness from the control plane or from the probes that prove a projection."""
+    if config.control.state_strategy == "control_tool":
+        return "complete"
+    passed = {probe.id for probe in evidence.probes if probe.status == "pass"}
+    return "complete" if {"P6", "P10", "P11"} <= passed else "diagnostic"
 
 
-def read_only_boundary_for(config: McpOracleConfig) -> str | None:
-    # Only a read-only deployment names a boundary; anywhere else the field is null rather
-    # than a reassuring string.
+def read_only_boundary_for(
+    config: McpOracleConfig,
+    evidence: ConformanceEvidence,
+) -> str | None:
+    """Name a mode-C boundary only after P6 verified that exact mechanism."""
     if config.mode != "C":
         return None
-    return "immutable_snapshot_sandbox" if config.fixtures.direction == "snapshot" else None
+    p6_passed = any(
+        probe.id == "P6" and probe.status == "pass" for probe in evidence.probes
+    )
+    boundary = evidence.suite.get("read_only_boundary")
+    if p6_passed and boundary in {
+        "upstream_authorization",
+        "immutable_snapshot_sandbox",
+    }:
+        return str(boundary)
+    return None
 
 
 def build_attestation(
@@ -152,7 +214,7 @@ def build_attestation(
 ) -> dict[str, Any]:
     """Build the exact document `GET /v1/conformance` returns."""
     validated = artifacts.validated()
-    observability = state_observability_for(config)
+    observability = state_observability_for(config, evidence)
     document: dict[str, Any] = {
         "schema_version": ATTESTATION_KIND,
         "provider_kind": PROVIDER_KIND_MCP,
@@ -168,12 +230,14 @@ def build_attestation(
         "snapshot_digest": validated.snapshot_digest,
         "probe_report_digest": evidence.report_digest,
         "gateway_conformance_report_digest": evidence.suite_digest(
-            validated.gateway_artifact_digest
+            validated.gateway_artifact_digest,
+            effective_content_digest=identity.content_digest,
+            tool_catalog_digest=report.tool_catalog_digest,
         ),
         "gateway_evidence_kind": "locally_verified",
         "gateway_evidence_issuer": GATEWAY_EVIDENCE_ISSUER,
         "state_observability": observability,
-        "read_only_boundary": read_only_boundary_for(config),
+        "read_only_boundary": read_only_boundary_for(config, evidence),
         "checks": [probe.as_check() for probe in evidence.probes],
     }
     # Parsing what we just built is cheap and catches a schema drift here before it reaches a
@@ -184,4 +248,4 @@ def build_attestation(
 
 def attestation_bytes(document: Mapping[str, Any]) -> bytes:
     """Serialize canonically, because the pinned digest is over these exact bytes."""
-    return canonical_json(dict(document)).encode("utf-8")
+    return str(canonical_json(dict(document))).encode("utf-8")
