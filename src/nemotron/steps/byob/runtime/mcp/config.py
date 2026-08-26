@@ -87,7 +87,7 @@ _UniqueKeySafeLoader.add_constructor(
 )
 
 
-def _load_unique_yaml(source: Path, label: str) -> dict[str, Any]:
+def load_unique_yaml_mapping(source: Path, label: str) -> dict[str, Any]:
     try:
         raw = yaml.load(
             source.read_text(encoding="utf-8"),
@@ -571,7 +571,7 @@ def load_mcp_oracle_config(
 ) -> LoadedMcpOracleConfig:
     """Load one strict MCP profile without resolving any credentials."""
     source = path.resolve()
-    raw = _load_unique_yaml(source, "MCP oracle config")
+    raw = load_unique_yaml_mapping(source, "MCP oracle config")
     try:
         config = McpOracleConfig.model_validate(raw)
         transport = config.transport
@@ -620,7 +620,7 @@ def load_mcp_oracle_config(
 def load_trusted_executable_policies(path: Path) -> TrustedExecutablePolicies:
     """Load the host-owned stdio executable policy from outside the oracle pack."""
     source = path.resolve()
-    raw = _load_unique_yaml(source, "trusted executable policy")
+    raw = load_unique_yaml_mapping(source, "trusted executable policy")
     try:
         policies = TrustedExecutablePolicies.model_validate(raw)
         resolved = {

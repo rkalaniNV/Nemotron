@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-import unicodedata
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -21,46 +19,15 @@ from nemotron.steps.byob.runtime.mcp.errors import (
     McpNormalizationError,
 )
 
-MAX_DESCRIPTION_CHARS = 4096
-
-# Language dependent, warning only. This lexicon finds the most common English phrasing
-# of an injected instruction and nothing else; it is not a control and must never be read
-# as one. The controls that do generalize are that descriptions are inert data BFCL never
-# executes as instructions, plus the language independent checks below.
-_ENGLISH_INJECTION_LEXICON = re.compile(
-    r"\b(ignore|disregard|override|bypass|reveal|exfiltrate|system prompt|developer message)\b",
-    re.IGNORECASE,
+# The rules for third-party text are shared with the authoring side, which cannot import
+# this package, so they live in a module neither environment owns.
+from nemotron.steps.byob.runtime.pack_authoring.untrusted_text import (
+    EMBEDDED_URL,
+    ENGLISH_INJECTION_LEXICON,
+    MAX_DESCRIPTION_CHARS,
+    SMUGGLED_BLOCK,
+    invisible_characters,
 )
-# Language independent shapes: prose in any script does not smuggle a fenced block, an
-# HTML comment, or a URL into a tool description by accident.
-_SMUGGLED_BLOCK = re.compile(r"```|<!--")
-_EMBEDDED_URL = re.compile(r"https?://", re.IGNORECASE)
-
-# Newlines and tabs are legitimate in a multi-line description; no other C0/C1 control is.
-_ALLOWED_CONTROLS = frozenset("\t\n\r")
-# Bidirectional overrides, embeddings, and isolates can render text that reads one way to
-# a human reviewer and another way to a parser, which defeats review itself. The
-# directional *marks* U+200E/U+200F and the joiners U+200C/U+200D are deliberately absent:
-# real Arabic, Hebrew, Persian, Indic, and emoji text needs them.
-_BIDI_OVERRIDES = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
-# Zero-width space and BOM carry no meaning mid-description and are common padding used to
-# break up an injected phrase so a lexicon misses it.
-_INVISIBLE_PADDING = frozenset("\u200b\ufeff")
-
-
-def _invisible_characters(text: str) -> list[str]:
-    """Return sorted code points that a human reviewer cannot see in ``text``."""
-    found = {
-        character
-        for character in text
-        if character in _BIDI_OVERRIDES
-        or character in _INVISIBLE_PADDING
-        or (
-            character not in _ALLOWED_CONTROLS
-            and unicodedata.category(character) == "Cc"
-        )
-    }
-    return sorted(f"U+{ord(character):04X}" for character in found)
 
 
 @dataclass(frozen=True)
@@ -242,7 +209,7 @@ def _normalize_one(
             f"selected tool {source_name!r} description exceeds "
             f"{MAX_DESCRIPTION_CHARS} characters"
         )
-    invisible = _invisible_characters(description)
+    invisible = invisible_characters(description)
     if invisible:
         # Fail closed rather than warn: the operator reviewing this description cannot
         # see these code points, so a warning would ask for review that cannot happen.
@@ -259,14 +226,14 @@ def _normalize_one(
         (
             "suspicious_description",
             "description contains instruction-like language in the English heuristic",
-            _ENGLISH_INJECTION_LEXICON,
+            ENGLISH_INJECTION_LEXICON,
         ),
         (
             "description_embeds_block",
             "description embeds a fenced block or HTML comment",
-            _SMUGGLED_BLOCK,
+            SMUGGLED_BLOCK,
         ),
-        ("description_embeds_url", "description embeds a URL", _EMBEDDED_URL),
+        ("description_embeds_url", "description embeds a URL", EMBEDDED_URL),
     ):
         if description and pattern.search(description):
             warning_list.append(NormalizationIssue(source_name, code, detail))

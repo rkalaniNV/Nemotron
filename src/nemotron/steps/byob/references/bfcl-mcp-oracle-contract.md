@@ -851,6 +851,95 @@ state behavior. `GET /v1/conformance`, attestation generation, and P4–P11 orch
 remain Epic 4 work; the Epic 2 runtime mechanics are directly unit- and HTTP-contract
 tested but do not self-assert L2.
 
+### 10.2 Epic 3 authoring intake boundary
+
+Intake lives under `runtime/mcp/authoring/` and runs in the same isolated `bfcl-mcp`
+environment as discovery, for a reason worth stating plainly: Data Designer requires MCP
+SDK v1 and this integration requires v2, and the two extras are mutually exclusive. The
+drafting phase therefore **cannot hold an MCP connection**. Everything it will ever know
+about the server has to be written down first, which makes the evidence bundle a process
+boundary rather than a convenience. A file can be diffed, digested, and approved; a live
+connection cannot.
+
+`scripts/build_mcp_intake.py` turns a reviewed `mcp_intake.yaml` into four things: a
+sanitized evidence bundle, the three pack files intake can derive without a model
+(`tools.json`, `manifest.yaml`, `endpoint_config.yaml`), the discovery report they came
+from, and a provenance record. The declaration itself is deliberately small — pack
+identity, which MCP profile to discover, and which gateway will serve the result — because
+everything else is derived, and a derived value that was also declared is a value that can
+disagree with itself.
+
+Three properties carry the trust:
+
+- `tools.json` is the normalized catalog copied through, not re-derived. Re-deriving it
+  would risk publishing something the pinned `tool_catalog_digest` does not cover.
+- `endpoint_config.yaml` pins its `expected.content_digest` from the same §9 identity
+  function the gateway serves at `GET /v1/metadata`, so the pack and the gateway cannot
+  drift into two separate calculations of the same digest.
+- Every prose string reaching the bundle is scanned, not just the `function.description`
+  that §7 already covers. `outputSchema` descriptions and `annotations` are injection
+  surface for the drafting model even though BFCL never publishes them; text a reviewer
+  cannot see blocks the whole draft, and merely suspicious text is flagged for a human and
+  kept verbatim for them. Bundle text is tagged as data so the drafting phase cannot embed
+  it without going through the quoting fence.
+
+The bundle carries `L0` evidence and states the rest as explicit unknowns, each naming the
+authoring decision it blocks: observed result shapes, observed error codes, state deltas,
+confirmation behavior, fixture samples, and tool dependencies. A drafting model that needs
+one of these must find an unknown and refuse rather than invent a plausible value. For the
+same reason the bundle's status is never `approved`; approval is a human act recorded in
+provenance, and the intake record sets `model` to null because nothing was inferred in this
+phase. Fixtures, task templates, validation cases, and assertions are listed as pending
+rather than emitted as stubs, since a stub turns a missing input into a file that looks
+authored.
+
+### 10.3 Epic 3 drafting phase
+
+Drafting lives under `runtime/pack_authoring/` and reads one file: the evidence bundle. Two
+gates stand in front of the model. The bundle digest is recomputed from the bytes on disk, so
+a bundle edited after review is refused rather than drafted from. And an approval document
+must name that exact digest and acknowledge every advisory finding by
+`location:code` — a blanket approval would let a newly appearing flag ride along on an older
+decision, which would make the review in §7 decorative.
+
+Four calls run in dependency order: coverage plan, then validation cases, task templates, and
+assertion specifications, each given the coverage plan as input rather than re-deriving it.
+Every call goes through the same content-addressed cache the generation stages use, keyed on
+model identity, prompt version, input, output schema, and seed, so a rerun reproduces the
+approved draft and provenance records which model produced it.
+
+What keeps the drafts honest is that the model is not allowed to answer questions the
+evidence cannot support, and `grounding.py` enforces this after every call rather than
+trusting the prompt:
+
+- Tool and parameter names must exist in the bundle. A drafted call against a tool the server
+  never advertised is rejected, not renamed.
+- A literal argument value is legal only where the tool's own input schema pins the value set
+  with an `enum` or a boolean type. Every other value names its source and waits for the
+  probe that will supply it, because a plausible-looking identifier is the failure mode that
+  looks most like progress: the pack would generate, pass, and test nothing.
+- Each draft declares `blocked_on` against the bundle's open unknowns, and the check runs both
+  ways. A success probe must admit it has not observed a result shape; a probe blocked on an
+  unknown the bundle already resolved is equally wrong, because it would park work behind a
+  gate that will never close.
+- Model prose is scanned with the same §7 rules. The model is not the untrusted party, but it
+  read untrusted text, and a bidi override copied out of a tool description into a policy
+  string defeats review just as well as it did upstream.
+
+A refused draft raises with the full list of violations and nothing retries. A retry loop
+would reward whichever attempt happened to pass, which is precisely how an ungrounded claim
+reaches a pack.
+
+Compilation to `assertions.py` covers trace predicates only, and is all-or-nothing. BFCL
+records which tools an episode called, so `tool_called`, `tool_not_called`, and
+`tool_called_after` are checkable against the benchmark's own evidence. Whether a result field
+exists or a collection grew is a claim about a server nobody probed, so it stays a
+specification until L1 probes resolve it. A partially compiled `assertions.py` would be worse
+than none: the pack would load, the suite would pass, and the coverage a reviewer believes
+they have would not exist. Drafts are therefore written to a `drafts/` directory beside the
+pack rather than into it, because a `task_templates.yaml` inside a pack directory is loaded by
+the pipeline as though a human had authored it.
+
 ## 11. Deferred Extension Points
 
 Each of these is a decision, not an omission. They are listed so a later reader can
