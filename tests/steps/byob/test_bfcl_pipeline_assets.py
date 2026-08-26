@@ -1316,7 +1316,7 @@ def test_prepare_invalidates_a_previous_publication_before_rewriting_lineage(
     for path in stale:
         path.write_text("stale", encoding="utf-8")
 
-    def stop_after_invalidation(_config):  # type: ignore[no-untyped-def]
+    def stop_after_invalidation(_config, *, force=False):  # type: ignore[no-untyped-def]
         assert all(not path.exists() for path in stale)
         raise RuntimeError("invalidation observed")
 
