@@ -285,11 +285,13 @@ anything moved. Two halves of a run taken against two different benchmarks would
 otherwise be averaged into one number.
 
 A translated benchmark is scored under this same contract only if it preserves
-every field the contract compares — the tools, the gold calls with their turn,
-group, and order, the assertions, and the gating columns. Translation may change
-the conversation, the intent, the system prompt, and row metadata. A translation
-that changes anything a scorer reads is a different benchmark and its scores are
-not comparable to the source's.
+every field the contract compares — tool names and complete parameter schemas,
+the gold calls with their turn, group, and order, the assertions, and the gating
+columns. Translation may change approved conversation content, intent display
+text, localized metadata, and `tools[].function.description`. The evaluator
+compares a field-level tool projection that removes only that description; a
+translation that changes any other tool field or scorer input is a different
+benchmark and its scores are not comparable to the source's.
 
 ## How candidate output is observed
 

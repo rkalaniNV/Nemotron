@@ -30,6 +30,14 @@ type = "bfcl_export_validation_report"
 description = "exports/export_validation_report.json proving enabled export row counts, order, truth fields, and hashes equal benchmark.parquet."
 
 [[produces]]
+type = "bfcl_localized_benchmark"
+description = "A target-language BFCL benchmark preserving source task identity, executable calls, assertions, schemas, fixture values, and Oracle lineage."
+
+[[produces]]
+type = "bfcl_translation_manifest"
+description = "Content-addressed translation_manifest.json binding the localized benchmark to its published source, stable field paths, protected tokens, quality artifacts, translator identity, and contamination scope."
+
+[[produces]]
 type = "bfcl_source_verification_report"
 description = "source_verification_report.json in the eval output tree proving the evaluated source is the committed publication: manifest hash, both table hashes, publication semantics, task index, and oracle pack fingerprint."
 
@@ -118,6 +126,11 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 [[strategies]]
 when = "You need BFCL JSONL or a NeMo Evaluator input bundle beside the published parquet"
 then = "Enable exports.bfcl_json and/or exports.nemo_evaluator_bundle. Stage 12 derives both from one canonical projection, reads them back, writes exports/export_validation_report.json, and publishes run_manifest.json last. The NeMo bundle is W5 adapter input, not a standalone Launcher task registration."
+skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[strategies]]
+when = "You need to localize a published BFCL benchmark without changing what it scores"
+then = "Resolve config/translate.yaml, point source_run_manifest at the immutable generation run's run_manifest.json, and run stage=translate. The adapter verifies both source tables through the manifest, flattens approved message, intent, and optional function-description fields to stable paths, replaces executable tokens with ordered placeholders, uses the shared translation and backtranslation backend, restores and validates every token, then compares every localized row with its source before atomically writing benchmark.<language>.parquet and translation_manifest.json. It never accepts a bare parquet, filters a row, translates tool results, or changes tool names, parameter schemas, expected calls, assertions, held-out state, or lineage."
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
@@ -363,7 +376,7 @@ recovery = "The declared oracle is not the one the source run executed: the kind
 
 [[errors]]
 name = "eval_source_translation_lineage_invalid"
-recovery = "A translated benchmark does not derive from this source run without changing its truth: the manifest changed after resolution, it names another run, it omits language/benchmark/task_ids_hash, its table does not match its declared hash, it adds, drops, or reorders rows, or it restates a preserved field. Translate only the conversation, intent, system prompt, and row metadata; every field a scorer compares must survive translation unchanged."
+recovery = "A localized benchmark does not satisfy the content-addressed BFCL translation contract: source or artifact hashes moved, stable translation/backtranslation/quality evidence is incomplete, translator identity or contamination scope is absent, languages disagree with row metadata, task order changed, or a protected message, tool, call, assertion, identifier, or lineage field changed. Regenerate with BFCLTranslationAdapter and restore the complete translation output as one immutable tree."
 
 [[errors]]
 name = "eval_source_changed_during_eval"
@@ -539,7 +552,11 @@ recovery = "Remove the stale generated BFCL framework distribution and install t
 
 [[errors]]
 name = "byob_stage_unsupported"
-recovery = "Choose a stage implemented by the selected benchmark family. BFCL supports prepare, generate, eval, and all; eval does not accept generation resume controls."
+recovery = "Choose a stage implemented by the selected benchmark family. BFCL supports prepare, generate, translate, eval, and all; translate and eval do not accept generation resume controls."
+
+[[errors]]
+name = "bfcl_translation_invalid"
+recovery = "Start from config/translate.yaml, set config_status: resolved, and name the source release's run_manifest.json rather than benchmark.parquet. Keep the source tree immutable, use a distinct empty output directory, preserve every protected placeholder through forward and backtranslation, and never enable remove_low_quality because BFCL task identity and publication order cannot change."
 
 [reference]
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"

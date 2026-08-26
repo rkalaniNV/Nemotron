@@ -39,11 +39,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import yaml
 from pydantic import ValidationError
@@ -63,6 +65,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
     EvalOracleResource,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract import (
+    BFCL_TRANSLATION_CONTRACT_VERSION,
     SOURCE_VERIFICATION_CONTRACT_VERSION,
     SOURCE_VERIFICATION_FAILURE_FILE,
     SOURCE_VERIFICATION_REPORT_FILE,
@@ -76,6 +79,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract im
     VerifiedOracleSource,
     VerifiedPublication,
     VerifiedTranslationSource,
+    translation_preserved_projection,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_errors import (
     BenchmarkHashMismatchError,
@@ -114,6 +118,12 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.publication_contract im
     verify_written_benchmarks,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import benchmark_schema, canonical_json
+from nemotron.steps.byob.runtime.config import AVAILABLE_QUALITY_METRICS
+from nemotron.steps.byob.runtime.translation.locales import (
+    SUPPORTED_SCRIPTS,
+    contains_script,
+    normalize_locale,
+)
 
 RUN_MANIFEST_FILE: Final = "run_manifest.json"
 
@@ -153,6 +163,7 @@ BACKEND_INTERFACE: Final = ("call_tool", "get_state", "list_tools", "reset")
 _UNSAFE_TASK_ID_CHARS: Final = frozenset('/\\:*?"<>|')
 _RESERVED_TASK_IDS: Final = frozenset({".", ".."})
 _MAX_TASK_ID_LENGTH: Final = 200
+_BFCL_PROTECTED_PLACEHOLDER: Final = re.compile(r"__BFCL_PROTECTED_[0-9]{6}__")
 
 
 def _sha256_file(path: Path) -> str:
@@ -529,9 +540,7 @@ def _verify_published_bytes(
     )
 
     raw_file = _plain_file_name(raw_declared.get("file"), "source_run_manifest.publication.raw.file")
-    published_file = _plain_file_name(
-        published_declared.get("file"), "source_run_manifest.publication.published.file"
-    )
+    published_file = _plain_file_name(published_declared.get("file"), "source_run_manifest.publication.published.file")
     if published_file != config.source.benchmark.path.name:
         raise SourceManifestDriftError(
             "source_run_manifest.publication.published.file",
@@ -939,9 +948,7 @@ def _verify_oracle(
         expected="the source oracle pack version",
         recovery="point at an unmodified run_manifest.json",
     )
-    expected_fingerprint = _content_hash_field(
-        pack.get("content_hash"), "source_run_manifest.pack.content_hash"
-    )
+    expected_fingerprint = _content_hash_field(pack.get("content_hash"), "source_run_manifest.pack.content_hash")
     if (pack_id, pack_version) != (resource.pack_id, resource.pack_version):
         raise OracleResourceMismatchError(
             "source_oracle",
@@ -1329,6 +1336,550 @@ def _verify_translation(
             "that owns its declared contract",
         )
 
+    translation_contract = document.get("translation_contract")
+    if translation_contract != BFCL_TRANSLATION_CONTRACT_VERSION:
+        raise TranslationLineageError(
+            f"{artifact}.translation_contract",
+            "does not declare the required BFCL translation contract",
+            actual=translation_contract,
+            expected=BFCL_TRANSLATION_CONTRACT_VERSION,
+            recovery="regenerate the localization with BFCLTranslationAdapter",
+        )
+    if translation_contract == BFCL_TRANSLATION_CONTRACT_VERSION:
+        required_content_addressed = {
+            "translation_id",
+            "model",
+            "contamination",
+            "field_policy",
+            "protected_tokens",
+            "source_benchmark_content_hash",
+            "source_oracle_pack",
+            "artifacts",
+            "quality",
+            "source_language",
+            "localization_validation",
+        }
+        if missing := sorted(required_content_addressed - set(document)):
+            raise TranslationLineageError(
+                artifact,
+                f"omits content-addressed BFCL translation field(s): {', '.join(missing)}",
+                expected="complete model, contamination, field, source, and artifact provenance",
+                recovery="regenerate the localization with BFCLTranslationAdapter",
+            )
+        body = {key: value for key, value in document.items() if key != "translation_id"}
+        expected_translation_id = _sha256_json(body)
+        if document["translation_id"] != expected_translation_id:
+            raise TranslationLineageError(
+                f"{artifact}.translation_id",
+                "does not identify the translation manifest body",
+                actual=document["translation_id"],
+                expected=expected_translation_id,
+                recovery="restore the unmodified content-addressed translation manifest",
+            )
+        model = document["model"]
+        if not isinstance(model, Mapping):
+            raise TranslationLineageError(
+                f"{artifact}.model",
+                "does not declare complete translator provenance",
+                expected="provider, model, canonical_id, source, immutable weights, and config_hash",
+                recovery="regenerate the localization with a resolved translator identity",
+            )
+        for field in ("provider", "model", "canonical_id", "source"):
+            _translation_text(model.get(field), f"{artifact}.model.{field}")
+        config_hash = model.get("config_hash")
+        revision = model.get("revision")
+        weights_digest = model.get("weights_digest")
+        if (
+            not isinstance(config_hash, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", config_hash)
+            or (
+                not (isinstance(weights_digest, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", weights_digest))
+                and not (isinstance(revision, str) and re.fullmatch(r"[0-9a-fA-F]{40,64}", revision))
+            )
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.model",
+                "does not pin the translator config and immutable weights",
+                expected="config_hash plus weights_digest or a 40-64 hex revision",
+                recovery="resolve complete translator provenance and regenerate",
+            )
+        field_policy = document["field_policy"]
+        required_localized = [
+            "messages.system.content",
+            "messages.user.content",
+            "messages.assistant_without_tool_calls.content",
+            "intent",
+            "metadata.language",
+        ]
+        allowed_localized_policies = [
+            required_localized,
+            [*required_localized, "tools.function.description"],
+        ]
+        localized_fields = field_policy.get("localized_fields") if isinstance(field_policy, Mapping) else None
+        if (
+            not isinstance(field_policy, Mapping)
+            or field_policy.get("flattening_contract") != "bfcl-translation-fields/1.0"
+            or field_policy.get("preserved_fields") != list(TRANSLATION_PRESERVED_FIELDS)
+            or not isinstance(localized_fields, list)
+            or localized_fields not in allowed_localized_policies
+            or type(field_policy.get("unit_count")) is not int
+            or field_policy["unit_count"] <= 0
+            or not isinstance(field_policy.get("field_paths_hash"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", field_policy["field_paths_hash"])
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.field_policy",
+                "does not declare the closed stable-path localization policy",
+                expected="the BFCL field policy with preserved fields, paths hash, and unit count",
+                recovery="regenerate the localization with BFCLTranslationAdapter",
+            )
+        localized_fields = cast(list[str], localized_fields)
+        protection = document["protected_tokens"]
+        if (
+            not isinstance(protection, Mapping)
+            or protection.get("contract") != "bfcl-protected-tokens/1.0"
+            or type(protection.get("occurrences")) is not int
+            or protection["occurrences"] < 0
+            or type(protection.get("fields_with_tokens")) is not int
+            or not 0 <= protection["fields_with_tokens"] <= field_policy["unit_count"]
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.protected_tokens",
+                "does not declare valid ordered-placeholder evidence",
+                expected="non-negative token and field counts under the protected-token contract",
+                recovery="regenerate the localization with BFCLTranslationAdapter",
+            )
+        quality = document["quality"]
+        quality_metrics = quality.get("metrics") if isinstance(quality, Mapping) else None
+        if (
+            not isinstance(quality, Mapping)
+            or quality.get("backtranslation") is not True
+            or quality.get("row_filtering") is not False
+            or not isinstance(quality_metrics, list)
+            or not quality_metrics
+            or any(
+                not isinstance(metric, Mapping)
+                or metric.get("type") not in AVAILABLE_QUALITY_METRICS
+                or not isinstance(metric.get("threshold"), int | float)
+                or isinstance(metric.get("threshold"), bool)
+                or metric["threshold"] < 0
+                for metric in quality_metrics
+            )
+            or len({metric["type"] for metric in quality_metrics}) != len(quality_metrics)
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.quality",
+                "does not declare backtranslation metrics without row filtering",
+                expected="backtranslation true, non-empty metrics, and row_filtering false",
+                recovery="regenerate the complete BFCL localization",
+            )
+        localization_validation = document["localization_validation"]
+        deterministic_fixes = (
+            localization_validation.get("deterministic_fixes")
+            if isinstance(localization_validation, Mapping)
+            else None
+        )
+        forbidden_patterns = (
+            localization_validation.get("forbidden_patterns") if isinstance(localization_validation, Mapping) else None
+        )
+        required_script = (
+            localization_validation.get("required_script") if isinstance(localization_validation, Mapping) else None
+        )
+        minimum_changed_fraction = (
+            localization_validation.get("minimum_changed_fraction")
+            if isinstance(localization_validation, Mapping)
+            else None
+        )
+        changed_fraction = (
+            localization_validation.get("changed_fraction") if isinstance(localization_validation, Mapping) else None
+        )
+        if (
+            not isinstance(localization_validation, Mapping)
+            or localization_validation.get("contract") != "bfcl-localization-validation/1.0"
+            or localization_validation.get("model_role") != "translator"
+            or localization_validation.get("executable_replay") != "truth_projection_and_parquet_readback"
+            or not isinstance(deterministic_fixes, Mapping)
+            or set(deterministic_fixes) != {"line_endings", "trailing_whitespace", "unicode"}
+            or deterministic_fixes.get("line_endings") != "lf"
+            or deterministic_fixes.get("trailing_whitespace") != "removed"
+            or deterministic_fixes.get("unicode") not in {"NFC", "unchanged"}
+            or not isinstance(minimum_changed_fraction, int | float)
+            or isinstance(minimum_changed_fraction, bool)
+            or not 0 < float(minimum_changed_fraction) <= 1
+            or not isinstance(changed_fraction, int | float)
+            or isinstance(changed_fraction, bool)
+            or not 0 <= float(changed_fraction) <= 1
+            or not isinstance(forbidden_patterns, list)
+            or any(not isinstance(pattern, str) or not pattern for pattern in forbidden_patterns)
+            or (required_script is not None and required_script not in SUPPORTED_SCRIPTS)
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.localization_validation",
+                "does not declare deterministic localization and language gates",
+                expected="the BFCL localization-validation contract",
+                recovery="regenerate the localization with BFCLTranslationAdapter",
+            )
+        try:
+            compiled_forbidden_patterns = [re.compile(pattern, flags=re.IGNORECASE) for pattern in forbidden_patterns]
+        except re.error as exc:
+            raise TranslationLineageError(
+                f"{artifact}.localization_validation.forbidden_patterns",
+                f"contains invalid regex: {exc}",
+                recovery="regenerate the localization with valid response guards",
+            ) from exc
+        if document["source_benchmark_content_hash"] != projection.source.content_hash:
+            raise TranslationLineageError(
+                f"{artifact}.source_benchmark_content_hash",
+                "does not identify the source benchmark this localization derives from",
+                actual=document["source_benchmark_content_hash"],
+                expected=projection.source.content_hash,
+                recovery="regenerate the localization from this source publication",
+            )
+        declared_pack = document["source_oracle_pack"]
+        source_pack = manifest.get("pack")
+        expected_pack = (
+            {
+                "pack_id": source_pack.get("pack_id"),
+                "version": source_pack.get("version"),
+                "content_hash": source_pack.get("content_hash"),
+            }
+            if isinstance(source_pack, Mapping)
+            else None
+        )
+        if not isinstance(declared_pack, Mapping) or canonical_json(declared_pack) != canonical_json(expected_pack):
+            raise TranslationLineageError(
+                f"{artifact}.source_oracle_pack",
+                "does not preserve the source Oracle-pack identity",
+                actual=declared_pack,
+                expected=canonical_json(expected_pack),
+                recovery="regenerate the localization from the immutable source release",
+            )
+        declared_artifacts = document["artifacts"]
+        expected_artifacts = {
+            "translation_units": "stage_cache/translation_units.parquet",
+            "backtranslation_units": "stage_cache/backtranslation_units.parquet",
+            "quality_metrics": "stage_cache/quality_metrics.parquet",
+        }
+        if not isinstance(declared_artifacts, Mapping) or set(declared_artifacts) != set(expected_artifacts):
+            raise TranslationLineageError(
+                f"{artifact}.artifacts",
+                "does not declare translation, backtranslation, and quality evidence",
+                expected=f"exactly {sorted(expected_artifacts)}",
+                recovery="regenerate the localization with BFCLTranslationAdapter",
+            )
+        evidence_rows: dict[str, list[dict[str, Any]]] = {}
+        for name, entry in declared_artifacts.items():
+            if (
+                not isinstance(entry, Mapping)
+                or set(entry) != {"file", "rows", "content_hash"}
+                or entry.get("file") != expected_artifacts[name]
+                or entry.get("rows") != field_policy["unit_count"]
+            ):
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts.{name}",
+                    "does not cover every stable translation field",
+                    expected=(f"{expected_artifacts[name]}, {field_policy['unit_count']} rows, and content_hash"),
+                    recovery="restore the unmodified translation manifest",
+                )
+            relative = Path(str(entry.get("file", "")))
+            evidence_path = reference.path.parent / relative
+            expected_hash = entry.get("content_hash")
+            if (
+                not relative.parts
+                or relative.is_absolute()
+                or ".." in relative.parts
+                or not evidence_path.is_file()
+                or evidence_path.is_symlink()
+                or evidence_path.resolve() != reference.path.parent.resolve() / relative
+                or not isinstance(expected_hash, str)
+                or _sha256_file(evidence_path) != expected_hash
+            ):
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts.{name}",
+                    "is missing, unsafe, or does not match its declared hash",
+                    expected="an immutable evidence file inside the translation tree",
+                    recovery="restore the complete translation output",
+                )
+            try:
+                import pyarrow.parquet as pq  # type: ignore[import-untyped]
+
+                table = pq.read_table(evidence_path)
+                artifact_rows = table.num_rows
+                evidence_rows[str(name)] = table.to_pylist()
+            except Exception as exc:  # noqa: BLE001 - all unreadable evidence fails alike
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts.{name}",
+                    "cannot be read as Parquet evidence",
+                    expected=f"{field_policy['unit_count']} readable rows",
+                    recovery="restore the complete translation output",
+                ) from exc
+            if artifact_rows != entry["rows"]:
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts.{name}.rows",
+                    "does not match its Parquet evidence",
+                    actual=entry["rows"],
+                    expected=str(artifact_rows),
+                    recovery="restore the unmodified translation manifest",
+                )
+        forward_rows = evidence_rows["translation_units"]
+        backward_rows = evidence_rows["backtranslation_units"]
+        quality_rows = evidence_rows["quality_metrics"]
+        translation_columns = {
+            "translation_id",
+            "field_path",
+            "text",
+            "source_language_code",
+            "target_language_code",
+            "translation",
+        }
+        quality_columns = {
+            "translation_id",
+            "field_path",
+            "source_text",
+            "translation",
+            "backtranslation",
+            "is_quality_metric_passed",
+            *(f"score_{metric['type']}" for metric in quality_metrics),
+            *(f"score_{metric['type']}_passed" for metric in quality_metrics),
+        }
+        if (
+            any(set(row) != translation_columns for row in forward_rows)
+            or any(set(row) != translation_columns for row in backward_rows)
+            or any(not quality_columns <= set(row) for row in quality_rows)
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.artifacts",
+                "does not carry the stable translation, backtranslation, and quality columns",
+                expected="field identities, paths, texts, languages, translations, and metric verdicts",
+                recovery="restore evidence written by BFCLTranslationAdapter",
+            )
+        for row_number, quality_row in enumerate(quality_rows):
+            expected_passes: list[bool] = []
+            for metric in quality_metrics:
+                metric_type = str(metric["type"])
+                score = quality_row.get(f"score_{metric_type}")
+                passed = quality_row.get(f"score_{metric_type}_passed")
+                if (
+                    not isinstance(score, int | float)
+                    or isinstance(score, bool)
+                    or not math.isfinite(float(score))
+                    or type(passed).__name__ not in {"bool", "bool_"}
+                ):
+                    raise TranslationLineageError(
+                        f"{artifact}.artifacts.quality_metrics row {row_number}",
+                        f"has an invalid {metric_type} score or verdict",
+                        recovery="regenerate quality evidence from the configured metrics",
+                    )
+                threshold = float(metric["threshold"])
+                expected_pass = float(score) <= threshold if metric_type == "ter" else float(score) >= threshold
+                if bool(passed) != expected_pass:
+                    raise TranslationLineageError(
+                        f"{artifact}.artifacts.quality_metrics row {row_number}",
+                        f"has an inconsistent {metric_type} threshold verdict",
+                        actual=passed,
+                        expected=str(expected_pass),
+                        recovery="regenerate quality evidence from the configured thresholds",
+                    )
+                expected_passes.append(expected_pass)
+            aggregate = quality_row.get("is_quality_metric_passed")
+            expected_aggregate = all(expected_passes)
+            if type(aggregate).__name__ not in {"bool", "bool_"} or bool(aggregate) != expected_aggregate:
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts.quality_metrics row {row_number}",
+                    "has an inconsistent aggregate quality verdict",
+                    actual=aggregate,
+                    expected=str(expected_aggregate),
+                    recovery="regenerate quality evidence from per-metric verdicts",
+                )
+        identifiers = [str(row["translation_id"]) for row in forward_rows]
+        paths = [str(row["field_path"]) for row in forward_rows]
+        expected_paths = _expected_translation_paths(projection.rows, localized_fields)
+        if (
+            len(set(identifiers)) != len(identifiers)
+            or len(set(paths)) != len(paths)
+            or paths != expected_paths
+            or _sha256_json(paths) != field_policy["field_paths_hash"]
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.artifacts.translation_units",
+                "does not carry unique stable field identities in the declared order",
+                expected=field_policy["field_paths_hash"],
+                recovery="restore the original translation evidence",
+            )
+        by_name = {name: {str(row["translation_id"]): row for row in rows} for name, rows in evidence_rows.items()}
+        if any(set(rows) != set(identifiers) for rows in by_name.values()):
+            raise TranslationLineageError(
+                f"{artifact}.artifacts",
+                "translation, backtranslation, and quality evidence cover different fields",
+                expected="the same stable translation IDs in all three artifacts",
+                recovery="restore the complete translation output",
+            )
+        placeholder_occurrences = 0
+        fields_with_placeholders = 0
+        from nemotron.steps.byob.runtime.benchmark_families.bfcl.translation import (
+            protected_translation_field,
+        )
+
+        source_rows_by_id = {row.task_id: row for row in projection.rows}
+        evidence_task_ids: set[str] = set()
+        field_bindings: dict[str, dict[str, str]] = {}
+        changed_fields = 0
+        localized_texts: list[str] = []
+        for identifier, path in zip(identifiers, paths, strict=True):
+            forward_row = by_name["translation_units"][identifier]
+            backward_row = by_name["backtranslation_units"][identifier]
+            quality_row = by_name["quality_metrics"][identifier]
+            source_text = forward_row["text"]
+            forward_text = forward_row["translation"]
+            backward_text = backward_row["translation"]
+            if not all(
+                isinstance(value, str)
+                for value in (
+                    path,
+                    source_text,
+                    forward_text,
+                    backward_text,
+                )
+            ):
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts field {identifier}",
+                    "carries a non-text field path or translation",
+                    expected="UTF-8 text under one stable JSON field path",
+                    recovery="restore the original translation evidence",
+                )
+            localized_text = _BFCL_PROTECTED_PLACEHOLDER.sub("", forward_text)
+            if (
+                "\r" in forward_text
+                or any(line != line.rstrip() for line in forward_text.split("\n"))
+                or (
+                    deterministic_fixes["unicode"] == "NFC"
+                    and unicodedata.normalize("NFC", forward_text) != forward_text
+                )
+                or any(pattern.search(localized_text) for pattern in compiled_forbidden_patterns)
+            ):
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts field {identifier}",
+                    "fails its declared deterministic localization or response guards",
+                    recovery="regenerate and validate localized text before publication",
+                )
+            changed_fields += forward_text != source_text
+            localized_texts.append(localized_text)
+            try:
+                evidence_task_id, original_text = _translation_path_value(source_rows_by_id, path)
+            except (IndexError, KeyError, TypeError) as exc:
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts field {identifier}",
+                    "does not name an approved field on its source task",
+                    actual=path,
+                    expected="approved message content, intent, or function.description",
+                    recovery="regenerate deterministic field paths from the source benchmark",
+                ) from exc
+            expected_protected_text = protected_translation_field(
+                source_rows_by_id[evidence_task_id],
+                original_text,
+                path=path,
+            )
+            if source_text != expected_protected_text:
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts field {identifier}",
+                    "does not apply the exact protected-token policy to its source field",
+                    actual=source_text,
+                    expected=expected_protected_text,
+                    recovery="regenerate placeholders from the immutable source row",
+                )
+            bindings = _protected_bindings(source_text, original_text)
+            if bindings is None:
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts field {identifier}",
+                    "protected source text does not reconstruct the source benchmark field",
+                    actual=path,
+                    expected="source text with only protected tokens replaced by placeholders",
+                    recovery="restore evidence written from the immutable source row",
+                )
+            evidence_task_ids.add(evidence_task_id)
+            field_bindings[identifier] = bindings
+            source_placeholders = _BFCL_PROTECTED_PLACEHOLDER.findall(source_text)
+            if (
+                _BFCL_PROTECTED_PLACEHOLDER.findall(forward_text) != source_placeholders
+                or _BFCL_PROTECTED_PLACEHOLDER.findall(backward_row["text"]) != source_placeholders
+                or _BFCL_PROTECTED_PLACEHOLDER.findall(backward_text) != source_placeholders
+                or backward_row["text"] != forward_text
+                or quality_row.get("field_path") != path
+                or quality_row.get("source_text") != source_text
+                or quality_row.get("translation") != forward_text
+                or quality_row.get("backtranslation") != backward_text
+                or forward_row["source_language_code"] != document["source_language"]
+                or forward_row["target_language_code"] != document["language"]
+                or backward_row["source_language_code"] != document["language"]
+                or backward_row["target_language_code"] != document["source_language"]
+            ):
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts field {identifier}",
+                    "breaks stable path, language, text, or protected-placeholder lineage",
+                    expected="one identical field record through translation, backtranslation, and quality",
+                    recovery="restore evidence written by BFCLTranslationAdapter",
+                )
+            expected_identifier = _sha256_json(
+                {
+                    "contract": field_policy["flattening_contract"],
+                    "source_manifest": config.source.run_manifest.content_hash,
+                    "path": path,
+                    "text": original_text,
+                }
+            )
+            if identifier != expected_identifier:
+                raise TranslationLineageError(
+                    f"{artifact}.artifacts field {identifier}",
+                    "does not derive its stable identity from source, path, and text",
+                    expected=expected_identifier,
+                    recovery="regenerate the localization from the immutable source",
+                )
+            placeholder_occurrences += len(source_placeholders)
+            fields_with_placeholders += bool(source_placeholders)
+        if evidence_task_ids != set(index.task_ids):
+            raise TranslationLineageError(
+                f"{artifact}.artifacts.translation_units",
+                "does not cover every source task",
+                actual=sorted(evidence_task_ids),
+                expected=index.task_ids_hash,
+                recovery="flatten every published row without adding or dropping a task",
+            )
+        if (
+            placeholder_occurrences != protection["occurrences"]
+            or fields_with_placeholders != protection["fields_with_tokens"]
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.protected_tokens",
+                "does not match the placeholders in translation evidence",
+                actual={
+                    "occurrences": protection["occurrences"],
+                    "fields_with_tokens": protection["fields_with_tokens"],
+                },
+                expected=(f"{placeholder_occurrences} occurrences in {fields_with_placeholders} fields"),
+                recovery="restore the original content-addressed translation output",
+            )
+        actual_changed_fraction = changed_fields / len(forward_rows)
+        if (
+            actual_changed_fraction < float(minimum_changed_fraction)
+            or not math.isclose(
+                actual_changed_fraction,
+                float(changed_fraction),
+                rel_tol=0,
+                abs_tol=1e-12,
+            )
+            or (required_script is not None and not contains_script("\n".join(localized_texts), required_script))
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.localization_validation",
+                "does not match the localized evidence language gates",
+                actual={
+                    "changed_fraction": actual_changed_fraction,
+                    "required_script": required_script,
+                },
+                expected=localization_validation,
+                recovery="regenerate the localization and its validation evidence",
+            )
+
     for field in ("language", "benchmark", "task_ids_hash"):
         if field not in document:
             raise TranslationLineageError(
@@ -1372,9 +1923,7 @@ def _verify_translation(
             expected="a plain file name",
             recovery="write the translated table beside its manifest",
         )
-    declared_hash = _translation_text(
-        declared_benchmark.get("content_hash"), f"{artifact}.benchmark.content_hash"
-    )
+    declared_hash = _translation_text(declared_benchmark.get("content_hash"), f"{artifact}.benchmark.content_hash")
     benchmark_path = reference.path.parent / file_name
     if not benchmark_path.is_file() or benchmark_path.is_symlink() or benchmark_path.resolve() != benchmark_path:
         raise TranslationLineageError(
@@ -1410,7 +1959,6 @@ def _verify_translation(
             expected=str(translated.source.rows),
             recovery="regenerate the translation manifest; its row count must describe the table it commits",
         )
-
     if tuple(row.task_id for row in translated.rows) != index.task_ids:
         raise TranslationLineageError(
             f"{artifact}.benchmark",
@@ -1420,6 +1968,59 @@ def _verify_translation(
             recovery="translate every published row and keep the publication order; a translation that adds, "
             "drops, or reorders rows is a different benchmark",
         )
+    source_language = _translation_text(document["source_language"], f"{artifact}.source_language")
+    try:
+        source_locale = normalize_locale(source_language)
+        translated_locale = normalize_locale(language)
+        source_languages = {normalize_locale(str(row.metadata.get("language"))).primary for row in projection.rows}
+        translated_languages = {normalize_locale(str(row.metadata.get("language"))).primary for row in translated.rows}
+    except ValueError as exc:
+        raise TranslationLineageError(
+            f"{artifact}.language",
+            f"contains an invalid locale tag: {exc}",
+            recovery="regenerate the localization with valid BCP-47 locale tags",
+        ) from exc
+    if source_languages != {source_locale.primary}:
+        raise TranslationLineageError(
+            f"{artifact}.source_language",
+            "does not identify every source row's language",
+            actual=sorted(source_languages),
+            expected=source_language,
+            recovery="regenerate the localization with the source language declared correctly",
+        )
+    if translated_languages != {translated_locale.primary}:
+        raise TranslationLineageError(
+            f"{artifact}.language",
+            "does not identify every localized row's metadata.language",
+            actual=sorted(translated_languages),
+            expected=language,
+            recovery="regenerate the localization without mixed or mislabeled rows",
+        )
+    translated_rows_by_id = {row.task_id: row for row in translated.rows}
+    for identifier, path in zip(identifiers, paths, strict=True):
+        try:
+            _, localized_text = _translation_path_value(translated_rows_by_id, path)
+        except (IndexError, KeyError, TypeError) as exc:
+            raise TranslationLineageError(
+                f"{artifact}.artifacts field {identifier}",
+                "does not name the same approved field in the localized benchmark",
+                actual=path,
+                expected="the source field path on the row with the same task id",
+                recovery="reassemble localization only through its stable field paths",
+            ) from exc
+        restored = _restore_evidence_text(
+            str(by_name["translation_units"][identifier]["translation"]),
+            field_bindings[identifier],
+        )
+        if restored != localized_text:
+            raise TranslationLineageError(
+                f"{artifact}.artifacts field {identifier}",
+                "forward translation does not reconstruct the localized benchmark field",
+                actual=path,
+                expected="the exact localized value committed in benchmark Parquet",
+                recovery="restore the content-addressed benchmark and translation evidence together",
+            )
+
     declared_index_hash = _translation_text(document["task_ids_hash"], f"{artifact}.task_ids_hash")
     if declared_index_hash != index.task_ids_hash:
         raise TranslationLineageError(
@@ -1429,7 +2030,28 @@ def _verify_translation(
             expected=index.task_ids_hash,
             recovery="regenerate the translation from this source publication",
         )
-    _require_preserved_truth(projection.rows, translated.rows)
+    if translation_contract == BFCL_TRANSLATION_CONTRACT_VERSION:
+        contamination = document["contamination"]
+        if (
+            not isinstance(contamination, Mapping)
+            or contamination.get("role") != "translator"
+            or contamination.get("scope") != "all_translated_rows"
+            or contamination.get("task_ids_hash") != index.task_ids_hash
+            or contamination.get("task_count") != index.task_count
+            or contamination.get("model_canonical_id") != document["model"]["canonical_id"]
+        ):
+            raise TranslationLineageError(
+                f"{artifact}.contamination",
+                "does not declare translator exposure over the complete source task set",
+                expected="translator exposure over all translated rows",
+                recovery="regenerate the localization with BFCLTranslationAdapter",
+            )
+    verified_localized_fields = cast(list[str], localized_fields)
+    _require_preserved_truth(
+        projection.rows,
+        translated.rows,
+        allow_tool_descriptions=("tools.function.description" in verified_localized_fields),
+    )
     translator = _translator_identity(document, artifact)
 
     checks.append(
@@ -1456,22 +2078,19 @@ def _verify_translation(
         ),
         task_ids_hash=index.task_ids_hash,
         translator=translator,
+        tool_descriptions_localized=("tools.function.description" in verified_localized_fields),
     )
 
 
-def _translator_identity(document: Mapping[str, Any], artifact: str) -> ModelIdentityClaim | None:
-    """Read the optional ``model`` block naming the translator.
-
-    A translation run reads every row it rewrites, so its model is an exposure.
-    The block is optional because a translation may come from outside this
-    pipeline, and refusing those outright would be a worse outcome than
-    evaluating them un-publishably: an absent block leaves the translator
-    unidentified, which the contamination gate treats as unresolved rather than
-    as clean. A block that is present must be usable, though — an empty mapping
-    is a manifest that meant to declare something and declared nothing.
-    """
+def _translator_identity(document: Mapping[str, Any], artifact: str) -> ModelIdentityClaim:
+    """Read the mandatory model block naming the translator."""
     if "model" not in document:
-        return None
+        raise TranslationLineageError(
+            f"{artifact}.model",
+            "does not identify the model that read every translated row",
+            expected="complete translator provenance",
+            recovery="regenerate the localization with BFCLTranslationAdapter",
+        )
     declared = document["model"]
     if not isinstance(declared, Mapping):
         raise TranslationLineageError(
@@ -1512,9 +2131,92 @@ def _translation_text(value: Any, artifact: str) -> str:
     return value.strip()
 
 
+def _translation_path_value(
+    rows: Mapping[str, CanonicalExportRow],
+    path: str,
+) -> tuple[str, str]:
+    prefix, separator, suffix = path.partition("/")
+    if prefix != "tasks" or not separator:
+        raise KeyError(path)
+    escaped_task_id, separator, field_path = suffix.partition("/")
+    if not separator:
+        raise KeyError(path)
+    task_id = escaped_task_id.replace("~1", "/").replace("~0", "~")
+    row = rows[task_id]
+    parts = field_path.split("/")
+    value: Any
+    if len(parts) == 1 and parts[0] == "intent":
+        value = row.intent
+    elif len(parts) == 3 and parts[0] == "messages" and parts[1].isdigit() and parts[2] == "content":
+        message = row.messages[int(parts[1])]
+        if message.role not in {"system", "user"} and not (message.role == "assistant" and not message.tool_calls):
+            raise KeyError(path)
+        value = message.content
+    elif len(parts) == 4 and parts[0] == "tools" and parts[1].isdigit() and parts[2:] == ["function", "description"]:
+        value = row.tools[int(parts[1])]["function"].get("description")
+    else:
+        raise KeyError(path)
+    if not isinstance(value, str) or not value:
+        raise KeyError(path)
+    return task_id, value
+
+
+def _expected_translation_paths(
+    rows: Sequence[CanonicalExportRow],
+    localized_fields: Sequence[str],
+) -> list[str]:
+    include_tool_descriptions = "tools.function.description" in localized_fields
+    paths: list[str] = []
+    for row in rows:
+        task_id = row.task_id.replace("~", "~0").replace("/", "~1")
+        for index, message in enumerate(row.messages):
+            if message.content and (
+                message.role in {"system", "user"} or (message.role == "assistant" and not message.tool_calls)
+            ):
+                paths.append(f"tasks/{task_id}/messages/{index}/content")
+        if row.intent:
+            paths.append(f"tasks/{task_id}/intent")
+        if include_tool_descriptions:
+            for index, tool in enumerate(row.tools):
+                function = tool.get("function")
+                description = function.get("description") if isinstance(function, Mapping) else None
+                if isinstance(description, str) and description:
+                    paths.append(f"tasks/{task_id}/tools/{index}/function/description")
+    return paths
+
+
+def _protected_bindings(protected: str, original: str) -> dict[str, str] | None:
+    placeholders = _BFCL_PROTECTED_PLACEHOLDER.findall(protected)
+    if len(set(placeholders)) != len(placeholders):
+        return None
+    cursor = 0
+    pattern = ""
+    for index, placeholder in enumerate(placeholders):
+        position = protected.find(placeholder, cursor)
+        pattern += re.escape(protected[cursor:position])
+        pattern += f"(?P<token_{index}>.*?)"
+        cursor = position + len(placeholder)
+    pattern += re.escape(protected[cursor:])
+    match = re.fullmatch(pattern, original, flags=re.DOTALL)
+    if match is None:
+        return None
+    return {placeholder: match.group(f"token_{index}") for index, placeholder in enumerate(placeholders)}
+
+
+def _restore_evidence_text(text: str, bindings: Mapping[str, str]) -> str | None:
+    result = text
+    for placeholder, value in bindings.items():
+        if result.count(placeholder) != 1:
+            return None
+        result = result.replace(placeholder, value)
+    return result if "__BFCL_PROTECTED_" not in result else None
+
+
 def _require_preserved_truth(
     source_rows: Sequence[CanonicalExportRow],
     translated_rows: Sequence[CanonicalExportRow],
+    *,
+    allow_tool_descriptions: bool,
 ) -> None:
     """Compare every field a translation may not change, row by row.
 
@@ -1523,8 +2225,11 @@ def _require_preserved_truth(
     values equal.
     """
     for source, translated in zip(source_rows, translated_rows, strict=True):
-        source_view = source.model_dump(mode="json")
-        translated_view = translated.model_dump(mode="json")
+        source_view = translation_preserved_projection(source)
+        translated_view = translation_preserved_projection(translated)
+        if not allow_tool_descriptions:
+            source_view["tools"] = source.model_dump(mode="json")["tools"]
+            translated_view["tools"] = translated.model_dump(mode="json")["tools"]
         changed = sorted(
             field
             for field in TRANSLATION_PRESERVED_FIELDS
@@ -1534,9 +2239,14 @@ def _require_preserved_truth(
             raise TranslationLineageError(
                 f"translation_manifest.benchmark row {source.task_id!r}",
                 f"restates {changed}, which a translation may not change",
-                expected="identical tools, gold calls, assertions, and gating fields",
-                recovery="translate only the conversation, the intent, the system prompt, and the row metadata; "
-                "everything a scorer compares against must survive translation unchanged",
+                expected=(
+                    "identical message structure, tool schemas, gold calls, "
+                    "assertions, identifiers, lineage, and gating fields"
+                ),
+                recovery=(
+                    "translate only approved message content, intent display text, "
+                    "metadata.language, and function.description"
+                ),
             )
 
 

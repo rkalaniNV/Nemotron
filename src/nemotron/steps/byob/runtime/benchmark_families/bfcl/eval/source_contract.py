@@ -45,6 +45,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.identity import (
     VerifiedModelExposure,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
+    CanonicalExportRow,
     ContentHash,
     FrozenDict,
     NonNegativeInt,
@@ -53,6 +54,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
 SOURCE_VERIFICATION_CONTRACT_VERSION: Final = "1.0"
+BFCL_TRANSLATION_CONTRACT_VERSION: Final = "bfcl-translation/1.0"
 
 SOURCE_VERIFICATION_REPORT_FILE: Final = "source_verification_report.json"
 # A failed verification writes a differently named artifact, so no reader can
@@ -66,8 +68,8 @@ ClaimScope = Literal["trace_only", "trace_and_executable"]
 
 # Row fields a translated benchmark must state exactly as its source does: the
 # truth a scorer compares a candidate against. Everything outside this tuple is
-# surface a translation exists to change — the conversation, the stated intent,
-# the system prompt, the metadata that records which language the row is in.
+# surface a translation exists to change — approved message content, the stated
+# intent, metadata.language, and the function-description projection.
 # A translation that edits one of these is not a translation of this benchmark,
 # because a candidate could pass it while failing the source.
 TRANSLATION_PRESERVED_FIELDS: Final = (
@@ -88,6 +90,7 @@ TRANSLATION_PRESERVED_FIELDS: Final = (
     "seed",
     "src",
     "success_assertions",
+    "system_prompt_id",
     "task_id",
     "template_id",
     "tier",
@@ -96,7 +99,68 @@ TRANSLATION_PRESERVED_FIELDS: Final = (
     "turn_policy",
     "validated_by",
     "variant_index",
+    "messages",
+    "metadata",
 )
+
+
+def translation_tool_truth(tools: Any) -> Any:
+    """Project tools without their one localizable field.
+
+    ``function.description`` is model-facing prose. The function name and the
+    complete parameters schema remain executable truth and are compared exactly.
+    """
+    projected: list[Any] = []
+    for tool in tools:
+        if not isinstance(tool, Mapping):
+            projected.append(tool)
+            continue
+        item = {str(key): value for key, value in tool.items()}
+        function = item.get("function")
+        if isinstance(function, Mapping):
+            item["function"] = {str(key): value for key, value in function.items() if key != "description"}
+        projected.append(item)
+    return projected
+
+
+def translation_message_truth(messages: Any) -> Any:
+    """Project messages while removing only approved localizable content."""
+    projected: list[Any] = []
+    for message in messages:
+        if not isinstance(message, Mapping):
+            projected.append(message)
+            continue
+        item = {str(key): value for key, value in message.items()}
+        role = item.get("role")
+        tool_calls = item.get("tool_calls")
+        if role in {"system", "user"} or (role == "assistant" and not tool_calls):
+            item["content"] = None
+        projected.append(item)
+    return projected
+
+
+def translation_metadata_truth(metadata: Any) -> Any:
+    """Project row metadata without its target-locale label."""
+    if not isinstance(metadata, Mapping):
+        return metadata
+    return {str(key): value for key, value in metadata.items() if key != "language"}
+
+
+def translation_preserved_projection(row: CanonicalExportRow) -> dict[str, Any]:
+    """Return the exact row truth a localization is forbidden to change."""
+    dumped = row.model_dump(mode="json")
+    return {
+        field: (
+            translation_tool_truth(dumped[field])
+            if field == "tools"
+            else translation_message_truth(dumped[field])
+            if field == "messages"
+            else translation_metadata_truth(dumped[field])
+            if field == "metadata"
+            else dumped[field]
+        )
+        for field in TRANSLATION_PRESERVED_FIELDS
+    }
 
 
 def _sha256_json(payload: Any) -> str:
@@ -145,7 +209,7 @@ class VerifiedBenchmarkArtifact(_Verified):
     def _plain_file_name(cls, value: StrictStr) -> str:
         if not value or Path(value).name != value:
             raise ValueError("must be a plain file name beside the run manifest")
-        return value
+        return str(value)
 
     @field_validator("path")
     @classmethod
@@ -382,11 +446,10 @@ class VerifiedTranslationSource(_Verified):
     benchmark: VerifiedBenchmarkArtifact
     task_ids_hash: ContentHash
     preserved_fields: tuple[StrictStr, ...] = TRANSLATION_PRESERVED_FIELDS
-    # The model that rewrote every row's surface. ``None`` when the translation
-    # manifest does not name one: a translator that cannot be identified is not
-    # assumed to be a different model from the candidate, it is left unresolved
-    # for the contamination gate to refuse to publish.
-    translator: ModelIdentityClaim | None = None
+    # A translator read every localized row, so its identity is mandatory
+    # contamination evidence under the BFCL translation contract.
+    translator: ModelIdentityClaim
+    tool_descriptions_localized: StrictBool = False
 
     def semantic_payload(self) -> dict[str, Any]:
         return {
@@ -396,7 +459,8 @@ class VerifiedTranslationSource(_Verified):
             "benchmark": self.benchmark.semantic_payload(),
             "task_ids_hash": self.task_ids_hash,
             "preserved_fields": list(self.preserved_fields),
-            "translator": self.translator.semantic_payload() if self.translator is not None else None,
+            "translator": self.translator.semantic_payload(),
+            "tool_descriptions_localized": self.tool_descriptions_localized,
         }
 
 
@@ -569,9 +633,7 @@ class SourceVerificationReport(_Verified):
                 if source.oracle is not None
                 else {"required": False}
             ),
-            "translation": (
-                source.translation.semantic_payload() if source.translation is not None else None
-            ),
+            "translation": (source.translation.semantic_payload() if source.translation is not None else None),
             "exposures": [exposure.as_document() for exposure in source.exposures],
             "modes": list(source.modes),
             "claim_scope": source.claim_scope,

@@ -45,6 +45,13 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     write_source_failure_diagnostic,
     write_source_verification_report,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract import (
+    BFCL_TRANSLATION_CONTRACT_VERSION,
+    TRANSLATION_PRESERVED_FIELDS,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
+    CanonicalExportRow,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     pack_fingerprint,
     resolve_declared_pack_paths,
@@ -58,6 +65,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     benchmark_schema,
     canonical_json,
     encode_arguments,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.translation import (
+    protected_translation_field,
 )
 
 IMMUTABLE_REVISION = "9f2c1b7d4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b"
@@ -965,13 +975,161 @@ def _translation(
     translated_rows = rows if rows is not None else [_translate_row(_row("test_pack__tpl__aaaaaaaaaaaaaaaa"))]
     table_path = directory / "benchmark.vi.parquet"
     _write_parquet(table_path, translated_rows)
-    source_ids = [
-        row["task_id"] for row in pq.read_table(publication.benchmark_path, columns=["task_id"]).to_pylist()
+    source_rows = pq.read_table(publication.benchmark_path).to_pylist()
+    source_ids = [row["task_id"] for row in source_rows]
+    translated_by_id = {row["task_id"]: row for row in translated_rows}
+    source_manifest = publication.manifest()
+    source_manifest_hash = _file_hash(publication.manifest_path)
+    stage_cache = directory / "stage_cache"
+    stage_cache.mkdir(exist_ok=True)
+    evidence_paths = {
+        "translation_units": stage_cache / "translation_units.parquet",
+        "backtranslation_units": stage_cache / "backtranslation_units.parquet",
+        "quality_metrics": stage_cache / "quality_metrics.parquet",
+    }
+    field_paths: list[str] = []
+    original_texts: list[str] = []
+    source_texts: list[str] = []
+    translated_texts: list[str] = []
+    for source_row in source_rows:
+        task_id = source_row["task_id"]
+        translated_row = translated_by_id.get(task_id, source_row)
+        source_model = CanonicalExportRow.from_benchmark_row(source_row)
+
+        def add_field(path: str, source_text: str, translated_text: str) -> None:
+            field_paths.append(path)
+            original_texts.append(source_text)
+            source_texts.append(
+                protected_translation_field(
+                    source_model,
+                    source_text,
+                    path=path,
+                )
+            )
+            translated_texts.append(
+                protected_translation_field(
+                    source_model,
+                    translated_text,
+                    path=path,
+                )
+            )
+
+        for index, message in enumerate(source_row["messages"]):
+            if message["content"] and (
+                message["role"] in {"system", "user"} or (message["role"] == "assistant" and not message["tool_calls"])
+            ):
+                path = f"tasks/{task_id}/messages/{index}/content"
+                add_field(
+                    path,
+                    str(message["content"]),
+                    str(translated_row["messages"][index]["content"]),
+                )
+        if source_row["intent"]:
+            path = f"tasks/{task_id}/intent"
+            add_field(
+                path,
+                str(source_row["intent"]),
+                str(translated_row["intent"]),
+            )
+        source_tools = json.loads(source_row["tools"])
+        translated_tools = json.loads(translated_row["tools"])
+        for index, tool in enumerate(source_tools):
+            description = tool["function"].get("description")
+            if isinstance(description, str) and description:
+                path = f"tasks/{task_id}/tools/{index}/function/description"
+                add_field(
+                    path,
+                    description,
+                    str(translated_tools[index]["function"]["description"]),
+                )
+    translation_ids = [
+        _hash(
+            canonical_json(
+                {
+                    "contract": "bfcl-translation-fields/1.0",
+                    "source_manifest": source_manifest_hash,
+                    "path": path,
+                    "text": original_texts[index],
+                }
+            ).encode("utf-8")
+        )
+        for index, path in enumerate(field_paths)
     ]
+    forward_rows = [
+        {
+            "translation_id": identifier,
+            "field_path": path,
+            "text": source_text,
+            "source_language_code": "en",
+            "target_language_code": "vi",
+            "translation": translated_text,
+        }
+        for identifier, path, source_text, translated_text in zip(
+            translation_ids,
+            field_paths,
+            source_texts,
+            translated_texts,
+            strict=True,
+        )
+    ]
+    backward_rows = [
+        {
+            "translation_id": identifier,
+            "field_path": path,
+            "text": translated_text,
+            "source_language_code": "vi",
+            "target_language_code": "en",
+            "translation": source_text,
+        }
+        for identifier, path, source_text, translated_text in zip(
+            translation_ids,
+            field_paths,
+            source_texts,
+            translated_texts,
+            strict=True,
+        )
+    ]
+    quality_rows = [
+        {
+            "translation_id": identifier,
+            "field_path": path,
+            "source_text": source_text,
+            "translation": translated_text,
+            "backtranslation": source_text,
+            "score_chrf": 100.0,
+            "score_chrf_passed": True,
+            "is_quality_metric_passed": True,
+        }
+        for identifier, path, source_text, translated_text in zip(
+            translation_ids,
+            field_paths,
+            source_texts,
+            translated_texts,
+            strict=True,
+        )
+    ]
+    for name, evidence_rows in (
+        ("translation_units", forward_rows),
+        ("backtranslation_units", backward_rows),
+        ("quality_metrics", quality_rows),
+    ):
+        pq.write_table(
+            pa.Table.from_pylist(evidence_rows),
+            evidence_paths[name],
+        )
+    source_pack = source_manifest["pack"]
     document: dict[str, Any] = {
         "schema_version": "1.0",
-        "source_run_id": publication.manifest()["run_id"],
-        "source_run_manifest_content_hash": _file_hash(publication.manifest_path),
+        "translation_contract": BFCL_TRANSLATION_CONTRACT_VERSION,
+        "source_run_id": source_manifest["run_id"],
+        "source_run_manifest_content_hash": source_manifest_hash,
+        "source_benchmark_content_hash": _file_hash(publication.benchmark_path),
+        "source_oracle_pack": {
+            "pack_id": source_pack["pack_id"],
+            "version": source_pack["version"],
+            "content_hash": source_pack["content_hash"],
+        },
+        "source_language": "en",
         "language": "vi",
         "benchmark": {
             "file": table_path.name,
@@ -979,8 +1137,74 @@ def _translation(
             "content_hash": declared_hash or _file_hash(table_path),
         },
         "task_ids_hash": _hash(canonical_json(source_ids).encode("utf-8")),
+        "field_policy": {
+            "flattening_contract": "bfcl-translation-fields/1.0",
+            "preserved_fields": list(TRANSLATION_PRESERVED_FIELDS),
+            "localized_fields": [
+                "messages.system.content",
+                "messages.user.content",
+                "messages.assistant_without_tool_calls.content",
+                "intent",
+                "metadata.language",
+                "tools.function.description",
+            ],
+            "field_paths_hash": _hash(canonical_json(field_paths).encode("utf-8")),
+            "unit_count": len(field_paths),
+        },
+        "protected_tokens": {
+            "contract": "bfcl-protected-tokens/1.0",
+            "occurrences": sum(text.count("__BFCL_PROTECTED_") for text in source_texts),
+            "fields_with_tokens": sum("__BFCL_PROTECTED_" in text for text in source_texts),
+        },
+        "model": {
+            "provider": "test",
+            "model": "translator-v1",
+            "canonical_id": "translator-v1",
+            "source": "test-registry",
+            "revision": IMMUTABLE_REVISION,
+            "weights_digest": None,
+            "config_hash": _hash(b"translator config"),
+        },
+        "contamination": {
+            "role": "translator",
+            "scope": "all_translated_rows",
+            "task_ids_hash": _hash(canonical_json(source_ids).encode("utf-8")),
+            "task_count": len(source_ids),
+            "model_canonical_id": "translator-v1",
+        },
+        "quality": {
+            "backtranslation": True,
+            "metrics": [{"type": "chrf", "threshold": 0}],
+            "row_filtering": False,
+        },
+        "localization_validation": {
+            "contract": "bfcl-localization-validation/1.0",
+            "model_role": "translator",
+            "deterministic_fixes": {
+                "line_endings": "lf",
+                "trailing_whitespace": "removed",
+                "unicode": "NFC",
+            },
+            "minimum_changed_fraction": 0.01,
+            "changed_fraction": sum(
+                source != translated for source, translated in zip(source_texts, translated_texts, strict=True)
+            )
+            / len(source_texts),
+            "forbidden_patterns": [],
+            "required_script": None,
+            "executable_replay": "truth_projection_and_parquet_readback",
+        },
+        "artifacts": {
+            name: {
+                "file": f"stage_cache/{path.name}",
+                "rows": len(field_paths),
+                "content_hash": _file_hash(path),
+            }
+            for name, path in evidence_paths.items()
+        },
     }
     document.update(document_overrides or {})
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
     manifest_path = directory / "translation_manifest.json"
     manifest_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest_path
@@ -993,16 +1217,9 @@ def _translate_row(row: dict[str, Any], **overrides: Any) -> dict[str, Any]:
     messages[1] = {**messages[1], "content": "Số dư của 1?"}
     translated["messages"] = messages
     translated["intent"] = "kiểm_tra_số_dư"
-    translated["system_prompt_id"] = "sp-vi-1"
-    translated["metadata"] = canonical_json(
-        {
-            "language": "vi",
-            "expt_name": "expt",
-            "base_task_id": row["task_id"],
-            "surface_source": "template",
-            "profile_hash": None,
-        }
-    )
+    metadata = json.loads(row["metadata"])
+    metadata["language"] = "vi"
+    translated["metadata"] = canonical_json(metadata)
     translated.update(overrides)
     return translated
 
@@ -1022,6 +1239,270 @@ def test_a_translation_of_this_source_verifies(tmp_path: Path) -> None:
     assert source.translation.task_ids_hash == source.task_index.task_ids_hash
     assert source.evaluation_benchmark.file == "benchmark.vi.parquet"
     assert source.benchmark.file == PUBLICATION_BENCHMARK_TABLE
+
+
+def test_a_translation_without_the_bfcl_content_addressed_contract_is_refused(
+    tmp_path: Path,
+) -> None:
+    publication = _publish(tmp_path)
+    manifest_path = _translation(tmp_path, publication)
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del document["translation_contract"]
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
+    manifest_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match="required BFCL translation contract"):
+        verify_eval_source(config)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("model", {}),
+        ("field_policy", {}),
+        ("protected_tokens", {}),
+        ("artifacts", {}),
+    ],
+)
+def test_translation_manifest_requires_complete_provenance_blocks(
+    tmp_path: Path,
+    field: str,
+    replacement: dict[str, Any],
+) -> None:
+    publication = _publish(tmp_path)
+    manifest_path = _translation(tmp_path, publication)
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    document[field] = replacement
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
+    manifest_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match=field):
+        verify_eval_source(config)
+
+
+def test_translation_manifest_rejects_unknown_quality_metric(tmp_path: Path) -> None:
+    publication = _publish(tmp_path)
+    manifest_path = _translation(tmp_path, publication)
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    document["quality"]["metrics"] = [{"type": "invented", "threshold": -1}]
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
+    manifest_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match="quality"):
+        verify_eval_source(config)
+
+
+def test_translation_manifest_recomputes_quality_verdicts(tmp_path: Path) -> None:
+    publication = _publish(tmp_path)
+    manifest_path = _translation(tmp_path, publication)
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    quality_path = manifest_path.parent / document["artifacts"]["quality_metrics"]["file"]
+    rows = pq.read_table(quality_path).to_pylist()
+    rows[0]["score_chrf_passed"] = False
+    rows[0]["is_quality_metric_passed"] = False
+    pq.write_table(pa.Table.from_pylist(rows), quality_path)
+    document["artifacts"]["quality_metrics"]["content_hash"] = _file_hash(quality_path)
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
+    manifest_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match="threshold verdict"):
+        verify_eval_source(config)
+
+
+def test_translation_manifest_binds_declared_languages_to_rows(tmp_path: Path) -> None:
+    publication = _publish(tmp_path)
+    manifest_path = _translation(tmp_path, publication)
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    document["source_language"] = "fr"
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
+    manifest_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match="language"):
+        verify_eval_source(config)
+
+
+def test_translation_manifest_verifies_evidence_field_identity(tmp_path: Path) -> None:
+    publication = _publish(tmp_path)
+    manifest_path = _translation(tmp_path, publication)
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    quality_path = manifest_path.parent / document["artifacts"]["quality_metrics"]["file"]
+    rows = pq.read_table(quality_path).to_pylist()
+    rows[0]["field_path"] = "tasks/another-task/intent"
+    pq.write_table(pa.Table.from_pylist(rows), quality_path)
+    document["artifacts"]["quality_metrics"]["content_hash"] = _file_hash(quality_path)
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
+    manifest_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match="stable path"):
+        verify_eval_source(config)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "changed_field"),
+    [
+        ("call_ids", "messages"),
+        ("profile_hash", "metadata"),
+        ("system_prompt_id", "system_prompt_id"),
+    ],
+)
+def test_translation_preserves_message_and_lineage_structure(
+    tmp_path: Path,
+    mutation: str,
+    changed_field: str,
+) -> None:
+    publication = _publish(tmp_path)
+    translated = _translate_row(_row("test_pack__tpl__aaaaaaaaaaaaaaaa"))
+    if mutation == "call_ids":
+        messages = [dict(message) for message in translated["messages"]]
+        messages[2] = {
+            **messages[2],
+            "tool_calls": [
+                {
+                    **messages[2]["tool_calls"][0],
+                    "id": "localized-call-id",
+                }
+            ],
+        }
+        messages[3] = {
+            **messages[3],
+            "tool_call_id": "localized-call-id",
+        }
+        translated["messages"] = messages
+    elif mutation == "profile_hash":
+        metadata = json.loads(translated["metadata"])
+        metadata["profile_hash"] = "sha256:" + "0" * 64
+        translated["metadata"] = canonical_json(metadata)
+    else:
+        translated["system_prompt_id"] = "localized-system-prompt"
+    manifest_path = _translation(tmp_path, publication, rows=[translated])
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match=changed_field):
+        verify_eval_source(config)
+
+
+def test_a_translation_may_localize_only_the_tool_function_description(
+    tmp_path: Path,
+) -> None:
+    publication = _publish(tmp_path)
+    translated = _translate_row(_row("test_pack__tpl__aaaaaaaaaaaaaaaa"))
+    tools = json.loads(translated["tools"])
+    tools[0]["function"]["description"] = "Tra cứu số dư tài khoản"
+    translated["tools"] = canonical_json(tools)
+    manifest_path = _translation(tmp_path, publication, rows=[translated])
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    source = verify_eval_source(config)
+
+    assert source.translation is not None
+
+
+def test_a_translation_may_not_localize_a_tool_parameter_schema(
+    tmp_path: Path,
+) -> None:
+    publication = _publish(tmp_path)
+    translated = _translate_row(_row("test_pack__tpl__aaaaaaaaaaaaaaaa"))
+    tools = json.loads(translated["tools"])
+    tools[0]["function"]["parameters"]["properties"]["account_id"]["type"] = "integer"
+    translated["tools"] = canonical_json(tools)
+    manifest_path = _translation(tmp_path, publication, rows=[translated])
+    config = _load(
+        tmp_path,
+        _config_data(
+            publication,
+            tmp_path / "eval_out",
+            translation_manifest=manifest_path,
+        ),
+    )
+
+    with pytest.raises(TranslationLineageError, match="tools"):
+        verify_eval_source(config)
 
 
 def test_a_translation_of_another_run_is_refused(tmp_path: Path) -> None:
@@ -1083,6 +1564,8 @@ def test_a_translation_manifest_row_count_must_match_its_table(tmp_path: Path) -
     manifest_path = _translation(tmp_path, publication)
     document = json.loads(manifest_path.read_text(encoding="utf-8"))
     document["benchmark"]["rows"] = 999
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
     manifest_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     config = _load(
         tmp_path,
@@ -1164,6 +1647,8 @@ def test_a_translation_manifest_without_the_contract_fails_loudly(tmp_path: Path
     manifest_path = _translation(tmp_path, publication)
     document = json.loads(manifest_path.read_text(encoding="utf-8"))
     del document["task_ids_hash"]
+    document.pop("translation_id")
+    document["translation_id"] = _hash(canonical_json(document).encode("utf-8"))
     manifest_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     config = _load(
         tmp_path,

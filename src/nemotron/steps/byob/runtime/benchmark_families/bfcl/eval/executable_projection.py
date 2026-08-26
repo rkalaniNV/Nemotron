@@ -43,6 +43,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_errors 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract import (
     VerifiedEvalSource,
+    translation_tool_truth,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_verification import (
     assert_source_unchanged,
@@ -59,6 +60,8 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_projection import (
     CanonicalExportProjection,
+    ExportProjectionError,
+    project_published_benchmark,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.fixture_filter import (
     evaluate_filter,
@@ -105,9 +108,7 @@ class ExecutableToolPolicy(_Frozen):
     @model_validator(mode="after")
     def _coherent(self) -> ExecutableToolPolicy:
         if self.requires_confirmation != (self.confirmation_parameter is not None):
-            raise ValueError(
-                "a confirmation-protected tool names the pack's confirmation parameter"
-            )
+            raise ValueError("a confirmation-protected tool names the pack's confirmation parameter")
         if self.confirmation_parameter is not None and not self.confirmation_parameter.strip():
             raise ValueError("the confirmation parameter is a non-empty argument name")
         return self
@@ -161,9 +162,7 @@ class ExecutableAssertionSpec(_Frozen):
         if not self.name.strip():
             raise ValueError("an executable assertion spec names its assertion")
         if not self.executable_compatible:
-            raise ValueError(
-                "an executable task references only executable-compatible assertions"
-            )
+            raise ValueError("an executable task references only executable-compatible assertions")
         return self
 
     def semantic_payload(self) -> dict[str, Any]:
@@ -216,45 +215,29 @@ class ExecutableTaskSpec(_Frozen):
             raise ValueError("the executable script belongs to this task")
         if self.script.source_verification_identity != self.source_verification_identity:
             raise ValueError("the executable script comes from this verified source")
-        if any(
-            call.recorded_result
-            for turn in self.script.turns
-            for call in turn.calls
-        ):
-            raise ValueError(
-                "an executable script carries expected call structure but no recorded gold result"
-            )
+        if any(call.recorded_result for turn in self.script.turns for call in turn.calls):
+            raise ValueError("an executable script carries expected call structure but no recorded gold result")
         names = [policy.function_name for policy in self.tool_policies]
         if len(set(names)) != len(names):
             raise ValueError("executable tool policies name each exposed tool once")
-        exposed = {
-            str((tool.get("function") or {}).get("name"))
-            for tool in self.script.tools
-        }
+        exposed = {str((tool.get("function") or {}).get("name")) for tool in self.script.tools}
         if set(names) != exposed:
             raise ValueError("executable tool policies cover exactly the model-facing tools")
         if not self.oracle_clock.strip():
             raise ValueError("an executable task carries the source run's frozen oracle clock")
         if tuple(spec.name for spec in self.assertion_specs) != self.success_assertions:
-            raise ValueError(
-                "executable assertion specs cover every required assertion in order"
-            )
+            raise ValueError("executable assertion specs cover every required assertion in order")
         if list(self.confirmed_call_turns) != sorted(set(self.confirmed_call_turns)):
             raise ValueError("confirmed call turns are unique and ordered")
         if any(
-            index >= len(self.script.turns)
-            or not self.script.turn(index).expects_tool_calls
+            index >= len(self.script.turns) or not self.script.turn(index).expects_tool_calls
             for index in self.confirmed_call_turns
         ):
             raise ValueError("confirmation covers only call turns in the executable script")
-        if [item.dependency_index for item in self.dependencies] != list(
-            range(len(self.dependencies))
-        ):
+        if [item.dependency_index for item in self.dependencies] != list(range(len(self.dependencies))):
             raise ValueError("executable dependencies are contiguous and zero-based")
         if (self.turn_policy == "dependent_call") != bool(self.dependencies):
-            raise ValueError(
-                "dependent_call tasks, and only those tasks, carry result dependencies"
-            )
+            raise ValueError("dependent_call tasks, and only those tasks, carry result dependencies")
         calls = {
             call.call_index: (turn, position, call)
             for turn in self.script.turns
@@ -275,9 +258,7 @@ class ExecutableTaskSpec(_Frozen):
                 or dependency.producer_call_index >= dependency.consumer_call_index
                 or dependency.producer_turn_index >= dependency.consumer_turn_index
             ):
-                raise ValueError(
-                    "a dependency binds a later consumer to an earlier producer turn"
-                )
+                raise ValueError("a dependency binds a later consumer to an earlier producer turn")
             target = (
                 dependency.consumer_call_index,
                 tuple(dependency.argument_path),
@@ -316,17 +297,11 @@ class ExecutableTaskSpec(_Frozen):
             "fixture_refs": list(self.fixture_refs),
             "script_hash": self.script.script_hash,
             "success_assertions": list(self.success_assertions),
-            "assertion_specs": [
-                spec.semantic_payload() for spec in self.assertion_specs
-            ],
+            "assertion_specs": [spec.semantic_payload() for spec in self.assertion_specs],
             "turn_policy": self.turn_policy,
-            "assistant_milestones": [
-                thaw_json(milestone) for milestone in self.assistant_milestones
-            ],
+            "assistant_milestones": [thaw_json(milestone) for milestone in self.assistant_milestones],
             "confirmed_call_turns": list(self.confirmed_call_turns),
-            "dependencies": [
-                dependency.semantic_payload() for dependency in self.dependencies
-            ],
+            "dependencies": [dependency.semantic_payload() for dependency in self.dependencies],
             "tool_policies": [policy.semantic_payload() for policy in self.tool_policies],
             "assertion_task": thaw_json(self.assertion_task),
         }
@@ -414,9 +389,7 @@ def _dependency_specs(
     }
     group_by_turn = {turn.turn_index: turn.call_group for turn in script.turns}
     milestone_ids: dict[str, tuple[int, int]] = {}
-    pending: list[
-        tuple[int, int, int, tuple[str | int, ...], str, str]
-    ] = []
+    pending: list[tuple[int, int, int, tuple[str | int, ...], str, str]] = []
     call_index = 0
     assistant_turn = -1
     for step in plan["steps"]:
@@ -452,9 +425,7 @@ def _dependency_specs(
                     raise ExecutableProjectionError(
                         f"task {row.task_id} dependency",
                         "has an unreadable from_result marker",
-                        expected=(
-                            "a nested argument marker with non-empty call and path strings"
-                        ),
+                        expected=("a nested argument marker with non-empty call and path strings"),
                         recovery="fix the verified template and regenerate the benchmark",
                     )
                 pending.append(
@@ -577,6 +548,7 @@ def _pack_metadata(
     source: VerifiedEvalSource,
     *,
     row: CanonicalExportRow,
+    truth_row: CanonicalExportRow | None = None,
 ) -> tuple[
     tuple[ExecutableToolPolicy, ...],
     tuple[FrozenDict, ...],
@@ -597,9 +569,7 @@ def _pack_metadata(
         templates = yaml.safe_load(paths.templates_path.read_text(encoding="utf-8")) or []
         pack_manifest = yaml.safe_load(paths.manifest_path.read_text(encoding="utf-8")) or {}
         fixtures = (
-            json.loads(paths.fixtures_path.read_text(encoding="utf-8"))
-            if paths.fixtures_path is not None
-            else {}
+            json.loads(paths.fixtures_path.read_text(encoding="utf-8")) if paths.fixtures_path is not None else {}
         )
     except Exception as exc:
         raise ExecutableProjectionError(
@@ -617,10 +587,7 @@ def _pack_metadata(
         raise ExecutableProjectionError(
             "source_oracle.pack",
             "has invalid runner metadata containers",
-            expected=(
-                "manifest and fixtures objects, tools.json array, and "
-                "task_templates.yaml array"
-            ),
+            expected=("manifest and fixtures objects, tools.json array, and task_templates.yaml array"),
             recovery="restore the pack revision that source verification accepted",
         )
     try:
@@ -633,11 +600,7 @@ def _pack_metadata(
                 fixtures=fixtures,
                 held_out=load_held_out_policy(
                     paths.held_out_path,
-                    source=(
-                        str(pack_manifest.get("held_out"))
-                        if pack_manifest.get("held_out") is not None
-                        else None
-                    ),
+                    source=(str(pack_manifest.get("held_out")) if pack_manifest.get("held_out") is not None else None),
                     manifest=pack_manifest,
                     fixtures=fixtures,
                     templates=templates,
@@ -674,11 +637,31 @@ def _pack_metadata(
     for model_tool in row.tools:
         name = str((model_tool.get("function") or {}).get("name"))
         full = full_by_name.get(name)
-        if full is None or not json_equal(projected_by_name.get(name), model_tool):
+        expected_tool = projected_by_name.get(name)
+        translation = getattr(source, "translation", None)
+        translated_descriptions = bool(
+            translation is not None and getattr(translation, "tool_descriptions_localized", False)
+        )
+        tools_match = (
+            json_equal(
+                translation_tool_truth([expected_tool])[0],
+                translation_tool_truth([model_tool])[0],
+            )
+            if translated_descriptions
+            else json_equal(expected_tool, model_tool)
+        )
+        if full is None or not tools_match:
             raise ExecutableProjectionError(
                 f"task tools[{name}]",
-                "do not match the verified pack's model-facing declaration",
-                expected="the exact projected definition from the verified tools.json",
+                "do not match the verified pack's executable declaration",
+                expected=(
+                    "the projected definition from verified tools.json"
+                    + (
+                        ", allowing only function.description to be localized"
+                        if translated_descriptions
+                        else " exactly"
+                    )
+                ),
                 recovery="re-publish the benchmark from the verified pack",
             )
         requires_confirmation = full.get("x-requires-confirmation") is True
@@ -711,7 +694,7 @@ def _pack_metadata(
     template = matching[0]
     validate_json_value(template, label=f"template {row.template_id}")
     assertion_bindings = _assertion_bindings(
-        row,
+        truth_row or row,
         template,
         milestones,
         pack_manifest=pack_manifest,
@@ -909,9 +892,7 @@ def _committed_values(
                 direct.setdefault(argument_name, []).append(argument_value)
 
     tool_milestones = [
-        milestone
-        for milestone in milestones
-        if isinstance(milestone, dict) and milestone.get("type") == "tool_call"
+        milestone for milestone in milestones if isinstance(milestone, dict) and milestone.get("type") == "tool_call"
     ]
     expected_calls = list(row.expected_tool_calls)
     pairs: list[tuple[dict[str, Any], Any]] = []
@@ -921,40 +902,25 @@ def _committed_values(
     # An explicit call_group is the same structural identity exported on each
     # expected call. Within a group, milestone order is position_in_group order.
     groups = {
-        milestone.get("call_group")
-        for milestone in tool_milestones
-        if isinstance(milestone.get("call_group"), int)
+        milestone.get("call_group") for milestone in tool_milestones if isinstance(milestone.get("call_group"), int)
     }
     for group in groups:
         milestone_indexes = [
-            index
-            for index, milestone in enumerate(tool_milestones)
-            if milestone.get("call_group") == group
+            index for index, milestone in enumerate(tool_milestones) if milestone.get("call_group") == group
         ]
         call_indexes = sorted(
-            [
-                index
-                for index, expected in enumerate(expected_calls)
-                if expected.call_group == group
-            ],
+            [index for index, expected in enumerate(expected_calls) if expected.call_group == group],
             key=lambda index: expected_calls[index].position_in_group,
         )
         if len(milestone_indexes) != len(call_indexes):
             continue
         if any(
-            tool_milestones[milestone_index].get("tool")
-            != expected_calls[call_index].function_name
-            for milestone_index, call_index in zip(
-                milestone_indexes, call_indexes, strict=True
-            )
+            tool_milestones[milestone_index].get("tool") != expected_calls[call_index].function_name
+            for milestone_index, call_index in zip(milestone_indexes, call_indexes, strict=True)
         ):
             continue
-        for milestone_index, call_index in zip(
-            milestone_indexes, call_indexes, strict=True
-        ):
-            pairs.append(
-                (tool_milestones[milestone_index], expected_calls[call_index])
-            )
+        for milestone_index, call_index in zip(milestone_indexes, call_indexes, strict=True):
+            pairs.append((tool_milestones[milestone_index], expected_calls[call_index]))
             paired_milestones.add(milestone_index)
             paired_calls.add(call_index)
 
@@ -965,8 +931,7 @@ def _committed_values(
         candidates = [
             call_index
             for call_index, expected in enumerate(expected_calls)
-            if call_index not in paired_calls
-            and expected.function_name == milestone.get("tool")
+            if call_index not in paired_calls and expected.function_name == milestone.get("tool")
         ]
         if len(candidates) == 1:
             call_index = candidates[0]
@@ -979,17 +944,11 @@ def _committed_values(
         if not isinstance(declared_args, dict):
             continue
         for argument_name, template_value in declared_args.items():
-            reference = (
-                _SLOT_REFERENCE.fullmatch(template_value)
-                if isinstance(template_value, str)
-                else None
-            )
+            reference = _SLOT_REFERENCE.fullmatch(template_value) if isinstance(template_value, str) else None
             if reference is not None and argument_name in expected.arguments:
                 name = reference.group(1)
                 if name in slot_specs:
-                    authoritative.setdefault(name, []).append(
-                        expected.arguments[argument_name]
-                    )
+                    authoritative.setdefault(name, []).append(expected.arguments[argument_name])
 
     values: dict[str, Any] = {}
     for name in slot_specs:
@@ -1044,11 +1003,7 @@ def _assertion_bindings(
 
     raw_specs = template.get("slots")
     slot_specs = (
-        {
-            name: spec
-            for name, spec in raw_specs.items()
-            if isinstance(name, str) and isinstance(spec, dict)
-        }
+        {name: spec for name, spec in raw_specs.items() if isinstance(name, str) and isinstance(spec, dict)}
         if isinstance(raw_specs, dict)
         else {}
     )
@@ -1059,10 +1014,7 @@ def _assertion_bindings(
         "tools": tools or [],
         "fixtures": fixtures or {},
     }
-    declared = {
-        name: _declared_values(spec, **source_context)
-        for name, spec in slot_specs.items()
-    }
+    declared = {name: _declared_values(spec, **source_context) for name, spec in slot_specs.items()}
 
     surface = _surface_bindings(row, template, declared=declared)
     committed = _committed_values(row, milestones, slot_specs)
@@ -1100,9 +1052,7 @@ def _assertion_bindings(
     for entry_index, name, definition in updates:
         remaining[name] -= 1
         # The last correction of a slot leaves the value the trace committed.
-        value_known, value = _sole(
-            _declared_values(definition, **source_context)
-        )
+        value_known, value = _sole(_declared_values(definition, **source_context))
         if not value_known and remaining[name] == 0 and name in slots:
             value = slots.get(name)
             value_known = True
@@ -1222,24 +1172,30 @@ def build_executable_task_spec(
         update={
             "turns": tuple(
                 turn.model_copy(
-                    update={
-                        "calls": tuple(
-                            call.model_copy(update={"recorded_result": ""})
-                            for call in turn.calls
-                        )
-                    }
+                    update={"calls": tuple(call.model_copy(update={"recorded_result": ""}) for call in turn.calls)}
                 )
                 for turn in script.turns
             )
         }
     )
     row = projection.row(task_id)
+    truth_row = row
+    if getattr(source, "translation", None) is not None:
+        try:
+            source_projection = project_published_benchmark(
+                source.benchmark.path,
+                expected_content_hash=source.benchmark.content_hash,
+            )
+            truth_row = source_projection.row(task_id)
+        except (ExportProjectionError, KeyError) as exc:
+            raise ExecutableProjectionError(
+                f"task {task_id} source truth",
+                "cannot recover the original row behind this localization",
+                expected="the immutable source benchmark verified for this translation",
+                recovery="restore the source publication and run source verification again",
+            ) from exc
     oracle = source.oracle
-    if (
-        not row.gold_eligible
-        or row.pack_id != oracle.pack_id
-        or row.pack_version != oracle.pack_version
-    ):
+    if not row.gold_eligible or row.pack_id != oracle.pack_id or row.pack_version != oracle.pack_version:
         raise ExecutableAuthorizationError(
             f"task {task_id}",
             "is not gold-eligible under the verified oracle pack",
@@ -1271,6 +1227,7 @@ def build_executable_task_spec(
     ) = _pack_metadata(
         source,
         row=row,
+        truth_row=truth_row,
     )
     dependencies = _dependency_specs(
         row=row,

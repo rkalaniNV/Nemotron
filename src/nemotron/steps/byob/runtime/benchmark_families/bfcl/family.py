@@ -10,12 +10,15 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
     generate_bfcl,
     prepare_bfcl,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.translation import (
+    translate_bfcl,
+)
 
 SPEC = BenchmarkFamilySpec(
     name="bfcl",
     description="Function-calling benchmark generation from an executable oracle pack.",
     prepare_data=prepare_bfcl,
     generate=generate_bfcl,
-    translate=None,
+    translate=translate_bfcl,
     evaluate=run_bfcl_eval_cli,
 )
