@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from nemotron.steps.byob.runtime.mcp.gateway.conformance import attestation_bytes
 from nemotron.steps.byob.runtime.mcp.gateway.errors import GatewayError
 from nemotron.steps.byob.runtime.mcp.gateway.service import GatewayService
 
@@ -148,6 +149,14 @@ def create_gateway_app(
     async def tools(request: Request) -> JSONResponse:
         return JSONResponse({"tools": service.list_tools()})
 
+    async def conformance(request: Request) -> Response:
+        # Served as canonical bytes rather than re-encoded JSON: the pack pins a digest over
+        # this exact document, and a JSON encoder that reorders keys would break it.
+        return Response(
+            content=attestation_bytes(service.conformance()),
+            media_type="application/json",
+        )
+
     async def create_session(request: Request) -> JSONResponse:
         payload = await _json_body(request, max_request_bytes=max_request_bytes)
         _exact_fields(
@@ -222,6 +231,7 @@ def create_gateway_app(
     app = Starlette(
         routes=[
             Route("/v1/metadata", metadata, methods=["GET"]),
+            Route("/v1/conformance", conformance, methods=["GET"]),
             Route("/v1/tools", tools, methods=["GET"]),
             Route("/v1/sessions", create_session, methods=["POST"]),
             Route(

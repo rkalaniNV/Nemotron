@@ -940,6 +940,53 @@ they have would not exist. Drafts are therefore written to a `drafts/` directory
 pack rather than into it, because a `task_templates.yaml` inside a pack directory is loaded by
 the pipeline as though a human had authored it.
 
+### 10.4 Epic 4 trust spine
+
+`GET /v1/conformance` exists, and so does the verification in front of it. The producer lives
+in `runtime/mcp/gateway/conformance.py`, the verifier in
+`runtime/benchmark_families/bfcl/conformance.py`, and both read one schema so a document
+cannot be valid to write and invalid to read. The route serves canonical bytes rather than
+re-encoded JSON, because the pinned digest covers exactly those bytes and a re-ordering
+encoder on either side would break verification while changing nothing semantically.
+
+Three digests must agree before anything publishes: the one the pack pinned at intake, the one
+the live endpoint reports at `GET /v1/metadata`, and the one inside the attestation. They are
+produced by different parties at different times, so agreement is the only available evidence
+that the build being certified is the build answering calls. Intake pins a *prediction* — it
+computes the attestation from the same function and the same inputs the gateway will use, then
+records its digest — which turns a deployed gateway of a different build into a digest mismatch
+rather than a silent substitution.
+
+The verifier never reads `level` as a verdict. It re-derives what the document has earned and
+reports both, so `attested_level` and `effective_level` can disagree, and only `L2` with no
+findings publishes. Two outcomes are distinguished on purpose. A **finding** is a
+contradiction — a digest mismatch, a failed or skipped probe, a required check declared
+inapplicable — and drops the document to `L0`. A **cap** is missing evidence rather than a
+defect: no `server_content_digest`, incomplete state observability, or an untrusted issuer.
+Caps lower `L2` to `L1`, which still blocks publication but says something different to a
+reviewer, and both appear in the report as named reasons rather than as a silent downgrade.
+
+The rule that matters most is that a gateway cannot certify itself. `locally_verified` asserts
+that BFCL ran the conformance suite against that exact artifact digest, so the verifier only
+believes it when the caller supplies a matching locally-computed report digest; otherwise the
+claim is self-reported and capped. A `signed_release` needs an issuer the verifier was
+configured to trust. Consequently a gateway serving a technically perfect `L2` document, with
+every digest agreeing, still cannot publish on its own word.
+
+Gold eligibility is enforced through the machinery that already exists rather than beside it.
+Check `A1` `endpoint_conformance` joins `extra_checks`, and `derive_pack_tier` refuses gold for
+any non-passing check, so there is no second gate to keep in step with the first. `A1` is
+emitted only when a pack actually pins an attestation: pinning is how a pack claims certifiable
+conformance, and a pack making no claim should not be measured against one. That also means a
+hand-written endpoint pack that pins nothing is never audited here — the protection comes from
+intake always pinning, not from the check being able to recognise an MCP-backed endpoint on its
+own.
+
+One consequence is worth stating plainly rather than discovering later: because `P4`–`P7` are
+not implemented, the gateway honestly reports `L1`, and every MCP-backed pack therefore fails
+`A1` and cannot publish today. That is the correct state, not a defect. It becomes publishable
+when the probe suite in `MCP-402` and `MCP-404`–`408` exists and BFCL runs it itself.
+
 ## 11. Deferred Extension Points
 
 Each of these is a decision, not an omission. They are listed so a later reader can

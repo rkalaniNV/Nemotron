@@ -28,6 +28,10 @@ from nemotron.steps.byob.runtime.mcp.discovery import (
     DiscoveryReport,
     discover_mcp_oracle,
 )
+from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
+    build_attestation,
+    discovery_evidence,
+)
 from nemotron.steps.byob.runtime.mcp.gateway.errors import (
     GatewayError,
     bad_request,
@@ -198,6 +202,23 @@ class GatewayService:
         self._require_started()
         assert self._identity is not None
         return self._identity.as_dict()
+
+    def conformance(self) -> dict[str, Any]:
+        """Serve the attestation for whatever this gateway can currently demonstrate.
+
+        Built from the discovery evidence rather than from a stored constant, so a gateway
+        whose startup discovery observed less than a full probe suite reports the lower level
+        instead of a level someone typed in.
+        """
+        self._require_started()
+        assert self._identity is not None and self._report is not None
+        return build_attestation(
+            self.config,
+            self._report,
+            self.artifacts,
+            self._identity,
+            discovery_evidence(self._report),
+        )
 
     def list_tools(self) -> list[str]:
         self._require_started()

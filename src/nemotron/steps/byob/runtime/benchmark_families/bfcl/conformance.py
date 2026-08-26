@@ -1,0 +1,333 @@
+"""The endpoint conformance attestation, and why an oracle cannot certify itself.
+
+An oracle that reports its own trustworthiness is not evidence, it is a claim. This module
+exists to keep that distinction enforceable. The document a gateway serves at
+`GET /v1/conformance` says what it believes about itself; verification here decides what BFCL
+is willing to act on, and the two answers are allowed to differ.
+
+Two rules carry most of the weight. A `level` field is never read as a verdict — the level a
+document may keep is re-derived from the evidence beside it, so a gateway that writes `"L2"`
+without complete state observability or without BFCL having run the conformance suite itself
+lands at `L1` and cannot publish. And the digests in the attestation must agree with the
+digests the pack pinned and with what `GET /v1/metadata` reports live; a document that
+describes a different build than the one answering calls is the drift this exists to catch.
+
+Findings accumulate instead of raising at the first problem. A reviewer asking why a pack was
+refused wants the whole picture, and a single mismatch is rarely the only one.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
+
+ATTESTATION_KIND = "bfcl-endpoint-conformance-v1"
+MCP_PROFILE_VERSION = "bfcl-mcp-oracle-v1"
+PROVIDER_KIND_MCP = "mcp"
+
+LEVELS = ("L0", "L1", "L2")
+REQUIREMENTS = frozenset({"required", "conditional"})
+CHECK_STATUSES = frozenset({"pass", "not_applicable", "fail", "skipped"})
+EVIDENCE_KINDS = frozenset({"locally_verified", "signed_release"})
+STATE_OBSERVABILITY = frozenset({"complete", "diagnostic"})
+# A mode-C attestation has to name its boundary from a closed set. Free-form prose here would
+# be a claim no verifier can check, which is the same as no boundary at all.
+READ_ONLY_BOUNDARIES = frozenset({"upstream_authorization", "immutable_snapshot_sandbox"})
+
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+# Digests that must be present, and those that carry an explicit null rather than being
+# omitted, so two different deployments cannot hash to the same document by accident.
+_REQUIRED_DIGESTS = (
+    "effective_content_digest",
+    "gateway_artifact_digest",
+    "tool_catalog_digest",
+    "probe_report_digest",
+    "gateway_conformance_report_digest",
+)
+_NULLABLE_DIGESTS = ("shim_artifact_digest", "server_content_digest", "snapshot_digest")
+
+_REQUIRED_FIELDS = frozenset(
+    {
+        "schema_version",
+        "provider_kind",
+        "profile_version",
+        "level",
+        "gateway_evidence_kind",
+        "gateway_evidence_issuer",
+        "state_observability",
+        "read_only_boundary",
+        "checks",
+        *_REQUIRED_DIGESTS,
+        *_NULLABLE_DIGESTS,
+    }
+)
+
+
+class AttestationError(ValueError):
+    """Raised when a document cannot be read as a conformance attestation at all."""
+
+
+def attestation_digest(document: Mapping[str, Any]) -> str:
+    """Digest the attestation exactly as the endpoint config pins it."""
+    return "sha256:" + hashlib.sha256(canonical_json(document).encode("utf-8")).hexdigest()
+
+
+def _digest_field(value: Any, source: str, *, nullable: bool) -> str | None:
+    if value is None:
+        if nullable:
+            return None
+        raise AttestationError(f"{source} must be sha256:<64 hex characters>, not null")
+    if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
+        raise AttestationError(f"{source} must be sha256:<64 lowercase hex characters>")
+    return value
+
+
+def _enum_field(value: Any, allowed: frozenset[str] | tuple[str, ...], source: str) -> str:
+    if not isinstance(value, str) or value not in allowed:
+        raise AttestationError(f"{source} must be one of {sorted(allowed)}, got {value!r}")
+    return value
+
+
+@dataclass(frozen=True)
+class ConformanceCheck:
+    """One probe result as the endpoint reports it."""
+
+    id: str
+    requirement: str
+    status: str
+    reason: str | None
+
+    @classmethod
+    def from_mapping(cls, value: Any, *, source: str) -> ConformanceCheck:
+        if not isinstance(value, dict):
+            raise AttestationError(f"{source} must be a JSON object")
+        allowed = {"id", "requirement", "status", "reason"}
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise AttestationError(f"{source} has unknown fields: {', '.join(unknown)}")
+        missing = sorted(allowed - set(value))
+        if missing:
+            raise AttestationError(f"{source} is missing: {', '.join(missing)}")
+        identifier = value["id"]
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise AttestationError(f"{source}.id must be a non-empty string")
+        reason = value["reason"]
+        if reason is not None and (not isinstance(reason, str) or not reason.strip()):
+            raise AttestationError(f"{source}.reason must be null or a non-empty string")
+        return cls(
+            id=identifier.strip(),
+            requirement=_enum_field(value["requirement"], REQUIREMENTS, f"{source}.requirement"),
+            status=_enum_field(value["status"], CHECK_STATUSES, f"{source}.status"),
+            reason=reason,
+        )
+
+
+@dataclass(frozen=True)
+class ConformanceAttestation:
+    """A parsed attestation, plus the verbatim document its digest was taken over."""
+
+    document: dict[str, Any]
+    level: str
+    effective_content_digest: str
+    gateway_artifact_digest: str
+    tool_catalog_digest: str
+    probe_report_digest: str
+    gateway_conformance_report_digest: str
+    shim_artifact_digest: str | None
+    server_content_digest: str | None
+    snapshot_digest: str | None
+    gateway_evidence_kind: str
+    gateway_evidence_issuer: str
+    state_observability: str
+    read_only_boundary: str | None
+    checks: tuple[ConformanceCheck, ...]
+
+    @classmethod
+    def from_mapping(cls, value: Any, *, source: str = "endpoint conformance") -> ConformanceAttestation:
+        if not isinstance(value, dict):
+            raise AttestationError(f"{source} must be a JSON object")
+        unknown = sorted(set(value) - _REQUIRED_FIELDS)
+        if unknown:
+            # An unknown field may be a newer profile or a smuggled one; either way this
+            # verifier cannot say what it means, so it refuses rather than ignoring it.
+            raise AttestationError(f"{source} has unknown fields: {', '.join(unknown)}")
+        missing = sorted(_REQUIRED_FIELDS - set(value))
+        if missing:
+            raise AttestationError(f"{source} is missing: {', '.join(missing)}")
+
+        for field, expected in (
+            ("schema_version", ATTESTATION_KIND),
+            ("provider_kind", PROVIDER_KIND_MCP),
+            ("profile_version", MCP_PROFILE_VERSION),
+        ):
+            if value[field] != expected:
+                raise AttestationError(f"{source}.{field} must be {expected!r}, got {value[field]!r}")
+
+        issuer = value["gateway_evidence_issuer"]
+        if not isinstance(issuer, str) or not issuer.strip():
+            raise AttestationError(f"{source}.gateway_evidence_issuer must be a non-empty string")
+
+        raw_checks = value["checks"]
+        if not isinstance(raw_checks, list) or not raw_checks:
+            raise AttestationError(f"{source}.checks must be a non-empty array")
+        checks = tuple(
+            ConformanceCheck.from_mapping(entry, source=f"{source}.checks[{index}]")
+            for index, entry in enumerate(raw_checks)
+        )
+        seen = [check.id for check in checks]
+        duplicates = sorted({name for name in seen if seen.count(name) > 1})
+        if duplicates:
+            raise AttestationError(f"{source}.checks repeats {', '.join(duplicates)}")
+
+        boundary = value["read_only_boundary"]
+        if boundary is not None:
+            boundary = _enum_field(boundary, READ_ONLY_BOUNDARIES, f"{source}.read_only_boundary")
+
+        def required(name: str) -> str:
+            digest = _digest_field(value[name], f"{source}.{name}", nullable=False)
+            assert digest is not None  # _digest_field raises rather than returning None here
+            return digest
+
+        def optional(name: str) -> str | None:
+            return _digest_field(value[name], f"{source}.{name}", nullable=True)
+
+        return cls(
+            document=dict(value),
+            level=_enum_field(value["level"], LEVELS, f"{source}.level"),
+            effective_content_digest=required("effective_content_digest"),
+            gateway_artifact_digest=required("gateway_artifact_digest"),
+            tool_catalog_digest=required("tool_catalog_digest"),
+            probe_report_digest=required("probe_report_digest"),
+            gateway_conformance_report_digest=required("gateway_conformance_report_digest"),
+            shim_artifact_digest=optional("shim_artifact_digest"),
+            server_content_digest=optional("server_content_digest"),
+            snapshot_digest=optional("snapshot_digest"),
+            gateway_evidence_kind=_enum_field(
+                value["gateway_evidence_kind"], EVIDENCE_KINDS, f"{source}.gateway_evidence_kind"
+            ),
+            gateway_evidence_issuer=issuer.strip(),
+            state_observability=_enum_field(
+                value["state_observability"], STATE_OBSERVABILITY, f"{source}.state_observability"
+            ),
+            read_only_boundary=boundary,
+            checks=checks,
+        )
+
+
+@dataclass(frozen=True)
+class ConformanceVerdict:
+    """What BFCL is willing to believe, as opposed to what the endpoint claimed."""
+
+    attested_level: str
+    effective_level: str
+    publishable: bool
+    findings: tuple[str, ...]
+    caps: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "attested_level": self.attested_level,
+            "effective_level": self.effective_level,
+            "publishable": self.publishable,
+            "findings": list(self.findings),
+            "caps": list(self.caps),
+        }
+
+
+def _check_findings(attestation: ConformanceAttestation) -> list[str]:
+    findings: list[str] = []
+    for check in attestation.checks:
+        if check.status == "skipped":
+            # A skipped probe is the absence of evidence. Treating it as satisfaction is
+            # how an untested oracle acquires a passing record.
+            findings.append(f"check_skipped:{check.id}")
+        elif check.status == "fail":
+            findings.append(f"check_failed:{check.id}")
+        elif check.requirement == "required" and check.status != "pass":
+            findings.append(f"required_check_not_passed:{check.id}")
+        elif check.status == "not_applicable":
+            if check.requirement != "conditional":
+                findings.append(f"required_check_not_passed:{check.id}")
+            elif check.reason is None:
+                findings.append(f"conditional_check_without_reason:{check.id}")
+    return findings
+
+
+def verify_conformance(
+    document: Any,
+    *,
+    expected_digest: str,
+    metadata_content_digest: str,
+    expected_identity: Mapping[str, str | None] | None = None,
+    local_conformance_report_digest: str | None = None,
+    trusted_issuers: Sequence[str] = (),
+) -> ConformanceVerdict:
+    """Decide which level an attestation earns, and whether it may publish.
+
+    `expected_digest` is what the pack pinned, `metadata_content_digest` is what the live
+    endpoint reports now, and `expected_identity` is the set of digests the pack recorded at
+    intake. Supplying `local_conformance_report_digest` is how a caller states that BFCL ran
+    the conformance suite itself; without it a `locally_verified` claim is self-reported.
+    """
+    findings: list[str] = []
+    caps: list[str] = []
+
+    try:
+        attestation = ConformanceAttestation.from_mapping(document)
+    except AttestationError as exc:
+        # Unreadable is strictly worse than low: nothing below can be evaluated.
+        return ConformanceVerdict(
+            attested_level="unknown",
+            effective_level="L0",
+            publishable=False,
+            findings=(f"attestation_malformed:{exc}",),
+            caps=("attestation_malformed",),
+        )
+
+    observed = attestation_digest(attestation.document)
+    if observed != expected_digest:
+        findings.append("attestation_digest_mismatch")
+    if attestation.effective_content_digest != metadata_content_digest:
+        # The document describes a different build than the one answering calls.
+        findings.append("effective_digest_differs_from_metadata")
+
+    for name, value in dict(expected_identity or {}).items():
+        actual = getattr(attestation, name, None)
+        if actual != value:
+            findings.append(f"identity_mismatch:{name}")
+
+    findings.extend(_check_findings(attestation))
+
+    if attestation.gateway_evidence_kind == "locally_verified":
+        if local_conformance_report_digest is None:
+            caps.append("gateway_evidence_self_reported")
+        elif local_conformance_report_digest != attestation.gateway_conformance_report_digest:
+            findings.append("gateway_conformance_report_digest_mismatch")
+    elif attestation.gateway_evidence_issuer not in set(trusted_issuers):
+        caps.append("gateway_evidence_issuer_untrusted")
+
+    if attestation.server_content_digest is None:
+        # Without a server content statement the effective digest still catches adapter and
+        # catalog drift, but not the server's own business logic changing underneath.
+        caps.append("server_content_digest_absent")
+    if attestation.state_observability != "complete":
+        caps.append("state_observability_incomplete")
+
+    effective = attestation.level
+    if caps and effective == "L2":
+        effective = "L1"
+    if findings:
+        effective = "L0"
+    return ConformanceVerdict(
+        attested_level=attestation.level,
+        effective_level=effective,
+        publishable=effective == "L2" and not findings,
+        findings=tuple(findings),
+        caps=tuple(caps),
+    )
