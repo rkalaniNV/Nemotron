@@ -34,6 +34,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     ModelExposureError,
     ModelIdentityClaim,
     SourceChangedDuringEvalError,
+    TranslationLineageError,
     UnresolvedContaminationError,
     VerifiedEvalSource,
     assert_plan_unchanged,
@@ -54,6 +55,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     benchmark_schema,
     canonical_json,
     encode_arguments,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.translation import (
+    translate_bfcl,
 )
 
 ORACLE_CLOCK = "2026-01-01T00:00:00+00:00"
@@ -293,29 +297,88 @@ def _publish(
     return publication
 
 
-def _translate(publication: Publication, tmp_path: Path, *, model: dict[str, Any] | None = None) -> Path:
-    """A translation that changes nothing, so only its lineage is under test."""
+def _translate(
+    publication: Publication,
+    tmp_path: Path,
+    *,
+    model: dict[str, Any] | None = None,
+    monkeypatch: pytest.MonkeyPatch | None = None,
+) -> Path:
+    """Write legacy-invalid evidence or run the registered translation adapter."""
     directory = tmp_path / "translated"
-    directory.mkdir(parents=True, exist_ok=True)
-    table = directory / "benchmark_vi.parquet"
-    table.write_bytes(publication.benchmark_path.read_bytes())
-    task_ids = pq.read_table(table, columns=["task_id"]).column("task_id").to_pylist()
-    document: dict[str, Any] = {
-        "schema_version": SOURCE_VERIFICATION_CONTRACT_VERSION,
-        "source_run_id": publication.manifest()["run_id"],
-        "language": "vi",
-        "benchmark": {
-            "file": table.name,
-            "rows": len(task_ids),
-            "content_hash": _file_hash(table),
+    if model is None:
+        directory.mkdir(parents=True, exist_ok=True)
+        table = directory / "benchmark_vi.parquet"
+        table.write_bytes(publication.benchmark_path.read_bytes())
+        task_ids = pq.read_table(table, columns=["task_id"]).column("task_id").to_pylist()
+        document = {
+            "schema_version": SOURCE_VERIFICATION_CONTRACT_VERSION,
+            "source_run_id": publication.manifest()["run_id"],
+            "language": "vi",
+            "benchmark": {
+                "file": table.name,
+                "rows": len(task_ids),
+                "content_hash": _file_hash(table),
+            },
+            "task_ids_hash": _hash(canonical_json(task_ids).encode("utf-8")),
+        }
+        manifest = directory / "translation_manifest.json"
+        manifest.write_text(
+            json.dumps(document, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return manifest
+
+    assert monkeypatch is not None
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import translation
+
+    class StubTranslationPipeline:
+        def __init__(self, _config: Any):
+            pass
+
+        def translate(self, dataframe: Any) -> Any:
+            output = dataframe.copy()
+            target = str(dataframe["target_language_code"].iloc[0])
+            prefix = "Bản dịch: " if target == "vi" else "Backtranslation: "
+            output["translation"] = output["text"].map(lambda text: prefix + text)
+            return output
+
+    def quality(dataframe: Any, _config: Any, **_kwargs: Any) -> Any:
+        output = dataframe.copy()
+        output["score_chrf"] = 100.0
+        output["score_chrf_passed"] = True
+        output["is_quality_metric_passed"] = True
+        return output
+
+    monkeypatch.setattr(translation, "TranslationPipeline", StubTranslationPipeline)
+    monkeypatch.setattr(translation, "evaluate_text_quality_metrics", quality)
+    config = {
+        "family": "bfcl",
+        "stage": "translate",
+        "config_status": "resolved",
+        "expt_name": "translated",
+        "source_run_manifest": str(publication.manifest_path),
+        "output_dir": str(tmp_path / "localized"),
+        "source_language": "en",
+        "target_language": "vi",
+        "translate_tool_descriptions": False,
+        "remove_low_quality": False,
+        "translation_model_config": {
+            "backend_type": "llm",
+            "params": {
+                "provider": model.get("provider", "test"),
+                "model": model.get("model", "translator"),
+                "canonical_id": model.get("canonical_id", model.get("model", "translator")),
+                "source": model.get("source", "huggingface"),
+                "revision": model.get("revision", IMMUTABLE_REVISION),
+                "weights_digest": model.get("weights_digest"),
+            },
         },
-        "task_ids_hash": _hash(canonical_json(task_ids).encode("utf-8")),
+        "backtranslation_quality_metrics": [{"type": "chrf", "threshold": 0}],
     }
-    if model is not None:
-        document["model"] = model
-    manifest = directory / "translation_manifest.json"
-    manifest.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return manifest
+    config_path = tmp_path / "translation.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    return translate_bfcl(config_path).parent / "translation_manifest.json"
 
 
 def _candidate(
@@ -415,9 +478,7 @@ def _load(tmp_path: Path, data: dict[str, Any], *, name: str = "eval") -> BfclEv
 
 def _gate(tmp_path: Path, **options: Any) -> tuple[VerifiedEvalSource, BfclEvalConfig, EligibleEvalPlan]:
     """Publish, verify, and gate in one step: the normal path for these tests."""
-    publish_options = {
-        key: options.pop(key) for key in ("name", "rows", "models", "extra") if key in options
-    }
+    publish_options = {key: options.pop(key) for key in ("name", "rows", "models", "extra") if key in options}
     publication = _publish(tmp_path, **publish_options)
     config = _load(tmp_path, _config_data(publication, tmp_path / "eval_out", **options))
     source = verify_eval_source(config)
@@ -463,9 +524,7 @@ def test_a_profile_is_scoped_to_the_rows_it_shaped(tmp_path: Path) -> None:
         extra={"profile_influenced_surface": True},
     )
 
-    assert [(exposure.role, exposure.task_ids) for exposure in source.exposures] == [
-        ("profile", ("t__a",))
-    ]
+    assert [(exposure.role, exposure.task_ids) for exposure in source.exposures] == [("profile", ("t__a",))]
 
 
 def test_a_judge_reads_the_whole_published_surface(tmp_path: Path) -> None:
@@ -708,9 +767,7 @@ def test_a_digest_written_without_its_algorithm_still_names_the_same_weights(tmp
         _gate(
             tmp_path,
             rows=[_row("t__a", paraphrased_by=PARAPHRASE_LABEL), _row("t__b")],
-            models=_roles(
-                paraphrase=_role(PARAPHRASE_LABEL, weights_digest=digest.removeprefix("sha256:"))
-            ),
+            models=_roles(paraphrase=_role(PARAPHRASE_LABEL, weights_digest=digest.removeprefix("sha256:"))),
             candidates=[_candidate("candidate_a", revision=None, weights_digest=digest)],
         )
 
@@ -733,9 +790,7 @@ def test_a_digest_from_another_algorithm_does_not_clear_a_candidate(tmp_path: Pa
                     weights_digest=f"blake3:{'c' * 64}",
                 )
             ),
-            candidates=[
-                _candidate("candidate_a", model="org/candidate", revision=None, weights_digest=_hash(b"w"))
-            ],
+            candidates=[_candidate("candidate_a", model="org/candidate", revision=None, weights_digest=_hash(b"w"))],
         )
 
 
@@ -1069,9 +1124,7 @@ def test_a_plan_widened_after_the_gate_stops_the_run(tmp_path: Path) -> None:
     widened = plan.model_copy(
         update={
             "candidates": (
-                plan.candidates[0].model_copy(
-                    update={"eligible_task_ids": ("t__a", "t__b"), "excluded_task_ids": ()}
-                ),
+                plan.candidates[0].model_copy(update={"eligible_task_ids": ("t__a", "t__b"), "excluded_task_ids": ()}),
             ),
             "common": plan.common.model_copy(update={"task_ids": ("t__a", "t__b")}),
         }
@@ -1120,29 +1173,27 @@ def test_a_plan_the_gate_would_never_produce_is_not_an_authorization(tmp_path: P
 # --- translation ------------------------------------------------------------
 
 
-def test_an_unnamed_translator_leaves_every_candidate_unresolved(tmp_path: Path) -> None:
+def test_an_unnamed_translator_is_refused(tmp_path: Path) -> None:
     publication = _publish(tmp_path)
     manifest = _translate(publication, tmp_path)
     config = _load(
         tmp_path,
         _config_data(publication, tmp_path / "eval_out", translation_manifest=manifest, publication_requested=False),
     )
-    source = verify_eval_source(config)
-
-    plan = evaluate_contamination(config, source)
-
-    exposure = source.exposures[0]
-    assert (exposure.role, exposure.identity, exposure.task_ids) == ("translator", None, ("t__a", "t__b"))
-    assert plan.candidate("candidate_a").unresolved is True
-    assert "contamination.unresolved:candidate_a" in plan.non_publication_reasons
+    with pytest.raises(TranslationLineageError, match="translation contract"):
+        verify_eval_source(config)
 
 
-def test_a_candidate_that_translated_the_benchmark_is_refused(tmp_path: Path) -> None:
+def test_a_candidate_that_translated_the_benchmark_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     publication = _publish(tmp_path)
     manifest = _translate(
         publication,
         tmp_path,
         model={"provider": SHARED_PROVIDER, "model": "candidate-route"},
+        monkeypatch=monkeypatch,
     )
     config = _load(
         tmp_path,
@@ -1154,12 +1205,16 @@ def test_a_candidate_that_translated_the_benchmark_is_refused(tmp_path: Path) ->
         evaluate_contamination(config, source)
 
 
-def test_a_named_translator_that_is_another_model_clears_the_candidate(tmp_path: Path) -> None:
+def test_a_named_translator_that_is_another_model_clears_the_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     publication = _publish(tmp_path)
     manifest = _translate(
         publication,
         tmp_path,
         model={"provider": "other", "model": "org/translator", "canonical_id": "other/translator"},
+        monkeypatch=monkeypatch,
     )
     config = _load(
         tmp_path,

@@ -28,12 +28,10 @@ source_run_manifest: REPLACE_ME_SOURCE_RUN_MANIFEST_JSON
 #   resource: REPLACE_ME_BACKEND_PY_OR_ENDPOINT_CONFIG
 source_oracle: null
 # Set only when scoring a translated benchmark derived from the same source run.
-# Verification requires the translation manifest to declare language, benchmark
-# (file, rows, content_hash), and task_ids_hash, to carry exactly the source task
-# ids in publication order, and to leave every truth field unchanged. An optional
-# `model` block (provider, model, source, revision, weights_digest, canonical_id)
-# names the translator; without it the translator stays unidentified and the run
-# is not publishable, because the candidate cannot be told apart from it.
+# Verification requires the content-addressed BFCL translation contract,
+# complete stable-path translation/backtranslation/quality evidence, exact source
+# task order and truth projection, and a mandatory immutable translator identity
+# plus all-rows contamination scope. An unidentified translator is refused.
 translation_manifest: null
 
 eval:

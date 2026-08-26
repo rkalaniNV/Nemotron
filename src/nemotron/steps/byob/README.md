@@ -97,12 +97,13 @@ uv run nemotron steps run byob/mcq \
 
 ### BFCL
 
-Start from `bfcl/config/tiny.yaml` for a smoke run or
-`bfcl/config/banking_vn.yaml` for generation. Resolve
+Start from `bfcl/config/tiny.yaml` for a smoke run,
+`bfcl/config/banking_vn.yaml` for generation, or
+`bfcl/config/translate.yaml` for localization. Resolve
 `bfcl/config/eval.default.yaml`, then use `eval.cli.yaml` or
 `eval.launcher.yaml` for model evaluation. BFCL supports:
 
-- `stage`: `prepare`, `generate`, `eval`, or `all`.
+- `stage`: `prepare`, `generate`, `translate`, `eval`, or `all`.
 - `oracle_pack.manifest_path`: executable oracle-pack manifest.
 - `oracle_runtime`: clock, process-worker timeouts, and `allowed_roots`.
 - `task_generation.tasks_per_category`: category-wide task budget.
@@ -110,8 +111,11 @@ Start from `bfcl/config/tiny.yaml` for a smoke run or
 - `execution_backend`: `direct` or `nemo_launcher` in an eval CLI envelope.
 - `output_format`: line-oriented `human` or machine-readable `json`.
 
-BFCL does not support `translate`. Generation accepts `skip_until` only for its
-canonical generation stages; eval refuses it. A resumed run recursively verifies
+BFCL translation accepts only a published `run_manifest.json`, preserves Oracle
+truth and task identity, protects executable tokens, and records model and
+contamination provenance in a content-addressed translation manifest. Generation
+accepts `skip_until` only for its canonical generation stages; translate and eval
+refuse it. A resumed generation run recursively verifies
 the predecessor checkpoint and revalidates the current pack, endpoint, config,
 task order, artifacts, and pipeline identity before continuing.
 

@@ -741,10 +741,11 @@ obtain one without verification:
 - **A translation preserves truth.** A translated benchmark must derive from this
   run, declare its language, table, and task-id hash, match its declared bytes,
   carry exactly the source task ids in publication order, and leave every field a
-  scorer reads byte-identical under canonical JSON. Only the conversation, the
-  intent, the system prompt, and row metadata may change. An optional `model`
-  block names the translator; without it the translator is unidentified, which
-  the contamination gate treats as unresolved rather than as clean.
+  scorer reads byte-identical under canonical JSON. Conversation text, intent,
+  localized metadata, and `tools[].function.description` may change; tool names
+  and complete parameter schemas may not. Translation manifests require a
+  `model` block plus complete contamination scope and self-hash their semantic
+  body; an unidentified translator is refused rather than treated as clean.
 - **Every model that read a row is named.** The `models.*` roles the manifest
   records — `profile`, `paraphrase`, `surface_judge` — are read together with the
   rows each one touched: rows carrying a `profile_hash`, rows attributed to the

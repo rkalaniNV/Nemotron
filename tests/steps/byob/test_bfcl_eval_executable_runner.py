@@ -68,6 +68,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_errors 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_projection import (
     ExecutableAssertionSpec,
     ExecutableDependency,
+    ExecutableProjectionError,
     ExecutableTaskSpec,
     ExecutableToolPolicy,
     _assertion_bindings,
@@ -145,15 +146,7 @@ HASH = "sha256:" + "1" * 64
 OTHER_HASH = "sha256:" + "2" * 64
 SOURCE_IDENTITY = "sha256:" + "3" * 64
 TASK_ID = "task-live-1"
-PACK_ROOT = (
-    Path(__file__).parents[3]
-    / "src"
-    / "nemotron"
-    / "steps"
-    / "byob"
-    / "data"
-    / "tiny_oracle_pack"
-)
+PACK_ROOT = Path(__file__).parents[3] / "src" / "nemotron" / "steps" / "byob" / "data" / "tiny_oracle_pack"
 
 
 def _hash(value: Any) -> str:
@@ -456,10 +449,7 @@ def _with_assertions(
     return task.model_copy(
         update={
             "success_assertions": names,
-            "assertion_specs": tuple(
-                ExecutableAssertionSpec(name=name, category=category)
-                for name in names
-            ),
+            "assertion_specs": tuple(ExecutableAssertionSpec(name=name, category=category) for name in names),
         }
     )
 
@@ -682,9 +672,7 @@ def _scripted_user_task(
         required_tools=("get_book_status",),
         call_order="strict",
     )
-    return task.model_copy(
-        update={"script": script, "turn_policy": turn_policy}
-    )
+    return task.model_copy(update={"script": script, "turn_policy": turn_policy})
 
 
 class _FakeOracle:
@@ -696,18 +684,14 @@ class _FakeOracle:
     async def reset(self) -> None:
         return None
 
-    async def call_tool(
-        self, function_name: str, arguments: dict[str, Any], *, turn_index: int
-    ) -> Any:
+    async def call_tool(self, function_name: str, arguments: dict[str, Any], *, turn_index: int) -> Any:
         self.calls.append((function_name, arguments, turn_index))
         return {"book_id": "BK-100", "status": "available"}
 
     async def get_state(self) -> dict[str, Any]:
         return {"books": [{"book_id": "BK-100", "status": "available"}]}
 
-    async def run_assertion(
-        self, name: str, *, task: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def run_assertion(self, name: str, *, task: dict[str, Any]) -> dict[str, Any]:
         return {"name": name, "status": "passed", "passed": True, "detail": None}
 
     async def close(self) -> None:
@@ -715,9 +699,7 @@ class _FakeOracle:
 
 
 class _TimeoutOracle(_FakeOracle):
-    async def call_tool(
-        self, function_name: str, arguments: dict[str, Any], *, turn_index: int
-    ) -> Any:
+    async def call_tool(self, function_name: str, arguments: dict[str, Any], *, turn_index: int) -> Any:
         self.calls.append((function_name, arguments, turn_index))
         raise TimeoutError("response lost")
 
@@ -727,9 +709,7 @@ class _FatalThenAssertionOracle(_TimeoutOracle):
         super().__init__(identity)
         self.assertion_calls = 0
 
-    async def run_assertion(
-        self, name: str, *, task: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def run_assertion(self, name: str, *, task: dict[str, Any]) -> dict[str, Any]:
         self.assertion_calls += 1
         return {
             "name": name,
@@ -753,9 +733,7 @@ class _SlowResetStateFailingOracle(_FakeOracle):
 
 
 class _InvalidJsonObjectOracle(_FakeOracle):
-    async def call_tool(
-        self, function_name: str, arguments: dict[str, Any], *, turn_index: int
-    ) -> Any:
+    async def call_tool(self, function_name: str, arguments: dict[str, Any], *, turn_index: int) -> Any:
         self.calls.append((function_name, arguments, turn_index))
         return {1: "object keys must be strings"}
 
@@ -775,9 +753,7 @@ class _UnreadableVerdictOracle(_FakeOracle):
 
 
 class _PendingMutationOracle(_FakeOracle):
-    async def call_tool(
-        self, function_name: str, arguments: dict[str, Any], *, turn_index: int
-    ) -> Any:
+    async def call_tool(self, function_name: str, arguments: dict[str, Any], *, turn_index: int) -> Any:
         self.calls.append((function_name, arguments, turn_index))
         return {"status": "awaiting_confirmation"}
 
@@ -804,9 +780,7 @@ class _FakeClient:
                     http_status=200,
                     latency_s=0.01,
                     raw_response="{}",
-                    raw_response_hash=(
-                        "sha256:" + hashlib.sha256(b"{}").hexdigest()
-                    ),
+                    raw_response_hash=("sha256:" + hashlib.sha256(b"{}").hexdigest()),
                 ),
             ),
             response=response,
@@ -856,8 +830,7 @@ def test_executable_projection_binds_plan_source_oracle_and_pack_metadata(
     source = _source(tmp_path, oracle)
     row = _row()
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_projection."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_projection.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -881,6 +854,31 @@ def test_executable_projection_binds_plan_source_oracle_and_pack_metadata(
     assert "user_turn_templates" in task.assertion_task
     assert "recorded_result" not in task.assertion_task
     assert "gold-only" not in canonical_json(task.model_dump(mode="json"))
+
+
+def test_direct_publication_tool_description_must_match_pack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oracle = _oracle()
+    source = _source(tmp_path, oracle)
+    row = _row()
+    tools = json.loads(canonical_json(row.tools))
+    tools[0]["function"]["description"] = "Unverified description."
+    changed = row.model_copy(update={"tools": tools})
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_projection.assert_source_unchanged",
+        lambda _source: None,
+    )
+
+    with pytest.raises(ExecutableProjectionError, match="do not match"):
+        build_executable_task_spec(
+            _projection(changed),
+            TASK_ID,
+            candidate_alias="candidate_a",
+            source=source,
+            plan=_plan(),
+        )
 
 
 def test_executable_projection_preserves_from_result_dependency_coordinates() -> None:
@@ -1071,9 +1069,7 @@ def test_surface_recovery_uses_every_verified_pack_source_kind() -> None:
                 "page": {"source": "range:{'min': 1, 'max': 3}"},
                 "missing": {"source": "absent:books"},
             },
-            "user_turn_templates": {
-                "en": "Book {title}, mode {mode}, page {page}, missing {missing}."
-            },
+            "user_turn_templates": {"en": "Book {title}, mode {mode}, page {page}, missing {missing}."},
         },
         [],
         pack_manifest={"absent_ids": {"books": [404]}},
@@ -1187,21 +1183,15 @@ def test_an_unknown_correction_keeps_its_timeline_position() -> None:
             "user_simulator_turns": [
                 {
                     "after": "correction",
-                    "slot_updates": {
-                        "value": {"source": "literal:['middle', 'final']"}
-                    },
+                    "slot_updates": {"value": {"source": "literal:['middle', 'final']"}},
                 }
             ],
         },
         [{"id": "correction"}],
     )
 
-    assert bindings["slot_updates"] == [
-        {"entry_index": 0, "values": {}, "aliases": {}}
-    ]
-    assert bindings["unresolved_slot_updates"] == [
-        {"update_index": 0, "entry_index": 0, "slots": ["value"]}
-    ]
+    assert bindings["slot_updates"] == [{"entry_index": 0, "values": {}, "aliases": {}}]
+    assert bindings["unresolved_slot_updates"] == [{"update_index": 0, "entry_index": 0, "slots": ["value"]}]
 
 
 def test_repeated_tool_milestones_pair_by_call_group_position() -> None:
@@ -1258,9 +1248,7 @@ def test_assertion_reading_an_unresolved_slot_is_infrastructure() -> None:
 
 
 def test_assertion_can_explicitly_report_not_applicable() -> None:
-    def optional_assertion(
-        *, state: dict, trace: list, task: dict, ctx: Any
-    ) -> dict[str, str]:
+    def optional_assertion(*, state: dict, trace: list, task: dict, ctx: Any) -> dict[str, str]:
         return {
             "status": "not_applicable",
             "detail": "the task declares no final-answer requirement",
@@ -1407,9 +1395,7 @@ def test_reading_an_unresolved_slot_update_is_infrastructure() -> None:
         trace=[],
         task={
             "slot_updates": [{"entry_index": 0, "values": {}, "aliases": {}}],
-            "unresolved_slot_updates": [
-                {"update_index": 0, "entry_index": 0, "slots": ["amount"]}
-            ],
+            "unresolved_slot_updates": [{"update_index": 0, "entry_index": 0, "slots": ["amount"]}],
         },
         ctx=None,
     )
@@ -1482,8 +1468,7 @@ async def _a_state_failure_keeps_the_reason_the_episode_already_ended_for(
     oracle_source = _oracle()
     source = _source(tmp_path, oracle_source)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -1514,11 +1499,7 @@ def test_a_state_failure_keeps_the_reason_the_episode_already_ended_for(
     # failure as the terminal status would describe an episode shape the
     # contract forbids, and the whole record would be lost to a validation
     # error instead of reporting the timeout that actually ended it.
-    episode = asyncio.run(
-        _a_state_failure_keeps_the_reason_the_episode_already_ended_for(
-            tmp_path, monkeypatch
-        )
-    )
+    episode = asyncio.run(_a_state_failure_keeps_the_reason_the_episode_already_ended_for(tmp_path, monkeypatch))
 
     assert episode.status == "episode_timeout"
     assert episode.observed == ()
@@ -1585,8 +1566,7 @@ async def _fatal_tool_status_is_not_overwritten_by_later_assertions(
     task = _with_assertions(_task(oracle_source), "assert_book_status_reported")
     oracle = _FatalThenAssertionOracle(oracle_source.verification_identity)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -1611,11 +1591,7 @@ async def _fatal_tool_status_is_not_overwritten_by_later_assertions(
 def test_a_fatal_tool_status_is_not_overwritten_by_later_assertions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(
-        _fatal_tool_status_is_not_overwritten_by_later_assertions(
-            tmp_path, monkeypatch
-        )
-    )
+    asyncio.run(_fatal_tool_status_is_not_overwritten_by_later_assertions(tmp_path, monkeypatch))
 
 
 async def _python_oracle_session_keeps_state_in_one_isolated_worker(
@@ -1776,8 +1752,7 @@ async def _projected_task_runs_its_pack_assertions_in_the_isolated_session(
     plan = _plan()
     for module in ("executable_projection", "executable_driver"):
         monkeypatch.setattr(
-            "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
-            f"{module}.assert_source_unchanged",
+            f"nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.{module}.assert_source_unchanged",
             lambda _source: None,
         )
     task = build_executable_task_spec(
@@ -1813,11 +1788,7 @@ async def _projected_task_runs_its_pack_assertions_in_the_isolated_session(
 def test_projected_task_runs_its_pack_assertions_in_the_isolated_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(
-        _projected_task_runs_its_pack_assertions_in_the_isolated_session(
-            tmp_path, monkeypatch
-        )
-    )
+    asyncio.run(_projected_task_runs_its_pack_assertions_in_the_isolated_session(tmp_path, monkeypatch))
 
 
 async def _live_driver_returns_live_result_to_candidate_not_recorded_gold(
@@ -1835,8 +1806,7 @@ async def _live_driver_returns_live_result_to_candidate_not_recorded_gold(
         ]
     )
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -1867,23 +1837,16 @@ async def _live_driver_returns_live_result_to_candidate_not_recorded_gold(
 def test_live_driver_returns_live_result_to_candidate_not_recorded_gold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(
-        _live_driver_returns_live_result_to_candidate_not_recorded_gold(
-            tmp_path, monkeypatch
-        )
-    )
+    asyncio.run(_live_driver_returns_live_result_to_candidate_not_recorded_gold(tmp_path, monkeypatch))
 
 
-async def _authorization_failure_closes_the_open_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def _authorization_failure_closes_the_open_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     oracle_source = _oracle()
     source = _source(tmp_path, oracle_source)
     source.verification_identity = "sha256:" + "b" * 64
     oracle = _FakeOracle(oracle_source.verification_identity)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -1902,9 +1865,7 @@ async def _authorization_failure_closes_the_open_session(
     assert oracle.closed
 
 
-def test_authorization_failure_closes_the_open_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_authorization_failure_closes_the_open_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_authorization_failure_closes_the_open_session(tmp_path, monkeypatch))
 
 
@@ -1917,8 +1878,7 @@ async def _schema_invalid_candidate_call_is_recorded_but_not_executed(
     oracle = _FakeOracle(oracle_source.verification_identity)
     client = _FakeClient([_response_with_call({})])
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -1942,11 +1902,7 @@ async def _schema_invalid_candidate_call_is_recorded_but_not_executed(
 def test_schema_invalid_candidate_call_is_recorded_but_not_executed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(
-        _schema_invalid_candidate_call_is_recorded_but_not_executed(
-            tmp_path, monkeypatch
-        )
-    )
+    asyncio.run(_schema_invalid_candidate_call_is_recorded_but_not_executed(tmp_path, monkeypatch))
 
 
 async def _invalid_json_object_result_is_recorded_as_an_oracle_failure(
@@ -1955,8 +1911,7 @@ async def _invalid_json_object_result_is_recorded_as_an_oracle_failure(
     oracle_source = _oracle()
     source = _source(tmp_path, oracle_source)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -1981,11 +1936,7 @@ async def _invalid_json_object_result_is_recorded_as_an_oracle_failure(
 def test_invalid_json_object_result_is_recorded_as_an_oracle_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(
-        _invalid_json_object_result_is_recorded_as_an_oracle_failure(
-            tmp_path, monkeypatch
-        )
-    )
+    asyncio.run(_invalid_json_object_result_is_recorded_as_an_oracle_failure(tmp_path, monkeypatch))
 
 
 async def _cleanup_failure_does_not_replace_a_candidate_outcome(
@@ -1995,8 +1946,7 @@ async def _cleanup_failure_does_not_replace_a_candidate_outcome(
     source = _source(tmp_path, oracle_source)
     oracle = _UnreadableVerdictOracle(oracle_source.verification_identity)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -2016,14 +1966,8 @@ async def _cleanup_failure_does_not_replace_a_candidate_outcome(
     assert oracle.closed
 
 
-def test_cleanup_failure_does_not_replace_a_candidate_outcome(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    asyncio.run(
-        _cleanup_failure_does_not_replace_a_candidate_outcome(
-            tmp_path, monkeypatch
-        )
-    )
+def test_cleanup_failure_does_not_replace_a_candidate_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    asyncio.run(_cleanup_failure_does_not_replace_a_candidate_outcome(tmp_path, monkeypatch))
 
 
 async def _drive_score_fixture(
@@ -2038,8 +1982,7 @@ async def _drive_score_fixture(
 ) -> Any:
     source = _source(tmp_path, _oracle())
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
     active_client = client or _FakeClient(responses)
@@ -2070,11 +2013,11 @@ def test_confirmation_protected_call_is_not_executed_before_user_confirmation(
             oracle=oracle,
             responses=[
                 _response_with_call(
-                        {
-                            "book_id": "BK-100",
-                            "patron_id": "P-1",
-                            "confirm": True,
-                        },
+                    {
+                        "book_id": "BK-100",
+                        "patron_id": "P-1",
+                        "confirm": True,
+                    },
                     function_name="checkout_book",
                 )
             ],
@@ -2084,10 +2027,7 @@ def test_confirmation_protected_call_is_not_executed_before_user_confirmation(
     assert episode.status == "confirmation_not_earned"
     assert episode.reason_code == "episode.confirmation_not_earned"
     assert episode.executions[0].status == "not_executed"
-    assert (
-        episode.executions[0].reason_code
-        == "tool_execution.confirmation_not_earned"
-    )
+    assert episode.executions[0].reason_code == "tool_execution.confirmation_not_earned"
     assert oracle.calls == []
 
 
@@ -2129,9 +2069,7 @@ def test_a_blocked_confirmation_ends_the_episode_instead_of_running_on(
     """A withheld call must stop the episode, not leave an unanswered tool call."""
 
     oracle_source = _oracle()
-    task = _confirmation_task(oracle_source).model_copy(
-        update={"confirmed_call_turns": ()}
-    )
+    task = _confirmation_task(oracle_source).model_copy(update={"confirmed_call_turns": ()})
     oracle = _FakeOracle(oracle_source.verification_identity)
     episode = asyncio.run(
         _drive_score_fixture(
@@ -2204,9 +2142,7 @@ def test_dependent_call_uses_the_prior_live_result_for_driving_and_scoring(
         ) -> Any:
             self.calls.append((function_name, arguments, turn_index))
             return {
-                "book_id": (
-                    "BK-LIVE" if len(self.calls) == 1 else arguments["book_id"]
-                ),
+                "book_id": ("BK-LIVE" if len(self.calls) == 1 else arguments["book_id"]),
                 "status": "available",
             }
 
@@ -2261,9 +2197,7 @@ def test_a_producer_result_naming_a_null_error_still_resolves_its_dependency(
         ) -> Any:
             self.calls.append((function_name, arguments, turn_index))
             return {
-                "book_id": (
-                    "BK-LIVE" if len(self.calls) == 1 else arguments["book_id"]
-                ),
+                "book_id": ("BK-LIVE" if len(self.calls) == 1 else arguments["book_id"]),
                 "status": "available",
                 "error": None,
             }
@@ -2359,9 +2293,7 @@ def test_executable_scorer_rejects_dependency_value_not_derived_from_live_result
         ) -> Any:
             self.calls.append((function_name, arguments, turn_index))
             return {
-                "book_id": (
-                    "BK-LIVE" if len(self.calls) == 1 else arguments["book_id"]
-                ),
+                "book_id": ("BK-LIVE" if len(self.calls) == 1 else arguments["book_id"]),
                 "status": "available",
             }
 
@@ -2425,8 +2357,7 @@ def test_multiturn_policies_release_only_the_published_scripted_user_turn(
     )
     source = _source(tmp_path, oracle_source)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -2444,18 +2375,14 @@ def test_multiturn_policies_release_only_the_published_scripted_user_turn(
     )
 
     second_request_users = [
-        message["content"]
-        for message in thaw_json(client.requests[1].body)["messages"]
-        if message["role"] == "user"
+        message["content"] for message in thaw_json(client.requests[1].body)["messages"] if message["role"] == "user"
     ]
     assert episode.status == "completed"
     assert second_request_users[-1] == user_content
     assert episode.released_user_turns == 1
 
 
-def test_executable_scorer_happy_path_is_deterministic(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_executable_scorer_happy_path_is_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     oracle_source = _oracle()
     task = _task(oracle_source)
     episode = asyncio.run(
@@ -2500,15 +2427,15 @@ def test_executable_scorer_happy_path_is_deterministic(
     assert aggregate.task_count == 1
     assert aggregate.successful_tasks == 1
     assert aggregate.metric("tool_execution_success_rate").value == 1.0
+    assert aggregate.metric("state_match_rate").not_applicable_reason == "metric.no_state_assertion"
     assert (
-        aggregate.metric("state_match_rate").not_applicable_reason
-        == "metric.no_state_assertion"
+        aggregate.aggregate_hash
+        == aggregate_executable_scores(
+            scores=(second,),
+            plan=_plan(),
+            candidate_alias="candidate_a",
+        ).aggregate_hash
     )
-    assert aggregate.aggregate_hash == aggregate_executable_scores(
-        scores=(second,),
-        plan=_plan(),
-        candidate_alias="candidate_a",
-    ).aggregate_hash
 
 
 def test_executable_aggregation_refuses_duplicate_or_foreign_task_scores(
@@ -2577,9 +2504,7 @@ def test_executable_task_contract_binds_terminal_completion_and_infrastructure_s
 
     completed_with_failed_completion = score.semantic_payload()
     completion = next(
-        gate
-        for gate in completed_with_failed_completion["gates"]
-        if gate["gate"] == "executable_completion"
+        gate for gate in completed_with_failed_completion["gates"] if gate["gate"] == "executable_completion"
     )
     completion.update(
         {
@@ -2596,16 +2521,10 @@ def test_executable_task_contract_binds_terminal_completion_and_infrastructure_s
     infrastructure_without_stop["episode_status"] = "oracle_timeout"
     infrastructure_without_stop["task_success"] = False
     task_success_metric = next(
-        metric
-        for metric in infrastructure_without_stop["metrics"]
-        if metric["metric"] == "task_success_rate"
+        metric for metric in infrastructure_without_stop["metrics"] if metric["metric"] == "task_success_rate"
     )
     task_success_metric.update({"numerator": 0, "value": 0.0})
-    completion = next(
-        gate
-        for gate in infrastructure_without_stop["gates"]
-        if gate["gate"] == "executable_completion"
-    )
+    completion = next(gate for gate in infrastructure_without_stop["gates"] if gate["gate"] == "executable_completion")
     completion.update(
         {
             "outcome": "failed",
@@ -2677,17 +2596,20 @@ def test_tool_trace_cache_replays_the_complete_episode_without_external_io(
     assert replay_oracle.calls == []
     assert replay_oracle.closed
     assert cache.content_hash is not None
-    assert score_executable_episode(
-        episode=replay,
-        task=task,
-        scoring=_scoring(),
-        plan=_plan(),
-    ).score_hash == score_executable_episode(
-        episode=first,
-        task=task,
-        scoring=_scoring(),
-        plan=_plan(),
-    ).score_hash
+    assert (
+        score_executable_episode(
+            episode=replay,
+            task=task,
+            scoring=_scoring(),
+            plan=_plan(),
+        ).score_hash
+        == score_executable_episode(
+            episode=first,
+            task=task,
+            scoring=_scoring(),
+            plan=_plan(),
+        ).score_hash
+    )
 
     request = build_tool_trace_request(
         candidate=_candidate(),
@@ -2740,13 +2662,9 @@ def test_publication_evidence_streams_identities_and_refuses_a_claim_without_one
         )
     )
     published = list(cache.publication_evidence())
-    assert [(item.candidate_alias, item.task_id) for item in published] == [
-        (episode.candidate_alias, episode.task_id)
-    ]
+    assert [(item.candidate_alias, item.task_id) for item in published] == [(episode.candidate_alias, episode.task_id)]
     assert published[0].episode_hash == episode.episode_hash
-    assert [turn.request_hash for turn in published[0].turns] == [
-        turn.request_hash for turn in episode.observed
-    ]
+    assert [turn.request_hash for turn in published[0].turns] == [turn.request_hash for turn in episode.observed]
 
     unfinished = build_tool_trace_request(
         candidate=_candidate(),
@@ -2846,9 +2764,7 @@ def test_executable_artifacts_bind_aggregates_task_rows_and_both_caches(
     )
 
     report = json.loads((output_dir / EVAL_REPORT_FILE).read_text(encoding="utf-8"))
-    manifest = json.loads(
-        (output_dir / EVAL_MANIFEST_FILE).read_text(encoding="utf-8")
-    )
+    manifest = json.loads((output_dir / EVAL_MANIFEST_FILE).read_text(encoding="utf-8"))
     rows = pq.read_table(output_dir / EVAL_TASK_RESULTS_FILE).to_pylist()
     assert report["candidates"][0]["metrics"]["task_success_rate"]["value"] == 1.0
     assert report["error_taxonomy_hash"] == ERROR_TAXONOMY_HASH
@@ -2856,14 +2772,8 @@ def test_executable_artifacts_bind_aggregates_task_rows_and_both_caches(
     assert rows[0]["episode_status"] == "completed"
     assert rows[0]["failure_records"] == []
     assert rows[0]["final_answer_passed"] is None
-    assert (
-        manifest["artifacts"]["candidate_io_cache"]["content_hash"]
-        == _hash_file(candidate_cache)
-    )
-    assert (
-        manifest["artifacts"]["tool_trace_cache"]["content_hash"]
-        == _hash_file(tool_cache)
-    )
+    assert manifest["artifacts"]["candidate_io_cache"]["content_hash"] == _hash_file(candidate_cache)
+    assert manifest["artifacts"]["tool_trace_cache"]["content_hash"] == _hash_file(tool_cache)
     assert manifest["error_taxonomy_hash"] == ERROR_TAXONOMY_HASH
     assert set(manifest["runtime"]) >= {
         "python",
@@ -2988,9 +2898,7 @@ def test_a_published_candidate_cache_is_checked_without_episode_evidence(
     unfinished_dir.mkdir()
     unfinished_path = unfinished_dir / "candidate_io_cache.jsonl"
     unfinished = CandidateIOCache(unfinished_path)
-    for index, (request, outcome) in enumerate(
-        zip(client.requests, client.outcomes, strict=True)
-    ):
+    for index, (request, outcome) in enumerate(zip(client.requests, client.outcomes, strict=True)):
         unfinished.put_request(request)
         if index == 0:
             for attempt in outcome.attempts:
@@ -3082,9 +2990,7 @@ def test_batch_pipeline_replays_end_to_end_from_both_valid_caches(
             super().__init__(values)
             self.cache = cache
 
-        async def complete(
-            self, request: Any, *, deadline: float
-        ) -> CandidateCallOutcome:
+        async def complete(self, request: Any, *, deadline: float) -> CandidateCallOutcome:
             nonlocal candidate_calls
             candidate_calls += 1
             outcome = await super().complete(request, deadline=deadline)
@@ -3154,8 +3060,7 @@ def test_batch_pipeline_replays_end_to_end_from_both_valid_caches(
     monkeypatch.setattr(batch_runner, "assert_plan_unchanged", lambda *_args: None)
     for module in ("executable_projection", "executable_driver"):
         monkeypatch.setattr(
-            "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval."
-            f"{module}.assert_source_unchanged",
+            f"nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.{module}.assert_source_unchanged",
             lambda _source: None,
         )
 
@@ -3223,9 +3128,7 @@ def test_business_rejection_is_execution_success_and_assertions_decide_correctne
             ],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
 
     assert episode.executions[0].status == "business_rejection"
     assert score.gate("oracle_execution").outcome == "passed"
@@ -3252,9 +3155,7 @@ def test_assertion_verdicts_keep_candidate_and_infrastructure_failures_separate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class VerdictOracle(_FakeOracle):
-        async def run_assertion(
-            self, name: str, *, task: dict[str, Any]
-        ) -> dict[str, Any]:
+        async def run_assertion(self, name: str, *, task: dict[str, Any]) -> dict[str, Any]:
             return {
                 "name": name,
                 "status": assertion_status,
@@ -3276,9 +3177,7 @@ def test_assertion_verdicts_keep_candidate_and_infrastructure_failures_separate(
             ],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
 
     assert episode.status == episode_status
     assert score.gate("assertions").failure_class == failure_class
@@ -3286,13 +3185,9 @@ def test_assertion_verdicts_keep_candidate_and_infrastructure_failures_separate(
     assert not score.task_success
 
 
-def test_not_applicable_assertion_does_not_fail_the_candidate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_not_applicable_assertion_does_not_fail_the_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class VerdictOracle(_FakeOracle):
-        async def run_assertion(
-            self, name: str, *, task: dict[str, Any]
-        ) -> dict[str, Any]:
+        async def run_assertion(self, name: str, *, task: dict[str, Any]) -> dict[str, Any]:
             return {
                 "name": name,
                 "status": "not_applicable",
@@ -3314,17 +3209,12 @@ def test_not_applicable_assertion_does_not_fail_the_candidate(
             ],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
 
     assert episode.status == "completed"
     assert episode.assertions[0].status == "not_applicable"
     assert score.gate("assertions").outcome == "not_applicable"
-    assert (
-        score.metric("assertion_success_rate").not_applicable_reason
-        == "metric.all_assertions_not_applicable"
-    )
+    assert score.metric("assertion_success_rate").not_applicable_reason == "metric.all_assertions_not_applicable"
     assert score.task_success
 
 
@@ -3349,18 +3239,13 @@ def test_declared_assertion_category_reaches_the_episode_and_its_metric(
             ],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
 
     assert episode.assertions[0].category == "state"
     assert score.assertions[0].category == "state"
     assert score.metric("state_match_rate").value == 1.0
     assert score.metric("assertion_success_rate").value == 1.0
-    assert (
-        score.metric("final_answer_success_rate").not_applicable_reason
-        == "metric.no_final_answer_assertion"
-    )
+    assert score.metric("final_answer_success_rate").not_applicable_reason == "metric.no_final_answer_assertion"
 
 
 def test_a_metric_quotient_is_not_part_of_the_score_identity() -> None:
@@ -3376,9 +3261,7 @@ def test_a_metric_quotient_is_not_part_of_the_score_identity() -> None:
     assert metric.identity_payload()["denominator"] == 2
 
 
-def test_oracle_timeout_is_a_non_candidate_scoring_stop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_oracle_timeout_is_a_non_candidate_scoring_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     oracle_source = _oracle()
     task = _with_assertions(_task(oracle_source), "assert_book_status_reported")
     episode = asyncio.run(
@@ -3390,9 +3273,7 @@ def test_oracle_timeout_is_a_non_candidate_scoring_stop(
             responses=[_response_with_call({"book_id": "BK-100"})],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
 
     assert score.gate("oracle_execution").failure_class == "infrastructure"
     assert score.gate("assertions").outcome == "not_applicable"
@@ -3405,22 +3286,14 @@ def test_oracle_timeout_is_a_non_candidate_scoring_stop(
     # evidence, not a candidate failure, so no assertion-derived metric may
     # report a number the episode never produced.
     assert score.metric("assertion_success_rate").value is None
-    assert (
-        score.metric("assertion_success_rate").not_applicable_reason
-        == "metric.assertion_evidence_incomplete"
-    )
+    assert score.metric("assertion_success_rate").not_applicable_reason == "metric.assertion_evidence_incomplete"
     assert score.metric("path_success_rate").value is None
-    assert (
-        score.metric("path_success_rate").not_applicable_reason
-        == "metric.path_evidence_incomplete"
-    )
+    assert score.metric("path_success_rate").not_applicable_reason == "metric.path_evidence_incomplete"
     result = executable_task_result(score)
     assert result["episode_status"] == "oracle_timeout"
     assert result["non_candidate_stop"] is True
     assert result["failure_records"]
-    assert {
-        record["attribution"] for record in result["failure_records"]
-    } == {"infrastructure"}
+    assert {record["attribution"] for record in result["failure_records"]} == {"infrastructure"}
     # Every incomplete episode fails the same completion gate, so only the
     # episode-layer record says which terminal ended this one.
     assert result["failure_records"][0] == {
@@ -3450,9 +3323,7 @@ def test_the_executable_score_reports_the_trace_layers_attribution_unchanged(
             responses=[_response_with_call({"book_id": "BK-100"})],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
     trace = parse_executable_trace(episode, task)
     normalized = score_normalized_trace(
         trace=trace,
@@ -3573,13 +3444,9 @@ def test_determined_mutation_commit_verdicts_pass_the_evidence_gate(
             ],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
 
-    assert episode.executions[0].state_commit == (
-        "committed" if changes_state else "not_committed"
-    )
+    assert episode.executions[0].state_commit == ("committed" if changes_state else "not_committed")
     assert score.gate("commit_state_known").outcome == "passed"
     assert score.task_success
 
@@ -3626,9 +3493,7 @@ def test_unknown_mutation_commit_state_is_an_infrastructure_stop(
             responses=[_response_with_call({"book_id": "BK-100"})],
         )
     )
-    score = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
 
     assert episode.status == "unknown_commit_state"
     assert score.gate("commit_state_known").failure_class == "infrastructure"
@@ -3636,9 +3501,7 @@ def test_unknown_mutation_commit_state_is_an_infrastructure_stop(
     assert not score.task_success
 
 
-def test_result_evidence_changes_executable_score_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_result_evidence_changes_executable_score_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class AlternateResultOracle(_FakeOracle):
         async def call_tool(
             self,
@@ -3674,20 +3537,14 @@ def test_result_evidence_changes_executable_score_identity(
             responses=list(responses),
         )
     )
-    first = score_executable_episode(
-        episode=first_episode, task=task, scoring=_scoring(), plan=_plan()
-    )
-    second = score_executable_episode(
-        episode=second_episode, task=task, scoring=_scoring(), plan=_plan()
-    )
+    first = score_executable_episode(episode=first_episode, task=task, scoring=_scoring(), plan=_plan())
+    second = score_executable_episode(episode=second_episode, task=task, scoring=_scoring(), plan=_plan())
 
     assert first_episode.executions[0].result_hash != second_episode.executions[0].result_hash
     assert first.score_hash != second.score_hash
 
 
-def test_executable_score_hash_ignores_diagnostic_wording(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_executable_score_hash_ignores_diagnostic_wording(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     oracle_source = _oracle()
     task = _task(oracle_source)
     episode = asyncio.run(
@@ -3706,30 +3563,22 @@ def test_executable_score_hash_ignores_diagnostic_wording(
         update={
             "detail": "different diagnostic",
             "observed": tuple(
-                turn.model_copy(update={"detail": "different turn diagnostic"})
-                for turn in episode.observed
+                turn.model_copy(update={"detail": "different turn diagnostic"}) for turn in episode.observed
             ),
             "executions": tuple(
-                item.model_copy(update={"detail": "different execution diagnostic"})
-                for item in episode.executions
+                item.model_copy(update={"detail": "different execution diagnostic"}) for item in episode.executions
             ),
         }
     )
 
-    original = score_executable_episode(
-        episode=episode, task=task, scoring=_scoring(), plan=_plan()
-    )
-    changed = score_executable_episode(
-        episode=reworded, task=task, scoring=_scoring(), plan=_plan()
-    )
+    original = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
+    changed = score_executable_episode(episode=reworded, task=task, scoring=_scoring(), plan=_plan())
 
     assert episode.episode_hash == reworded.episode_hash
     assert original.score_hash == changed.score_hash
 
 
-def test_executable_scorer_refuses_identity_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_executable_scorer_refuses_identity_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     oracle_source = _oracle()
     task = _task(oracle_source)
     episode = asyncio.run(
@@ -3796,12 +3645,8 @@ def test_assertions_only_accepts_candidate_trace_mismatch_when_assertions_pass(
             responses=[_response_with_call({"book_id": "BK-200"})],
         )
     )
-    assertions_only = _scoring().model_copy(
-        update={"task_success": "assertions_only"}
-    )
-    assertions_only_plan = _plan().model_copy(
-        update={"scoring_policy_hash": assertions_only.scoring_policy_hash}
-    )
+    assertions_only = _scoring().model_copy(update={"task_success": "assertions_only"})
+    assertions_only_plan = _plan().model_copy(update={"scoring_policy_hash": assertions_only.scoring_policy_hash})
     assertions_only_task = task.model_copy(
         update={
             "scoring_policy_hash": assertions_only.scoring_policy_hash,
@@ -3832,9 +3677,7 @@ def test_assertions_only_accepts_candidate_trace_mismatch_when_assertions_pass(
 def test_assertions_only_requires_at_least_one_assertion() -> None:
     oracle_source = _oracle()
     task = _task(oracle_source)
-    assertions_only = _scoring().model_copy(
-        update={"task_success": "assertions_only"}
-    )
+    assertions_only = _scoring().model_copy(update={"task_success": "assertions_only"})
 
     with pytest.raises(ExecutableScoringPolicyError, match="no required assertion"):
         score_executable_episode(
@@ -3853,8 +3696,7 @@ async def _unreadable_assertion_verdict_keeps_the_episode_evidence(
     task = _with_assertions(_task(oracle_source), "assert_book_status_reported")
     oracle = _UnreadableVerdictOracle(oracle_source.verification_identity)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -3882,14 +3724,10 @@ async def _unreadable_assertion_verdict_keeps_the_episode_evidence(
 def test_an_unreadable_assertion_verdict_keeps_the_episode_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(
-        _unreadable_assertion_verdict_keeps_the_episode_evidence(tmp_path, monkeypatch)
-    )
+    asyncio.run(_unreadable_assertion_verdict_keeps_the_episode_evidence(tmp_path, monkeypatch))
 
 
-async def _pending_mutation_is_not_recorded_as_committed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def _pending_mutation_is_not_recorded_as_committed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     oracle_source = _oracle()
     source = _source(tmp_path, oracle_source)
     task = _task(oracle_source).model_copy(
@@ -3916,8 +3754,7 @@ async def _pending_mutation_is_not_recorded_as_committed(
         ]
     )
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -3935,15 +3772,10 @@ async def _pending_mutation_is_not_recorded_as_committed(
     assert episode.status == "completed"
     assert episode.executions[0].state_commit == "not_committed"
     assert episode.executions[0].state_before_hash is not None
-    assert (
-        episode.executions[0].state_before_hash
-        == episode.executions[0].state_after_hash
-    )
+    assert episode.executions[0].state_before_hash == episode.executions[0].state_after_hash
 
 
-def test_a_pending_mutation_is_not_recorded_as_committed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_pending_mutation_is_not_recorded_as_committed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_pending_mutation_is_not_recorded_as_committed(tmp_path, monkeypatch))
 
 
@@ -3954,13 +3786,10 @@ async def _terminal_tool_call_can_complete_without_releasing_its_result(
     source = _source(tmp_path, oracle_source)
     task = _task(oracle_source)
     terminal_call = task.script.turns[0].model_copy(update={"is_terminal": True})
-    task = task.model_copy(
-        update={"script": task.script.model_copy(update={"turns": (terminal_call,)})}
-    )
+    task = task.model_copy(update={"script": task.script.model_copy(update={"turns": (terminal_call,)})})
     oracle = _FakeOracle(oracle_source.verification_identity)
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -3985,16 +3814,10 @@ async def _terminal_tool_call_can_complete_without_releasing_its_result(
 def test_a_terminal_tool_call_can_complete_without_releasing_its_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(
-        _terminal_tool_call_can_complete_without_releasing_its_result(
-            tmp_path, monkeypatch
-        )
-    )
+    asyncio.run(_terminal_tool_call_can_complete_without_releasing_its_result(tmp_path, monkeypatch))
 
 
-async def _mutating_timeout_is_not_retried(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def _mutating_timeout_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     oracle_source = _oracle()
     source = _source(tmp_path, oracle_source)
     task = _task(oracle_source).model_copy(
@@ -4016,8 +3839,7 @@ async def _mutating_timeout_is_not_retried(
     oracle = _TimeoutOracle(oracle_source.verification_identity)
     client = _FakeClient([_response_with_call({"book_id": "BK-100"})])
     monkeypatch.setattr(
-        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver."
-        "assert_source_unchanged",
+        "nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.executable_driver.assert_source_unchanged",
         lambda _source: None,
     )
 
@@ -4038,7 +3860,5 @@ async def _mutating_timeout_is_not_retried(
     assert episode.executions[0].state_commit == "unknown"
 
 
-def test_a_mutating_timeout_is_not_retried(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_mutating_timeout_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_mutating_timeout_is_not_retried(tmp_path, monkeypatch))

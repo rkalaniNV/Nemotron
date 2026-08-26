@@ -60,7 +60,19 @@ first when `skip_until` is set. A run without `skip_until` clears old checkpoint
 Restoration removes only the stage outputs that run again and keeps the
 append-only model I/O caches, so a re-run stage replays the recorded responses
 instead of paying for new ones that would render different surfaces.
-BFCL still does not support `translate`.
+
+`stage=translate` starts from the source release's `run_manifest.json`, verifies
+the published Parquet hashes and schema, and localizes only approved model-facing
+text. Stable field paths and one placeholder per protected occurrence keep tool
+names, parameter keys, slot values, identifiers, calls, assertions, ordering,
+held-out state, and lineage unchanged. Function descriptions may be localized
+when enabled, but names and parameter schemas remain exact. Forward translation,
+backtranslation, and quality evidence are written beside a content-addressed
+`translation_manifest.json` that records the translator and contamination scope.
+Deterministic normalization, configurable response guards, a no-op translation
+gate, and inferred or configured Unicode-script checks run before publication.
+Evaluation recomputes those claims and all metric verdicts from evidence.
+Translation never filters rows and does not support `skip_until`.
 
 ## Oracle Pack
 
