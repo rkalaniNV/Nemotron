@@ -1,0 +1,159 @@
+"""Output schemas for the authoring calls, shaped so the model states intent, not facts.
+
+The design rule here is that a model should not be *able* to express a value it has no
+evidence for. Where that can be enforced by shape it is: a validation case names the
+*source* of each argument rather than a literal, so "make up a plausible account id" is not
+a sentence this schema can say. Where shape cannot enforce it — prose fields, tool names —
+`grounding.py` checks the response against the bundle afterwards.
+
+Every draft carries `blocked_on`. At `L0` most concrete expectations are unavailable, and a
+draft that admits which unknown it is waiting on is reviewable; one that quietly omits the
+expectation looks finished.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+# The unknown field names a draft may declare itself blocked on. Kept as a closed set so a
+# typo becomes an error instead of a blocker nobody will ever resolve.
+UnknownField = Literal[
+    "observed_result_shapes",
+    "observed_error_codes",
+    "state_deltas",
+    "confirmation_behavior",
+    "fixture_samples",
+    "tool_dependencies",
+]
+
+# Where an argument value comes from. `unresolved` is the honest answer at L0 for anything
+# that would otherwise be invented.
+ValueSource = Literal["literal", "fixture", "absent_id", "confirmation_flag", "unresolved"]
+
+
+class _Draft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ToolCoverage(_Draft):
+    """What the benchmark should exercise for one tool, and why."""
+
+    tool: str = Field(description="Published tool name, exactly as given in the evidence")
+    purpose: str = Field(description="What this tool does, in the author's own words")
+    policies: list[str] = Field(
+        default_factory=list,
+        description="Domain rules a correct assistant must respect when using this tool",
+    )
+    positive_intents: list[str] = Field(
+        default_factory=list,
+        description="Successful outcomes worth covering, as intents rather than values",
+    )
+    negative_intents: list[str] = Field(
+        default_factory=list,
+        description="Failure situations worth covering, as intents rather than values",
+    )
+    depends_on: list[str] = Field(
+        default_factory=list,
+        description="Published tool names that must be called before this one can succeed",
+    )
+    confirmation_relevant: bool = Field(
+        default=False,
+        description="True when this tool is gated on an explicit confirmation argument",
+    )
+
+
+class CoveragePlan(_Draft):
+    """The whole reviewed coverage matrix."""
+
+    tools: list[ToolCoverage]
+    cross_tool_notes: list[str] = Field(
+        default_factory=list,
+        description="Ordering or state interactions that span more than one tool",
+    )
+
+
+class ArgumentPlan(_Draft):
+    """One argument, described by where its value will come from."""
+
+    name: str = Field(description="Parameter name from the tool's own input schema")
+    source: ValueSource
+    literal: str | None = Field(
+        default=None,
+        description="Only for source=literal, and only when the value is domain-neutral",
+    )
+    note: str | None = None
+
+
+class ValidationCaseDraft(_Draft):
+    """One probe proving a tool behaves as the pack claims."""
+
+    case_id: str = Field(description="Stable lowercase identifier, unique in the pack")
+    tool: str
+    kind: Literal["success", "error", "confirmation_pending"]
+    intent: str = Field(description="What this probe demonstrates")
+    arguments: list[ArgumentPlan] = Field(default_factory=list)
+    expectation: str = Field(
+        description="The observable outcome, in words; codes and shapes come from probes"
+    )
+    blocked_on: list[UnknownField] = Field(default_factory=list)
+
+
+class ValidationCasePlan(_Draft):
+    cases: list[ValidationCaseDraft]
+
+
+class MilestoneDraft(_Draft):
+    """One thing the assistant must accomplish, in order."""
+
+    description: str
+    tool: str | None = Field(
+        default=None, description="Tool the milestone requires, when it requires one"
+    )
+    requires_confirmation: bool = False
+
+
+class TaskTemplateDraft(_Draft):
+    """One multi-turn task the benchmark will render."""
+
+    template_id: str = Field(description="Stable lowercase identifier, unique in the pack")
+    user_goal: str = Field(description="What the user wants, in the user's voice")
+    required_tools: list[str] = Field(
+        default_factory=list, description="Published tool names, in the order needed"
+    )
+    milestones: list[MilestoneDraft] = Field(default_factory=list)
+    policies: list[str] = Field(default_factory=list)
+    blocked_on: list[UnknownField] = Field(default_factory=list)
+
+
+class TaskTemplatePlan(_Draft):
+    templates: list[TaskTemplateDraft]
+
+
+class AssertionSpecDraft(_Draft):
+    """One declarative predicate a successful task must satisfy."""
+
+    assertion_id: str = Field(description="Stable lowercase identifier, unique in the pack")
+    subject: Literal["result", "state", "trace"]
+    predicate: Literal[
+        "field_present",
+        "field_equals_argument",
+        "collection_size_changed",
+        "tool_called",
+        "tool_called_after",
+        "tool_not_called",
+    ]
+    target: str = Field(
+        description="Result field path, state collection, or published tool name"
+    )
+    argument: str | None = Field(
+        default=None, description="Argument name, for predicates that compare to an input"
+    )
+    tool: str | None = Field(default=None, description="Published tool name when relevant")
+    rationale: str
+    blocked_on: list[UnknownField] = Field(default_factory=list)
+
+
+class AssertionSpecPlan(_Draft):
+    assertions: list[AssertionSpecDraft]

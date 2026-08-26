@@ -1,0 +1,190 @@
+"""One cached, structured authoring call.
+
+Reuses the pattern the generation stages already established: a content-addressed request
+hash over everything that can change an answer, an append-only cache that refuses to replace
+a prior observation, and a canonical model identity recorded alongside. The point is not to
+save tokens. It is that a reviewer can re-run authoring and get the artifact they approved,
+and that the record says which model produced it.
+
+Data Designer is imported lazily by the runner it calls, so this module stays importable in
+the environment where discovery runs and the SDK versions conflict.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel
+
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
+    ImmutableModelIOCache,
+    request_hash,
+)
+from nemotron.steps.byob.runtime.pack_authoring.artifacts import sha256_json
+from nemotron.steps.byob.runtime.pack_authoring.prompts import prompt_hash
+
+StructuredCaller = Callable[..., dict[str, dict[str, Any]]]
+
+
+class AuthoringModelError(Exception):
+    """Raised when the authoring model cannot be used or did not answer."""
+
+
+@dataclass(frozen=True)
+class AuthoringModel:
+    """The model identity and settings an authoring run is pinned to."""
+
+    alias: str
+    provider: str
+    model: str
+    canonical_id: str
+    seed: int = 0
+    inference_parameters: Mapping[str, Any] = field(default_factory=dict)
+
+    def as_model_config(self) -> dict[str, Any]:
+        return {
+            "alias": self.alias,
+            "provider": self.provider,
+            "model": self.model,
+            "canonical_id": self.canonical_id,
+            "inference_parameters": dict(self.inference_parameters),
+        }
+
+    def as_provenance(self) -> dict[str, Any]:
+        # No credentials, no endpoint: identity and settings only, so the record can be
+        # published next to the pack.
+        return {
+            "alias": self.alias,
+            "provider": self.provider,
+            "model": self.model,
+            "canonical_id": self.canonical_id.strip().lower(),
+            "seed": self.seed,
+            "inference_parameters": dict(self.inference_parameters),
+        }
+
+
+@dataclass(frozen=True)
+class ModelCallRecord:
+    """What was asked, of which model, and whether the answer was already on disk."""
+
+    stage: str
+    prompt_version: str
+    prompt_hash: str
+    request_hash: str
+    input_hash: str
+    output_schema_hash: str
+    model_canonical: str
+    served_from_cache: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "prompt_version": self.prompt_version,
+            "prompt_hash": self.prompt_hash,
+            "request_hash": self.request_hash,
+            "input_hash": self.input_hash,
+            "output_schema_hash": self.output_schema_hash,
+            "model_canonical": self.model_canonical,
+            "served_from_cache": self.served_from_cache,
+        }
+
+
+def _default_caller(
+    run_dir: Path,
+    *,
+    stage_name: str,
+    model_config: dict[str, Any],
+    requests: Sequence[dict[str, str]],
+    system_prompt: str,
+    prompt: str,
+    output_format: type[BaseModel],
+) -> dict[str, dict[str, Any]]:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_runner import (
+        run_structured_model,
+    )
+
+    # The adapter only needs somewhere to put its seed file and artifacts, so an authoring
+    # run supplies that directly rather than inventing a pack-shaped pipeline config.
+    class _RunDir:
+        output_dir = str(run_dir.parent)
+        expt_name = run_dir.name
+
+    return run_structured_model(
+        _RunDir(),  # type: ignore[arg-type]
+        stage_name=stage_name,
+        model_config=model_config,
+        requests=requests,
+        system_prompt=system_prompt,
+        prompt=prompt,
+        output_format=output_format,
+    )
+
+
+def call_structured(
+    model: AuthoringModel,
+    *,
+    stage_name: str,
+    prompt_version: str,
+    system_prompt: str,
+    prompt: str,
+    columns: Mapping[str, str],
+    output_format: type[BaseModel],
+    cache: ImmutableModelIOCache,
+    run_dir: Path,
+    caller: StructuredCaller | None = None,
+) -> tuple[dict[str, Any], ModelCallRecord]:
+    """Return one validated structured response, from cache when it is already known."""
+    schema = output_format.model_json_schema()
+    model_input = dict(sorted(columns.items()))
+    hashed_prompt = prompt_hash(prompt_version, system_prompt, prompt)
+    key = request_hash(
+        model_canonical=model.canonical_id,
+        prompt_hash=hashed_prompt,
+        model_input=model_input,
+        inference_parameters=dict(model.inference_parameters),
+        output_schema=schema,
+        seed=model.seed,
+    )
+    input_hash = sha256_json(model_input)
+    record = ModelCallRecord(
+        stage=stage_name,
+        prompt_version=prompt_version,
+        prompt_hash=hashed_prompt,
+        request_hash=key,
+        input_hash=input_hash,
+        output_schema_hash=sha256_json(schema),
+        model_canonical=model.canonical_id.strip().lower(),
+        served_from_cache=True,
+    )
+
+    cached = cache.get(key)
+    if cached is not None:
+        return dict(cached), record
+
+    invoke = caller if caller is not None else _default_caller
+    responses = invoke(
+        run_dir,
+        stage_name=stage_name,
+        model_config=model.as_model_config(),
+        requests=[{"request_id": stage_name, **model_input}],
+        system_prompt=system_prompt,
+        prompt=prompt,
+        output_format=output_format,
+    )
+    response = responses.get(stage_name)
+    if not isinstance(response, dict):
+        raise AuthoringModelError(
+            f"{stage_name} returned no structured response for request {stage_name!r}"
+        )
+    # Only a well-formed answer is cached. Caching an infrastructure failure would make a
+    # transient outage permanent for every later run.
+    cache.put(
+        key,
+        response,
+        model_canonical=model.canonical_id,
+        input_hash=input_hash,
+    )
+    return response, replace(record, served_from_cache=False)
