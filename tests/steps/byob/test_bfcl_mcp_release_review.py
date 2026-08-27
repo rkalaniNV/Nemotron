@@ -35,6 +35,7 @@ from nemotron.steps.byob.runtime.mcp.release.freeze import (
 from nemotron.steps.byob.runtime.mcp.release.handoff import (
     HandoffError,
     _require_fresh_gold,
+    handoff_frozen_release,
 )
 from nemotron.steps.byob.runtime.mcp.release.review import (
     REQUIRED_CHECKLIST,
@@ -812,6 +813,79 @@ def test_publication_handoff_requires_a_fresh_l2_gold_report(tmp_path: Path) -> 
     report["extra_checks"][0]["conformance"]["publishable"] = False
     with pytest.raises(HandoffError, match="independently verify endpoint L2"):
         _require_fresh_gold(report, release)
+
+
+def test_publication_handoff_forces_prepare_and_uses_existing_generator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.mcp.release import handoff
+
+    release = freeze_canonical_pack(
+        _approved_freeze_inputs(tmp_path),
+        tmp_path / "release",
+    )
+    output_root = tmp_path / "output"
+    experiment = "mcp-publication"
+    config = SimpleNamespace(output_dir=output_root, expt_name=experiment)
+    observed_force: list[bool] = []
+    report_path = tmp_path / "fresh-validation.json"
+
+    def prepare(path: Path, *, force_validation: bool = False) -> Path:
+        observed_force.append(force_validation)
+        report = _validation()
+        report["pack_fingerprint"] = release.pack_fingerprint.removeprefix("sha256:")
+        report["stats"] = {
+            "has_oracle": True,
+            "n_templates": 1,
+            "n_assertions": 1,
+            "n_tools": 1,
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return report_path
+
+    def generate(path: Path) -> Path:
+        publication = output_root / experiment
+        publication.mkdir(parents=True)
+        benchmark = publication / "benchmark.parquet"
+        raw = publication / "benchmark_raw.parquet"
+        manifest = publication / "run_manifest.json"
+        benchmark.write_bytes(b"benchmark")
+        raw.write_bytes(b"raw")
+        manifest.write_text(
+            json.dumps(
+                {
+                    "pack": {"content_hash": release.pack_fingerprint},
+                    "oracle": {
+                        "mcp": {
+                            "frozen_pack_fingerprint": release.pack_fingerprint,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return benchmark
+
+    paths = resolve_declared_pack_paths(
+        OraclePackRef(manifest_path=release.pack_root / "manifest.yaml"),
+        (release.pack_root,),
+    )
+    monkeypatch.setattr(
+        handoff.BfclConfig,
+        "from_yaml",
+        classmethod(lambda cls, path: config),
+    )
+    monkeypatch.setattr(handoff, "resolve_pack_paths", lambda config: paths)
+    monkeypatch.setattr(handoff, "prepare_bfcl", prepare)
+    monkeypatch.setattr(handoff, "generate_bfcl", generate)
+
+    result = handoff_frozen_release(release.root, tmp_path / "config.yaml")
+
+    assert observed_force == [True]
+    assert result.benchmark_path.read_bytes() == b"benchmark"
+    assert result.raw_benchmark_path.read_bytes() == b"raw"
+    assert result.run_manifest["pack"]["content_hash"] == release.pack_fingerprint
 
 
 def test_fresh_prepare_forces_validation_instead_of_reusing_process_cache(

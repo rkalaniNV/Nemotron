@@ -17,6 +17,7 @@ from nemotron.steps.byob.runtime.mcp import (
 from nemotron.steps.byob.runtime.mcp.errors import (
     McpIntegrationError,
 )
+from nemotron.steps.byob.runtime.mcp.rollout import require_mcp_feature
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -52,6 +53,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _run(args: argparse.Namespace) -> dict:
+    require_mcp_feature()
     loaded = load_mcp_oracle_config(
         args.config,
         allow_insecure_localhost=args.allow_insecure_localhost,

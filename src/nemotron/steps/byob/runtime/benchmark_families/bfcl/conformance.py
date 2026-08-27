@@ -303,6 +303,26 @@ def _evidence_findings(
             != attestation.gateway_evidence_issuer
         ):
             findings.append("gateway_report_issuer_mismatch")
+        suite = gateway_conformance_report.get("suite")
+        p9 = suite.get("p9") if isinstance(suite, Mapping) else None
+        if (
+            not isinstance(suite, Mapping)
+            or suite.get("kind") != "gateway"
+            or suite.get("profile_version")
+            != "bfcl-mcp-gateway-conformance-v1"
+        ):
+            findings.append("gateway_report_suite_invalid")
+        required_p9 = {
+            "timeout_observed": True,
+            "business_call_attempts": 1,
+            "episode_poisoned": True,
+            "transport_cleanup_completed": True,
+            "unknown_commit_state_preserved": True,
+        }
+        if not isinstance(p9, Mapping) or any(
+            p9.get(field) != expected for field, expected in required_p9.items()
+        ):
+            findings.append("gateway_report_timeout_probe_invalid")
     return findings
 
 

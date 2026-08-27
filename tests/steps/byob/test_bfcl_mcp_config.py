@@ -22,6 +22,11 @@ from nemotron.steps.byob.runtime.mcp.errors import (
     McpConfigError,
     McpCredentialError,
 )
+from nemotron.steps.byob.runtime.mcp.rollout import (
+    MCP_FEATURE_ENV,
+    mcp_feature_enabled,
+    require_mcp_feature,
+)
 
 DIGEST = "sha256:" + "0" * 64
 
@@ -191,3 +196,25 @@ def test_stdio_launch_requires_exact_host_policy(tmp_path: Path) -> None:
         loaded.value.transport,  # type: ignore[arg-type]
         {"MCP_FIXTURE": "fixture", "UNRELATED_SECRET": "do-not-forward"},
     ) == {"MCP_FIXTURE": "fixture"}
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", " yes "])
+def test_experimental_mcp_feature_accepts_only_explicit_true_values(
+    value: str,
+) -> None:
+    assert mcp_feature_enabled({MCP_FEATURE_ENV: value}) is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", " no "])
+def test_experimental_mcp_feature_accepts_explicit_false_values(
+    value: str,
+) -> None:
+    assert mcp_feature_enabled({MCP_FEATURE_ENV: value}) is False
+
+
+def test_experimental_mcp_feature_is_off_by_default_and_rejects_typos() -> None:
+    assert mcp_feature_enabled({}) is False
+    with pytest.raises(McpConfigError, match=MCP_FEATURE_ENV):
+        require_mcp_feature({})
+    with pytest.raises(McpConfigError, match="must be one of"):
+        mcp_feature_enabled({MCP_FEATURE_ENV: "enabled-ish"})

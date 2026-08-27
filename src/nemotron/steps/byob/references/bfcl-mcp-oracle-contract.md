@@ -847,9 +847,8 @@ This implementation:
 Mode B remains blocked on a fingerprinted shim interface and namespace contract. Mode
 C remains blocked on a pinned snapshot artifact and an enforceable read-only boundary.
 The gateway fails startup for either mode instead of silently approximating reset or
-state behavior. `GET /v1/conformance`, attestation generation, and P4–P11 orchestration
-remain Epic 4 work; the Epic 2 runtime mechanics are directly unit- and HTTP-contract
-tested but do not self-assert L2.
+state behavior. Mode A now supports the P4–P11 evidence handoff described below; Modes B
+and C remain non-executable rather than inheriting Mode A's result.
 
 ### 10.2 Epic 3 authoring intake boundary
 
@@ -987,10 +986,20 @@ run, but `A1` records `endpoint_attestation_missing` and caps it below publicati
 block from a generated pack is therefore not a Gold bypass. Local Python oracles do not receive
 an endpoint check.
 
-One consequence is worth stating plainly rather than discovering later: because `P4`–`P11` are
-not implemented, the gateway honestly reports `L0` (`P4` is the executable-L1 boundary), and every MCP-backed pack therefore fails
-`A1` and cannot publish today. That is the correct state, not a defect. It becomes publishable
-when the probe suite in `MCP-402` and `MCP-404`–`408` exists and BFCL runs it itself.
+The evidence bootstrap is explicit. A discovery-only gateway starts at `L0`; BFCL validates a
+provisional pack and writes `mcp_probe_report` from the live target observations. Separately,
+`run_gateway_timeout_conformance` exercises the pinned gateway core against a controlled hanging
+fixture and writes the P9 suite. The gateway is then restarted with both documents using
+`--probe-report` and `--gateway-suite`. It refuses incomplete, unordered, or non-passing evidence.
+The exact bound documents are available at `/v1/conformance/probe-report` and
+`/v1/conformance/gateway-report`; the latter is sealed in the pack at
+`.bfcl/conformance/gateway_conformance_report.json`.
+
+Final validation does not trust the served probe report. It reruns P1–P8 and P10–P11 against
+the live endpoint, reruns interleaved episode isolation, derives a new canonical report, loads
+the sealed P9 gateway report, and supplies both to `A1`. The verifier hashes both, compares the
+fresh probe list with the attestation, validates every P9 timeout/poisoning/cleanup property,
+and only then permits effective `L2`.
 
 ### 10.5 Epic 5 review boundary
 
@@ -1011,15 +1020,14 @@ A packet is still written when evidence is incomplete, because failed review evi
 to a reviewer. Its status is then `blocked`, with named reasons. Missing complete call or state
 delta logs, unresolved drafting unknowns, uncompiled assertions, a non-Gold validation report,
 or an endpoint below independently verified `L2` are blockers. This is intentionally stricter
-than treating a review meeting as proof: with P4–P11 still absent, current MCP packs can generate
+than treating a review meeting as proof: a failed, stale, or incomplete P4–P11 report can generate
 a packet explaining the gap but cannot acquire a freeze approval.
 
 The call and state-delta evidence is read from an `mcp_observations` object in the oracle
 validation report, carrying `calls`, `calls_complete`, `state_deltas`, and `state_deltas_complete`.
-No code writes that key yet, which is why the `observed_calls_missing` and `state_deltas_missing`
-blockers currently fire for every pack. Producing it is the publication-facing half of `MCP-402`
-and `MCP-404`–`408`; the key is named here so that work has a fixed target instead of inventing a
-second review contract.
+Oracle validation now writes this object for attested endpoint packs. Completeness is false if
+any declared executable case raises, returns a non-object, or lacks its before/after state pair;
+review therefore cannot silently treat a partial log as complete evidence.
 
 MCP-502 records a second, domain-level approval distinct from the earlier approval to let a
 model read an intake bundle. The reviewer must name themselves, provide a timezone-qualified

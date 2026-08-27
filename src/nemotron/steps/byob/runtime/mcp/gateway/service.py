@@ -238,6 +238,26 @@ class GatewayService:
             self._conformance_evidence,
         )
 
+    def probe_report(self) -> dict[str, Any]:
+        """Return the exact report whose digest the attestation cites."""
+        self._require_started()
+        assert self._conformance_evidence is not None
+        return self._conformance_evidence.probe_report
+
+    def gateway_conformance_report(self) -> dict[str, Any]:
+        """Bind the build-time suite to the live gateway and discovered target."""
+        self._require_started()
+        assert (
+            self._identity is not None
+            and self._report is not None
+            and self._conformance_evidence is not None
+        )
+        return self._conformance_evidence.gateway_report(
+            self.artifacts.validated().gateway_artifact_digest,
+            effective_content_digest=self._identity.content_digest,
+            tool_catalog_digest=self._report.tool_catalog_digest,
+        )
+
     def list_tools(self) -> list[str]:
         self._require_started()
         # Discovery already sorts normalized tools by published name.
