@@ -69,6 +69,21 @@ joining them shows which stage dropped a task.
 - Keep `oracle_runtime.worker: process`. `thread` runs pack code in-process for debugging and can never reach the gold tier.
 - Read [references/bfcl-oracle-pack.md](references/bfcl-oracle-pack.md) for the pack layout, backend contract, validation-case keys, and tier rules.
 
+### Experimental MCP onboarding
+
+BFCL can discover an MCP server, expose it through the existing Oracle HTTP v1 endpoint
+contract, draft a canonical Oracle Pack from sanitized evidence, and carry a reviewed frozen
+pack into the existing generation path. Install that transport runtime separately with
+`uv sync --extra bfcl-mcp`; the model-authoring environment may use a different MCP SDK major.
+
+This path is not publication-ready yet. The independent P4–P11 probe suite is still pending,
+so MCP gateways currently attain `L0` and the Gold Gate correctly refuses publication. Human
+approval and freeze do not raise that level. Set `BFCL_ENABLE_EXPERIMENTAL_MCP=1` to opt into
+live discovery or gateway startup; the default is disabled. See the
+[MCP support matrix](references/bfcl-mcp-support-matrix.md) before integrating a server, then
+use the normative
+[MCP Oracle contract](references/bfcl-mcp-oracle-contract.md) for profile and control details.
+
 ## CLI And Config Knobs
 
 ### MCQ
@@ -106,7 +121,13 @@ Start from `bfcl/config/tiny.yaml` for a smoke run,
 - `stage`: `prepare`, `generate`, `translate`, `eval`, or `all`.
 - `oracle_pack.manifest_path`: executable oracle-pack manifest.
 - `oracle_runtime`: clock, process-worker timeouts, and `allowed_roots`.
-- `task_generation.tasks_per_category`: category-wide task budget.
+- `task_generation.tasks_per_category`: default Stage-4 category budget and
+  Stage-11 publication cap.
+- `task_generation.candidate_tasks_per_category`: optional Stage-4 inventory
+  ceiling used before Stage-11 balancing; it must be at least the publication
+  ceiling.
+- `task_generation.difficulty_mix`, `turn_mix`, and `tool_call_count_mix`:
+  optional Stage-11 targets over generic task dimensions.
 - `surface_generation.language`: language rendered from pack templates.
 - `execution_backend`: `direct` or `nemo_launcher` in an eval CLI envelope.
 - `output_format`: line-oriented `human` or machine-readable `json`.

@@ -402,12 +402,18 @@ as it is built, so the same pack and config always produce the same instances �
 but the cap keeps the earliest candidates, so raising it varies the last slot
 first. Use narrower filters when you need spread across a specific slot.
 
-`tasks_per_category` is currently the only active `task_generation` control.
-Generation rejects other keys (for example mix targets or turn limits) instead
-of recording targets that no balancing stage applied. The same rule covers the rest
-of the config: a request no stage can honor — a paraphrase count, a judge's drop
-authority, an unrecognized `surface_generation` key — stops the run instead of
-being dropped in silence. Config values are type-strict as well: quoted strings do
+Set `task_generation.candidate_tasks_per_category` above the publication budget
+when Stage 11 needs inventory from which to satisfy difficulty or turn-mix
+quotas. Stage 4 expands to that candidate ceiling; Stage 11 still enforces
+`tasks_per_category`. The candidate ceiling must never be smaller than the
+publication ceiling.
+
+Generation rejects unsupported task-generation keys instead of recording
+targets that no stage applies. Category budgets are consumed by expansion and
+publication; mix targets and hard limits are consumed by Stage 11. The same rule
+covers the rest of the config: a request no stage can honor — a paraphrase count,
+a judge's drop authority, an unrecognized `surface_generation` key — stops the
+run instead of being dropped in silence. Config values are type-strict as well: quoted strings do
 not stand in for booleans or integers, and an empty list does not stand in for an
 empty mapping. Timeout values must be positive finite numbers; YAML `NaN` and
 infinities are rejected before they can reach deadline arithmetic.

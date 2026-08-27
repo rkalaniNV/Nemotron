@@ -42,6 +42,12 @@ absent_ids:
   transactions:
     - TXN-ABSENT-1
     - TXN-ABSENT-2
+    - TXN-ABSENT-3
+    - TXN-ABSENT-4
+    - TXN-ABSENT-5
+    - TXN-ABSENT-6
+    - TXN-ABSENT-7
+    - TXN-ABSENT-8
   transfers:
     - TRF-ABSENT-1
   vietqr_payments:

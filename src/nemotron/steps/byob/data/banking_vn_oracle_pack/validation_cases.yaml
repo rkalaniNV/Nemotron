@@ -163,7 +163,7 @@
 - id: success_create_dispute
   tool: create_dispute
   arguments:
-    transaction_id: TXN-1015
+    transaction_id: TXN-1111
     reason: goods_not_received
     confirm: true
   expect: {result_class: success, error_code: null}
@@ -181,7 +181,7 @@
 - id: confirm_false_create_dispute
   tool: create_dispute
   arguments:
-    transaction_id: TXN-1015
+    transaction_id: TXN-1111
     reason: goods_not_received
     confirm: false
   expect:
@@ -192,7 +192,7 @@
 - id: wrong_type_confirm_create_dispute
   tool: create_dispute
   arguments:
-    transaction_id: TXN-1015
+    transaction_id: TXN-1111
     reason: goods_not_received
     confirm: "false"
   expect: {result_class: structured_error, error_code: invalid_argument}

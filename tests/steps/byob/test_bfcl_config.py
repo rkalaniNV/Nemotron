@@ -58,7 +58,25 @@ def test_all_bfcl_configs_pin_family() -> None:
         assert data["family"] == "bfcl", name
 
 
-def test_banking_gold_config_requests_the_closest_uniform_bfcl_v1_scale() -> None:
+def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
+        DedupBalancingDecision,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.dedup_balancing import (
+        balance_publication_set,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
+        _select_round_robin,
+        expand_template,
+        group_by_category,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
+        build_plan,
+    )
+
     path = BFCL_CONFIG_DIR / "banking_vn.gold.yaml"
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     templates = yaml.safe_load(
@@ -70,20 +88,169 @@ def test_banking_gold_config_requests_the_closest_uniform_bfcl_v1_scale() -> Non
     requested_samples = category_count * int(raw["task_generation"]["tasks_per_category"])
 
     config = BfclConfig.from_yaml(path)
+    pack = load_pack(config)
+    budget = int(config.task_generation["tasks_per_category"])
+    candidate_budget = int(config.task_generation["candidate_tasks_per_category"])
+    candidate_by_category = {
+        category: _select_round_robin(
+            [
+                expand_template(
+                    pack,
+                    template,
+                    candidate_budget,
+                    int(config.random_seed or 0),
+                )
+                for template in grouped
+            ],
+            candidate_budget,
+        )
+        for category, grouped in group_by_category(pack.templates).items()
+    }
+    candidates = [
+        task
+        for category_tasks in candidate_by_category.values()
+        for task in category_tasks
+    ]
+    templates_by_id = {
+        str(template["template_id"]): template for template in pack.templates
+    }
+    candidate_surfaces = {}
+    for task in candidates:
+        plan = build_plan(templates_by_id[str(task["template_id"])], task)
+        task["num_tool_calls"] = plan["num_tool_calls"]
+        task["is_multi_turn"] = plan["is_multi_turn"]
+        candidate_surfaces[str(task["task_id"])] = {
+            "language": "vi",
+            "steps": plan["steps"],
+        }
+    representative_decisions = [
+        DedupBalancingDecision(
+            task_id=str(task["task_id"]),
+            selected=True,
+            is_duplicate=False,
+            selection_rank=index,
+        )
+        for index, task in enumerate(candidates)
+    ]
+    _, _, challenge_summary = balance_publication_set(
+        config,
+        candidates,
+        candidate_surfaces,
+        representative_decisions,
+    )
+    selected_by_category = {
+        category: _select_round_robin(
+            [
+                expand_template(
+                    pack,
+                    template,
+                    budget,
+                    int(config.random_seed or 0),
+                )
+                for template in grouped
+            ],
+            budget,
+        )
+        for category, grouped in group_by_category(pack.templates).items()
+    }
+    selected = [
+        task
+        for category_tasks in selected_by_category.values()
+        for task in category_tasks
+    ]
+    out_of_scope_pairs = {
+        (str(task["slots"]["service"]), str(task["slots"]["topic"]))
+        for task in selected_by_category["out_of_scope"]
+    }
+    create_dispute_tasks = [
+        task
+        for task in selected_by_category["dispute"]
+        if task["template_id"] == "bn_create_dispute_single"
+    ]
+    create_dispute_ids = {
+        str(task["slots"]["transaction_id"]) for task in create_dispute_tasks
+    }
+    transactions = {
+        str(row["transaction_id"]): row for row in pack.fixtures["transactions"]
+    }
+    open_dispute_transaction_ids = {
+        str(row["transaction_id"])
+        for row in pack.fixtures["disputes"]
+        if row["status"] in {"open", "in_review", "awaiting_confirmation"}
+    }
 
     assert category_count == 6
     assert requested_samples == 1_392
     assert abs(requested_samples - 1_390) == 2
+    assert {category: len(tasks) for category, tasks in selected_by_category.items()} == {
+        "balance_inquiry": 232,
+        "transaction_status": 232,
+        "transfer": 232,
+        "qr_payment": 232,
+        "dispute": 232,
+        "out_of_scope": 232,
+    }
+    assert len(selected) == requested_samples
+    assert len({str(task["task_id"]) for task in selected}) == requested_samples
+    assert len(candidates) == 1_763
+    assert all(len(tasks) >= budget for tasks in candidate_by_category.values())
+    candidate_difficulty = {
+        difficulty: sum(task["difficulty"] == difficulty for task in candidates)
+        for difficulty in ("easy", "medium", "hard")
+    }
+    assert candidate_difficulty == {"easy": 975, "medium": 295, "hard": 493}
+    assert candidate_difficulty["hard"] >= 487
+    assert challenge_summary["selected_count"] == requested_samples
+    assert challenge_summary["actual_counts"]["difficulty"] == {
+        "easy": 626,
+        "hard": 487,
+        "medium": 279,
+    }
+    assert challenge_summary["actual_counts"]["turn_class"] == {
+        "multi_turn": 320,
+        "single_turn": 1_072,
+    }
+    assert challenge_summary["unmet_targets"] == []
+    assert len(out_of_scope_pairs) == 232
+    assert len(create_dispute_tasks) == 72
+    assert len(create_dispute_ids) == 18
+    assert not create_dispute_ids & open_dispute_transaction_ids
+    assert all(
+        transactions[transaction_id]["dispute_eligible"] is True
+        and transactions[transaction_id]["direction"] == "debit"
+        and transactions[transaction_id]["status"] == "succeeded"
+        for transaction_id in create_dispute_ids
+    )
     assert config.config_status == "resolved"
     assert config.lineage.policy == "strict_separation"
     assert config.oracle_runtime.worker == "process"
     assert config.surface_quality_validation["enabled"] is True
     assert config.semantic_deduplication_config["enabled"] is True
+    assert config.semantic_deduplication_config["remove_duplicates"] is False
     assert config.semantic_deduplication_config["unmet_target_policy"] == "abort"
     assert config.exports == {
         "bfcl_json": True,
         "nemo_evaluator_bundle": True,
     }
+
+
+def test_candidate_category_budget_cannot_be_smaller_than_publication_budget(
+    tmp_path: Path,
+) -> None:
+    path = _write_tiny_config(
+        tmp_path,
+        "candidate-underflow.yaml",
+        task_generation={
+            "tasks_per_category": 4,
+            "candidate_tasks_per_category": 3,
+        },
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="candidate_tasks_per_category must be greater than or equal",
+    ):
+        BfclConfig.from_yaml(path)
 
 
 def test_tiny_config_loads_as_smoke(tmp_path: Path) -> None:

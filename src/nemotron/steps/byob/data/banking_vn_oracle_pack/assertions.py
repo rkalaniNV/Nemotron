@@ -126,6 +126,47 @@ def assert_status_checked_from_listed_transaction(
         raise AssertionError(f"status checked for ids that were never listed: {invented}")
 
 
+def _assert_status_checked_from_result(
+    trace: list,
+    *,
+    source_tool: str,
+) -> None:
+    source_ids = {
+        result.get("transaction_id")
+        for result in _results(trace, source_tool)
+        if "error" not in result and result.get("transaction_id") is not None
+    }
+    if not source_ids:
+        raise AssertionError(f"missing transaction_id from {source_tool} result")
+    checked = {
+        result.get("transaction_id")
+        for result in _results(trace, "get_transaction_status")
+        if "error" not in result
+    }
+    if not checked:
+        raise AssertionError("missing get_transaction_status result")
+    invented = sorted(str(txn_id) for txn_id in checked if txn_id not in source_ids)
+    if invented:
+        raise AssertionError(
+            f"status checked for ids not returned by {source_tool}: {invented}"
+        )
+
+
+def assert_status_checked_from_vietqr_payment(
+    *, state: dict, trace: list, task: dict, ctx: Any
+) -> None:
+    _assert_status_checked_from_result(
+        trace,
+        source_tool="get_vietqr_payment_status",
+    )
+
+
+def assert_status_checked_from_dispute(
+    *, state: dict, trace: list, task: dict, ctx: Any
+) -> None:
+    _assert_status_checked_from_result(trace, source_tool="get_dispute_status")
+
+
 def assert_transaction_not_found(*, state: dict, trace: list, task: dict, ctx: Any) -> None:
     txn_id = _slots(task).get("transaction_id")
     for result in _results(trace, "get_transaction_status"):
@@ -176,6 +217,8 @@ ASSERTIONS = {
     "assert_dispute_status_reported": assert_dispute_status_reported,
     "assert_dispute_opened": assert_dispute_opened,
     "assert_status_checked_from_listed_transaction": assert_status_checked_from_listed_transaction,
+    "assert_status_checked_from_vietqr_payment": assert_status_checked_from_vietqr_payment,
+    "assert_status_checked_from_dispute": assert_status_checked_from_dispute,
     "assert_transaction_not_found": assert_transaction_not_found,
     "assert_transfer_rejected_for_funds": assert_transfer_rejected_for_funds,
     "assert_no_tool_called": assert_no_tool_called,
@@ -233,6 +276,16 @@ ASSERTION_CAPABILITIES = {
         "category": "state",
     },
     "assert_status_checked_from_listed_transaction": {
+        "trace": True,
+        "executable": True,
+        "category": "path",
+    },
+    "assert_status_checked_from_vietqr_payment": {
+        "trace": True,
+        "executable": True,
+        "category": "path",
+    },
+    "assert_status_checked_from_dispute": {
         "trace": True,
         "executable": True,
         "category": "path",
