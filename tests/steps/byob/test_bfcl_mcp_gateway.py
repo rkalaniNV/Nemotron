@@ -31,6 +31,8 @@ from nemotron.steps.byob.runtime.mcp.gateway import (
 from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
     ConformanceEvidence,
     ProbeOutcome,
+    load_conformance_evidence,
+    run_gateway_timeout_conformance,
 )
 from nemotron.steps.byob.runtime.mcp.gateway.identity import (
     BFCL_ORACLE_PROTOCOL_VERSION,
@@ -529,6 +531,40 @@ def test_timeout_poisoning_never_retries_a_business_call() -> None:
     asyncio.run(run())
 
 
+def test_bfcl_owned_gateway_timeout_suite_records_p9_evidence() -> None:
+    async def run() -> None:
+        service, factory = _service(
+            factory=_Factory(hang_business_call=True),
+            tool_timeout_s=0.01,
+        )
+        suite = await run_gateway_timeout_conformance(
+            service,
+            context=_context(),
+            business_tool="inventory_lookup",
+            arguments={"item_id": "A"},
+            business_call_attempts=lambda: sum(
+                client.business_calls for client in factory.clients
+            ),
+            transport_cleanup_completed=lambda: all(
+                client.closed for client in factory.clients
+            ),
+        )
+
+        assert suite == {
+            "kind": "gateway",
+            "profile_version": "bfcl-mcp-gateway-conformance-v1",
+            "p9": {
+                "timeout_observed": True,
+                "business_call_attempts": 1,
+                "episode_poisoned": True,
+                "transport_cleanup_completed": True,
+                "unknown_commit_state_preserved": True,
+            },
+        }
+
+    asyncio.run(run())
+
+
 def test_poisoning_lets_the_transport_finish_its_own_shutdown() -> None:
     async def run() -> None:
         service, factory = _service(
@@ -628,16 +664,79 @@ def test_verified_probe_evidence_can_move_the_live_route_to_l2() -> None:
             )
             for index in range(1, 12)
         ),
-        suite={"kind": "bfcl-owned", "version": "1"},
+        suite={
+            "kind": "gateway",
+            "profile_version": "bfcl-mcp-gateway-conformance-v1",
+            "p9": {
+                "timeout_observed": True,
+                "business_call_attempts": 1,
+                "episode_poisoned": True,
+                "transport_cleanup_completed": True,
+                "unknown_commit_state_preserved": True,
+            },
+        },
     )
     service, _ = _service(conformance_evidence=evidence)
     with TestClient(create_gateway_app(service)) as client:
         document = client.get("/v1/conformance").json()
+        metadata = client.get("/v1/metadata").json()
+        probe_report = client.get("/v1/conformance/probe-report").json()
+        gateway_report = client.get(
+            "/v1/conformance/gateway-report"
+        ).json()
 
     assert document["level"] == "L2"
     assert {check["id"] for check in document["checks"]} == {
         f"P{index}" for index in range(1, 12)
     }
+    assert attestation_digest(probe_report) == document["probe_report_digest"]
+    assert (
+        attestation_digest(gateway_report)
+        == document["gateway_conformance_report_digest"]
+    )
+    verdict = verify_conformance(
+        document,
+        expected_digest=attestation_digest(document),
+        metadata_content_digest=metadata["content_digest"],
+        probe_report=probe_report,
+        gateway_conformance_report=gateway_report,
+    )
+    assert verdict.publishable is True
+    assert verdict.effective_level == "L2"
+
+
+def test_gateway_loads_only_complete_ordered_probes_and_passing_p9_suite() -> None:
+    probes = {
+        "probes": [
+            {
+                "id": f"P{index}",
+                "requirement": (
+                    "conditional" if index in {7, 8} else "required"
+                ),
+                "status": "pass",
+                "reason": None,
+            }
+            for index in range(1, 12)
+        ]
+    }
+    suite = {
+        "kind": "gateway",
+        "profile_version": "bfcl-mcp-gateway-conformance-v1",
+        "p9": {
+            "timeout_observed": True,
+            "business_call_attempts": 1,
+            "episode_poisoned": True,
+            "transport_cleanup_completed": True,
+            "unknown_commit_state_preserved": True,
+        },
+    }
+
+    evidence = load_conformance_evidence(probes, suite)
+    assert evidence.probe_report == probes
+
+    suite["p9"]["business_call_attempts"] = 2
+    with pytest.raises(ValueError, match="passing P9"):
+        load_conformance_evidence(probes, suite)
 
 
 def test_a_gateway_attestation_cannot_publish_on_its_own_word() -> None:

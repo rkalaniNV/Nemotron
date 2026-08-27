@@ -55,6 +55,40 @@ class _BoundedRedactingTextSink(io.StringIO):
         return len(value)
 
 
+def _drain_stderr_fd(descriptor: int, sink: _BoundedRedactingTextSink) -> None:
+    """Drain child stderr without ever storing its unredacted text."""
+    with os.fdopen(
+        descriptor,
+        "r",
+        encoding="utf-8",
+        errors="replace",
+        closefd=True,
+    ) as source:
+        while chunk := source.read(4096):
+            sink.write(chunk)
+
+
+@asynccontextmanager
+async def _stdio_error_pipe(
+    secrets: tuple[str, ...],
+) -> AsyncIterator[tuple[io.TextIOWrapper, _BoundedRedactingTextSink]]:
+    """Provide the real file descriptor required by MCP SDK v2's stdio transport.
+
+    ``io.StringIO`` worked with mocked transports but cannot be passed to
+    ``subprocess.Popen``. A pipe lets the child write to a real descriptor while a
+    background reader redacts each bounded chunk before it reaches memory.
+    """
+    read_fd, write_fd = os.pipe()
+    sink = _BoundedRedactingTextSink(secrets)
+    writer = os.fdopen(write_fd, "w", encoding="utf-8", closefd=True)
+    reader = asyncio.create_task(asyncio.to_thread(_drain_stderr_fd, read_fd, sink))
+    try:
+        yield writer, sink
+    finally:
+        writer.close()
+        await reader
+
+
 @dataclass(frozen=True)
 class McpServerIdentity:
     name: str | None
@@ -392,6 +426,12 @@ class SdkConnectedMcpClient:
             "next_cursor",
             label="the tools/list continuation cursor",
         )
+        if next_cursor is not None and (
+            not isinstance(next_cursor, str) or not next_cursor
+        ):
+            raise McpProtocolError(
+                "tools/list nextCursor must be a non-empty string or null"
+            )
         payload = {
             "tools": [_model_dump(tool) for tool in tools],
             "next_cursor": next_cursor,
@@ -467,7 +507,9 @@ async def open_mcp_connection(
                 secrets.values = tuple(
                     child_env[name] for name in config.transport.env_passthrough if name in child_env
                 )
-                errlog = _BoundedRedactingTextSink(secrets.values)
+                errlog, _captured_stderr = await stack.enter_async_context(
+                    _stdio_error_pipe(secrets.values)
+                )
                 target = stdio_client(
                     StdioServerParameters(
                         command=command,

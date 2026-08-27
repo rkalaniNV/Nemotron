@@ -14,7 +14,7 @@ cannot be valid to produce and invalid to read.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +36,7 @@ from nemotron.steps.byob.runtime.mcp.gateway.identity import (
 # The issuer name identifies which suite produced the evidence, so a verifier configured to
 # trust a signed release can tell one issuer from another.
 GATEWAY_EVIDENCE_ISSUER = "bfcl-mcp-conformance-v1"
+GATEWAY_SUITE_VERSION = "bfcl-mcp-gateway-conformance-v1"
 
 # P1-P3 establish discovery, P4 establishes executable L1, and P5-P11 establish L2.
 # P7 and P8 are conditional, but they still have to be present as either pass or an explicit
@@ -44,6 +45,8 @@ DISCOVERY_PROBES = ("P1", "P2", "P3")
 EXECUTABLE_PROBE = "P4"
 L2_PROBES = tuple(f"P{index}" for index in range(5, 12))
 CONDITIONAL_PROBES = frozenset({"P7", "P8"})
+_PROBE_STATUSES = frozenset({"pass", "fail", "skipped", "not_applicable"})
+_PROBE_REQUIREMENTS = frozenset({"required", "conditional"})
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,146 @@ def discovery_evidence(report: DiscoveryReport) -> ConformanceEvidence:
             "discovery_report_digest": report.document.get("report_digest"),
         },
     )
+
+
+def load_conformance_evidence(
+    probe_report: Any,
+    gateway_suite: Any,
+) -> ConformanceEvidence:
+    """Strictly load BFCL-produced evidence before a gateway may advertise it."""
+    if not isinstance(probe_report, dict) or set(probe_report) != {"probes"}:
+        raise ValueError("probe report must contain exactly the 'probes' field")
+    raw_probes = probe_report["probes"]
+    if not isinstance(raw_probes, list):
+        raise ValueError("probe report.probes must be an array")
+    probes: list[ProbeOutcome] = []
+    for index, raw in enumerate(raw_probes):
+        if not isinstance(raw, dict) or set(raw) != {
+            "id",
+            "requirement",
+            "status",
+            "reason",
+        }:
+            raise ValueError(
+                f"probe report.probes[{index}] has an invalid field set"
+            )
+        identifier = raw["id"]
+        requirement = raw["requirement"]
+        status = raw["status"]
+        reason = raw["reason"]
+        if not isinstance(identifier, str) or not identifier:
+            raise ValueError(f"probe report.probes[{index}].id must be non-empty")
+        if requirement not in _PROBE_REQUIREMENTS:
+            raise ValueError(
+                f"probe report.probes[{index}].requirement is invalid"
+            )
+        if status not in _PROBE_STATUSES:
+            raise ValueError(f"probe report.probes[{index}].status is invalid")
+        if reason is not None and (
+            not isinstance(reason, str) or not reason.strip()
+        ):
+            raise ValueError(
+                f"probe report.probes[{index}].reason must be null or non-empty"
+            )
+        probes.append(
+            ProbeOutcome(
+                id=identifier,
+                requirement=requirement,
+                status=status,
+                reason=reason,
+            )
+        )
+    identifiers = [probe.id for probe in probes]
+    expected = [f"P{index}" for index in range(1, 12)]
+    if identifiers != expected:
+        raise ValueError("probe report must contain P1 through P11 in order")
+
+    if not isinstance(gateway_suite, dict) or set(gateway_suite) != {
+        "kind",
+        "profile_version",
+        "p9",
+    }:
+        raise ValueError("gateway suite has an invalid field set")
+    p9 = gateway_suite.get("p9")
+    required_p9 = {
+        "timeout_observed": True,
+        "business_call_attempts": 1,
+        "episode_poisoned": True,
+        "transport_cleanup_completed": True,
+        "unknown_commit_state_preserved": True,
+    }
+    if (
+        gateway_suite.get("kind") != "gateway"
+        or gateway_suite.get("profile_version") != GATEWAY_SUITE_VERSION
+        or not isinstance(p9, dict)
+        or p9 != required_p9
+    ):
+        raise ValueError("gateway suite does not contain a passing P9 observation")
+    return ConformanceEvidence(probes=tuple(probes), suite=dict(gateway_suite))
+
+
+async def run_gateway_timeout_conformance(
+    service: Any,
+    *,
+    context: Mapping[str, Any],
+    business_tool: str,
+    arguments: Mapping[str, Any],
+    business_call_attempts: Callable[[], int],
+    transport_cleanup_completed: Callable[[], bool],
+    fixtures: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run P9 against a controlled hanging MCP fixture through the real gateway core."""
+    timeout_observed = False
+    episode_poisoned = False
+    session_id: str | None = None
+    await service.start()
+    try:
+        created = await service.create_session(
+            context=dict(context),
+            fixtures=None if fixtures is None else dict(fixtures),
+        )
+        session_id = str(created["session_id"])
+        try:
+            await service.call_tool(
+                session_id,
+                name=business_tool,
+                arguments=dict(arguments),
+                turn_index=0,
+            )
+        except Exception as exc:  # noqa: BLE001 - the stable gateway code is inspected below
+            timeout_observed = getattr(exc, "code", None) == "mcp_call_timeout"
+        try:
+            await service.call_tool(
+                session_id,
+                name=business_tool,
+                arguments=dict(arguments),
+                turn_index=1,
+            )
+        except Exception as exc:  # noqa: BLE001 - the stable gateway code is inspected below
+            episode_poisoned = getattr(exc, "code", None) == "mcp_session_poisoned"
+    finally:
+        if session_id is not None:
+            try:
+                await service.delete_session(session_id)
+            except Exception:  # noqa: BLE001 - shutdown below is the final bounded cleanup
+                pass
+        await service.shutdown()
+
+    attempts = business_call_attempts()
+    cleanup = transport_cleanup_completed()
+    return {
+        "kind": "gateway",
+        "profile_version": GATEWAY_SUITE_VERSION,
+        "p9": {
+            "timeout_observed": timeout_observed,
+            "business_call_attempts": attempts,
+            "episode_poisoned": episode_poisoned,
+            "transport_cleanup_completed": cleanup,
+            # A timed-out mutation has unknown commit state. Poisoning the episode and refusing
+            # a second call is the observable proof that the gateway did not invent rollback.
+            "unknown_commit_state_preserved": timeout_observed and episode_poisoned,
+        },
+    }
 
 
 def _attained_level(probes: Sequence[ProbeOutcome], *, state_observability: str) -> str:

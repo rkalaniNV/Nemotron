@@ -157,6 +157,18 @@ def create_gateway_app(
             media_type="application/json",
         )
 
+    async def probe_report(request: Request) -> Response:
+        return Response(
+            content=attestation_bytes(service.probe_report()),
+            media_type="application/json",
+        )
+
+    async def gateway_conformance_report(request: Request) -> Response:
+        return Response(
+            content=attestation_bytes(service.gateway_conformance_report()),
+            media_type="application/json",
+        )
+
     async def create_session(request: Request) -> JSONResponse:
         payload = await _json_body(request, max_request_bytes=max_request_bytes)
         _exact_fields(
@@ -232,6 +244,16 @@ def create_gateway_app(
         routes=[
             Route("/v1/metadata", metadata, methods=["GET"]),
             Route("/v1/conformance", conformance, methods=["GET"]),
+            Route(
+                "/v1/conformance/probe-report",
+                probe_report,
+                methods=["GET"],
+            ),
+            Route(
+                "/v1/conformance/gateway-report",
+                gateway_conformance_report,
+                methods=["GET"],
+            ),
             Route("/v1/tools", tools, methods=["GET"]),
             Route("/v1/sessions", create_session, methods=["POST"]),
             Route(

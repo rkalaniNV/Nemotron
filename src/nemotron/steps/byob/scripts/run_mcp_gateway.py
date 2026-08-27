@@ -22,6 +22,10 @@ from nemotron.steps.byob.runtime.mcp.gateway import (
     GatewayService,
     create_gateway_app,
 )
+from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
+    load_conformance_evidence,
+)
+from nemotron.steps.byob.runtime.mcp.rollout import require_mcp_feature
 
 _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -33,6 +37,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--gateway-artifact-digest", required=True)
     parser.add_argument("--shim-artifact-digest")
     parser.add_argument("--snapshot-digest")
+    parser.add_argument("--probe-report", type=Path)
+    parser.add_argument("--gateway-suite", type=Path)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--tls-certfile", type=Path)
@@ -64,6 +70,10 @@ def _validate_bind(args: argparse.Namespace) -> None:
         raise ValueError("--port must be between 1 and 65535")
     if args.max_request_bytes <= 0:
         raise ValueError("--max-request-bytes must be positive")
+    if (args.probe_report is None) != (args.gateway_suite is None):
+        raise ValueError(
+            "--probe-report and --gateway-suite must be provided together"
+        )
     has_cert = args.tls_certfile is not None
     has_key = args.tls_keyfile is not None
     if has_cert != has_key:
@@ -78,7 +88,23 @@ def _validate_bind(args: argparse.Namespace) -> None:
             raise ValueError(f"{label} is not a file: {value.resolve()}")
 
 
+def _load_unique_json(path: Path) -> object:
+    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        document: dict[str, object] = {}
+        for key, value in pairs:
+            if key in document:
+                raise ValueError(f"{path} repeats JSON key {key!r}")
+            document[key] = value
+        return document
+
+    return json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=unique_pairs,
+    )
+
+
 def _build_app(args: argparse.Namespace) -> Starlette:
+    require_mcp_feature()
     _validate_bind(args)
     loaded = load_mcp_oracle_config(
         args.config,
@@ -87,6 +113,12 @@ def _build_app(args: argparse.Namespace) -> Starlette:
     policies = (
         load_trusted_executable_policies(args.trusted_executables) if args.trusted_executables is not None else None
     )
+    conformance_evidence = None
+    if args.probe_report is not None and args.gateway_suite is not None:
+        conformance_evidence = load_conformance_evidence(
+            _load_unique_json(args.probe_report.resolve()),
+            _load_unique_json(args.gateway_suite.resolve()),
+        )
     service = GatewayService(
         loaded,
         artifacts=GatewayArtifacts(
@@ -95,6 +127,7 @@ def _build_app(args: argparse.Namespace) -> Starlette:
             snapshot_digest=args.snapshot_digest,
         ),
         executable_policies=policies,
+        conformance_evidence=conformance_evidence,
     )
     return create_gateway_app(
         service,

@@ -21,6 +21,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.endpoint_conformance import (
     run_endpoint_conformance_check,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
+    derive_pack_tier,
+)
 from nemotron.steps.byob.runtime.mcp.gateway.conformance import (
     ProbeOutcome,
     _attained_level,
@@ -80,7 +83,17 @@ def _gateway_report(document: dict[str, Any]) -> dict[str, Any]:
         "gateway_artifact_digest": document["gateway_artifact_digest"],
         "effective_content_digest": document["effective_content_digest"],
         "tool_catalog_digest": document["tool_catalog_digest"],
-        "suite": {"kind": "test"},
+        "suite": {
+            "kind": "gateway",
+            "profile_version": "bfcl-mcp-gateway-conformance-v1",
+            "p9": {
+                "timeout_observed": True,
+                "business_call_attempts": 1,
+                "episode_poisoned": True,
+                "transport_cleanup_completed": True,
+                "unknown_commit_state_preserved": True,
+            },
+        },
     }
 
 
@@ -467,6 +480,39 @@ def test_an_endpoint_verified_by_bfcl_itself_passes_the_gate() -> None:
     assert entry["status"] == "pass"
     assert entry["failures"] == []
     assert entry["conformance"]["effective_level"] == "L2"
+
+
+def test_mcp606_independently_verified_l2_crosses_the_existing_gold_gate() -> None:
+    document = _attestation()
+    entry = run_endpoint_conformance_check(
+        _Config(expected_digest=attestation_digest(document)),  # type: ignore[arg-type]
+        {"content_digest": METADATA_DIGEST},
+        fetch=lambda _config: document,
+        probe_report=_probe_report(document),
+        gateway_conformance_report=_gateway_report(document),
+    )
+    assert entry is not None and entry["status"] == "pass"
+    report = {
+        "checks": [
+            {"id": index, "status": "pass", "failures": []}
+            for index in range(1, 8)
+        ],
+        "extra_checks": [
+            {"id": "D1", "status": "pass", "failures": []},
+            {"id": "D2", "status": "pass", "failures": []},
+            {"id": "T1", "status": "pass", "failures": []},
+            {"id": "I1", "status": "pass", "failures": []},
+            entry,
+        ],
+        "stats": {
+            "has_oracle": True,
+            "n_templates": 1,
+            "n_assertions": 1,
+            "n_tools": 1,
+        },
+    }
+
+    assert derive_pack_tier(report) == (True, "gold")
 
 
 def test_an_unreachable_conformance_route_fails_closed() -> None:

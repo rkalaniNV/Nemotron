@@ -695,6 +695,17 @@ def test_sdk_facade_refuses_an_unrecognized_pagination_surface() -> None:
         asyncio.run(_facade(_SdkPage(cursor_attribute=None)).list_tools())
 
 
+@pytest.mark.parametrize("invalid_cursor", ["", 7, [], {}])
+def test_sdk_facade_refuses_invalid_pagination_cursor_types(
+    invalid_cursor: Any,
+) -> None:
+    page = _SdkPage(cursor_attribute="nextCursor")
+    page.nextCursor = invalid_cursor
+
+    with pytest.raises(McpProtocolError, match="non-empty string or null"):
+        asyncio.run(_facade(page).list_tools())
+
+
 @pytest.mark.parametrize("injected", ["\u202e", "\u200b", "\ufeff", "\x07"])
 def test_invisible_description_characters_fail_closed(injected: str) -> None:
     hidden = [TOOLS[0], {**TOOLS[1], "description": f"Look up{injected} one item."}]
