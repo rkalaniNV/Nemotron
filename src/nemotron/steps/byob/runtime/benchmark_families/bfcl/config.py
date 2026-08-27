@@ -112,6 +112,7 @@ _SURFACE_QUALITY_KEYS = frozenset({"contract_version", "enabled", "drop_authorit
 _TASK_GENERATION_KEYS = frozenset(
     {
         "tasks_per_category",
+        "candidate_tasks_per_category",
         "max_turns",
         "max_tool_calls",
         "difficulty_mix",
@@ -702,13 +703,33 @@ class BfclConfig:
         elif judge_advisory is not None:
             raise ValueError("lineage.judge_advisory must be null when the surface judge is disabled")
         task_generation = sections["task_generation"]
-        for key in ("tasks_per_category", "max_turns", "max_tool_calls"):
+        for key in (
+            "tasks_per_category",
+            "candidate_tasks_per_category",
+            "max_turns",
+            "max_tool_calls",
+        ):
             if key not in task_generation:
                 continue
             _require_int(
                 task_generation[key],
                 f"task_generation.{key}",
                 minimum=1,
+            )
+        selected_category_budget = int(
+            task_generation.get("tasks_per_category", 1) or 1
+        )
+        candidate_category_budget = int(
+            task_generation.get(
+                "candidate_tasks_per_category",
+                selected_category_budget,
+            )
+            or selected_category_budget
+        )
+        if candidate_category_budget < selected_category_budget:
+            raise ValueError(
+                "task_generation.candidate_tasks_per_category must be greater "
+                "than or equal to task_generation.tasks_per_category"
             )
         for key in ("difficulty_mix", "turn_mix", "tool_call_count_mix"):
             if key in task_generation:

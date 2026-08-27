@@ -633,10 +633,21 @@ def _select_round_robin(pools: list[list[dict[str, Any]]], budget: int) -> list[
 def run_expand(config: BfclConfig, pack: LoadedPack) -> list[dict[str, Any]]:
     """Expand every template and cache the locked task instances.
 
-    ``tasks_per_category`` budgets each category, not each template, so adding a
-    template to a category spreads that budget instead of growing the set.
+    ``candidate_tasks_per_category`` controls the Stage-4 inventory when
+    declared; ``tasks_per_category`` remains the Stage-11 publication cap.
+    Keeping these separate lets balancing choose a challenge mix from a larger
+    deterministic pool instead of retaining every easy row.
     """
-    budget = int(config.task_generation.get("tasks_per_category", 1) or 1)
+    selected_budget = int(
+        config.task_generation.get("tasks_per_category", 1) or 1
+    )
+    budget = int(
+        config.task_generation.get(
+            "candidate_tasks_per_category",
+            selected_budget,
+        )
+        or selected_budget
+    )
     global_seed = int(config.random_seed or 0)
 
     policy = held_out_policy(pack)

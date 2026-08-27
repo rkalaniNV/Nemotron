@@ -25,6 +25,19 @@ nemotron steps run byob/bfcl \
 For a larger example covering every supported conversation policy, replace
 `tiny.yaml` with `banking_vn.yaml`.
 
+`config/banking_vn.gold.yaml` is the bundled publication-scale example. Its
+domain-specific inventory, scale, and current mix are documented with the
+[banking oracle pack](../data/banking_vn_oracle_pack/README.md); they are not
+framework defaults.
+
+For any pack, `tasks_per_category` is the default Stage-4 category budget and
+the Stage-11 publication cap over unique bindings. When Stage 11 is enabled, an
+optional, larger `candidate_tasks_per_category` ceiling lets Stage 4 provide
+inventory from which balancing can satisfy declared targets. Neither setting
+authorizes row copying or treats paraphrases as new task semantics. Difficulty,
+conversation turns, and tool-call depth are independent dimensions: for
+example, a dependent two-call chain can still contain only one user turn.
+
 Use `stage=prepare` to validate a pack without generating benchmark rows:
 
 ```bash
@@ -33,12 +46,16 @@ python -m nemotron.steps.byob.scripts.validate_oracle_pack --config <CONFIG>
 
 ## Pipeline
 
-BFCL supports three stage values:
+BFCL supports five top-level stage values:
 
 - `prepare`: normalize and validate the oracle pack.
 - `generate`: require a gold-eligible pack, generate tasks, replay them, and
   publish artifacts.
-- `all`: run `prepare` followed by `generate`.
+- `translate`: localize an already published benchmark without changing Oracle
+  truth.
+- `eval`: evaluate candidates from a separate evaluation configuration.
+- `all`: run `prepare` followed by `generate`; it does not implicitly translate
+  or evaluate.
 
 Generation runs:
 
@@ -159,11 +176,24 @@ Start from `config/default.yaml` for a new pack. The main settings are:
 
 - `oracle_pack.manifest_path`
 - `oracle_runtime.clock`, timeouts, `worker`, and `allowed_roots`
-- `task_generation`: category budget, turn/tool limits, and normalized
-  `difficulty_mix`, `turn_mix`, and `tool_call_count_mix`
+- `task_generation.tasks_per_category`: default Stage-4 category budget and
+  Stage-11 publication cap
+- `task_generation.candidate_tasks_per_category`: optional Stage-4 expansion
+  ceiling; it defaults to and cannot be smaller than `tasks_per_category`
+- `task_generation.max_turns` and `task_generation.max_tool_calls`: publication
+  hard limits
+- `task_generation.difficulty_mix`, `task_generation.turn_mix`, and
+  `task_generation.tool_call_count_mix`: normalized Stage-11 balancing targets
 - `surface_generation.language`
 - `lineage.policy`
 - `exports.bfcl_json` and `exports.nemo_evaluator_bundle`
+
+Candidate over-generation is useful only when Stage 11 is enabled and the pack
+contains enough distinct bindings in the desired buckets. It does not guarantee
+that the publication ceiling will be reached: deduplication, hard limits,
+coverage locks, held-out policy, and incompatible cross-dimensional targets can
+reduce the feasible set. Inspect `dedup_balancing_report.json` and keep
+`unmet_target_policy: abort` for a Gold release.
 
 ```yaml
 exports:
@@ -337,6 +367,14 @@ production BYOB environments use PuLP/CBC. Targets that inventory or a locked
 coverage survivor genuinely prevents are returned with explicit
 inventory, target, actual, and reason metadata rather than being silently
 claimed as met.
+
+Here, “candidate” means a replay-valid Stage-10 survivor, not a model response.
+`turn_class` is derived from the number of rendered user turns, while
+`tool_call_count` is derived from the executable plan. `turn_policy` remains a
+separate dimension, so dependent-call and parallel-call tasks are not
+automatically counted as multiturn. A larger
+`candidate_tasks_per_category` increases the upstream choice set; the
+publication cap remains `tasks_per_category`.
 
 Stage 11 writes `stage_cache/balanced_tasks.parquet` with one row for every
 Stage-10 survivor, including Curator lineage, final cluster and representative

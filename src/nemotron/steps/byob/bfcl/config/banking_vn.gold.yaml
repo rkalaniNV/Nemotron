@@ -1,0 +1,86 @@
+# Publication configuration for the Vietnamese banking Gold release.
+#
+# BFCL V1 contains approximately 1,390 samples. This pack declares six
+# categories, so the closest uniform publication budget is
+# 6 * 232 = 1,392 samples. `tasks_per_category` is a maximum, not a replication
+# instruction: every row still has a unique deterministic binding. Stage 4
+# builds 1,763 candidates and Stage 11 selects the declared challenge mix
+# without copying rows or counting paraphrases as new task semantics.
+
+schema_version: "1.1"
+config_status: resolved
+family: bfcl
+expt_name: bfcl_banking_vn_gold_v1_1392
+stage: all
+random_seed: 42
+
+output_dir: /tmp/bfcl/banking_vn_gold_v1
+
+oracle_pack:
+  manifest_path: data/banking_vn_oracle_pack/manifest.yaml
+
+oracle_runtime:
+  clock: "2026-03-02T09:00:00+07:00"
+  tool_timeout_s: 5.0
+  assertion_timeout_s: 5.0
+  import_timeout_s: 10.0
+  reset_timeout_s: 5.0
+  episode_timeout_s: 60.0
+  worker: process
+  allowed_roots:
+    - data
+
+lineage:
+  policy: strict_separation
+  profile_influenced_surface: false
+  judge_advisory: null
+  roles:
+    # Template-only generation remains Gold-eligible. Model roles can be
+    # enabled later only with pinned, mutually distinct canonical identities.
+    profile: {enabled: false, model_config: null}
+    paraphrase: {enabled: false, model_config: null}
+    surface_judge: {enabled: false, model_config: null}
+
+surface_generation:
+  language: vi
+  model_paraphrase_enabled: false
+  paraphrases_per_template: 0
+  preserve_slot_values: true
+  prevent_tool_name_leakage: true
+
+surface_quality_validation:
+  contract_version: "1.1"
+  enabled: true
+  # Deterministic guards run without delegating publication authority to an LLM.
+  drop_authority: false
+
+task_generation:
+  # Stage 4 over-generates a deterministic candidate pool so Stage 11 can
+  # select a challenge mix instead of retaining every easy lookup.
+  candidate_tasks_per_category: 320
+  # Six categories * 232 = 1,392 published canonical task samples.
+  tasks_per_category: 232
+  difficulty_mix: {easy: 0.45, medium: 0.20, hard: 0.35}
+  # Dependent multi-call tasks remain single-user-turn by definition; the
+  # separate turn mix therefore targets the available scripted dialogue
+  # inventory without misclassifying tool-chain depth as multiturn.
+  turn_mix: {single_turn: 0.77, multi_turn: 0.23}
+
+semantic_deduplication_config:
+  contract_version: "1.0"
+  enabled: true
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_clusters: 64
+  eps: 0.08
+  # Keep distinct fixture-bound evaluation cases even when their masked
+  # surface forms cluster together. Stage 11 still records those clusters for
+  # the B11 audit; dropping them would collapse this BFCL-style argument and
+  # state coverage back to roughly one row per template.
+  remove_duplicates: false
+  representative_source_preference: [template, model]
+  # A publication run must not silently weaken a declared balancing target.
+  unmet_target_policy: abort
+
+exports:
+  bfcl_json: true
+  nemo_evaluator_bundle: true

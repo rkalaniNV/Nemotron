@@ -150,7 +150,11 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     requested.extend(
         f"exports.{name}" for name, on in sorted(config.exports.items()) if on and name not in EXPORT_WRITERS
     )
-    supported_task_generation = {"tasks_per_category", "target_published_tasks"}
+    supported_task_generation = {
+        "tasks_per_category",
+        "candidate_tasks_per_category",
+        "target_published_tasks",
+    }
     if config.semantic_deduplication_config.get("enabled"):
         supported_task_generation.update(
             {
