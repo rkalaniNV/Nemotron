@@ -99,7 +99,14 @@ def test_banking_declares_a_template_for_every_supported_policy() -> None:
     }
     assert len(groups) == 1
 
-    corrected = by_policy["correction"][0]
+    corrections = by_policy["correction"]
+    # Re-confirmation is what a corrected *mutation* needs, so assert it on a mutating
+    # correction rather than on whichever correction template happens to come first.
+    mutating_corrections = [
+        template for template in corrections if template.get("mutates") is True
+    ]
+    assert mutating_corrections
+    corrected = mutating_corrections[0]
     replacing, reconfirming = corrected["user_simulator_turns"]
     updated = replacing["slot_updates"]
     assert set(updated) <= set(corrected["slots"])
@@ -119,6 +126,20 @@ def test_banking_declares_a_template_for_every_supported_policy() -> None:
     for slot_name, update in updated.items():
         assert corrected["slots"][slot_name]["visible_in_first_turn"] is True
         assert update["bind_as"] in replacing["content_template"]["vi"]
+
+    # A read-only correction withdraws nothing, so it corrects once and never asks for
+    # a confirmation the policy would then have to re-obtain.
+    for read_only in (
+        template for template in corrections if template.get("mutates") is not True
+    ):
+        turns = read_only["user_simulator_turns"]
+        assert len(turns) == 1
+        assert turns[0]["slot_updates"]
+        assert not [
+            milestone
+            for milestone in read_only["assistant_milestones"]
+            if milestone["type"] == "ask_confirm"
+        ]
 
 
 def test_banking_negative_paths_expect_documented_failures() -> None:

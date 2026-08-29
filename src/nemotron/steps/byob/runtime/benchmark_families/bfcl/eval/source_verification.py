@@ -104,7 +104,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_projection impor
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import PackTrustError, ProcessWorker
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.origin_provenance import (
     OriginProvenanceError,
-    load_mcp_origin,
+    load_origin_provenance,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     ResolvedPackPaths,
@@ -1034,7 +1034,7 @@ def _verify_oracle(
         else None
     )
     try:
-        observed_mcp_origin = load_mcp_origin(
+        observed_provider_origin = load_origin_provenance(
             paths,
             endpoint_config,
             pack_fingerprint=actual_fingerprint,
@@ -1043,23 +1043,29 @@ def _verify_oracle(
         )
     except OriginProvenanceError as exc:
         raise OraclePackDriftError(
-            "source_oracle.mcp_origin",
+            "source_oracle.provider_origin",
             str(exc),
-            expected="MCP lineage consistent with the frozen endpoint pack",
-            recovery="restore the exact frozen MCP pack used for generation",
+            expected="provider lineage consistent with the frozen oracle pack",
+            recovery="restore the exact frozen provider pack used for generation",
         ) from exc
     manifest_oracle = _mapping(
         manifest["oracle"],
         "source_run_manifest.oracle",
         recovery="restore the run manifest written by generation",
     )
-    if manifest_oracle.get("mcp") != observed_mcp_origin:
+    origin_field = (
+        "mcp"
+        if observed_provider_origin is not None
+        and observed_provider_origin.get("provider_kind") == "mcp"
+        else "origin"
+    )
+    if manifest_oracle.get(origin_field) != observed_provider_origin:
         raise OraclePackDriftError(
-            "source_oracle.mcp_origin",
-            "publication MCP provenance differs from the frozen pack lineage",
-            actual=canonical_json(manifest_oracle.get("mcp")),
-            expected=canonical_json(observed_mcp_origin),
-            recovery="restore the matching run manifest and frozen MCP pack",
+            "source_oracle.provider_origin",
+            "publication provider provenance differs from the frozen pack lineage",
+            actual=canonical_json(manifest_oracle.get(origin_field)),
+            expected=canonical_json(observed_provider_origin),
+            recovery="restore the matching run manifest and frozen provider pack",
         )
 
     endpoint: VerifiedEndpointIdentity | None = None

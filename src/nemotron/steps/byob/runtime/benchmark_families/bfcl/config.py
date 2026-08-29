@@ -17,6 +17,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contrac
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_quality_contract import (
     SURFACE_QUALITY_CONTRACT_VERSION,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_styles import (
+    SURFACE_STYLE_AXES,
+)
 
 # runtime/benchmark_families/bfcl/config.py → …/steps/byob
 BYOB_ROOT = Path(__file__).resolve().parents[3]
@@ -106,6 +109,7 @@ SURFACE_GENERATION_KEYS = frozenset(
         "paraphrases_per_template",
         "preserve_slot_values",
         "prevent_tool_name_leakage",
+        "surface_style_axes",
     }
 )
 _SURFACE_QUALITY_KEYS = frozenset({"contract_version", "enabled", "drop_authority"})
@@ -183,6 +187,28 @@ def _require_probability_mix(value: Any, path: str) -> dict[str, float]:
     if not math.isclose(sum(normalized.values()), 1.0, rel_tol=0.0, abs_tol=1e-9):
         raise ValueError(f"{path} probabilities must sum to 1, got {sum(normalized.values())!r}")
     return normalized
+
+
+def _resolve_declared_style_axes(surface: dict[str, Any]) -> tuple[str, ...]:
+    """Validate an optional axis override and return the axes this config will use."""
+    declared = surface.get("surface_style_axes")
+    if declared is None:
+        return SURFACE_STYLE_AXES
+    if not isinstance(declared, list) or not declared:
+        raise ValueError("surface_generation.surface_style_axes must be a non-empty list")
+    axes: list[str] = []
+    for index, axis in enumerate(declared):
+        if not isinstance(axis, str) or not axis.strip():
+            raise ValueError(f"surface_generation.surface_style_axes[{index}] must be a non-empty string")
+        axes.append(axis.strip())
+    duplicates = sorted({axis for axis in axes if axes.count(axis) > 1})
+    if duplicates:
+        raise ValueError(
+            "surface_generation.surface_style_axes must be unique, found duplicates: "
+            + ", ".join(repr(axis) for axis in duplicates)
+        )
+    surface["surface_style_axes"] = axes
+    return tuple(axes)
 
 
 def _reject_model_secrets(value: Any, path: str) -> None:
@@ -655,9 +681,17 @@ class BfclConfig:
             )
         if "language" in surface and (not isinstance(surface["language"], str) or not surface["language"].strip()):
             raise ValueError("surface_generation.language must be a non-empty string")
+        style_axes = _resolve_declared_style_axes(surface)
         paraphrase_role_enabled = bool(roles.get("paraphrase") and roles["paraphrase"].enabled)
         paraphrase_enabled = bool(surface.get("model_paraphrase_enabled", False))
         paraphrase_count = int(surface.get("paraphrases_per_template", 0))
+        # Beyond one variant per axis the assignment can only repeat an axis inside a
+        # single binding, which asks the same model for the same rewrite twice.
+        if paraphrase_count > len(style_axes):
+            raise ValueError(
+                "surface_generation.paraphrases_per_template cannot exceed the "
+                f"{len(style_axes)} declared surface style axes"
+            )
         if paraphrase_enabled != paraphrase_role_enabled:
             raise ValueError("surface_generation.model_paraphrase_enabled must match lineage.roles.paraphrase.enabled")
         if paraphrase_enabled and paraphrase_count < 1:

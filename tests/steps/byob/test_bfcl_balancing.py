@@ -14,6 +14,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contrac
     DedupBalancingDecision,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.dedup_balancing import (
+    _publication_shortfall_reason,
     balance_publication_set,
     balancing_features,
     largest_remainder_quotas,
@@ -564,7 +565,7 @@ def test_balancing_enforces_exact_surface_reuse_and_ratio(
     assert summary["unmet_targets"] == []
 
 
-def test_publication_target_reports_insufficient_diverse_inventory(
+def test_publication_target_names_the_bound_that_caused_the_shortfall(
     tmp_path: Path,
 ) -> None:
     tasks = [_task(task_id) for task_id in ("a", "b", "c")]
@@ -588,6 +589,46 @@ def test_publication_target_reports_insufficient_diverse_inventory(
             "target": 3,
             "actual": 1,
             "inventory": 3,
-            "reason": "insufficient_diverse_inventory",
+            "reason": "insufficient_surface_diversity",
         }
     ]
+
+    # The same shortfall shape has several possible causes, and a run that aborts after
+    # hours is only actionable if the report names the bound that actually applied.
+    reason = _publication_shortfall_reason
+    assert reason(target=10, selected=10, bounds={}, mix_exceeds_inventory=False) == (
+        "balancing_constraint"
+    )
+    assert reason(target=10, selected=11, bounds={}, mix_exceeds_inventory=False) == (
+        "coverage_requires_more_than_declared_target"
+    )
+    assert (
+        reason(target=10, selected=4, bounds={}, mix_exceeds_inventory=True)
+        == "declared_mix_exceeds_inventory"
+    )
+    assert (
+        reason(
+            target=10,
+            selected=4,
+            bounds={
+                "insufficient_candidate_inventory": 12,
+                "category_cap_limits_inventory": 6,
+                "insufficient_surface_diversity": 4,
+            },
+            mix_exceeds_inventory=True,
+        )
+        == "insufficient_surface_diversity"
+    )
+    assert (
+        reason(
+            target=10,
+            selected=6,
+            bounds={
+                "insufficient_candidate_inventory": 12,
+                "category_cap_limits_inventory": 6,
+                "insufficient_surface_diversity": 12,
+            },
+            mix_exceeds_inventory=False,
+        )
+        == "category_cap_limits_inventory"
+    )

@@ -8,11 +8,19 @@ would be loaded by the pipeline as though a human had written it.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from nemotron.steps.byob.runtime.authoring_workflow.quota import (
+    DEFAULT_AUTHORING_QUOTA,
+    RunQuota,
+    RunQuotaLimits,
+    RunQuotaSnapshot,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
     ImmutableModelIOCache,
 )
@@ -20,8 +28,15 @@ from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_text,
     write_text_atomic,
 )
+from nemotron.steps.byob.runtime.pack_authoring.authorization import (
+    ExposureAuthorization,
+    build_exposure_subject,
+    load_exposure_authorization,
+    verify_exposure_authorization,
+)
 from nemotron.steps.byob.runtime.pack_authoring.bundle import (
     Approval,
+    BundleError,
     EvidenceView,
     load_approval,
     load_evidence_bundle,
@@ -44,6 +59,9 @@ from nemotron.steps.byob.runtime.pack_authoring.provenance import (
     build_draft_provenance,
     write_draft_provenance,
 )
+from nemotron.steps.byob.runtime.pack_authoring.questions import (
+    verify_answered_revision,
+)
 
 DRAFT_DIRECTORY_NAME = "drafts"
 CACHE_FILE_NAME = "authoring_io_cache.jsonl"
@@ -60,6 +78,7 @@ class DraftingResult:
     output_root: Path
     assertions_path: Path | None
     compilation_refusals: tuple[str, ...]
+    quota_usage: RunQuotaSnapshot
 
     @property
     def draft_root(self) -> Path:
@@ -85,18 +104,97 @@ def run_drafting(
     model: AuthoringModel,
     *,
     caller: StructuredCaller | None = None,
+    certification_report_path: Path | None = None,
+    trusted_certification_keys: Mapping[str, Ed25519PublicKey] | None = None,
+    domain_brief_source_path: Path | None = None,
+    domain_brief_report_path: Path | None = None,
+    held_out_redaction_report_path: Path | None = None,
+    held_out_policy_path: Path | None = None,
+    held_out_content_path: Path | None = None,
+    source_bundle_path: Path | None = None,
+    migration_record_path: Path | None = None,
+    source_observations_path: Path | None = None,
+    parent_evidence_path: Path | None = None,
+    open_questions_path: Path | None = None,
+    answer_set_path: Path | None = None,
+    exposure_authorization_path: Path | None = None,
+    organizational_policy_digest: str | None = None,
+    allow_legacy_v1_model_exposure: bool = False,
+    quota_limits: RunQuotaLimits = DEFAULT_AUTHORING_QUOTA,
+    resolved_authoring_config_digest: str | None = None,
 ) -> DraftingResult:
     """Draft the pack artifacts an approved evidence bundle can support."""
-    evidence = load_evidence_bundle(bundle_path)
+    evidence = load_evidence_bundle(
+        bundle_path,
+        certification_report_path=certification_report_path,
+        trusted_certification_keys=trusted_certification_keys,
+        domain_brief_source_path=domain_brief_source_path,
+        domain_brief_report_path=domain_brief_report_path,
+        held_out_redaction_report_path=held_out_redaction_report_path,
+        held_out_policy_path=held_out_policy_path,
+        held_out_content_path=held_out_content_path,
+        source_bundle_path=source_bundle_path,
+        migration_record_path=migration_record_path,
+        source_observations_path=source_observations_path,
+    )
+    exposure_authorization: ExposureAuthorization | None = None
+    if evidence.source_evidence is not None:
+        verify_answered_revision(
+            evidence.source_evidence,
+            parent_evidence_path=parent_evidence_path,
+            open_questions_path=open_questions_path,
+            answer_set_path=answer_set_path,
+            expected_root_digest=evidence.source_digest,
+            expected_normalized_origin_digest=(
+                evidence.migration.normalized_digest
+                if evidence.migration is not None
+                else None
+            ),
+        )
+        if exposure_authorization_path is None:
+            raise BundleError(
+                "v2 drafting requires an explicit model exposure authorization"
+            )
+        if (
+            evidence.domain_brief_report is None
+            or evidence.held_out_redaction_report is None
+        ):
+            raise BundleError("v2 evidence reports are incomplete")
+        exposure_authorization = load_exposure_authorization(
+            exposure_authorization_path
+        )
+        verify_exposure_authorization(
+            exposure_authorization,
+            expected_subject=build_exposure_subject(
+                evidence.source_evidence,
+                domain_brief_report=evidence.domain_brief_report,
+                held_out_redaction_report=evidence.held_out_redaction_report,
+            ),
+            expected_organizational_policy_digest=organizational_policy_digest,
+        )
+    else:
+        if not allow_legacy_v1_model_exposure:
+            raise BundleError(
+                "legacy v1 evidence cannot reach a model implicitly; normalize to v2"
+            )
+        if (
+            exposure_authorization_path is not None
+            or organizational_policy_digest is not None
+        ):
+            raise BundleError(
+                "model exposure authorization is valid only for v2 evidence"
+            )
     approval = load_approval(approval_path, evidence)
 
     root = output_root.resolve()
+    quota = RunQuota(quota_limits)
     context = DraftingContext(
         evidence=evidence,
         model=model,
         cache=ImmutableModelIOCache(root / CACHE_FILE_NAME),
         run_dir=root / "model_runs",
         caller=caller,
+        quota=quota,
     )
     drafts = draft_all(context)
 
@@ -122,6 +220,9 @@ def run_drafting(
         drafts,
         assertions_compiled=source is not None,
         compilation_refusals=refusals,
+        exposure_authorization=exposure_authorization,
+        quota_snapshot=quota.snapshot(),
+        resolved_authoring_config_digest=resolved_authoring_config_digest,
     )
     write_draft_provenance(provenance, root / PROVENANCE_FILE_NAME)
     if assertions_path is not None and source is not None:
@@ -139,4 +240,5 @@ def run_drafting(
         output_root=root,
         assertions_path=assertions_path,
         compilation_refusals=refusals,
+        quota_usage=quota.snapshot(),
     )

@@ -47,7 +47,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.nemo_evaluator_export i
     write_nemo_evaluator_bundle,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.origin_provenance import (
-    load_mcp_origin,
+    load_origin_provenance,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
@@ -1003,7 +1003,7 @@ def run_final_output(
         _discard(staging_dir)
         raise
 
-    mcp_origin = load_mcp_origin(
+    provider_origin = load_origin_provenance(
         pack.paths,
         pack.endpoint_config,
         pack_fingerprint=current_pack_fingerprint,
@@ -1040,7 +1040,17 @@ def run_final_output(
         "oracle": {
             "kind": "endpoint" if pack.endpoint_config is not None else "python",
             "endpoint_metadata": validation_report.get("endpoint_metadata"),
-            **({"mcp": mcp_origin} if mcp_origin is not None else {}),
+            **(
+                {
+                    (
+                        "mcp"
+                        if provider_origin.get("provider_kind") == "mcp"
+                        else "origin"
+                    ): provider_origin
+                }
+                if provider_origin is not None
+                else {}
+            ),
         },
         "reference_benchmark": _reference_benchmark_manifest(config),
         "prompt_bundle_hash": prompt_bundle["prompt_bundle_hash"],

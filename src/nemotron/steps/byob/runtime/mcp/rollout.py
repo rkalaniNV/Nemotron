@@ -2,37 +2,32 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 
+from nemotron.steps.byob.runtime.authoring_workflow.rollout import (
+    LEGACY_MCP_ROLLOUT_ENV,
+    RolloutPolicyError,
+    adapter_rollout_enabled,
+    require_adapter_rollout,
+)
 from nemotron.steps.byob.runtime.mcp.errors import McpConfigError
 
-MCP_FEATURE_ENV = "BFCL_ENABLE_EXPERIMENTAL_MCP"
-_TRUE = frozenset({"1", "true", "yes"})
-_FALSE = frozenset({"0", "false", "no"})
+MCP_FEATURE_ENV = LEGACY_MCP_ROLLOUT_ENV
 
 
 def mcp_feature_enabled(environ: Mapping[str, str] | None = None) -> bool:
-    """Return the explicit rollout decision, rejecting ambiguous spellings."""
-    source = os.environ if environ is None else environ
-    raw = source.get(MCP_FEATURE_ENV)
-    if raw is None:
-        return False
-    normalized = raw.strip().casefold()
-    if normalized in _TRUE:
-        return True
-    if normalized in _FALSE:
-        return False
-    raise McpConfigError(
-        f"{MCP_FEATURE_ENV} must be one of "
-        f"{sorted(_TRUE | _FALSE)}, got {raw!r}"
-    )
+    """Compatibility alias for the generic MCP Mode A rollout decision."""
+    try:
+        return adapter_rollout_enabled("mcp_mode_a", environ=environ)
+    except RolloutPolicyError as exc:
+        raise McpConfigError(str(exc)) from exc
 
 
 def require_mcp_feature(environ: Mapping[str, str] | None = None) -> None:
-    """Fail closed until an operator explicitly opts into the experimental path."""
-    if not mcp_feature_enabled(environ):
+    """Compatibility gate retained for one deprecation window."""
+    try:
+        require_adapter_rollout("mcp_mode_a", environ=environ)
+    except RolloutPolicyError as exc:
         raise McpConfigError(
-            "MCP onboarding is experimental and not publication-ready; set "
-            f"{MCP_FEATURE_ENV}=1 to enable live discovery or gateway operation"
-        )
+            f"{exc}; compatibility alias: set {MCP_FEATURE_ENV}=1"
+        ) from exc

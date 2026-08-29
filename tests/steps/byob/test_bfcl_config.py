@@ -1380,11 +1380,77 @@ def test_style_plan_is_deterministic_distinct_per_variant_and_spread_over_axes()
     assert style_plan({"seed": 0}, 0) == []
     # More variants than axes may only cycle; it must never raise.
     assert len(style_plan(task, len(SURFACE_STYLE_AXES) + 2)) == len(SURFACE_STYLE_AXES) + 2
+    # A pack may declare its own register catalog, so the plan must honor it.
+    assert style_plan({"seed": 1}, 2, ("first style", "second style")) == [
+        "second style",
+        "first style",
+    ]
+    with pytest.raises(ValueError, match="must not be empty"):
+        style_plan(task, 1, ())
 
     # Bindings of one template differ only by seed, so the assignment has to spread
     # them across axes; otherwise every binding would be asked for the same rewrite.
     first_styles = {style_plan({"seed": seed}, 1)[0] for seed in range(200)}
     assert first_styles == set(SURFACE_STYLE_AXES)
+
+
+def test_declared_surface_style_axes_are_validated_and_bound_variant_count(
+    tmp_path: Path,
+) -> None:
+    from itertools import count
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        SURFACE_STYLE_AXES,
+        resolve_style_axes,
+    )
+
+    written = count()
+
+    def config_with(**surface: Any) -> BfclConfig:
+        return BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                f"axes-{next(written)}.yaml",
+                lineage={
+                    "roles": {
+                        "paraphrase": {
+                            "enabled": True,
+                            "model_config": {
+                                "alias": "paraphrase",
+                                "provider": "nvidia",
+                                "model": "paraphrase-model",
+                                "canonical_id": "source::paraphrase-model@revision",
+                                "inference_parameters": {"temperature": 0.0},
+                            },
+                        }
+                    }
+                },
+                surface_generation={"model_paraphrase_enabled": True, **surface},
+            )
+        )
+
+    assert resolve_style_axes(config_with(paraphrases_per_template=1)) == SURFACE_STYLE_AXES
+    declared = config_with(
+        paraphrases_per_template=2,
+        surface_style_axes=["  short and blunt  ", "long and formal"],
+    )
+    assert resolve_style_axes(declared) == ("short and blunt", "long and formal")
+
+    # Asking for more variants than axes can only repeat an axis inside one binding,
+    # which spends the model twice on the same rewrite.
+    with pytest.raises(ValueError, match="cannot exceed the 20 declared surface style axes"):
+        config_with(paraphrases_per_template=len(SURFACE_STYLE_AXES) + 1)
+    with pytest.raises(ValueError, match="cannot exceed the 2 declared surface style axes"):
+        config_with(
+            paraphrases_per_template=3,
+            surface_style_axes=["one", "two"],
+        )
+    with pytest.raises(ValueError, match="must be unique"):
+        config_with(paraphrases_per_template=1, surface_style_axes=["same", "same"])
+    with pytest.raises(ValueError, match="must be a non-empty list"):
+        config_with(paraphrases_per_template=1, surface_style_axes=[])
+    with pytest.raises(ValueError, match=r"surface_style_axes\[1\] must be a non-empty string"):
+        config_with(paraphrases_per_template=1, surface_style_axes=["fine", "  "])
 
 
 def test_paraphrase_asks_each_binding_for_its_own_surface_style(tmp_path: Path) -> None:
@@ -1476,6 +1542,201 @@ def test_paraphrase_asks_each_binding_for_its_own_surface_style(tmp_path: Path) 
     assert sorted(requested_styles) == sorted(
         tuple(style_plan(task, 2)) for task in by_task.values()
     )
+
+
+def test_paraphrase_rejects_a_variant_that_repeats_another_variant(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
+        run_expand,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        run_paraphrase,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.reference_profile import (
+        run_reference_profile,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        run_render,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
+        run_state_machine,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "paraphrase-duplicates.yaml",
+            lineage={
+                "roles": {
+                    "paraphrase": {
+                        "enabled": True,
+                        "model_config": {
+                            "alias": "paraphrase",
+                            "provider": "nvidia",
+                            "model": "paraphrase-model",
+                            "canonical_id": "source::paraphrase-model@revision",
+                            "inference_parameters": {"temperature": 0.0},
+                        },
+                    }
+                }
+            },
+            surface_generation={
+                "model_paraphrase_enabled": True,
+                "paraphrases_per_template": 2,
+            },
+        )
+    )
+    pack = load_pack(config)
+    for template in pack.templates:
+        template["paraphrase"] = {"allowed": True}
+    templates = {str(template["template_id"]): template for template in pack.templates}
+    canonical_tasks = run_expand(config, pack)
+    plans = run_state_machine(config, templates, canonical_tasks)
+    surfaces, _ = run_render(config, pack, templates, canonical_tasks, plans)
+    profile = run_reference_profile(config)
+
+    def duplicating_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        del args
+        responses = {}
+        for request in kwargs["requests"]:
+            contract = json.loads(request["model_input"])
+            repeated = {
+                "user_turns": [
+                    f"cùng một cách diễn đạt: {text}"
+                    for text in contract["canonical_user_turns"]
+                ]
+            }
+            responses[request["request_id"]] = {"variants": [repeated, dict(repeated)]}
+        return responses
+
+    output_tasks, _, _, report = run_paraphrase(
+        config,
+        pack,
+        templates,
+        canonical_tasks,
+        plans,
+        surfaces,
+        profile,
+        model_runner=duplicating_runner,
+    )
+
+    accepted = [task for task in output_tasks if int(task.get("variant_index", 0)) > 0]
+    assert accepted
+    # Both variants pass the value guards, so only the repeat itself may be dropped.
+    assert len(accepted) == len(canonical_tasks)
+    assert report["rejected_candidates"] == len(canonical_tasks)
+    assert report["by_reason"]["semantic_shape"] == len(canonical_tasks)
+    assert any(
+        detail["reason"] == "duplicate_variant_surface"
+        for event in report["events"]
+        for detail in event.get("detail", [])
+    )
+
+
+def test_one_failing_paraphrase_request_does_not_discard_its_batch(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
+        run_expand,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        run_paraphrase,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.reference_profile import (
+        run_reference_profile,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        run_render,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
+        run_state_machine,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "paraphrase-batch-failure.yaml",
+            ndd_batch_size=32,
+            lineage={
+                "roles": {
+                    "paraphrase": {
+                        "enabled": True,
+                        "model_config": {
+                            "alias": "paraphrase",
+                            "provider": "nvidia",
+                            "model": "paraphrase-model",
+                            "canonical_id": "source::paraphrase-model@revision",
+                            "inference_parameters": {"temperature": 0.0},
+                        },
+                    }
+                }
+            },
+            surface_generation={
+                "model_paraphrase_enabled": True,
+                "paraphrases_per_template": 1,
+            },
+        )
+    )
+    pack = load_pack(config)
+    for template in pack.templates:
+        template["paraphrase"] = {"allowed": True}
+    templates = {str(template["template_id"]): template for template in pack.templates}
+    canonical_tasks = run_expand(config, pack)
+    assert len(canonical_tasks) > 1
+    plans = run_state_machine(config, templates, canonical_tasks)
+    surfaces, _ = run_render(config, pack, templates, canonical_tasks, plans)
+    profile = run_reference_profile(config)
+    poisoned: list[str] = []
+    call_sizes: list[int] = []
+
+    def failing_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        del args
+        requests = kwargs["requests"]
+        call_sizes.append(len(requests))
+        # One request is permanently broken; the rest of its batch is healthy.
+        broken = sorted(request["request_id"] for request in requests)[0]
+        if len(requests) > 1 or requests[0]["request_id"] == broken:
+            if not poisoned:
+                poisoned.append(broken)
+            if any(request["request_id"] == poisoned[0] for request in requests):
+                raise RuntimeError("endpoint refused this request")
+        responses = {}
+        for request in requests:
+            contract = json.loads(request["model_input"])
+            responses[request["request_id"]] = {
+                "variants": [
+                    {
+                        "user_turns": [
+                            f"diễn đạt khác: {text}"
+                            for text in contract["canonical_user_turns"]
+                        ]
+                    }
+                ]
+            }
+        return responses
+
+    output_tasks, _, _, report = run_paraphrase(
+        config,
+        pack,
+        templates,
+        canonical_tasks,
+        plans,
+        surfaces,
+        profile,
+        model_runner=failing_runner,
+    )
+
+    accepted = [task for task in output_tasks if int(task.get("variant_index", 0)) > 0]
+    # Every binding but the broken one keeps its variant, and the retry is per request.
+    assert len(accepted) == len(canonical_tasks) - 1
+    assert max(call_sizes) > 1
+    assert call_sizes.count(1) == len(canonical_tasks)
+    assert report["by_reason"] == {"model_error": 1}
+    assert [event["reason"] for event in report["events"]] == ["model_error"]
+    assert report["events"][0]["detail"] == "RuntimeError"
 
 
 def test_pipeline_publishes_paraphrase_variants_with_the_base_trace(

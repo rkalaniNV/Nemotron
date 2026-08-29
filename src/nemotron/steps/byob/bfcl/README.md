@@ -253,7 +253,10 @@ quality failure.
 Python owns the first three checks by mapping the existing render and paraphrase
 guards (`must_preserve`, `must_omit`, `must_not_mention`, `novel_literal`,
 `expected_result_leakage`, `semantic_shape`). Canonical template surfaces never
-fail `unchanged_surface`. Each task gets a complete six-check record. When the
+fail `unchanged_surface`. Under `semantic_shape` a model variant is also dropped
+when it returns the canonical wording (`unchanged_surface`) or repeats another
+variant of the same binding (`duplicate_variant_surface`), since neither adds a
+surface. Each task gets a complete six-check record. When the
 optional judge is disabled the judged checks are `not_run`; when it runs, it
 sees only language, user-facing turns, style hints, and the surface rubric, and
 `clarify_only` ambiguity is recorded as `not_applicable` before assembly.
@@ -368,9 +371,11 @@ without cloning rows. Fractional targets use deterministic largest-remainder
 allocation. Selection is a deterministic binary optimization: coverage and
 representative lineage are hard constraints, while total category-cap and
 cross-dimension target deviation is minimized globally before stable rank breaks
-equivalent optima. This avoids both greedy local optima and the former cubic
-exchange pass, so a feasible mix is not reported unmet merely because of the
-order rows were picked in. Minimal environments use an exact bounded fallback;
+equivalent optima. That priority is exact rather than weighted — deviation is
+minimized, pinned at its optimum, and the stable order is minimized against it —
+so no solver tolerance can trade a real deviation for a cheaper row order. This
+avoids both greedy local optima and the former cubic exchange pass, so a feasible
+mix is not reported unmet merely because of the order rows were picked in. Minimal environments use an exact bounded fallback;
 production BYOB environments use PuLP/CBC. Targets that inventory or a locked
 coverage survivor genuinely prevents are returned with explicit
 inventory, target, actual, and reason metadata rather than being silently
@@ -442,11 +447,28 @@ binding one structural style axis from `SURFACE_STYLE_AXES`, chosen from the tas
 seed, so repeated bindings are asked for different sentence forms instead of the
 same rewrite. The axes are register- and structure-level only: an axis that asked
 for shortened numbers or abbreviated identifiers would rewrite protected values
-and the `must_preserve` guard would reject the variant. Since masking removes the
-slot values, a pack's reachable masked-surface count is roughly its template
-count plus its paraphrase-eligible templates times the number of axes, and that
-product is what has to clear `min_exact_surface_ratio` and
-`max_exact_surface_reuse` at the requested scale.
+and the `must_preserve` guard would reject the variant. A pack whose domain or
+language needs different registers declares its own list in
+`surface_generation.surface_style_axes`; `paraphrases_per_template` may not
+exceed the axis count, because beyond that the assignment can only ask one
+binding for the same rewrite twice.
+
+Model calls are batched, and a failed call is an infrastructure event: it stays
+out of the immutable cache so a repaired endpoint can be retried, and the
+rejection report records what produced nothing. A failed batch is retried one
+request at a time, so a single refused request costs its own variant rather than
+the variants of everything batched with it.
+
+Since masking removes the slot values, a pack's reachable masked-surface count is
+roughly its template count plus its paraphrase-eligible templates times the
+number of axes, and that product is what has to clear `min_exact_surface_ratio`
+and `max_exact_surface_reuse` at the requested scale. The cap applies inside each
+category as well: with `tasks_per_category` balancing the publication set,
+a category needs at least `tasks_per_category / max_exact_surface_reuse` masked
+surfaces of its own, so paraphrase eligibility has to be spread across categories
+rather than concentrated in a few. When a target is still missed, the Stage 11
+report names the bound that caused it — candidate inventory, category cap, surface
+diversity, declared mix, or coverage — instead of one generic reason.
 
 A pack that references `held_out.yaml` from its manifest is enforced under
 versioned contract `1.0` at two points. Stage 4 never binds a reserved template

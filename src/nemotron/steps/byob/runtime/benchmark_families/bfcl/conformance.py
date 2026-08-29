@@ -22,13 +22,16 @@ import hashlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
 ATTESTATION_KIND = "bfcl-endpoint-conformance-v1"
 MCP_PROFILE_VERSION = "bfcl-mcp-oracle-v1"
+HTTP_PROFILE_VERSION = "bfcl-http-oracle-v1"
 PROVIDER_KIND_MCP = "mcp"
+PROVIDER_KIND_HTTP = "http"
 
 LEVELS = ("L0", "L1", "L2")
 REQUIREMENTS = frozenset({"required", "conditional"})
@@ -40,6 +43,8 @@ STATE_OBSERVABILITY = frozenset({"complete", "diagnostic"})
 READ_ONLY_BOUNDARIES = frozenset({"upstream_authorization", "immutable_snapshot_sandbox"})
 MCP_L1_PROBES = tuple(f"P{index}" for index in range(1, 5))
 MCP_L2_PROBES = tuple(f"P{index}" for index in range(1, 12))
+HTTP_L1_PROBES = tuple(f"H{index}" for index in range(1, 5))
+HTTP_L2_PROBES = tuple(f"H{index}" for index in range(1, 12))
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -73,6 +78,139 @@ _REQUIRED_FIELDS = frozenset(
 
 class AttestationError(ValueError):
     """Raised when a document cannot be read as a conformance attestation at all."""
+
+    def __init__(self, message: str, *, code: str = "malformed") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class ConformanceProfile:
+    """Strict, inert rules used to interpret one provider attestation profile."""
+
+    schema_version: str
+    provider_kind: str
+    profile_version: str
+    levels: tuple[str, ...]
+    publishable_level: str
+    required_probes: tuple[tuple[str, tuple[str, ...]], ...]
+    report_suite_kind: str
+    report_suite_version: str
+    timeout_probe_requirements: tuple[tuple[str, Any], ...]
+    enforce_snapshot_identity: bool = False
+    cap_without_server_content: bool = True
+    cap_without_complete_state: bool = True
+
+    def __post_init__(self) -> None:
+        text_fields = (
+            self.schema_version,
+            self.provider_kind,
+            self.profile_version,
+            self.publishable_level,
+            self.report_suite_kind,
+            self.report_suite_version,
+        )
+        if any(not value.strip() for value in text_fields):
+            raise ValueError("conformance profile text fields must be non-empty")
+        if not self.levels or len(self.levels) != len(set(self.levels)):
+            raise ValueError("conformance profile levels must be non-empty and unique")
+        if self.publishable_level not in self.levels:
+            raise ValueError("publishable level must belong to the profile")
+        probe_levels = [level for level, _ in self.required_probes]
+        if len(probe_levels) != len(set(probe_levels)) or any(
+            level not in self.levels for level in probe_levels
+        ):
+            raise ValueError("required probe levels must be unique profile levels")
+        for _, probes in self.required_probes:
+            if len(probes) != len(set(probes)) or any(not probe.strip() for probe in probes):
+                raise ValueError("required probe identifiers must be non-empty and unique")
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.provider_kind, self.profile_version)
+
+    def probes_for(self, level: str) -> tuple[str, ...]:
+        return dict(self.required_probes).get(level, ())
+
+
+MCP_CONFORMANCE_PROFILE = ConformanceProfile(
+    schema_version=ATTESTATION_KIND,
+    provider_kind=PROVIDER_KIND_MCP,
+    profile_version=MCP_PROFILE_VERSION,
+    levels=LEVELS,
+    publishable_level="L2",
+    required_probes=(
+        ("L1", MCP_L1_PROBES),
+        ("L2", MCP_L2_PROBES),
+    ),
+    report_suite_kind="gateway",
+    report_suite_version="bfcl-mcp-gateway-conformance-v1",
+    timeout_probe_requirements=(
+        ("timeout_observed", True),
+        ("business_call_attempts", 1),
+        ("episode_poisoned", True),
+        ("transport_cleanup_completed", True),
+        ("unknown_commit_state_preserved", True),
+    ),
+    enforce_snapshot_identity=True,
+)
+HTTP_CONFORMANCE_PROFILE = ConformanceProfile(
+    schema_version=ATTESTATION_KIND,
+    provider_kind=PROVIDER_KIND_HTTP,
+    profile_version=HTTP_PROFILE_VERSION,
+    levels=LEVELS,
+    publishable_level="L2",
+    required_probes=(
+        ("L1", HTTP_L1_PROBES),
+        ("L2", HTTP_L2_PROBES),
+    ),
+    report_suite_kind="endpoint",
+    report_suite_version="bfcl-http-conformance-v1",
+    timeout_probe_requirements=(
+        ("timeout_observed", True),
+        ("business_call_attempts", 1),
+        ("episode_poisoned", True),
+        ("transport_cleanup_completed", True),
+        ("unknown_commit_state_preserved", True),
+    ),
+    enforce_snapshot_identity=False,
+    cap_without_server_content=False,
+)
+DEFAULT_CONFORMANCE_PROFILES: Mapping[
+    tuple[str, str], ConformanceProfile
+] = MappingProxyType(
+    {
+        HTTP_CONFORMANCE_PROFILE.key: HTTP_CONFORMANCE_PROFILE,
+        MCP_CONFORMANCE_PROFILE.key: MCP_CONFORMANCE_PROFILE,
+    }
+)
+
+
+def resolve_conformance_profile(
+    *,
+    provider_kind: Any,
+    profile_version: Any,
+    profiles: Mapping[
+        tuple[str, str], ConformanceProfile
+    ] = DEFAULT_CONFORMANCE_PROFILES,
+) -> ConformanceProfile:
+    if not isinstance(provider_kind, str) or not isinstance(profile_version, str):
+        raise AttestationError(
+            "endpoint conformance provider_kind and profile_version must be strings",
+            code="profile_identity_invalid",
+        )
+    profile = profiles.get((provider_kind, profile_version))
+    if profile is None:
+        raise AttestationError(
+            "endpoint conformance names an unknown provider/profile pair",
+            code="unknown_profile",
+        )
+    if profile.key != (provider_kind, profile_version):
+        raise AttestationError(
+            "conformance profile registry key does not match its profile",
+            code="profile_registry_mismatch",
+        )
+    return profile
 
 
 def attestation_digest(document: Mapping[str, Any]) -> str:
@@ -135,6 +273,7 @@ class ConformanceAttestation:
     """A parsed attestation, plus the verbatim document its digest was taken over."""
 
     document: dict[str, Any]
+    profile: ConformanceProfile
     level: str
     effective_content_digest: str
     gateway_artifact_digest: str
@@ -151,7 +290,16 @@ class ConformanceAttestation:
     checks: tuple[ConformanceCheck, ...]
 
     @classmethod
-    def from_mapping(cls, value: Any, *, source: str = "endpoint conformance") -> ConformanceAttestation:
+    def from_mapping(
+        cls,
+        value: Any,
+        *,
+        source: str = "endpoint conformance",
+        profile: ConformanceProfile | None = None,
+        profiles: Mapping[
+            tuple[str, str], ConformanceProfile
+        ] = DEFAULT_CONFORMANCE_PROFILES,
+    ) -> ConformanceAttestation:
         if not isinstance(value, dict):
             raise AttestationError(f"{source} must be a JSON object")
         unknown = sorted(set(value) - _REQUIRED_FIELDS)
@@ -163,10 +311,20 @@ class ConformanceAttestation:
         if missing:
             raise AttestationError(f"{source} is missing: {', '.join(missing)}")
 
+        resolved_profile = resolve_conformance_profile(
+            provider_kind=value["provider_kind"],
+            profile_version=value["profile_version"],
+            profiles=profiles,
+        )
+        if profile is not None and profile != resolved_profile:
+            raise AttestationError(
+                f"{source} does not match the selected conformance profile",
+                code="profile_mismatch",
+            )
         for field, expected in (
-            ("schema_version", ATTESTATION_KIND),
-            ("provider_kind", PROVIDER_KIND_MCP),
-            ("profile_version", MCP_PROFILE_VERSION),
+            ("schema_version", resolved_profile.schema_version),
+            ("provider_kind", resolved_profile.provider_kind),
+            ("profile_version", resolved_profile.profile_version),
         ):
             if value[field] != expected:
                 raise AttestationError(f"{source}.{field} must be {expected!r}, got {value[field]!r}")
@@ -201,7 +359,8 @@ class ConformanceAttestation:
 
         return cls(
             document=dict(value),
-            level=_enum_field(value["level"], LEVELS, f"{source}.level"),
+            profile=resolved_profile,
+            level=_enum_field(value["level"], resolved_profile.levels, f"{source}.level"),
             effective_content_digest=required("effective_content_digest"),
             gateway_artifact_digest=required("gateway_artifact_digest"),
             tool_catalog_digest=required("tool_catalog_digest"),
@@ -307,20 +466,17 @@ def _evidence_findings(
         p9 = suite.get("p9") if isinstance(suite, Mapping) else None
         if (
             not isinstance(suite, Mapping)
-            or suite.get("kind") != "gateway"
+            or suite.get("kind") != attestation.profile.report_suite_kind
             or suite.get("profile_version")
-            != "bfcl-mcp-gateway-conformance-v1"
+            != attestation.profile.report_suite_version
         ):
             findings.append("gateway_report_suite_invalid")
-        required_p9 = {
-            "timeout_observed": True,
-            "business_call_attempts": 1,
-            "episode_poisoned": True,
-            "transport_cleanup_completed": True,
-            "unknown_commit_state_preserved": True,
-        }
-        if not isinstance(p9, Mapping) or any(
-            p9.get(field) != expected for field, expected in required_p9.items()
+        required_p9 = dict(attestation.profile.timeout_probe_requirements)
+        if required_p9 and (
+            not isinstance(p9, Mapping)
+            or any(
+                p9.get(field) != expected for field, expected in required_p9.items()
+            )
         ):
             findings.append("gateway_report_timeout_probe_invalid")
     return findings
@@ -328,6 +484,8 @@ def _evidence_findings(
 
 def _identity_semantic_findings(attestation: ConformanceAttestation) -> list[str]:
     """Enforce the mode information encoded by optional identity components."""
+    if not attestation.profile.enforce_snapshot_identity:
+        return []
     findings: list[str] = []
     is_snapshot = attestation.snapshot_digest is not None
     if is_snapshot and attestation.shim_artifact_digest is not None:
@@ -359,12 +517,8 @@ def _check_findings(attestation: ConformanceAttestation) -> list[str]:
 
 
 def _probe_coverage_findings(attestation: ConformanceAttestation) -> list[str]:
-    """Independently enforce the MCP profile's level-to-probe contract."""
-    expected: tuple[str, ...] = ()
-    if attestation.level == "L1":
-        expected = MCP_L1_PROBES
-    elif attestation.level == "L2":
-        expected = MCP_L2_PROBES
+    """Independently enforce the selected profile's level-to-probe contract."""
+    expected = attestation.profile.probes_for(attestation.level)
     present = {check.id for check in attestation.checks}
     return [
         f"probe_missing_for_{attestation.level.lower()}:{identifier}"
@@ -381,6 +535,10 @@ def verify_conformance(
     expected_identity: Mapping[str, str | None] | None = None,
     probe_report: Mapping[str, Any] | None = None,
     gateway_conformance_report: Mapping[str, Any] | None = None,
+    profile: ConformanceProfile | None = None,
+    profiles: Mapping[
+        tuple[str, str], ConformanceProfile
+    ] = DEFAULT_CONFORMANCE_PROFILES,
 ) -> ConformanceVerdict:
     """Decide which level an attestation earns, and whether it may publish.
 
@@ -393,15 +551,19 @@ def verify_conformance(
     caps: list[str] = []
 
     try:
-        attestation = ConformanceAttestation.from_mapping(document)
+        attestation = ConformanceAttestation.from_mapping(
+            document,
+            profile=profile,
+            profiles=profiles,
+        )
     except AttestationError as exc:
         # Unreadable is strictly worse than low: nothing below can be evaluated.
         return ConformanceVerdict(
             attested_level="unknown",
             effective_level="L0",
             publishable=False,
-            findings=(f"attestation_malformed:{exc}",),
-            caps=("attestation_malformed",),
+            findings=(f"attestation_malformed:{exc.code}",),
+            caps=(f"attestation_malformed:{exc.code}",),
         )
 
     observed = attestation_digest(attestation.document)
@@ -437,23 +599,33 @@ def verify_conformance(
         attestation.snapshot_digest is not None
         and attestation.read_only_boundary == "immutable_snapshot_sandbox"
     )
-    if attestation.server_content_digest is None and not immutable_snapshot:
+    if (
+        attestation.profile.cap_without_server_content
+        and attestation.server_content_digest is None
+        and not immutable_snapshot
+    ):
         # Without a server content statement the effective digest still catches adapter and
         # catalog drift, but not the server's own business logic changing underneath. An
         # immutable local snapshot is the one contract-defined exception.
         caps.append("server_content_digest_absent")
-    if attestation.state_observability != "complete":
+    if (
+        attestation.profile.cap_without_complete_state
+        and attestation.state_observability != "complete"
+    ):
         caps.append("state_observability_incomplete")
 
     effective = attestation.level
-    if caps and effective == "L2":
-        effective = "L1"
+    if caps and effective == attestation.profile.publishable_level:
+        publishable_index = attestation.profile.levels.index(
+            attestation.profile.publishable_level
+        )
+        effective = attestation.profile.levels[max(0, publishable_index - 1)]
     if findings:
-        effective = "L0"
+        effective = attestation.profile.levels[0]
     return ConformanceVerdict(
         attested_level=attestation.level,
         effective_level=effective,
-        publishable=effective == "L2" and not findings,
+        publishable=effective == attestation.profile.publishable_level and not findings,
         findings=tuple(findings),
         caps=tuple(caps),
     )

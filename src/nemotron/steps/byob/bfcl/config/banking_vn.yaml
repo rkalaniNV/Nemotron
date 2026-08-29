@@ -41,8 +41,9 @@ surface_quality_validation:
   drop_authority: false
 
 task_generation:
-  # Shared by every template in a category; the widest category declares five.
-  tasks_per_category: 6
+  # Shared by every template in a category, so it may not fall below the number of
+  # templates in the widest category or a template would lose its only instance.
+  tasks_per_category: 7
 
 semantic_deduplication_config:
   enabled: false

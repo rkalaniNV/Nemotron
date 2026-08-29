@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,6 +60,14 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.nemo_evaluator_export i
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     canonical_json,
     encode_arguments,
+)
+
+# Registering a native task, translating metrics, and validating a native result all
+# execute against the real evaluator. Those tests are conformance checks for an optional
+# integration, so they skip rather than fail where the extra is not installed.
+requires_nemo_evaluator = pytest.mark.skipif(
+    importlib.util.find_spec("nemo_evaluator") is None,
+    reason="native adapter conformance requires the evaluator extra (nemo-evaluator)",
 )
 
 TOOLS = [
@@ -286,6 +295,7 @@ def _native_adapter(
     )
 
 
+@requires_nemo_evaluator
 def test_the_native_adapter_verifies_and_registers_the_immutable_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -420,6 +430,7 @@ def test_native_run_maps_setup_failures_to_immutable_evidence(
     assert failure["adapter_config_hash"] == adapter.config_hash
 
 
+@requires_nemo_evaluator
 def test_native_metric_translation_preserves_counts_and_omits_na() -> None:
     aggregate = type(
         "Aggregate",
@@ -505,6 +516,7 @@ def test_native_authorization_rejects_a_different_execution_dataset_before_run(
         run_nemo_native_adapter(adapter)
 
 
+@requires_nemo_evaluator
 def test_native_run_maps_the_bfcl_result_and_publishes_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

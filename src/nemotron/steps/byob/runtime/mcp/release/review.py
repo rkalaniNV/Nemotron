@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import OraclePackRef
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
     ConformanceAttestation,
@@ -306,9 +308,30 @@ def build_review_packet(
     pack_root: Path,
     *,
     held_out_path: Path | None = None,
+    certification_report_path: Path | None = None,
+    trusted_certification_keys: Mapping[str, Ed25519PublicKey] | None = None,
+    domain_brief_source_path: Path | None = None,
+    domain_brief_report_path: Path | None = None,
+    held_out_redaction_report_path: Path | None = None,
+    held_out_policy_path: Path | None = None,
+    held_out_content_path: Path | None = None,
+    source_bundle_path: Path | None = None,
+    migration_record_path: Path | None = None,
 ) -> ReviewPacket:
     """MCP-501: assemble every fact a domain reviewer must accept or reject."""
-    evidence = load_evidence_bundle(evidence_path)
+    evidence = load_evidence_bundle(
+        evidence_path,
+        certification_report_path=certification_report_path,
+        trusted_certification_keys=trusted_certification_keys,
+        domain_brief_source_path=domain_brief_source_path,
+        domain_brief_report_path=domain_brief_report_path,
+        held_out_redaction_report_path=held_out_redaction_report_path,
+        held_out_policy_path=held_out_policy_path,
+        held_out_content_path=held_out_content_path,
+        source_bundle_path=source_bundle_path,
+        migration_record_path=migration_record_path,
+    )
+    mcp_evidence = evidence.source_document or evidence.document
     intake_document = load_json_mapping(intake_provenance_path, "intake provenance")
     intake = IntakeProvenance(document=intake_document)
     intake.verify_digest()
@@ -340,7 +363,7 @@ def build_review_packet(
         raise ReviewError(
             "canonical endpoint config does not pin the reviewed gateway attestation"
         )
-    discovered_content = evidence.document["identity"]["effective_content_digest"]
+    discovered_content = mcp_evidence["identity"]["effective_content_digest"]
     if (endpoint_document.get("expected") or {}).get("content_digest") != discovered_content:
         raise ReviewError(
             "canonical endpoint config pins a different effective content digest than "
@@ -349,6 +372,13 @@ def build_review_packet(
 
     if draft_document.get("evidence", {}).get("bundle_digest") != evidence.digest:
         raise ReviewError("draft provenance does not cover this evidence bundle")
+    if evidence.is_v2 and not isinstance(
+        draft_document.get("model_exposure_authorization"),
+        Mapping,
+    ):
+        raise ReviewError(
+            "v2 draft provenance has no distinct model exposure authorization"
+        )
     if intake_document.get("evidence_bundle", {}).get("digest") != evidence.digest:
         raise ReviewError("intake provenance does not cover this evidence bundle")
     if (
@@ -366,7 +396,7 @@ def build_review_packet(
         raise ReviewError(
             "validation report does not cover the canonical pack under review"
         )
-    expected_profile_digest = evidence.document["identity"]["source_config_digest"]
+    expected_profile_digest = mcp_evidence["identity"]["source_config_digest"]
     observed_profile_digest = sha256_json(loaded_profile.raw_document)
     if observed_profile_digest != expected_profile_digest:
         raise ReviewError(
@@ -376,7 +406,32 @@ def build_review_packet(
 
     held_out: dict[str, Any]
     pack_held_out = canonical_pack["held_out"]
-    if held_out_path is None and pack_held_out is None:
+    held_out_decision: Mapping[str, Any] | None = None
+    if evidence.is_v2:
+        raw_decision = evidence.document["fixtures"]["held_out"]
+        if not isinstance(raw_decision, Mapping):
+            raise ReviewError("v2 held-out decision must be a mapping")
+        held_out_decision = raw_decision
+    if (
+        evidence.is_v2
+        and held_out_decision is not None
+        and held_out_decision["status"] == "not_applicable"
+    ):
+        if held_out_path is not None or pack_held_out is not None:
+            raise ReviewError(
+                "not_applicable held-out decision conflicts with a supplied policy"
+            )
+        held_out = {
+            "status": "not_applicable",
+            "digest": None,
+            "policy": None,
+            "reviewed_reason": held_out_decision["reviewed_reason"],
+            "reviewed_by": held_out_decision["reviewed_by"],
+            "decision_digest": held_out_decision["decision_digest"],
+        }
+    elif held_out_path is None and pack_held_out is None:
+        if evidence.is_v2:
+            raise ReviewError("required held-out decision has no reviewed policy")
         held_out = {"status": "not_declared", "digest": None, "policy": None}
     else:
         policy = (
@@ -393,6 +448,14 @@ def build_review_packet(
             "digest": sha256_json(policy),
             "policy": policy,
         }
+        if evidence.is_v2 and (
+            held_out_decision is None
+            or held_out_decision["status"] != "required"
+            or held_out_decision["policy_digest"] != held_out["digest"]
+        ):
+            raise ReviewError(
+                "reviewed held-out policy does not match the v2 intake decision"
+            )
 
     observations = validation.get("mcp_observations")
     if not isinstance(observations, Mapping):
@@ -407,7 +470,7 @@ def build_review_packet(
     )
 
     failures = _validation_failures(validation)
-    risks = _metadata_risks(evidence.document, validation)
+    risks = _metadata_risks(mcp_evidence, validation)
     blockers = _blockers(
         draft=draft_document,
         validation_report=validation,
@@ -416,18 +479,25 @@ def build_review_packet(
     )
     tools = [
         {
-            "published_name": entry["published_name"],
-            "source_name": entry["source_name"],
-            "description": entry["description"],
-            "parameters": entry["untrusted_schemas"]["parameters"],
-            "output_schema": entry["untrusted_schemas"]["output_schema"],
-            "annotations": entry["untrusted_schemas"]["annotations"],
-            "mutates": entry["declared"]["mutates"],
-            "mutation_source": entry["declared"]["mutation_source"],
-            "requires_confirmation": entry["declared"]["requires_confirmation"],
-            "raw_digest": entry["raw_digest"],
+            "published_name": tool.published_name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+            "output_schema": tool.output_schema,
+            "annotations": tool.annotations,
+            "mutates": tool.mutates,
+            "mutation_source": (
+                "bfcl-source-evidence-v2"
+                if evidence.is_v2
+                else entry["declared"]["mutation_source"]
+            ),
+            "requires_confirmation": tool.requires_confirmation,
+            "raw_digest": sha256_json(entry),
         }
-        for entry in evidence.document["tools"]
+        for entry, tool in zip(
+            mcp_evidence["tools"],
+            evidence.tools,
+            strict=True,
+        )
     ]
     document: dict[str, Any] = {
         "schema_version": REVIEW_PACKET_VERSION,
@@ -443,21 +513,24 @@ def build_review_packet(
             "held_out_policy": held_out["digest"],
             "canonical_pack": canonical_pack["fingerprint"],
         },
-        "identity": dict(evidence.document["identity"]),
-        "oracle": dict(evidence.document["oracle"]),
-        "mode": evidence.document["mode"],
+        "identity": dict(mcp_evidence["identity"]),
+        "oracle": dict(mcp_evidence["oracle"]),
+        "mode": mcp_evidence["mode"],
         "control_mapping": loaded_profile.value.control.model_dump(mode="json"),
         "fixture_policy": {
-            **dict(evidence.document["fixtures"]),
+            **dict(mcp_evidence["fixtures"]),
             "held_out": held_out,
         },
         "tools": tools,
         "canonical_pack": canonical_pack,
-        "exclusions": list(evidence.document["catalog"]["exclusions"]),
+        "exclusions": list(mcp_evidence["catalog"]["exclusions"]),
         "metadata_risks": risks,
-        "assumptions": list(evidence.document["assumptions"]),
+        "assumptions": list(mcp_evidence["assumptions"]),
         "authoring": {
             "model": draft_document.get("model"),
+            "model_exposure_authorization": draft_document.get(
+                "model_exposure_authorization"
+            ),
             "model_calls": list(draft_document.get("calls") or []),
             "artifact_digests": dict(draft_document.get("artifact_digests") or {}),
             "blocked_on": list(draft_document.get("blocked_on") or []),
@@ -482,6 +555,32 @@ def build_review_packet(
         },
         "blockers": blockers,
     }
+    if evidence.is_v2:
+        assert evidence.certification_report is not None
+        assert evidence.domain_brief_report is not None
+        assert evidence.held_out_redaction_report is not None
+        document["source_digests"].update(
+            {
+                "source_evidence_bundle": evidence.source_digest,
+                "certification_report": (
+                    evidence.certification_report.report_digest
+                ),
+                "migration_record": (
+                    evidence.migration.record_digest
+                    if evidence.migration is not None
+                    else None
+                ),
+                "domain_brief_source": evidence.document["domain_brief"][
+                    "source_digest"
+                ],
+                "domain_brief_report": (
+                    evidence.domain_brief_report.record_digest
+                ),
+                "held_out_redaction_report": (
+                    evidence.held_out_redaction_report.report_digest
+                ),
+            }
+        )
     document["packet_digest"] = sha256_json(document)
     return ReviewPacket(document=document)
 

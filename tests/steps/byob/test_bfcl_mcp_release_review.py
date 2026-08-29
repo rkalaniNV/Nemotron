@@ -19,8 +19,11 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
     load_endpoint_config,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.origin_provenance import (
+    MCP_ORIGIN_PROFILE,
+    OriginProfile,
     OriginProvenanceError,
     load_mcp_origin,
+    load_origin_provenance,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     pack_fingerprint,
@@ -51,6 +54,8 @@ from nemotron.steps.byob.runtime.mcp.release.review import (
     write_review_packet,
 )
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import sha256_json
+from nemotron.steps.byob.runtime.pack_authoring.bundle import load_evidence_bundle
+from nemotron.steps.byob.runtime.source_adapters.certification import AdapterTier
 
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
@@ -716,6 +721,111 @@ def test_freeze_atomically_seals_the_canonical_pack_and_lineage(
     assert origin["effective_content_digest"] == SHA_C
     assert "approved_by" not in origin
     assert "base_url" not in json.dumps(origin)
+    assert origin == load_origin_provenance(
+        paths,
+        load_endpoint_config(
+            paths.endpoint_config_path,  # type: ignore[arg-type]
+            allowed_roots=(release.pack_root,),
+        ),
+        pack_fingerprint=release.pack_fingerprint,
+        pack_id="acme-inventory",
+        pack_version="1.0.0",
+    )
+
+
+def test_gold_freeze_requires_a2_source_certification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inputs = _approved_freeze_inputs(tmp_path)
+
+    def checked_loader(*args: Any, **kwargs: Any) -> Any:
+        assert kwargs["required_certification_tier"] is AdapterTier.A2
+        return load_evidence_bundle(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.mcp.release.freeze.load_evidence_bundle",
+        checked_loader,
+    )
+    freeze_canonical_pack(inputs, tmp_path / "release")
+
+
+def test_generic_origin_resolution_rejects_ambiguous_provider_profiles(
+    tmp_path: Path,
+) -> None:
+    release = freeze_canonical_pack(
+        _approved_freeze_inputs(tmp_path),
+        tmp_path / "release",
+    )
+    for path in release.pack_root.rglob("*"):
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    release.pack_root.chmod(0o755)
+    second_path = Path("provenance") / "http_lineage.json"
+    (release.pack_root / second_path).write_text("{}\n", encoding="utf-8")
+    http_profile = OriginProfile(
+        schema_version="bfcl-http-publication-lineage-v1",
+        provider_kind="http",
+        origin="http_backed_endpoint",
+        lineage_relative_path=second_path,
+        label="HTTP lineage",
+        allowed_profile_versions=("bfcl-http-oracle-v1",),
+        identity_digest_fields=MCP_ORIGIN_PROFILE.identity_digest_fields,
+        endpoint_content_field="effective_content_digest",
+        endpoint_attestation_field="conformance_digest",
+    )
+    paths = resolve_declared_pack_paths(
+        OraclePackRef(manifest_path=release.pack_root / "manifest.yaml"),
+        (release.pack_root,),
+    )
+
+    with pytest.raises(OriginProvenanceError, match="origin_profile_ambiguous"):
+        load_origin_provenance(
+            paths,
+            load_endpoint_config(
+                paths.endpoint_config_path,  # type: ignore[arg-type]
+                allowed_roots=(release.pack_root,),
+            ),
+            pack_fingerprint=release.pack_fingerprint,
+            pack_id="acme-inventory",
+            pack_version="1.0.0",
+            profiles={
+                MCP_ORIGIN_PROFILE.key: MCP_ORIGIN_PROFILE,
+                http_profile.key: http_profile,
+            },
+        )
+
+
+def test_generic_origin_resolution_rejects_unknown_provider_identity(
+    tmp_path: Path,
+) -> None:
+    release = freeze_canonical_pack(
+        _approved_freeze_inputs(tmp_path),
+        tmp_path / "release",
+    )
+    for path in release.pack_root.rglob("*"):
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    release.pack_root.chmod(0o755)
+    lineage_path = release.pack_root / MCP_ORIGIN_PROFILE.lineage_relative_path
+    document = json.loads(lineage_path.read_text(encoding="utf-8"))
+    document["provider_kind"] = "unknown"
+    document.pop("record_digest")
+    document["record_digest"] = sha256_json(document)
+    lineage_path.write_text(json.dumps(document), encoding="utf-8")
+    paths = resolve_declared_pack_paths(
+        OraclePackRef(manifest_path=release.pack_root / "manifest.yaml"),
+        (release.pack_root,),
+    )
+
+    with pytest.raises(OriginProvenanceError, match="origin_profile_mismatch"):
+        load_origin_provenance(
+            paths,
+            load_endpoint_config(
+                paths.endpoint_config_path,  # type: ignore[arg-type]
+                allowed_roots=(release.pack_root,),
+            ),
+            pack_fingerprint=release.pack_fingerprint,
+            pack_id="acme-inventory",
+            pack_version="1.0.0",
+        )
 
 
 def test_publication_origin_refuses_lineage_lifted_from_another_pack(

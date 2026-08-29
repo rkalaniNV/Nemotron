@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 import yaml
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
     ATTESTATION_KIND,
@@ -42,12 +43,22 @@ from nemotron.steps.byob.runtime.mcp.errors import (
 )
 from nemotron.steps.byob.runtime.mcp.gateway.errors import GatewayError
 from nemotron.steps.byob.runtime.mcp.normalization import normalize_catalog
+from nemotron.steps.byob.runtime.pack_authoring.bundle import load_evidence_bundle
 from nemotron.steps.byob.runtime.pack_authoring.untrusted_text import (
     UNTRUSTED_TAG,
     ProseHygieneError,
     quote_untrusted,
     scan_document,
 )
+from nemotron.steps.byob.runtime.source_adapters.certification import (
+    CertificationAuthority,
+)
+from nemotron.steps.byob.runtime.source_adapters.held_out import (
+    HeldOutLeakageError,
+    build_not_applicable_decision,
+    load_required_held_out_policy,
+)
+from nemotron.steps.byob.runtime.source_adapters.intake import SourceIntakeError
 
 GATEWAY_DIGEST = "sha256:" + "b" * 64
 SERVER_DIGEST = "sha256:" + "a" * 64
@@ -234,6 +245,8 @@ def _intake(
     mode: str = "A",
     intake: dict[str, Any] | None = None,
     output: str = "out",
+    v2: bool = False,
+    v2_overrides: dict[str, Any] | None = None,
 ):
     catalog_tools = _tools() if tools is None else tools
     path = _write_intake(
@@ -275,12 +288,29 @@ def _intake(
             ],
         }
 
+    v2_kwargs: dict[str, Any] = {}
+    if v2:
+        brief = tmp_path / f"{output}-domain-brief.txt"
+        brief.write_text("Evaluate deterministic inventory lookup.", encoding="utf-8")
+        v2_kwargs = {
+            "domain_brief_path": brief,
+            "certification_authority": CertificationAuthority(
+                key_id="test-root",
+                private_key=Ed25519PrivateKey.from_private_bytes(b"\x03" * 32),
+            ),
+            "held_out_decision": build_not_applicable_decision(
+                "Synthetic MCP fixture has no held-out evaluation.",
+                reviewed_by="mcp-authoring-tests",
+            ),
+        }
+        v2_kwargs.update(v2_overrides or {})
     return asyncio.run(
         run_intake(
             path,
             tmp_path / output,
             connection_factory=_factory(catalog_tools),
             attestation_fetcher=attestation,
+            **v2_kwargs,
         )
     )
 
@@ -320,6 +350,123 @@ def test_intake_emits_a_pack_draft_pinned_to_the_gateway_identity(tmp_path: Path
     assert result.provenance.document["gateway_attestation"]["digest"] == attestation_digest(
         result.attestation
     )
+
+
+def test_production_mcp_intake_emits_verified_v2_trust_sidecars(
+    tmp_path: Path,
+) -> None:
+    result = _intake(tmp_path, output="v2", v2=True)
+
+    assert result.source_evidence is not None
+    assert result.source_evidence.schema_version == "bfcl-source-evidence-v2"
+    assert result.source_evidence.certification.attained_tier == "A0"
+    assert result.provenance.document["evidence_bundle"]["digest"] == (
+        result.source_evidence.bundle_digest
+    )
+    assert result.certification_path is not None
+    assert result.migration_path is not None
+    assert result.domain_brief_source_path is not None
+    assert result.domain_brief_report_path is not None
+    assert result.held_out_redaction_path is not None
+    assert result.exposure_subject_path is not None
+    assert result.exposure_subject is not None
+    assert result.observations_path is not None
+    assert result.exposure_subject.evidence_digest == result.source_evidence.bundle_digest
+    assert result.provenance.document["model_exposure_subject"]["evidence_digest"] == (
+        result.source_evidence.bundle_digest
+    )
+    assert result.provenance.document["source_observations"]["profile_id"] == (
+        result.source_evidence.certification.profile_id
+    )
+    authority = CertificationAuthority(
+        key_id="test-root",
+        private_key=Ed25519PrivateKey.from_private_bytes(b"\x03" * 32),
+    )
+    view = load_evidence_bundle(
+        result.output_root / "evidence_bundle.json",
+        certification_report_path=result.certification_path,
+        trusted_certification_keys={"test-root": authority.public_key},
+        domain_brief_source_path=result.domain_brief_source_path,
+        domain_brief_report_path=result.domain_brief_report_path,
+        held_out_redaction_report_path=result.held_out_redaction_path,
+        source_bundle_path=result.output_root / "evidence_bundle.v1.json",
+        migration_record_path=result.migration_path,
+        source_observations_path=result.observations_path,
+    )
+    assert view.is_v2
+    assert view.certification_verified
+
+
+def test_v2_intake_publishes_no_authoritative_output_when_redaction_fails(
+    tmp_path: Path,
+) -> None:
+    policy = tmp_path / "held-out.yaml"
+    policy.write_text(
+        "version: 1\nfixtures:\n  tools: [inventory_lookup]\n",
+        encoding="utf-8",
+    )
+    content = tmp_path / "held-out-content.yaml"
+    content.write_text("rows: []\n", encoding="utf-8")
+    decision = load_required_held_out_policy(
+        policy,
+        reviewed_by="mcp-authoring-tests",
+    )
+
+    with pytest.raises(HeldOutLeakageError):
+        _intake(
+            tmp_path,
+            output="redaction-failure",
+            v2=True,
+            v2_overrides={
+                "held_out_decision": decision,
+                "held_out_policy_path": policy,
+                "held_out_content_path": content,
+            },
+        )
+
+    assert not (tmp_path / "redaction-failure").exists()
+    assert not list(tmp_path.glob(".redaction-failure.staging-*"))
+
+
+def test_mcp_v2_uses_stable_held_out_refusal_codes(tmp_path: Path) -> None:
+    decision = build_not_applicable_decision(
+        "No held-out material.",
+        reviewed_by="mcp-authoring-tests",
+    ).model_copy(
+        update={
+            "status": "required",
+            "policy_digest": "sha256:" + "a" * 64,
+            "reviewed_reason": None,
+        }
+    )
+
+    with pytest.raises(SourceIntakeError) as refused:
+        _intake(
+            tmp_path,
+            output="stable-refusal",
+            v2=True,
+            v2_overrides={
+                "held_out_decision": decision,
+            },
+        )
+    assert refused.value.code == "held_out_policy_missing"
+
+
+def test_mcp_cleans_staging_when_sidecar_publication_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_write(*_args: Any, **_kwargs: Any) -> None:
+        raise OSError("injected sidecar write failure")
+
+    monkeypatch.setattr(
+        "nemotron.steps.byob.runtime.mcp.authoring.runner.write_canonical_json",
+        fail_write,
+    )
+    with pytest.raises(OSError, match="injected sidecar"):
+        _intake(tmp_path, output="sidecar-failure", v2=True)
+
+    assert not (tmp_path / "sidecar-failure").exists()
+    assert not list(tmp_path.glob(".sidecar-failure.staging-*"))
 
 
 def test_a_second_run_against_an_unchanged_server_writes_identical_bytes(

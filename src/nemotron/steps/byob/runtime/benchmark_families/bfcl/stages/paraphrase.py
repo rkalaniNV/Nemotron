@@ -45,6 +45,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
     mentions_value,
     resolve_render_contract,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_styles import (
+    SURFACE_STYLE_AXES,
+    style_plan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,37 +61,6 @@ Follow style_hints and avoid every pattern in style_avoid when those lists are s
 Do not mention forbidden implementation names. Return only the requested structured variants."""
 PARAPHRASE_PROMPT = """Create the requested ordered variants from this canonical JSON contract:
 {{ model_input }}"""
-# Asked to rewrite the same canonical turn for many fixture bindings, a model
-# converges on one preferred phrasing, so wording diversity saturates at roughly one
-# surface per template no matter how many bindings exist. These axes are the request
-# for diversity: each binding is assigned one, so repeated bindings are asked for
-# different sentence forms rather than the same rewrite.
-#
-# Every axis is structural or register-level on purpose. An axis that asked for
-# shortened numbers, abbreviated identifiers, or converted units would rewrite
-# protected values, and the must_preserve guard would then reject the variant.
-SURFACE_STYLE_AXES: tuple[str, ...] = (
-    "direct imperative request with no opener",
-    "polite request phrased as a yes/no question",
-    "state the goal first, then the identifying values",
-    "state the identifying values first, then the goal",
-    "terse phrasing that drops optional function words",
-    "one sentence that also says why the user is asking",
-    "two short sentences rather than one longer sentence",
-    "formal register addressed to a service desk",
-    "casual register addressed to a familiar agent",
-    "brief courtesy greeting, then the request",
-    "the request, then a brief closing thanks",
-    "phrased as confirming something the user already believes",
-    "phrased as an uncertainty the user wants resolved",
-    "phrased as the next step after something the user just did",
-    "lead with the relevant condition, then the request",
-    "indirect request that asks whether the assistant is able to help",
-    "phrased as a comparison or cross-check between the values involved",
-    "phrased with mild urgency about needing the answer now",
-    "phrased as a follow-up to an earlier unanswered attempt",
-    "phrased as delegating the task and awaiting a report back",
-)
 ParaphraseRunner = Callable[..., dict[str, dict[str, Any]]]
 _LITERAL = re.compile(r"(?<!\w)(?:[A-Z]{2,}[-_][A-Z0-9_-]+|\d[\d.,:/-]*)(?!\w)")
 
@@ -96,19 +69,12 @@ def _sha256(value: str) -> str:
     return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
-def style_plan(task: dict[str, Any], requested: int) -> list[str]:
-    """Assign one style axis per requested variant, deterministically per binding.
-
-    The offset comes from the task seed, which already mixes the global seed with the
-    binding identity, so the same config yields the same plan and two bindings of one
-    template normally receive different axes. Consecutive axes keep the variants of a
-    single binding distinct whenever fewer variants than axes are requested.
-    """
-    offset = int(task["seed"]) % len(SURFACE_STYLE_AXES)
-    return [
-        SURFACE_STYLE_AXES[(offset + index) % len(SURFACE_STYLE_AXES)]
-        for index in range(max(0, requested))
-    ]
+def resolve_style_axes(config: BfclConfig) -> tuple[str, ...]:
+    """Return the axes this run requests, letting a pack profile declare its own."""
+    declared = config.surface_generation.get("surface_style_axes")
+    if declared:
+        return tuple(str(axis) for axis in declared)
+    return SURFACE_STYLE_AXES
 
 
 def _identity_bindings(task: dict[str, Any]) -> dict[str, Any]:
@@ -438,6 +404,7 @@ def run_paraphrase(
     )
     contract = resolve_render_contract(config, pack, templates_by_id)
     tool_names = contract["tool_names"]
+    style_axes = resolve_style_axes(config)
     role = (config.lineage.roles or {}).get("paraphrase")
     model_config = dict(role.model_config or {}) if role else {}
     if model_config.get("canonical_id"):
@@ -494,7 +461,7 @@ def run_paraphrase(
                 language=str(surfaces[base_id]["language"]),
                 requested_variants=requested,
                 tool_names=tool_names,
-                surface_styles=style_plan(task, requested),
+                surface_styles=style_plan(task, requested, style_axes),
                 style_hints=style_hints,
                 style_avoid=style_avoid,
             )
@@ -548,9 +515,8 @@ def run_paraphrase(
             )
 
             model_runner = run_structured_model
-        batch_size = max(1, int(config.ndd_batch_size))
-        for start in range(0, len(missing), batch_size):
-            batch = missing[start : start + batch_size]
+        def request_batch(batch: list[dict[str, Any]]) -> None:
+            """Fill in the responses of one batch, attributing failures per request."""
             try:
                 responses = model_runner(
                     config,
@@ -570,10 +536,15 @@ def run_paraphrase(
             except Exception as exc:  # noqa: BLE001 - canonical rows must survive
                 # A failed call is an infrastructure event, not a model observation. It
                 # stays out of the immutable cache so a fixed endpoint can be retried;
-                # the rejection report is what records that this batch produced nothing.
-                for item in batch:
-                    item["response"] = {"_model_error": type(exc).__name__}
-                continue
+                # the rejection report is what records what produced nothing. One
+                # failing request must not discard the variants of the rest of its
+                # batch, so a failed batch is retried one request at a time.
+                if len(batch) > 1:
+                    for item in batch:
+                        request_batch([item])
+                    return
+                batch[0]["response"] = {"_model_error": type(exc).__name__}
+                return
             for item in batch:
                 response = responses.get(item["key"])
                 if response is None:
@@ -587,6 +558,10 @@ def run_paraphrase(
                         model_canonical=str(model_config["canonical_id"]),
                         input_hash=_sha256(item["input_json"]),
                     )
+
+        batch_size = max(1, int(config.ndd_batch_size))
+        for start in range(0, len(missing), batch_size):
+            request_batch(missing[start : start + batch_size])
 
     for item in pending:
         task = item["task"]
@@ -616,6 +591,9 @@ def run_paraphrase(
             )
             continue
         variants = response["variants"]
+        # Each variant of one binding is asked for a different style, so two identical
+        # variants add no wording and only consume the diversity budget of a surface.
+        accepted_turns: set[tuple[str, ...]] = set()
         for variant_index, candidate in enumerate(variants, 1):
             user_turns = (
                 candidate.get("user_turns") if isinstance(candidate, dict) else None
@@ -658,6 +636,29 @@ def run_paraphrase(
                     }
                 )
                 continue
+            variant_turns = tuple(
+                str(step["content"])
+                for step in variant_surface["steps"]
+                if step["kind"] == "user"
+            )
+            if variant_turns in accepted_turns:
+                rejection_events.append(
+                    {
+                        "base_task_id": base_id,
+                        "template_id": str(task["template_id"]),
+                        "variant_index": variant_index,
+                        "reason": "semantic_shape",
+                        "detail": [
+                            {
+                                "guard": "semantic_shape",
+                                "reason": "duplicate_variant_surface",
+                            }
+                        ],
+                        "count": 1,
+                    }
+                )
+                continue
+            accepted_turns.add(variant_turns)
             output_tasks.append(variant_task)
             output_plans[variant_id] = variant_plan
             output_surfaces[variant_id] = variant_surface

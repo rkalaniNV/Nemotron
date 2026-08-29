@@ -138,10 +138,23 @@ def test_masking_numeric_slot_accepts_grouped_localized_forms() -> None:
         slots={"amount": 500000},
     )
 
-    for rendered in ("500.000 đồng", "500,000đ", "500 000 VND"):
+    for rendered in (
+        "500.000 đồng",
+        "500,000đ",
+        "500 000 VND",
+        "500\u00a0000 VND",
+        "500'000 CHF",
+        "500\u2019000 CHF",
+    ):
         masked, slots = mask_slot_literals(f"Chuyển {rendered}", task)
         assert masked.startswith("Chuyển <amount>")
         assert slots == ["amount"]
+
+    # A grouping the pattern does not recognize must leave the text untouched rather
+    # than mask a value the projection cannot identify.
+    masked, slots = mask_slot_literals("Chuyển 5,00,000 INR", task)
+    assert masked == "Chuyển 5,00,000 INR"
+    assert slots == []
 
 
 def test_a_shared_literal_masks_under_one_deterministic_slot_name() -> None:
@@ -225,6 +238,33 @@ def test_execution_case_identity_is_independent_of_surface_wording() -> None:
         "slots_initial": {"account_id": "ACC-2002"},
     }
     assert execution_case_hash(task) != execution_case_hash(changed)
+
+
+def test_execution_case_identity_accounts_for_every_published_task_column() -> None:
+    """A new task column must be classified, not silently left out of the identity."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
+        task_instances_schema,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import dedup_balancing
+
+    # Columns that describe where a row came from, how it was labelled, or which
+    # rendering of one case it is — none of which changes what the row executes.
+    not_executable_meaning = {
+        "task_id",
+        "base_task_id",
+        "template_id",
+        "pack_id",
+        "pack_version",
+        "difficulty",
+        "variant_index",
+        "seed",
+        "mutates",
+    }
+    hashed = set(dedup_balancing.EXECUTION_CASE_KEYS)
+    columns = set(task_instances_schema().names)
+
+    assert not_executable_meaning <= columns
+    assert columns - hashed == not_executable_meaning
 
 
 def test_projection_rejects_a_surface_without_a_user_turn() -> None:
