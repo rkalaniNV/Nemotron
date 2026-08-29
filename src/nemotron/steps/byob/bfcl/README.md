@@ -29,6 +29,12 @@ For a larger example covering every supported conversation policy, replace
 domain-specific inventory, scale, and current mix are documented with the
 [banking oracle pack](../data/banking_vn_oracle_pack/README.md); they are not
 framework defaults.
+`config/banking_vn.gold.paraphrase.yaml` is the opt-in model-surface profile; it
+applies fail-closed exact-surface diversity constraints while retaining
+executable-case lineage. Model roles are routed by Data Designer, so the
+`provider` named in a role must exist in `model_providers.yaml` under
+`DATA_DESIGNER_HOME`, and the variable named by `api_key_env` must be exported.
+The config records the route identity; it does not create the provider.
 
 For any pack, `tasks_per_category` is the default Stage-4 category budget and
 the Stage-11 publication cap over unique bindings. When Stage 11 is enabled, an
@@ -180,6 +186,8 @@ Start from `config/default.yaml` for a new pack. The main settings are:
   Stage-11 publication cap
 - `task_generation.candidate_tasks_per_category`: optional Stage-4 expansion
   ceiling; it defaults to and cannot be smaller than `tasks_per_category`
+- `task_generation.target_published_tasks`: optional exact run-wide publication
+  count; an unmet target is reported and follows the Stage-11 release policy
 - `task_generation.max_turns` and `task_generation.max_tool_calls`: publication
   hard limits
 - `task_generation.difficulty_mix`, `task_generation.turn_mix`, and
@@ -412,8 +420,33 @@ semantic_deduplication_config:
   n_clusters: 20
   eps: 0.08
   remove_duplicates: true
+  max_exact_surface_reuse: 8       # optional exact masked-text cap
+  min_exact_surface_ratio: 0.15    # optional selected-set diversity floor
   representative_source_preference: [template, model]
 ```
+
+Stage 11 reports three separate signals: exact masked-surface diversity,
+embedding-based surface similarity, and executable-case diversity. A model
+paraphrase intentionally keeps the executable-case hash of its canonical task;
+different fixture bindings, call policies, assertions, or distractor sets do
+not. This avoids treating repeated wording and repeated executable meaning as
+the same failure mode. The optional exact-surface constraints participate in
+selection, and `target_published_tasks` prevents a diversity shortfall from
+silently becoming a smaller Gold benchmark.
+
+Because those constraints count masked surfaces, wording inventory — not binding
+count — is what limits how many rows a pack can publish. A template renders one
+canonical wording per language, so a thousand fixture bindings of it still
+contribute a single masked surface. The paraphrase stage therefore assigns each
+binding one structural style axis from `SURFACE_STYLE_AXES`, chosen from the task
+seed, so repeated bindings are asked for different sentence forms instead of the
+same rewrite. The axes are register- and structure-level only: an axis that asked
+for shortened numbers or abbreviated identifiers would rewrite protected values
+and the `must_preserve` guard would reject the variant. Since masking removes the
+slot values, a pack's reachable masked-surface count is roughly its template
+count plus its paraphrase-eligible templates times the number of axes, and that
+product is what has to clear `min_exact_surface_ratio` and
+`max_exact_surface_reuse` at the requested scale.
 
 A pack that references `held_out.yaml` from its manifest is enforced under
 versioned contract `1.0` at two points. Stage 4 never binds a reserved template

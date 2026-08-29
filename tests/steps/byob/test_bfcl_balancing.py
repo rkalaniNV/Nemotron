@@ -27,6 +27,7 @@ def _config(
     *,
     task_generation: dict[str, Any] | None = None,
     remove_duplicates: bool = True,
+    dedup: dict[str, Any] | None = None,
 ) -> BfclConfig:
     data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
     data["output_dir"] = str(tmp_path / "output")
@@ -46,6 +47,7 @@ def _config(
         "n_clusters": 20,
         "eps": 0.08,
         "remove_duplicates": remove_duplicates,
+        **(dedup or {}),
     }
     path = tmp_path / "balancing.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
@@ -509,3 +511,83 @@ def test_balancing_is_deterministic_and_reports_every_dimension(
     ]
     assert first_summary == second_summary
     assert set(first_summary["actual_counts"]) == set(BALANCING_DIMENSIONS)
+
+
+def test_balancing_enforces_exact_surface_reuse_and_ratio(
+    tmp_path: Path,
+) -> None:
+    tasks = [_task(task_id) for task_id in ("a", "b", "c", "d")]
+    surfaces = {
+        "a": _surface("a"),
+        "b": _surface("b"),
+        "c": {
+            **_surface("c"),
+            "steps": [{"kind": "user", "content": "A different request"}],
+        },
+        "d": {
+            **_surface("d"),
+            "steps": [{"kind": "user", "content": "A third request"}],
+        },
+    }
+    config = _config(
+        tmp_path,
+        task_generation={
+            "tasks_per_category": 3,
+            "target_published_tasks": 3,
+        },
+        dedup={
+            "max_exact_surface_reuse": 1,
+            "min_exact_surface_ratio": 1.0,
+        },
+    )
+
+    decisions, _, summary = _run(config, tasks, surfaces)
+
+    selected = [decision.task_id for decision in decisions if decision.selected]
+    assert len(selected) == 3
+    assert len(
+        {
+            balancing_features(
+                next(task for task in tasks if task["task_id"] == task_id),
+                surfaces[task_id],
+            )["surface_text_hash"]
+            for task_id in selected
+        }
+    ) == 3
+    assert summary["exact_surface_diversity"] == {
+        "unique": 3,
+        "unique_ratio": 1.0,
+        "max_reuse": 1,
+        "max_exact_surface_reuse": 1,
+        "min_exact_surface_ratio": 1.0,
+    }
+    assert summary["unmet_targets"] == []
+
+
+def test_publication_target_reports_insufficient_diverse_inventory(
+    tmp_path: Path,
+) -> None:
+    tasks = [_task(task_id) for task_id in ("a", "b", "c")]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+    config = _config(
+        tmp_path,
+        task_generation={
+            "tasks_per_category": 3,
+            "target_published_tasks": 3,
+        },
+        dedup={"max_exact_surface_reuse": 1},
+    )
+
+    _, _, summary = _run(config, tasks, surfaces)
+
+    assert summary["selected_count"] == 1
+    assert summary["unmet_targets"] == [
+        {
+            "dimension": "publication_count",
+            "bucket": "all",
+            "target": 3,
+            "actual": 1,
+            "inventory": 3,
+            "reason": "insufficient_diverse_inventory",
+        }
+    ]

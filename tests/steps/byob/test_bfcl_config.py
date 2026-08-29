@@ -11,6 +11,7 @@ import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import EXPORT_FORMATS
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
 from nemotron.steps.byob.runtime.benchmark_families.registry import list_families
 
 BFCL_CONFIG_DIR = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob" / "bfcl" / "config"
@@ -53,6 +54,7 @@ def test_all_bfcl_configs_pin_family() -> None:
         "translate.yaml",
         "banking_vn.yaml",
         "banking_vn.gold.yaml",
+        "banking_vn.gold.paraphrase.yaml",
     ):
         data = yaml.safe_load((BFCL_CONFIG_DIR / name).read_text(encoding="utf-8"))
         assert data["family"] == "bfcl", name
@@ -72,6 +74,10 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         _select_round_robin,
         expand_template,
         group_by_category,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        render_task,
+        resolve_render_contract,
     )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
         build_plan,
@@ -114,15 +120,22 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
     templates_by_id = {
         str(template["template_id"]): template for template in pack.templates
     }
+    render_contract = resolve_render_contract(config, pack, templates_by_id)
     candidate_surfaces = {}
     for task in candidates:
-        plan = build_plan(templates_by_id[str(task["template_id"])], task)
+        template = templates_by_id[str(task["template_id"])]
+        plan = build_plan(template, task)
         task["num_tool_calls"] = plan["num_tool_calls"]
         task["is_multi_turn"] = plan["is_multi_turn"]
-        candidate_surfaces[str(task["task_id"])] = {
-            "language": "vi",
-            "steps": plan["steps"],
-        }
+        candidate_surfaces[str(task["task_id"])] = render_task(
+            pack,
+            template,
+            task,
+            plan,
+            language=render_contract["language"],
+            prompt_bundle=render_contract["prompt_bundle"],
+            tool_names=render_contract["tool_names"],
+        )
     representative_decisions = [
         DedupBalancingDecision(
             task_id=str(task["task_id"]),
@@ -158,15 +171,20 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         for category_tasks in selected_by_category.values()
         for task in category_tasks
     ]
-    out_of_scope_pairs = {
-        (str(task["slots"]["service"]), str(task["slots"]["topic"]))
+    out_of_scope_cases = {
+        (
+            str(task["template_id"]),
+            str(task["slots"]["service"]),
+            str(task["slots"]["topic"]),
+        )
         for task in selected_by_category["out_of_scope"]
     }
-    create_dispute_tasks = [
-        task
-        for task in selected_by_category["dispute"]
-        if task["template_id"] == "bn_create_dispute_single"
-    ]
+    create_dispute_tasks = expand_template(
+        pack,
+        templates_by_id["bn_create_dispute_single"],
+        budget,
+        int(config.random_seed or 0),
+    )
     create_dispute_ids = {
         str(task["slots"]["transaction_id"]) for task in create_dispute_tasks
     }
@@ -192,13 +210,13 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
     }
     assert len(selected) == requested_samples
     assert len({str(task["task_id"]) for task in selected}) == requested_samples
-    assert len(candidates) == 1_763
+    assert len(candidates) == 1_896
     assert all(len(tasks) >= budget for tasks in candidate_by_category.values())
     candidate_difficulty = {
         difficulty: sum(task["difficulty"] == difficulty for task in candidates)
         for difficulty in ("easy", "medium", "hard")
     }
-    assert candidate_difficulty == {"easy": 975, "medium": 295, "hard": 493}
+    assert candidate_difficulty == {"easy": 750, "medium": 585, "hard": 561}
     assert candidate_difficulty["hard"] >= 487
     assert challenge_summary["selected_count"] == requested_samples
     assert challenge_summary["actual_counts"]["difficulty"] == {
@@ -207,11 +225,11 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         "medium": 279,
     }
     assert challenge_summary["actual_counts"]["turn_class"] == {
-        "multi_turn": 320,
-        "single_turn": 1_072,
+        "multi_turn": 329,
+        "single_turn": 1_063,
     }
     assert challenge_summary["unmet_targets"] == []
-    assert len(out_of_scope_pairs) == 232
+    assert len(out_of_scope_cases) == 232
     assert len(create_dispute_tasks) == 72
     assert len(create_dispute_ids) == 18
     assert not create_dispute_ids & open_dispute_transaction_ids
@@ -228,10 +246,46 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
     assert config.semantic_deduplication_config["enabled"] is True
     assert config.semantic_deduplication_config["remove_duplicates"] is False
     assert config.semantic_deduplication_config["unmet_target_policy"] == "abort"
+    assert config.task_generation["target_published_tasks"] == requested_samples
     assert config.exports == {
         "bfcl_json": True,
         "nemo_evaluator_bundle": True,
     }
+
+
+def test_banking_gold_paraphrase_profile_is_guarded_and_fail_closed() -> None:
+    config = BfclConfig.from_yaml(
+        BFCL_CONFIG_DIR / "banking_vn.gold.paraphrase.yaml"
+    )
+    pack = load_pack(config)
+    role = config.lineage.roles["paraphrase"]
+    eligible = [
+        template
+        for template in pack.templates
+        if (template.get("paraphrase") or {}).get("allowed") is True
+    ]
+
+    assert config.lineage.policy == "strict_separation"
+    assert role.enabled is True
+    assert role.model_config["provider"] == "nvidia_inference_api"
+    assert (
+        role.model_config["canonical_id"]
+        == "nvidia-inference-api/azure/openai/gpt-5.6-sol"
+    )
+    assert role.model_config["api_key_env"] == "NGC_API_KEY"
+    # This route rejects top_p, so the profile must not declare it.
+    assert "top_p" not in role.model_config["inference_parameters"]
+    assert config.surface_generation["model_paraphrase_enabled"] is True
+    assert config.surface_generation["paraphrases_per_template"] == 1
+    assert len(eligible) >= 17
+    assert all(
+        template["paraphrase"]["max_variants"] == 1
+        for template in eligible
+    )
+    assert config.task_generation["target_published_tasks"] == 1_392
+    assert config.semantic_deduplication_config["max_exact_surface_reuse"] == 8
+    assert config.semantic_deduplication_config["min_exact_surface_ratio"] == 0.15
+    assert config.semantic_deduplication_config["unmet_target_policy"] == "abort"
 
 
 def test_candidate_category_budget_cannot_be_smaller_than_publication_budget(
@@ -1309,6 +1363,119 @@ def test_controlled_paraphrase_fans_out_only_guarded_variants_and_reuses_cache(
     )
     assert [task["task_id"] for task in rerun[0]] == [task["task_id"] for task in tasks]
     assert model_calls == 1
+
+
+def test_style_plan_is_deterministic_distinct_per_variant_and_spread_over_axes() -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        SURFACE_STYLE_AXES,
+        style_plan,
+    )
+
+    task = {"seed": 7}
+    plan = style_plan(task, 3)
+
+    assert plan == style_plan(dict(task), 3)
+    assert len(set(plan)) == 3
+    assert set(plan) <= set(SURFACE_STYLE_AXES)
+    assert style_plan({"seed": 0}, 0) == []
+    # More variants than axes may only cycle; it must never raise.
+    assert len(style_plan(task, len(SURFACE_STYLE_AXES) + 2)) == len(SURFACE_STYLE_AXES) + 2
+
+    # Bindings of one template differ only by seed, so the assignment has to spread
+    # them across axes; otherwise every binding would be asked for the same rewrite.
+    first_styles = {style_plan({"seed": seed}, 1)[0] for seed in range(200)}
+    assert first_styles == set(SURFACE_STYLE_AXES)
+
+
+def test_paraphrase_asks_each_binding_for_its_own_surface_style(tmp_path: Path) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
+        run_expand,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.paraphrase import (
+        SURFACE_STYLE_AXES,
+        run_paraphrase,
+        style_plan,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.reference_profile import (
+        run_reference_profile,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.render import (
+        run_render,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.state_machine import (
+        run_state_machine,
+    )
+
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "paraphrase-styles.yaml",
+            lineage={
+                "roles": {
+                    "paraphrase": {
+                        "enabled": True,
+                        "model_config": {
+                            "alias": "paraphrase",
+                            "provider": "nvidia",
+                            "model": "paraphrase-model",
+                            "canonical_id": "source::paraphrase-model@revision",
+                            "inference_parameters": {"temperature": 0.0},
+                        },
+                    }
+                }
+            },
+            surface_generation={
+                "model_paraphrase_enabled": True,
+                "paraphrases_per_template": 2,
+            },
+        )
+    )
+    pack = load_pack(config)
+    for template in pack.templates:
+        template["paraphrase"] = {"allowed": True}
+    templates = {str(template["template_id"]): template for template in pack.templates}
+    canonical_tasks = run_expand(config, pack)
+    plans = run_state_machine(config, templates, canonical_tasks)
+    surfaces, _ = run_render(config, pack, templates, canonical_tasks, plans)
+    profile = run_reference_profile(config)
+    contracts: list[dict[str, Any]] = []
+
+    def capturing_runner(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        del args
+        responses = {}
+        for request in kwargs["requests"]:
+            contract = json.loads(request["model_input"])
+            contracts.append(contract)
+            responses[request["request_id"]] = {
+                "variants": [
+                    {"user_turns": [f"{style}: {text}" for text in contract["canonical_user_turns"]]}
+                    for style in contract["surface_styles"]
+                ]
+            }
+        return responses
+
+    run_paraphrase(
+        config,
+        pack,
+        templates,
+        canonical_tasks,
+        plans,
+        surfaces,
+        profile,
+        model_runner=capturing_runner,
+    )
+
+    assert contracts
+    by_task = {str(task["task_id"]): task for task in canonical_tasks}
+    requested_styles = [tuple(contract["surface_styles"]) for contract in contracts]
+    assert all(len(styles) == 2 and len(set(styles)) == 2 for styles in requested_styles)
+    assert all(set(styles) <= set(SURFACE_STYLE_AXES) for styles in requested_styles)
+    assert sorted(requested_styles) == sorted(
+        tuple(style_plan(task, 2)) for task in by_task.values()
+    )
 
 
 def test_pipeline_publishes_paraphrase_variants_with_the_base_trace(

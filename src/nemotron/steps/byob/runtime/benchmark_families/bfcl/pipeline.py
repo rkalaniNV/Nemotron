@@ -154,6 +154,7 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
         "tasks_per_category",
         "candidate_tasks_per_category",
         "target_published_tasks",
+        "target_published_tasks",
     }
     if config.semantic_deduplication_config.get("enabled"):
         supported_task_generation.update(

@@ -126,6 +126,8 @@ Start from `bfcl/config/tiny.yaml` for a smoke run,
 - `task_generation.candidate_tasks_per_category`: optional Stage-4 inventory
   ceiling used before Stage-11 balancing; it must be at least the publication
   ceiling.
+- `task_generation.target_published_tasks`: optional exact run-wide publication
+  count; Stage 11 reports a shortfall instead of silently shrinking the release.
 - `task_generation.difficulty_mix`, `turn_mix`, and `tool_call_count_mix`:
   optional Stage-11 targets over generic task dimensions.
 - `surface_generation.language`: language rendered from pack templates.
