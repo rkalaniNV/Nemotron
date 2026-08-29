@@ -113,6 +113,7 @@ _TASK_GENERATION_KEYS = frozenset(
     {
         "tasks_per_category",
         "candidate_tasks_per_category",
+        "target_published_tasks",
         "max_turns",
         "max_tool_calls",
         "difficulty_mix",
@@ -128,6 +129,8 @@ _DEDUP_KEYS = frozenset(
         "n_clusters",
         "eps",
         "remove_duplicates",
+        "max_exact_surface_reuse",
+        "min_exact_surface_ratio",
         "representative_source_preference",
         "unmet_target_policy",
     }
@@ -706,6 +709,7 @@ class BfclConfig:
         for key in (
             "tasks_per_category",
             "candidate_tasks_per_category",
+            "target_published_tasks",
             "max_turns",
             "max_tool_calls",
         ):
@@ -793,6 +797,23 @@ class BfclConfig:
                 dedup["remove_duplicates"],
                 "semantic_deduplication_config.remove_duplicates",
             )
+        if "max_exact_surface_reuse" in dedup:
+            _require_int(
+                dedup["max_exact_surface_reuse"],
+                "semantic_deduplication_config.max_exact_surface_reuse",
+                minimum=1,
+            )
+        if "min_exact_surface_ratio" in dedup:
+            ratio = _require_number(
+                dedup["min_exact_surface_ratio"],
+                "semantic_deduplication_config.min_exact_surface_ratio",
+            )
+            if not 0.0 < ratio <= 1.0:
+                raise ValueError(
+                    "semantic_deduplication_config.min_exact_surface_ratio "
+                    "must be greater than 0 and at most 1"
+                )
+            dedup["min_exact_surface_ratio"] = ratio
         if "representative_source_preference" in dedup:
             preference = dedup["representative_source_preference"]
             if (

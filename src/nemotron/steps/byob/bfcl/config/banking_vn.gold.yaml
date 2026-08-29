@@ -60,11 +60,12 @@ task_generation:
   candidate_tasks_per_category: 320
   # Six categories * 232 = 1,392 published canonical task samples.
   tasks_per_category: 232
+  target_published_tasks: 1392
   difficulty_mix: {easy: 0.45, medium: 0.20, hard: 0.35}
   # Dependent multi-call tasks remain single-user-turn by definition; the
   # separate turn mix therefore targets the available scripted dialogue
   # inventory without misclassifying tool-chain depth as multiturn.
-  turn_mix: {single_turn: 0.77, multi_turn: 0.23}
+  turn_mix: {single_turn: 0.764, multi_turn: 0.236}
 
 semantic_deduplication_config:
   contract_version: "1.0"

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.dedup_balancing import (
+    execution_case_hash,
     mask_slot_literals,
     project_dedup_text,
     project_dedup_texts,
@@ -116,6 +117,33 @@ def test_masking_prefers_the_longest_literal() -> None:
     assert slots == ["account_id", "branch_id"]
 
 
+def test_masking_numeric_slot_allows_a_localized_unit_suffix() -> None:
+    task = _task(
+        slots_initial={"amount": 500000},
+        slots={"amount": 500000},
+    )
+
+    masked, slots = mask_slot_literals(
+        "Chuyển 500000đ, không phải 1500000đ",
+        task,
+    )
+
+    assert masked == "Chuyển <amount>đ, không phải 1500000đ"
+    assert slots == ["amount"]
+
+
+def test_masking_numeric_slot_accepts_grouped_localized_forms() -> None:
+    task = _task(
+        slots_initial={"amount": 500000},
+        slots={"amount": 500000},
+    )
+
+    for rendered in ("500.000 đồng", "500,000đ", "500 000 VND"):
+        masked, slots = mask_slot_literals(f"Chuyển {rendered}", task)
+        assert masked.startswith("Chuyển <amount>")
+        assert slots == ["amount"]
+
+
 def test_a_shared_literal_masks_under_one_deterministic_slot_name() -> None:
     task = _task(
         slots_initial={"target_id": "ACC-1001", "source_id": "ACC-1001"},
@@ -177,6 +205,26 @@ def test_projection_is_generic_to_a_pack_without_slots() -> None:
     assert record["text"] == "[user] List every pallet in aisle four"
     assert record["masked_slots"] == []
     assert record["num_user_turns"] == 1
+
+
+def test_execution_case_identity_is_independent_of_surface_wording() -> None:
+    task = _task()
+    paraphrased = {**task, "task_id": "banking__balance__paraphrase-1"}
+
+    assert execution_case_hash(task) == execution_case_hash(paraphrased)
+    assert project_dedup_text(task, _surface("Check ACC-1001"))[
+        "execution_case_hash"
+    ] == project_dedup_text(
+        paraphrased,
+        _surface("Please look up ACC-1001"),
+    )["execution_case_hash"]
+
+    changed = {
+        **task,
+        "slots": {"account_id": "ACC-2002"},
+        "slots_initial": {"account_id": "ACC-2002"},
+    }
+    assert execution_case_hash(task) != execution_case_hash(changed)
 
 
 def test_projection_rejects_a_surface_without_a_user_turn() -> None:

@@ -98,6 +98,8 @@ surface_quality_validation:
 
 task_generation:
   tasks_per_category: 30
+  # candidate_tasks_per_category: 45
+  # target_published_tasks: 180
   # Stage 11 targets (uncomment together after semantic balancing is enabled):
   # max_turns: 6
   # max_tool_calls: 3
@@ -112,6 +114,8 @@ semantic_deduplication_config:
   n_clusters: 20
   eps: 0.08
   remove_duplicates: true
+  # max_exact_surface_reuse: 8
+  # min_exact_surface_ratio: 0.15
   representative_source_preference: [template, model]
   unmet_target_policy: abort
 

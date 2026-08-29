@@ -407,6 +407,9 @@ when Stage 11 needs inventory from which to satisfy difficulty or turn-mix
 quotas. Stage 4 expands to that candidate ceiling; Stage 11 still enforces
 `tasks_per_category`. The candidate ceiling must never be smaller than the
 publication ceiling.
+Declare `task_generation.target_published_tasks` when a release also requires
+an exact run-wide row count. A diversity or inventory shortfall then becomes an
+explicit unmet target governed by `unmet_target_policy`.
 
 Generation rejects unsupported task-generation keys instead of recording
 targets that no stage applies. Category budgets are consumed by expansion and

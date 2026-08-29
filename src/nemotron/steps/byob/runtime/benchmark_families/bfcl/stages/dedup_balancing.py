@@ -118,6 +118,12 @@ def slot_literals(task: Mapping[str, Any]) -> dict[str, str]:
 
 def _bounded(literal: str) -> str:
     """Match a literal only as a whole token, so short values cannot corrupt words."""
+    # Numeric slots are commonly rendered next to a localized unit (``500000đ``,
+    # ``20kg``). A word boundary would leave the value unmasked because Unicode
+    # letters and digits are both ``\w``. Digit-only values instead guard against
+    # adjacent digits, which still prevents matching a prefix of a larger number.
+    if literal.isdigit():
+        return r"(?<!\d)" + re.escape(literal) + r"(?!\d)"
     prefix = r"(?<!\w)" if _is_word_char(literal[0]) else ""
     suffix = r"(?!\w)" if _is_word_char(literal[-1]) else ""
     return prefix + re.escape(literal) + suffix
@@ -125,6 +131,11 @@ def _bounded(literal: str) -> str:
 
 def _is_word_char(character: str) -> bool:
     return character.isalnum() or character == "_"
+
+
+_GROUPED_NUMBER = re.compile(
+    r"(?<!\d)\d{1,3}(?:[.,\u00a0\u202f ]\d{3})+(?!\d)"
+)
 
 
 def mask_slot_literals(text: str, task: Mapping[str, Any]) -> tuple[str, list[str]]:
@@ -138,6 +149,16 @@ def mask_slot_literals(text: str, task: Mapping[str, Any]) -> tuple[str, list[st
     ordered = sorted(literals, key=lambda literal: (-len(literal), literal))
     pattern = re.compile("|".join(_bounded(literal) for literal in ordered))
     masked: set[str] = set()
+
+    def replace_grouped_number(match: re.Match[str]) -> str:
+        normalized = re.sub(r"\D", "", match.group(0))
+        slot_name = literals.get(normalized)
+        if slot_name is None or not normalized.isdigit():
+            return match.group(0)
+        masked.add(slot_name)
+        return f"<{slot_name}>"
+
+    text = _GROUPED_NUMBER.sub(replace_grouped_number, text)
 
     def replace(match: re.Match[str]) -> str:
         slot_name = literals[match.group(0)]
@@ -161,6 +182,34 @@ def project_surface_text(task: Mapping[str, Any], surface: Mapping[str, Any]) ->
     return "\n".join(lines), sorted(masked)
 
 
+def execution_case_hash(task: Mapping[str, Any]) -> str:
+    """Hash executable meaning separately from the masked linguistic surface.
+
+    Model paraphrases intentionally share this identity with their canonical
+    task, while different fixture bindings, call policies, assertions, or
+    distractor sets remain distinct evaluation cases.
+    """
+    keys = (
+        "intent",
+        "category",
+        "slots_initial",
+        "slots",
+        "slot_updates",
+        "fixture_refs",
+        "required_tools",
+        "tools_present",
+        "success_assertions",
+        "turn_policy",
+        "call_order",
+        "call_order_prefix",
+        "num_tool_calls",
+        "has_user_confirmation",
+        "confirmed_call_turns",
+        "edge_signatures",
+    )
+    return _sha256(canonical_json({key: task.get(key) for key in keys}))
+
+
 def project_dedup_text(task: Mapping[str, Any], surface: Mapping[str, Any]) -> dict[str, Any]:
     """Project one Stage 10 survivor into the record Stage 11 embeds."""
     text, masked = project_surface_text(task, surface)
@@ -168,6 +217,7 @@ def project_dedup_text(task: Mapping[str, Any], surface: Mapping[str, Any]) -> d
         "task_id": _task_id(task),
         "text": text,
         "text_hash": _sha256(text),
+        "execution_case_hash": execution_case_hash(task),
         "num_user_turns": text.count(f"{USER_TURN_MARKER} "),
         "masked_slots": masked,
     }
@@ -200,6 +250,8 @@ class DedupSettings:
     n_clusters: int
     eps: float
     remove_duplicates: bool
+    max_exact_surface_reuse: int | None
+    min_exact_surface_ratio: float | None
     representative_source_preference: tuple[str, ...]
     unmet_target_policy: str
 
@@ -210,6 +262,8 @@ class DedupSettings:
             "n_clusters": self.n_clusters,
             "eps": self.eps,
             "remove_duplicates": self.remove_duplicates,
+            "max_exact_surface_reuse": self.max_exact_surface_reuse,
+            "min_exact_surface_ratio": self.min_exact_surface_ratio,
             "representative_source_preference": list(self.representative_source_preference),
             "unmet_target_policy": self.unmet_target_policy,
         }
@@ -235,6 +289,16 @@ def resolve_dedup_settings(config: BfclConfig) -> DedupSettings:
         n_clusters=int(dedup["n_clusters"]),
         eps=float(dedup["eps"]),
         remove_duplicates=bool(dedup["remove_duplicates"]),
+        max_exact_surface_reuse=(
+            int(dedup["max_exact_surface_reuse"])
+            if dedup.get("max_exact_surface_reuse") is not None
+            else None
+        ),
+        min_exact_surface_ratio=(
+            float(dedup["min_exact_surface_ratio"])
+            if dedup.get("min_exact_surface_ratio") is not None
+            else None
+        ),
         representative_source_preference=tuple(
             dedup.get("representative_source_preference") or ("template", "model")
         ),
@@ -385,6 +449,25 @@ def _validate_finder_result(
     return sorted(duplicates), clusters, signature, pairwise_by_id
 
 
+def _exact_diversity(
+    projected: Sequence[Mapping[str, Any]],
+    key: str,
+) -> dict[str, Any] | None:
+    values = [str(record[key]) for record in projected if record.get(key) is not None]
+    if len(values) != len(projected):
+        return None
+    counts = Counter(values)
+    total = len(values)
+    unique = len(counts)
+    return {
+        "total": total,
+        "unique": unique,
+        "duplicate_rows": total - unique,
+        "unique_ratio": (unique / total) if total else 1.0,
+        "max_reuse": max(counts.values(), default=0),
+    }
+
+
 def run_semantic_dedup(
     config: BfclConfig,
     projected: Sequence[Mapping[str, Any]],
@@ -426,6 +509,11 @@ def run_semantic_dedup(
         "input_hash": input_hash,
         "input_count": len(task_ids),
         "effective_n_clusters": effective_n_clusters(settings.n_clusters, len(task_ids)),
+        "exact_surface_diversity": _exact_diversity(projected, "text_hash"),
+        "execution_case_diversity": _exact_diversity(
+            projected,
+            "execution_case_hash",
+        ),
     }
     # One row cannot duplicate anything, and zero rows have nothing to embed, so
     # neither case may pay for an embedding model or a k-means with k > n.
@@ -900,6 +988,7 @@ def balancing_features(
         "turn_class": "multi_turn" if num_turns > 1 else "single_turn",
         "tool_call_count": call_bucket,
         "turn_policy": required_text("turn_policy"),
+        "surface_text_hash": project_dedup_text(task, surface)["text_hash"],
         "num_turns": num_turns,
         "num_tool_calls": raw_calls,
     }
@@ -964,6 +1053,8 @@ def _solve_balanced_selection(
     budget: int,
     category_cap: int,
     target_counts: Mapping[str, Mapping[str, int]],
+    max_exact_surface_reuse: int | None,
+    min_unique_surface_count: int,
     stable_key: Callable[[str], tuple[Any, ...]],
 ) -> set[str]:
     """Globally minimize declared mix and category deviations."""
@@ -1003,6 +1094,20 @@ def _solve_balanced_selection(
             chosen = set(chosen_tuple)
             if any(not chosen.intersection(members) for members in candidates_by_bucket.values()):
                 continue
+            surface_counts = Counter(
+                str(features[task_id]["surface_text_hash"])
+                for task_id in chosen_tuple
+            )
+            if (
+                max_exact_surface_reuse is not None
+                and any(
+                    count > max_exact_surface_reuse
+                    for count in surface_counts.values()
+                )
+            ):
+                continue
+            if len(surface_counts) < min_unique_surface_count:
+                continue
             if any(
                 decision.representative_task_id is not None
                 and decision.representative_task_id != task_id
@@ -1036,6 +1141,29 @@ def _solve_balanced_selection(
             and representative_id in variables
         ):
             problem += variables[task_id] <= variables[representative_id]
+
+    if max_exact_surface_reuse is not None or min_unique_surface_count:
+        surface_groups: dict[str, list[str]] = {}
+        for task_id in ordered:
+            surface_groups.setdefault(
+                str(features[task_id]["surface_text_hash"]),
+                [],
+            ).append(task_id)
+        surface_used: dict[str, Any] = {}
+        for index, (surface_hash, members) in enumerate(
+            sorted(surface_groups.items())
+        ):
+            count = pulp.lpSum(variables[task_id] for task_id in members)
+            if max_exact_surface_reuse is not None:
+                problem += count <= max_exact_surface_reuse
+            used = pulp.LpVariable(f"surface_used_{index}", cat=pulp.LpBinary)
+            surface_used[surface_hash] = used
+            problem += count >= used
+            problem += count <= len(members) * used
+        if min_unique_surface_count:
+            problem += (
+                pulp.lpSum(surface_used.values()) >= min_unique_surface_count
+            )
 
     deviation_terms: list[Any] = []
     categories = sorted({str(features[task_id]["category"]) for task_id in ordered})
@@ -1183,6 +1311,22 @@ def balance_publication_set(
     category_cap = int(generation.get("tasks_per_category") or len(candidates))
     inventory_by_category = Counter(features[task_id]["category"] for task_id in candidates)
     category_budget = sum(min(count, category_cap) for count in inventory_by_category.values())
+    surface_inventory = Counter(
+        str(features[task_id]["surface_text_hash"]) for task_id in candidates
+    )
+    surface_budget = len(candidates)
+    if settings.max_exact_surface_reuse is not None:
+        surface_budget = sum(
+            min(count, settings.max_exact_surface_reuse)
+            for count in surface_inventory.values()
+        )
+    if settings.min_exact_surface_ratio is not None:
+        surface_budget = min(
+            surface_budget,
+            math.floor(
+                len(surface_inventory) / settings.min_exact_surface_ratio
+            ),
+        )
     target_mixes = _target_mix_by_dimension(config)
 
     def quotas_fit(total: int) -> bool:
@@ -1193,11 +1337,22 @@ def balance_publication_set(
                 return False
         return True
 
-    budget = min(len(candidates), category_budget)
+    feasible_budget = min(len(candidates), category_budget, surface_budget)
+    declared_target = generation.get("target_published_tasks")
+    budget = (
+        min(feasible_budget, int(declared_target))
+        if declared_target is not None
+        else feasible_budget
+    )
     while budget > len(mandatory) and not quotas_fit(budget):
         budget -= 1
     budget = max(budget, len(mandatory))
     target_counts = {dimension: largest_remainder_quotas(budget, mix) for dimension, mix in target_mixes.items()}
+    min_unique_surface_count = (
+        math.ceil(budget * settings.min_exact_surface_ratio)
+        if settings.min_exact_surface_ratio is not None
+        else 0
+    )
 
     # This is a multi-dimensional cardinality problem. A local greedy/swap
     # optimizer can stop at a strict local optimum even when an exact selection
@@ -1210,6 +1365,8 @@ def balance_publication_set(
         budget=budget,
         category_cap=category_cap,
         target_counts=target_counts,
+        max_exact_surface_reuse=settings.max_exact_surface_reuse,
+        min_unique_surface_count=min_unique_surface_count,
         stable_key=stable_key,
     )
     selected_order = sorted(selected, key=stable_key)
@@ -1282,6 +1439,7 @@ def balance_publication_set(
                 "drop_reason": decision.drop_reason,
                 "balance_dimension": primary_dimension,
                 "dimensions": {dimension: features[task_id][dimension] for dimension in BALANCING_DIMENSIONS},
+                "surface_text_hash": features[task_id]["surface_text_hash"],
                 "num_turns": features[task_id]["num_turns"],
                 "num_tool_calls": features[task_id]["num_tool_calls"],
                 "coverage_locked": task_id in coverage_locked_ids,
@@ -1296,6 +1454,17 @@ def balance_publication_set(
     )
     inventory_counts = _dimension_counts(candidates, features)
     unmet: list[dict[str, Any]] = []
+    if declared_target is not None and len(selected_order) != int(declared_target):
+        unmet.append(
+            {
+                "dimension": "publication_count",
+                "bucket": "all",
+                "target": int(declared_target),
+                "actual": len(selected_order),
+                "inventory": len(candidates),
+                "reason": "insufficient_diverse_inventory",
+            }
+        )
     for category, actual in sorted(actual_counts["category"].items()):
         if actual > category_cap:
             unmet.append(
@@ -1327,6 +1496,10 @@ def balance_publication_set(
                         ),
                     }
                 )
+    selected_surface_counts = Counter(
+        str(features[task_id]["surface_text_hash"])
+        for task_id in selected_order
+    )
     summary = {
         "input_count": len(task_ids),
         "candidate_count": len(candidates),
@@ -1336,6 +1509,17 @@ def balance_publication_set(
         "target_counts": target_counts,
         "inventory_counts": inventory_counts,
         "actual_counts": actual_counts,
+        "exact_surface_diversity": {
+            "unique": len(selected_surface_counts),
+            "unique_ratio": (
+                len(selected_surface_counts) / len(selected_order)
+                if selected_order
+                else 1.0
+            ),
+            "max_reuse": max(selected_surface_counts.values(), default=0),
+            "max_exact_surface_reuse": settings.max_exact_surface_reuse,
+            "min_exact_surface_ratio": settings.min_exact_surface_ratio,
+        },
         "unmet_targets": unmet,
     }
     return validated, records, summary
@@ -1588,6 +1772,17 @@ def write_dedup_balancing_artifacts(
         "inventory_counts": balancing_summary.get("inventory_counts") or {},
         "target_counts": balancing_summary.get("target_counts") or {},
         "actual_counts": actual_counts,
+        "diversity": {
+            "candidate_exact_surfaces": semantic_result.get(
+                "exact_surface_diversity"
+            ),
+            "candidate_execution_cases": semantic_result.get(
+                "execution_case_diversity"
+            ),
+            "published_exact_surfaces": balancing_summary.get(
+                "exact_surface_diversity"
+            ),
+        },
         "unmet_targets": unmet_targets,
         "release_policy": {
             "unmet_target_policy": settings.unmet_target_policy,
