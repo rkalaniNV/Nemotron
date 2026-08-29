@@ -8,17 +8,24 @@ and the finished tree is renamed into place only after its final fingerprint is 
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import stat
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import OraclePackRef
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.origin_provenance import (
+    MCP_LINEAGE_RELATIVE_PATH,
+    MCP_LINEAGE_VERSION,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     IGNORED_PACK_DIRS,
     ResolvedPackPaths,
@@ -41,12 +48,12 @@ from nemotron.steps.byob.runtime.pack_authoring.provenance import (
     DraftProvenance,
     ProvenanceError,
 )
+from nemotron.steps.byob.runtime.source_adapters.certification import AdapterTier
 
 FREEZE_MANIFEST_VERSION = "bfcl-mcp-frozen-release-v1"
-MCP_LINEAGE_VERSION = "bfcl-mcp-publication-lineage-v1"
 PACK_DIRECTORY_NAME = "pack"
 FREEZE_MANIFEST_NAME = "freeze_manifest.json"
-LINEAGE_PATH = Path("provenance") / "mcp_lineage.json"
+LINEAGE_PATH = MCP_LINEAGE_RELATIVE_PATH
 REVIEW_PACKET_PATH = Path("provenance") / "review_packet.json"
 REVIEW_APPROVAL_PATH = Path("provenance") / "review_approval.json"
 _RESERVED_PATHS = frozenset({"mcp_oracle.yaml", "provenance"})
@@ -77,6 +84,16 @@ class FreezeInputs:
     validation_report_path: Path
     review_packet_path: Path
     review_approval_path: Path
+    certification_report_path: Path | None = None
+    trusted_certification_keys: Mapping[str, Ed25519PublicKey] | None = None
+    domain_brief_source_path: Path | None = None
+    domain_brief_report_path: Path | None = None
+    held_out_redaction_report_path: Path | None = None
+    held_out_policy_path: Path | None = None
+    held_out_content_path: Path | None = None
+    source_bundle_path: Path | None = None
+    migration_record_path: Path | None = None
+    source_observations_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -152,7 +169,7 @@ def _copy_pack_tree(source: Path, destination: Path) -> None:
 def _require_source_digest(
     packet: ReviewPacket,
     name: str,
-    observed: str,
+    observed: str | None,
 ) -> None:
     expected = packet.document["source_digests"].get(name)
     if observed != expected:
@@ -173,7 +190,20 @@ def _load_and_verify_inputs(inputs: FreezeInputs) -> tuple[
     if packet.document.get("status") != "ready_for_approval":
         raise FreezeError("review packet is not ready for approval")
 
-    evidence = load_evidence_bundle(inputs.evidence_path)
+    evidence = load_evidence_bundle(
+        inputs.evidence_path,
+        certification_report_path=inputs.certification_report_path,
+        trusted_certification_keys=inputs.trusted_certification_keys,
+        domain_brief_source_path=inputs.domain_brief_source_path,
+        domain_brief_report_path=inputs.domain_brief_report_path,
+        held_out_redaction_report_path=inputs.held_out_redaction_report_path,
+        held_out_policy_path=inputs.held_out_policy_path,
+        held_out_content_path=inputs.held_out_content_path,
+        source_bundle_path=inputs.source_bundle_path,
+        migration_record_path=inputs.migration_record_path,
+        source_observations_path=inputs.source_observations_path,
+        required_certification_tier=AdapterTier.A2,
+    )
     intake = load_json_mapping(inputs.intake_provenance_path, "intake provenance")
     gateway_attestation = load_json_mapping(
         inputs.gateway_attestation_path,
@@ -200,6 +230,42 @@ def _load_and_verify_inputs(inputs: FreezeInputs) -> tuple[
     _require_source_digest(packet, "draft_provenance", str(draft.get("record_digest")))
     _require_source_digest(packet, "validation_report", sha256_json(validation))
     _require_source_digest(packet, "mcp_config", sha256_json(profile.raw_document))
+    if evidence.is_v2:
+        assert evidence.certification_report is not None
+        assert evidence.domain_brief_report is not None
+        assert evidence.held_out_redaction_report is not None
+        assert inputs.domain_brief_source_path is not None
+        _require_source_digest(
+            packet,
+            "source_evidence_bundle",
+            str(evidence.source_digest),
+        )
+        _require_source_digest(
+            packet,
+            "certification_report",
+            evidence.certification_report.report_digest,
+        )
+        _require_source_digest(
+            packet,
+            "migration_record",
+            evidence.migration.record_digest if evidence.migration is not None else None,
+        )
+        _require_source_digest(
+            packet,
+            "domain_brief_source",
+            "sha256:"
+            + hashlib.sha256(inputs.domain_brief_source_path.read_bytes()).hexdigest(),
+        )
+        _require_source_digest(
+            packet,
+            "domain_brief_report",
+            evidence.domain_brief_report.record_digest,
+        )
+        _require_source_digest(
+            packet,
+            "held_out_redaction_report",
+            evidence.held_out_redaction_report.report_digest,
+        )
 
     _, source_fingerprint = _require_canonical_endpoint_pack(inputs.pack_root)
     _require_source_digest(
@@ -216,6 +282,27 @@ def _load_and_verify_inputs(inputs: FreezeInputs) -> tuple[
         "review_packet.json": packet.document,
         "review_approval.json": approval.document,
     }
+    if evidence.is_v2:
+        assert evidence.source_document is not None
+        assert evidence.certification_report is not None
+        assert evidence.domain_brief_report is not None
+        assert evidence.held_out_redaction_report is not None
+        assert evidence.migration is not None
+        records.update(
+            {
+                "source_evidence_bundle.json": evidence.source_document,
+                "adapter_certification.json": (
+                    evidence.certification_report.model_dump(mode="json")
+                ),
+                "evidence_migration.json": evidence.migration.model_dump(mode="json"),
+                "domain_brief_redaction.json": (
+                    evidence.domain_brief_report.model_dump(mode="json")
+                ),
+                "held_out_redaction.json": (
+                    evidence.held_out_redaction_report.model_dump(mode="json")
+                ),
+            }
+        )
     return packet, records, source_fingerprint, profile.raw_document
 
 

@@ -14,6 +14,15 @@ import asyncio
 import json
 from pathlib import Path
 
+from nemotron.steps.byob.runtime.authoring_workflow.resolved_config import (
+    load_resolved_authoring_config,
+    verify_resolved_authoring_inputs,
+)
+from nemotron.steps.byob.runtime.authoring_workflow.rollout import (
+    require_adapter_rollout,
+    require_no_rollout_revocation,
+)
+from nemotron.steps.byob.runtime.mcp.authoring.intake import load_mcp_intake
 from nemotron.steps.byob.runtime.mcp.authoring.pack_artifacts import (
     PENDING_PACK_ARTIFACTS,
 )
@@ -25,6 +34,14 @@ from nemotron.steps.byob.runtime.pack_authoring.untrusted_text import (
     ProseHygieneError,
     quote_untrusted,
 )
+from nemotron.steps.byob.runtime.source_adapters.certification import (
+    AdapterTier,
+    load_certification_authority,
+)
+from nemotron.steps.byob.runtime.source_adapters.held_out import (
+    build_not_applicable_decision,
+    load_required_held_out_policy,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -35,12 +52,51 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="Path to reviewed mcp_intake.yaml",
     )
+    held_out = parser.add_mutually_exclusive_group(required=True)
+    held_out.add_argument(
+        "--held-out-policy",
+        type=Path,
+        help="Reviewed held-out policy; its canonical digest enters v2 evidence",
+    )
+    held_out.add_argument(
+        "--held-out-not-applicable-reason",
+        help="Reviewed reason this benchmark has no held-out requirement",
+    )
+    parser.add_argument(
+        "--held-out-reviewed-by",
+        required=True,
+        help="Stable reviewer name or email for the held-out decision",
+    )
+    parser.add_argument(
+        "--held-out-content",
+        type=Path,
+        help="Optional runtime-only YAML mapping containing reserved content to scan",
+    )
+    parser.add_argument(
+        "--domain-brief",
+        type=Path,
+        required=True,
+        help="Reviewed source/domain intent; sanitized and bound into v2 evidence",
+    )
+    parser.add_argument("--domain-brief-language", default="en")
+    parser.add_argument(
+        "--certification-private-key",
+        type=Path,
+        required=True,
+        help="BFCL Ed25519 private key used to issue the A0 certification report",
+    )
+    parser.add_argument(
+        "--certification-key-id",
+        required=True,
+        help="Allowlisted identifier for the matching BFCL public key",
+    )
     parser.add_argument(
         "--output",
         type=Path,
         required=True,
         help="Directory for the pack draft, evidence bundle, and provenance",
     )
+    parser.add_argument("--resolved-authoring-config", type=Path)
     parser.add_argument(
         "--trusted-executables",
         type=Path,
@@ -76,16 +132,75 @@ def _flagged_text(result: IntakeResult) -> list[dict[str, str]]:
 
 
 async def _run(args: argparse.Namespace) -> IntakeResult:
+    if args.held_out_policy is None and args.held_out_content is not None:
+        raise ValueError("--held-out-content requires --held-out-policy")
     policies = (
         load_trusted_executable_policies(args.trusted_executables)
         if args.trusted_executables is not None
         else None
     )
+    held_out = (
+        load_required_held_out_policy(
+            args.held_out_policy,
+            reviewed_by=args.held_out_reviewed_by,
+        )
+        if args.held_out_policy is not None
+        else build_not_applicable_decision(
+            args.held_out_not_applicable_reason,
+            reviewed_by=args.held_out_reviewed_by,
+        )
+    )
+    resolved_config_digest = None
+    required_tier = AdapterTier.A0
+    if args.resolved_authoring_config is not None:
+        resolved = load_resolved_authoring_config(args.resolved_authoring_config)
+        verify_resolved_authoring_inputs(
+            resolved,
+            adapter_kind="mcp_mode_a",
+            source=args.intake,
+            domain_brief=args.domain_brief,
+        )
+        intake = load_mcp_intake(
+            args.intake,
+            allow_insecure_localhost=args.allow_insecure_localhost,
+        )
+        semantic = resolved.semantic_payload
+        if (
+            semantic.adapter_kind.value != "mcp_mode_a"
+            or semantic.pack_id.value != intake.value.pack.pack_id
+            or semantic.pack_version.value != intake.value.pack.version
+        ):
+            raise ValueError(
+                "MCP intake pack does not match resolved authoring configuration"
+            )
+        resolved_config_digest = resolved.resolved_authoring_config_digest
+        required_tier = AdapterTier(
+            resolved.semantic_payload.required_certification_tier.value
+        )
+        if (
+            semantic.rollout_policy is None
+            or not semantic.rollout_policy.live_authoring_enabled.value
+        ):
+            raise ValueError("resolved configuration does not enable MCP authoring")
+        require_no_rollout_revocation("mcp_mode_a")
+    else:
+        require_adapter_rollout("mcp_mode_a")
     return await run_intake(
         args.intake,
         args.output,
         executable_policies=policies,
         allow_insecure_localhost=args.allow_insecure_localhost,
+        domain_brief_path=args.domain_brief,
+        domain_brief_language=args.domain_brief_language,
+        certification_authority=load_certification_authority(
+            args.certification_private_key,
+            key_id=args.certification_key_id,
+        ),
+        held_out_decision=held_out,
+        held_out_policy_path=args.held_out_policy,
+        held_out_content_path=args.held_out_content,
+        resolved_authoring_config_digest=resolved_config_digest,
+        required_tier=required_tier,
     )
 
 
@@ -108,10 +223,11 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     advisory = result.bundle.document["review"]["advisory"]
+    assert result.source_evidence is not None
     _print(
         {
             "status": result.bundle.document["status"],
-            "attained_level": result.bundle.document["attained_level"],
+            "attained_tier": result.source_evidence.certification.attained_tier,
             "pack": result.bundle.document["pack"],
             "oracle": result.bundle.document["oracle"],
             "output_root": str(result.output_root),
@@ -119,7 +235,7 @@ def main() -> None:
                 artifact.as_dict(root=result.output_root)
                 for artifact in result.artifacts
             ],
-            "evidence_bundle_digest": result.bundle.bundle_digest,
+            "evidence_bundle_digest": result.source_evidence.bundle_digest,
             "tool_count": len(result.bundle.document["tools"]),
             "advisory_findings": advisory,
             "flagged_text": _flagged_text(result),

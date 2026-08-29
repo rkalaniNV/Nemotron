@@ -12,11 +12,24 @@ from nemotron.steps.byob.runtime.mcp.release.review import (
     build_review_packet,
     write_review_packet,
 )
+from nemotron.steps.byob.runtime.source_adapters.certification import (
+    load_trusted_certification_key,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--source-bundle", type=Path, required=True)
+    parser.add_argument("--migration-record", type=Path, required=True)
+    parser.add_argument("--certification-report", type=Path, required=True)
+    parser.add_argument("--domain-brief-source", type=Path, required=True)
+    parser.add_argument("--domain-brief-report", type=Path, required=True)
+    parser.add_argument("--held-out-redaction-report", type=Path, required=True)
+    parser.add_argument("--held-out-policy", type=Path)
+    parser.add_argument("--held-out-content", type=Path)
+    parser.add_argument("--certification-public-key", type=Path, required=True)
+    parser.add_argument("--certification-key-id", required=True)
     parser.add_argument("--intake-provenance", type=Path, required=True)
     parser.add_argument("--gateway-attestation", type=Path, required=True)
     parser.add_argument("--draft-provenance", type=Path, required=True)
@@ -40,6 +53,18 @@ def main() -> None:
             args.mcp_config,
             args.pack,
             held_out_path=args.held_out,
+            certification_report_path=args.certification_report,
+            trusted_certification_keys=load_trusted_certification_key(
+                args.certification_public_key,
+                key_id=args.certification_key_id,
+            ),
+            domain_brief_source_path=args.domain_brief_source,
+            domain_brief_report_path=args.domain_brief_report,
+            held_out_redaction_report_path=args.held_out_redaction_report,
+            held_out_policy_path=args.held_out_policy,
+            held_out_content_path=args.held_out_content,
+            source_bundle_path=args.source_bundle,
+            migration_record_path=args.migration_record,
         )
         path = write_review_packet(packet, args.output)
     except (ReviewError, OSError, ValueError) as exc:

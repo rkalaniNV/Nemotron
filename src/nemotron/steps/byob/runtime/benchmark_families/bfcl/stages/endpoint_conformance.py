@@ -17,6 +17,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
+    DEFAULT_CONFORMANCE_PROFILES,
+    ConformanceProfile,
     ConformanceVerdict,
     attestation_digest,
     verify_conformance,
@@ -52,6 +54,10 @@ def run_endpoint_conformance_check(
     timeout_s: float = 30.0,
     probe_report: Mapping[str, Any] | None = None,
     gateway_conformance_report: Mapping[str, Any] | None = None,
+    profile: ConformanceProfile | None = None,
+    profiles: Mapping[
+        tuple[str, str], ConformanceProfile
+    ] = DEFAULT_CONFORMANCE_PROFILES,
 ) -> dict[str, Any] | None:
     """Return the `A1` check entry, or None for a local Python oracle."""
     if endpoint_config is None:
@@ -112,6 +118,8 @@ def run_endpoint_conformance_check(
         },
         probe_report=probe_report,
         gateway_conformance_report=gateway_conformance_report,
+        profile=profile,
+        profiles=profiles,
     )
     if verdict.publishable:
         return _entry("pass", [], verdict, document=document)

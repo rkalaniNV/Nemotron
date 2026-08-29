@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -617,6 +618,12 @@ def test_launcher_backend_keeps_a_base_config_that_deploys_its_own_endpoint(
     # from the endpoint it creates.
     assert "url" not in materialized["target"]["api_endpoint"]
     assert "model_id" not in materialized["target"]["api_endpoint"]
+    # What remains cross-checks the materialized config against the real launcher, so it
+    # skips where that optional extra is absent. The assertions above already covered
+    # what this repository controls.
+    if importlib.util.find_spec("nemo_evaluator_launcher") is None:
+        pytest.skip("launcher round-trip requires the evaluator extra")
+
     home = tmp_path / "launcher-home"
     home.mkdir()
     validation = (

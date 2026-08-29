@@ -11,9 +11,11 @@ and publication handoff exist for Mode A. A discovery-only gateway still attests
 gateway restarted with strict BFCL-produced target evidence and a passing controlled P9 suite can
 attest `L2`, and the existing BFCL Gold Gate independently reruns and verifies that evidence.
 
-Live discovery and gateway startup are disabled by default. An operator must set
-`BFCL_ENABLE_EXPERIMENTAL_MCP=1`; omitted, false, or misspelled values fail closed. Offline review
-and verification of already-produced artifacts do not need that flag.
+Live discovery, gateway startup, and intake are disabled by default. Set
+`BFCL_ENABLE_MCP_MODE_A=1`. `BFCL_ENABLE_EXPERIMENTAL_MCP` remains an alias for one
+deprecation window; if both variables are present they must agree. Omitted, false,
+misspelled, unknown-kind, and conflicting settings fail closed. Offline review and
+verification of already-produced artifacts do not need a rollout flag.
 
 Do not describe an MCP pack as Gold merely because it has:
 

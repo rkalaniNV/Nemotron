@@ -51,11 +51,19 @@ exact masked surface. Model variants retain their canonical executable-case
 identity and immutable request/response cache lineage.
 
 Those gates are reachable here only because of the style axes. The 28 templates
-supply 28 canonical masked surfaces, while the 18 paraphrase-eligible templates
-crossed with the 20 style axes reach about 340 more, for roughly 368 distinct
-masked surfaces over a 3,364-row candidate pool. That admits about 1,592 rows
-under the eight-use cap, against the 1,392 target. Without the axes the same
-model collapses onto one wording per template, the pool holds 28 surfaces, and
-Stage 11 caps publication at 186 rows and aborts.
+supply 28 canonical masked surfaces, while the 20 paraphrase-eligible templates
+crossed with the 20 style axes reach about 380 more, for roughly 407 distinct
+masked surfaces over a 3,523-row candidate pool. Without the axes the same model
+collapses onto one wording per template, the pool holds 28 surfaces, and Stage 11
+caps publication at 186 rows and aborts.
+
+The eight-use cap has to clear the target in every category, not only in total,
+because the publication set is balanced at 232 rows per category. Paraphrase
+eligibility is therefore spread so that each category reaches at least 29 masked
+surfaces: with only two eligible templates in `dispute` and `transfer` those
+categories topped out at 197 and 199 rows, and Stage 11 met the total only by
+overflowing other categories, which the abort policy rejects. Each category now
+reaches between 237 and 328 rows, and the declared category, difficulty, and
+turn mixes are met exactly at 1,392.
 
 Frozen clock: `2026-03-02T09:00:00+07:00` (`clock_step: null`).

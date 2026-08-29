@@ -383,7 +383,7 @@
       source: "literal:['970436']"
       visible_in_first_turn: true
   success_assertions: [assert_transfer_fee_reported]
-  paraphrase: {allowed: false}
+  paraphrase: {allowed: true, max_variants: 1}
   user_turn_templates:
     vi: "Phí chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail} là bao nhiêu?"
   assistant_milestones:
@@ -652,7 +652,7 @@
       source: "fixture:disputes.dispute_id"
       visible_in_first_turn: true
   success_assertions: [assert_dispute_status_reported]
-  paraphrase: {allowed: false}
+  paraphrase: {allowed: true, max_variants: 1}
   user_turn_templates:
     vi: "Hồ sơ tra soát {dispute_id} đang ở trạng thái nào?"
   assistant_milestones:

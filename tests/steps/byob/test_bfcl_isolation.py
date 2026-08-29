@@ -135,11 +135,13 @@ def get_state():
     real_recv = Connection.recv
     calls = 0
 
+    stalled_recv_s = 10.0
+
     def delayed_second_recv(connection):  # type: ignore[no-untyped-def]
         nonlocal calls
         calls += 1
         if calls == 2:
-            time.sleep(0.5)
+            time.sleep(stalled_recv_s)
         return real_recv(connection)
 
     monkeypatch.setattr(Connection, "recv", delayed_second_recv)
@@ -152,11 +154,14 @@ def get_state():
             seed=0,
             task_id="slow-receive",
             steps=[{"op": "call_tool", "name": "probe", "arguments": {}}],
-            import_timeout_s=2.0,
+            import_timeout_s=30.0,
             tool_timeout_s=0.1,
-            episode_timeout_s=3.0,
+            episode_timeout_s=60.0,
         )
-    assert time.monotonic() - started < 1.0
+    # The deadline has to abort the stalled recv rather than notice afterwards that it
+    # took too long. The bound is a fraction of the stall so worker startup, which this
+    # test does not measure, cannot decide the outcome on a loaded machine.
+    assert time.monotonic() - started < stalled_recv_s / 2
 
 
 def test_debug_thread_mode_leaves_the_caller_environment_intact(

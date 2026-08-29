@@ -38,7 +38,9 @@ _CONFIG_KEYS = frozenset(
     }
 )
 _AUTH_KEYS = frozenset({"bearer_token_env", "headers"})
-_EXPECTED_KEYS = frozenset({"oracle_id", "oracle_version", "content_digest"})
+_EXPECTED_KEYS = frozenset(
+    {"oracle_id", "oracle_version", "content_digest", "principal_digest"}
+)
 _ATTESTATION_KEYS = frozenset({"kind", "expected_digest"})
 _TLS_KEYS = frozenset({"ca_bundle_path"})
 _HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
@@ -50,6 +52,7 @@ class EndpointIdentity:
     oracle_id: str
     oracle_version: str
     content_digest: str
+    principal_digest: str | None = None
 
     @classmethod
     def from_mapping(cls, value: Any, *, source: str) -> EndpointIdentity:
@@ -61,7 +64,8 @@ class EndpointIdentity:
             "oracle_version",
             "content_digest",
         }
-        unknown = sorted(set(value) - required)
+        allowed = required | {"principal_digest"}
+        unknown = sorted(set(value) - allowed)
         if unknown:
             raise ValueError(f"{source} has unknown fields: {', '.join(unknown)}")
         missing = sorted(required - set(value))
@@ -81,15 +85,27 @@ class EndpointIdentity:
             int(digest.removeprefix("sha256:"), 16)
         except ValueError as exc:
             raise ValueError(f"{source} content_digest is not hexadecimal") from exc
-        return cls(**fields)
+        principal_digest = value.get("principal_digest")
+        if principal_digest is not None:
+            if (
+                not isinstance(principal_digest, str)
+                or _ATTESTATION_DIGEST.fullmatch(principal_digest) is None
+            ):
+                raise ValueError(
+                    f"{source} principal_digest must be sha256:<64 lowercase hex characters>"
+                )
+        return cls(**fields, principal_digest=principal_digest)
 
     def as_dict(self) -> dict[str, str]:
-        return {
+        result = {
             "protocol_version": self.protocol_version,
             "oracle_id": self.oracle_id,
             "oracle_version": self.oracle_version,
             "content_digest": self.content_digest,
         }
+        if self.principal_digest is not None:
+            result["principal_digest"] = self.principal_digest
+        return result
 
 
 @dataclass(frozen=True)

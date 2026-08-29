@@ -19,6 +19,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from nemotron.steps.byob.runtime.authoring_workflow.quota import (
+    RunQuota,
+    estimate_structured_token_units,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
     ImmutableModelIOCache,
     request_hash,
@@ -135,6 +139,7 @@ def call_structured(
     cache: ImmutableModelIOCache,
     run_dir: Path,
     caller: StructuredCaller | None = None,
+    quota: RunQuota | None = None,
 ) -> tuple[dict[str, Any], ModelCallRecord]:
     """Return one validated structured response, from cache when it is already known."""
     schema = output_format.model_json_schema()
@@ -162,8 +167,22 @@ def call_structured(
 
     cached = cache.get(key)
     if cached is not None:
+        if quota is not None:
+            quota.record_cache_hit(batch_size=1)
         return dict(cached), record
 
+    if quota is not None:
+        quota.reserve_provider_call(
+            token_units=estimate_structured_token_units(
+                model_canonical=model.canonical_id,
+                system_prompt=system_prompt,
+                prompt=prompt,
+                model_input=model_input,
+                inference_parameters=model.inference_parameters,
+                output_schema=schema,
+            ),
+            batch_size=1,
+        )
     invoke = caller if caller is not None else _default_caller
     responses = invoke(
         run_dir,
@@ -179,6 +198,8 @@ def call_structured(
         raise AuthoringModelError(
             f"{stage_name} returned no structured response for request {stage_name!r}"
         )
+    if quota is not None:
+        quota.check_after_provider_call()
     # Only a well-formed answer is cached. Caching an infrastructure failure would make a
     # transient outage permanent for every later run.
     cache.put(

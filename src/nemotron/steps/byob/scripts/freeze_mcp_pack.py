@@ -12,6 +12,9 @@ from nemotron.steps.byob.runtime.mcp.release.freeze import (
     FreezeInputs,
     freeze_canonical_pack,
 )
+from nemotron.steps.byob.runtime.source_adapters.certification import (
+    load_trusted_certification_key,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,8 +30,19 @@ def _parser() -> argparse.ArgumentParser:
         "review-packet",
         "review-approval",
         "output",
+        "source-bundle",
+        "migration-record",
+        "certification-report",
+        "domain-brief-source",
+        "domain-brief-report",
+        "held-out-redaction-report",
+        "source-observations",
+        "certification-public-key",
     ):
         parser.add_argument(f"--{name}", type=Path, required=True)
+    parser.add_argument("--certification-key-id", required=True)
+    parser.add_argument("--held-out-policy", type=Path)
+    parser.add_argument("--held-out-content", type=Path)
     return parser
 
 
@@ -44,6 +58,19 @@ def main() -> None:
         validation_report_path=args.validation_report,
         review_packet_path=args.review_packet,
         review_approval_path=args.review_approval,
+        certification_report_path=args.certification_report,
+        trusted_certification_keys=load_trusted_certification_key(
+            args.certification_public_key,
+            key_id=args.certification_key_id,
+        ),
+        domain_brief_source_path=args.domain_brief_source,
+        domain_brief_report_path=args.domain_brief_report,
+        held_out_redaction_report_path=args.held_out_redaction_report,
+        held_out_policy_path=args.held_out_policy,
+        held_out_content_path=args.held_out_content,
+        source_bundle_path=args.source_bundle,
+        migration_record_path=args.migration_record,
+        source_observations_path=args.source_observations,
     )
     try:
         release = freeze_canonical_pack(inputs, args.output)

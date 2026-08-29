@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
     ATTESTATION_KIND,
+    MCP_CONFORMANCE_PROFILE,
     AttestationError,
     ConformanceAttestation,
     attestation_digest,
@@ -139,6 +141,69 @@ def test_a_malformed_document_verifies_as_unreadable_rather_than_low() -> None:
     assert verdict.effective_level == "L0"
     assert verdict.publishable is False
     assert verdict.findings[0].startswith("attestation_malformed:")
+
+
+def test_unknown_and_explicitly_mismatched_profiles_have_stable_refusals() -> None:
+    unknown = _attestation(provider_kind="http", profile_version="unknown")
+    verdict = _verify(unknown)
+    assert verdict.findings == ("attestation_malformed:unknown_profile",)
+
+    document = _attestation()
+    other = replace(
+        MCP_CONFORMANCE_PROFILE,
+        provider_kind="http",
+        profile_version="bfcl-http-oracle-v1",
+    )
+    verdict = _verify(
+        document,
+        profile=other,
+        profiles={
+            MCP_CONFORMANCE_PROFILE.key: MCP_CONFORMANCE_PROFILE,
+            other.key: other,
+        },
+    )
+    assert verdict.findings == ("attestation_malformed:profile_mismatch",)
+
+
+def test_a_non_mcp_profile_uses_the_same_generic_verifier() -> None:
+    profile = replace(
+        MCP_CONFORMANCE_PROFILE,
+        provider_kind="http",
+        profile_version="bfcl-http-oracle-v1",
+        required_probes=(("L2", ("H1", "H2")),),
+        report_suite_kind="endpoint",
+        report_suite_version="bfcl-http-conformance-v1",
+        timeout_probe_requirements=(),
+        enforce_snapshot_identity=False,
+    )
+    document = _attestation(
+        provider_kind=profile.provider_kind,
+        profile_version=profile.profile_version,
+        checks=[
+            {"id": "H1", "requirement": "required", "status": "pass", "reason": None},
+            {"id": "H2", "requirement": "required", "status": "pass", "reason": None},
+        ],
+    )
+    probe_report = _probe_report(document)
+    gateway_report = _gateway_report(document)
+    gateway_report["suite"] = {
+        "kind": profile.report_suite_kind,
+        "profile_version": profile.report_suite_version,
+    }
+    document["probe_report_digest"] = attestation_digest(probe_report)
+    document["gateway_conformance_report_digest"] = attestation_digest(gateway_report)
+
+    verdict = verify_conformance(
+        document,
+        expected_digest=attestation_digest(document),
+        metadata_content_digest=METADATA_DIGEST,
+        probe_report=probe_report,
+        gateway_conformance_report=gateway_report,
+        profiles={profile.key: profile},
+    )
+
+    assert verdict.publishable is True
+    assert verdict.findings == ()
 
 
 def test_the_digest_covers_the_document_regardless_of_key_order() -> None:

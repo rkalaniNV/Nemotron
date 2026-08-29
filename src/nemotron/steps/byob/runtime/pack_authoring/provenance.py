@@ -13,9 +13,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nemotron.steps.byob.runtime.authoring_workflow.quota import RunQuotaSnapshot
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_json,
     write_canonical_json,
+)
+from nemotron.steps.byob.runtime.pack_authoring.authorization import (
+    ExposureAuthorization,
 )
 from nemotron.steps.byob.runtime.pack_authoring.bundle import Approval, EvidenceView
 from nemotron.steps.byob.runtime.pack_authoring.drafts import DraftBundle
@@ -54,6 +58,9 @@ def build_draft_provenance(
     *,
     assertions_compiled: bool,
     compilation_refusals: tuple[str, ...] = (),
+    exposure_authorization: ExposureAuthorization | None = None,
+    quota_snapshot: RunQuotaSnapshot | None = None,
+    resolved_authoring_config_digest: str | None = None,
 ) -> DraftProvenance:
     """Record the drafting phase and what it still could not produce."""
     documents = drafts.as_documents()
@@ -66,13 +73,54 @@ def build_draft_provenance(
         },
         "pack": dict(evidence.document["pack"]),
         "evidence": {
+            "schema_version": evidence.document["schema_version"],
             "bundle_digest": evidence.digest,
-            "attained_level": evidence.attained_level,
+            "source_bundle_digest": evidence.source_digest,
+            "migration_record_digest": (
+                evidence.migration.record_digest
+                if evidence.migration is not None
+                else None
+            ),
+            "certification": {
+                "tier": evidence.certification_tier,
+                "bfcl_verified": evidence.certification_verified,
+                "legacy_level": evidence.legacy_level,
+                "report_digest": (
+                    evidence.certification_report.report_digest
+                    if evidence.certification_report is not None
+                    else None
+                ),
+                "profile_id": (
+                    evidence.certification_report.profile_id
+                    if evidence.certification_report is not None
+                    else None
+                ),
+            },
+            "domain_brief_digest": (
+                evidence.document["domain_brief"]["content_digest"]
+                if evidence.is_v2
+                else None
+            ),
+            "held_out_redaction_report_digest": (
+                evidence.held_out_redaction_report.report_digest
+                if evidence.held_out_redaction_report is not None
+                else None
+            ),
             "unresolved_unknowns": sorted(evidence.unresolved_unknowns),
         },
         "approval": approval.as_dict(),
+        "model_exposure_authorization": (
+            exposure_authorization.model_dump(mode="json")
+            if exposure_authorization is not None
+            else None
+        ),
         "model": model.as_provenance(),
         "calls": [record.as_dict() for record in drafts.calls],
+        "run_quota": (
+            quota_snapshot.model_dump(mode="json")
+            if quota_snapshot is not None
+            else None
+        ),
         # Each artifact is digested so a later edit to a draft is visible rather than
         # inheriting the trust of the run that generated it.
         "artifact_digests": {
@@ -98,6 +146,10 @@ def build_draft_provenance(
             }
         ),
     }
+    if resolved_authoring_config_digest is not None:
+        document["resolved_authoring_config_digest"] = (
+            resolved_authoring_config_digest
+        )
     document["record_digest"] = sha256_json(document)
     return DraftProvenance(document=document)
 

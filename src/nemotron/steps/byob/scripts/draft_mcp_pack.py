@@ -13,6 +13,9 @@ import argparse
 import json
 from pathlib import Path
 
+from nemotron.steps.byob.runtime.authoring_workflow.resolved_config import (
+    resolved_config_digest,
+)
 from nemotron.steps.byob.runtime.pack_authoring.bundle import BundleError
 from nemotron.steps.byob.runtime.pack_authoring.grounding import GroundingError
 from nemotron.steps.byob.runtime.pack_authoring.model_client import (
@@ -20,11 +23,31 @@ from nemotron.steps.byob.runtime.pack_authoring.model_client import (
     AuthoringModelError,
 )
 from nemotron.steps.byob.runtime.pack_authoring.runner import run_drafting
+from nemotron.steps.byob.runtime.source_adapters.certification import (
+    load_trusted_certification_key,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True, help="evidence_bundle.json")
+    parser.add_argument("--source-bundle", type=Path, required=True)
+    parser.add_argument("--migration-record", type=Path, required=True)
+    parser.add_argument("--certification-report", type=Path, required=True)
+    parser.add_argument("--source-observations", type=Path)
+    parser.add_argument("--domain-brief-source", type=Path, required=True)
+    parser.add_argument("--domain-brief-report", type=Path, required=True)
+    parser.add_argument("--held-out-redaction-report", type=Path, required=True)
+    parser.add_argument("--held-out-policy", type=Path)
+    parser.add_argument("--held-out-content", type=Path)
+    parser.add_argument("--certification-public-key", type=Path, required=True)
+    parser.add_argument("--certification-key-id", required=True)
+    parser.add_argument("--exposure-authorization", type=Path, required=True)
+    parser.add_argument("--organizational-policy-digest")
+    parser.add_argument("--resolved-authoring-config", type=Path)
+    parser.add_argument("--parent-evidence", type=Path)
+    parser.add_argument("--open-questions", type=Path)
+    parser.add_argument("--answer-set", type=Path)
     parser.add_argument(
         "--approval",
         type=Path,
@@ -65,7 +88,35 @@ def main() -> None:
         inference_parameters={"temperature": args.temperature},
     )
     try:
-        result = run_drafting(args.bundle, args.approval, args.output, model)
+        result = run_drafting(
+            args.bundle,
+            args.approval,
+            args.output,
+            model,
+            certification_report_path=args.certification_report,
+            trusted_certification_keys=load_trusted_certification_key(
+                args.certification_public_key,
+                key_id=args.certification_key_id,
+            ),
+            domain_brief_source_path=args.domain_brief_source,
+            domain_brief_report_path=args.domain_brief_report,
+            held_out_redaction_report_path=args.held_out_redaction_report,
+            held_out_policy_path=args.held_out_policy,
+            held_out_content_path=args.held_out_content,
+            source_bundle_path=args.source_bundle,
+            migration_record_path=args.migration_record,
+            source_observations_path=args.source_observations,
+            parent_evidence_path=args.parent_evidence,
+            open_questions_path=args.open_questions,
+            answer_set_path=args.answer_set,
+            exposure_authorization_path=args.exposure_authorization,
+            organizational_policy_digest=args.organizational_policy_digest,
+            resolved_authoring_config_digest=(
+                resolved_config_digest(args.resolved_authoring_config)
+                if args.resolved_authoring_config is not None
+                else None
+            ),
+        )
     except (BundleError, GroundingError, AuthoringModelError, OSError, ValueError) as exc:
         _print(
             {

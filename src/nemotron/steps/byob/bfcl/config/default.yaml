@@ -87,9 +87,14 @@ lineage:
 
 surface_generation:
   model_paraphrase_enabled: false
+  # Bounded by the number of surface style axes, one axis per variant.
   paraphrases_per_template: 0
   preserve_slot_values: true
   prevent_tool_name_leakage: true
+  # Optional: replace the framework style axes with registers that suit this
+  # domain or language. Each axis must select phrasing only, never which values a
+  # request carries, or the must_preserve guard will reject the variant.
+  # surface_style_axes: []
 
 surface_quality_validation:
   contract_version: "1.1"

@@ -133,8 +133,12 @@ def _is_word_char(character: str) -> bool:
     return character.isalnum() or character == "_"
 
 
+# Thousands separators seen across locales a pack may render in: dot, comma, plain
+# and non-breaking spaces, and the Swiss apostrophes. Only uniform three-digit groups
+# are recognized, so a locale with mixed group widths keeps its value unmasked rather
+# than risking a wrong match on unrelated digits.
 _GROUPED_NUMBER = re.compile(
-    r"(?<!\d)\d{1,3}(?:[.,\u00a0\u202f ]\d{3})+(?!\d)"
+    r"(?<!\d)\d{1,3}(?:[.,\u00a0\u202f '\u2019]\d{3})+(?!\d)"
 )
 
 
@@ -182,6 +186,30 @@ def project_surface_text(task: Mapping[str, Any], surface: Mapping[str, Any]) ->
     return "\n".join(lines), sorted(masked)
 
 
+# What a row executes: the request, the values it carries, the tools and policy it
+# runs under, and the assertions that decide it. Identity, provenance, declared
+# labels, and which rendering of a case a row is are deliberately excluded, which is
+# what lets a paraphrase share the identity of its canonical task.
+EXECUTION_CASE_KEYS: tuple[str, ...] = (
+    "intent",
+    "category",
+    "slots_initial",
+    "slots",
+    "slot_updates",
+    "fixture_refs",
+    "required_tools",
+    "tools_present",
+    "success_assertions",
+    "turn_policy",
+    "call_order",
+    "call_order_prefix",
+    "num_tool_calls",
+    "has_user_confirmation",
+    "confirmed_call_turns",
+    "edge_signatures",
+)
+
+
 def execution_case_hash(task: Mapping[str, Any]) -> str:
     """Hash executable meaning separately from the masked linguistic surface.
 
@@ -189,25 +217,9 @@ def execution_case_hash(task: Mapping[str, Any]) -> str:
     task, while different fixture bindings, call policies, assertions, or
     distractor sets remain distinct evaluation cases.
     """
-    keys = (
-        "intent",
-        "category",
-        "slots_initial",
-        "slots",
-        "slot_updates",
-        "fixture_refs",
-        "required_tools",
-        "tools_present",
-        "success_assertions",
-        "turn_policy",
-        "call_order",
-        "call_order_prefix",
-        "num_tool_calls",
-        "has_user_confirmation",
-        "confirmed_call_turns",
-        "edge_signatures",
+    return _sha256(
+        canonical_json({key: task.get(key) for key in EXECUTION_CASE_KEYS})
     )
-    return _sha256(canonical_json({key: task.get(key) for key in keys}))
 
 
 def project_dedup_text(task: Mapping[str, Any], surface: Mapping[str, Any]) -> dict[str, Any]:
@@ -1044,6 +1056,27 @@ def _dimension_counts(
     return counts
 
 
+def _publication_shortfall_reason(
+    *,
+    target: int,
+    selected: int,
+    bounds: Mapping[str, int],
+    mix_exceeds_inventory: bool,
+) -> str:
+    """Name the bound that kept the selection away from the declared target."""
+    if selected > target:
+        return "coverage_requires_more_than_declared_target"
+    binding = sorted(
+        (name for name, bound in bounds.items() if bound < target),
+        key=lambda name: (bounds[name], name),
+    )
+    if binding:
+        return binding[0]
+    if mix_exceeds_inventory:
+        return "declared_mix_exceeds_inventory"
+    return "balancing_constraint"
+
+
 def _solve_balanced_selection(
     *,
     candidates: Sequence[str],
@@ -1203,20 +1236,28 @@ def _solve_balanced_selection(
             problem += count + under - over == quotas.get(bucket, 0)
             deviation_terms.extend((under, over))
 
-    max_tie_cost = len(ordered) * (len(ordered) + 1) // 2
-    problem += (
-        (max_tie_cost + 1) * pulp.lpSum(deviation_terms)
-        + pulp.lpSum(
-            (index + 1) * variables[task_id]
-            for index, task_id in enumerate(ordered)
-        )
+    # Declared mixes come first and the stable order only breaks ties. Expressing that
+    # as one weighted objective needs a tie-break weight of O(n^2) — millions of units
+    # at publication scale — and the solver's tolerances then decide whether a small
+    # deviation really outranks the tie-break. Two exact solves keep the priority
+    # exact: minimize deviation, pin it, then minimize the order cost.
+    total_deviation = pulp.lpSum(deviation_terms)
+    tie_break_cost = pulp.lpSum(
+        (index + 1) * variables[task_id] for index, task_id in enumerate(ordered)
     )
-    status = problem.solve(pulp.PULP_CBC_CMD(msg=False, threads=1))
-    if pulp.LpStatus[status] != "Optimal":
-        raise RuntimeError(
-            "Stage 11 could not solve the publication balancing constraints "
-            f"(solver_status={pulp.LpStatus[status]!r})"
-        )
+
+    def solve(objective: Any, phase: str) -> None:
+        problem.setObjective(objective)
+        status = problem.solve(pulp.PULP_CBC_CMD(msg=False, threads=1))
+        if pulp.LpStatus[status] != "Optimal":
+            raise RuntimeError(
+                "Stage 11 could not solve the publication balancing constraints "
+                f"(phase={phase}, solver_status={pulp.LpStatus[status]!r})"
+            )
+
+    solve(total_deviation, "deviation")
+    problem += total_deviation <= round(float(pulp.value(total_deviation) or 0.0))
+    solve(tie_break_cost, "stable_order")
     return {
         task_id
         for task_id in ordered
@@ -1329,9 +1370,16 @@ def balance_publication_set(
         )
     target_mixes = _target_mix_by_dimension(config)
 
+    # The inventory does not change while the budget shrinks, so counting it once keeps
+    # the search linear even when the declared mix forces many steps down.
+    mix_inventory = {
+        dimension: Counter(features[task_id][dimension] for task_id in candidates)
+        for dimension in target_mixes
+    }
+
     def quotas_fit(total: int) -> bool:
         for dimension, mix in target_mixes.items():
-            inventory = Counter(features[task_id][dimension] for task_id in candidates)
+            inventory = mix_inventory[dimension]
             quotas = largest_remainder_quotas(total, mix)
             if any(quotas[bucket] > inventory.get(bucket, 0) for bucket in quotas):
                 return False
@@ -1344,8 +1392,17 @@ def balance_publication_set(
         if declared_target is not None
         else feasible_budget
     )
+    # A publication shortfall costs a whole run, so record which bound produced it
+    # instead of reporting one fixed cause for every reason a target can be missed.
+    shortfall_bounds = {
+        "insufficient_candidate_inventory": len(candidates),
+        "category_cap_limits_inventory": category_budget,
+        "insufficient_surface_diversity": surface_budget,
+    }
+    mix_exceeds_inventory = False
     while budget > len(mandatory) and not quotas_fit(budget):
         budget -= 1
+        mix_exceeds_inventory = True
     budget = max(budget, len(mandatory))
     target_counts = {dimension: largest_remainder_quotas(budget, mix) for dimension, mix in target_mixes.items()}
     min_unique_surface_count = (
@@ -1462,7 +1519,12 @@ def balance_publication_set(
                 "target": int(declared_target),
                 "actual": len(selected_order),
                 "inventory": len(candidates),
-                "reason": "insufficient_diverse_inventory",
+                "reason": _publication_shortfall_reason(
+                    target=int(declared_target),
+                    selected=len(selected_order),
+                    bounds=shortfall_bounds,
+                    mix_exceeds_inventory=mix_exceeds_inventory,
+                ),
             }
         )
     for category, actual in sorted(actual_counts["category"].items()):

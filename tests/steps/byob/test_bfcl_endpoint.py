@@ -318,16 +318,19 @@ def test_process_worker_accepts_endpoint_oracle_and_redacts_auth(
     )
     monkeypatch.setenv("BFCL_TEST_TOKEN", "process-secret")
 
+    # The endpoint refuses the connection immediately, so this asserts redaction rather
+    # than a deadline. The timeouts only bound the test, and they stay well clear of
+    # worker startup so a loaded machine cannot turn this into a timeout instead.
     with pytest.raises(RuntimeError) as raised:
-        ProcessWorker(default_timeout_s=1.0).run_episode(
+        ProcessWorker(default_timeout_s=30.0).run_episode(
             endpoint_config=config,
             fixtures=None,
             clock_iso="2026-03-02T09:00:00+07:00",
             seed=0,
             task_id="endpoint-process",
             steps=[{"op": "metadata"}],
-            tool_timeout_s=1.0,
-            episode_timeout_s=2.0,
+            tool_timeout_s=30.0,
+            episode_timeout_s=60.0,
         )
     assert "process-secret" not in str(raised.value)
 

@@ -20,8 +20,11 @@ Do not resolve them into one environment.
 
 ```bash
 uv sync --extra bfcl-mcp
-export BFCL_ENABLE_EXPERIMENTAL_MCP=1
+export BFCL_ENABLE_MCP_MODE_A=1
 ```
+
+`BFCL_ENABLE_EXPERIMENTAL_MCP` is accepted as a compatibility alias for one
+deprecation window. If both variables are set, they must resolve to the same boolean.
 
 For stdio, create a host-owned trusted-executable policy that pins the executable's absolute
 path, SHA-256, exact allowed argument vectors, and allowed working-directory roots. The
@@ -140,8 +143,9 @@ A cooperative server must:
 
 ### “MCP onboarding is experimental”
 
-Set `BFCL_ENABLE_EXPERIMENTAL_MCP=1` for live discovery or gateway startup. Offline review and
-verification do not require the flag.
+Set `BFCL_ENABLE_MCP_MODE_A=1` for live discovery, gateway startup, or MCP intake.
+Offline review and verification do not require the flag. The legacy
+`BFCL_ENABLE_EXPERIMENTAL_MCP` alias remains temporarily available.
 
 ### SDK major mismatch
 

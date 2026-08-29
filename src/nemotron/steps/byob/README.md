@@ -78,8 +78,9 @@ pack into the existing generation path. Install that transport runtime separatel
 
 This path is not publication-ready yet. The independent P4–P11 probe suite is still pending,
 so MCP gateways currently attain `L0` and the Gold Gate correctly refuses publication. Human
-approval and freeze do not raise that level. Set `BFCL_ENABLE_EXPERIMENTAL_MCP=1` to opt into
-live discovery or gateway startup; the default is disabled. See the
+approval and freeze do not raise that level. Set `BFCL_ENABLE_MCP_MODE_A=1` to opt into
+live discovery, gateway startup, or intake; the default is disabled. The legacy
+`BFCL_ENABLE_EXPERIMENTAL_MCP` name remains a temporary compatibility alias. See the
 [MCP support matrix](references/bfcl-mcp-support-matrix.md) before integrating a server, then
 use the normative
 [MCP Oracle contract](references/bfcl-mcp-oracle-contract.md) for profile and control details.

@@ -19,6 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from nemotron.steps.byob.runtime.authoring_workflow.quota import RunQuota
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
     ImmutableModelIOCache,
 )
@@ -85,6 +86,7 @@ class DraftingContext:
     cache: ImmutableModelIOCache
     run_dir: Path
     caller: StructuredCaller | None = None
+    quota: RunQuota | None = None
 
     @property
     def grounding(self) -> Grounding:
@@ -124,6 +126,7 @@ def _call(
         cache=context.cache,
         run_dir=context.run_dir,
         caller=context.caller,
+        quota=context.quota,
     )
     return _parse(stage, response, output_format), record
 
