@@ -223,14 +223,16 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
         # spaces are disjoint and no pair can ever match. Refuse rather than
         # report the clean result that guarantees.
         raise ConfigError(
-            "the train and holdout splits identify documents by different fields — train uses "
-            f"{groups['left_key_fields']}, holdout uses {groups['right_key_fields']}. Group keys "
-            "are namespaced by the field that produced them, so these two sets can never "
-            "intersect and the exact-identity pass would report no overlap whatever the data "
-            "contains. Give both splits the same identifying field (commonly url, or the same "
-            "id space), or prepare the holdout from the same corpus the train split was ingested "
-            "from — ingest mints new ids, so a holdout built from the raw corpus no longer "
-            "shares an id space with the ingested one."
+            f"{groups['unmatchable_left']} training and {groups['unmatchable_right']} holdout "
+            "document(s) are keyed off a field the other split never uses, so nothing can match "
+            f"them. Train keys: {groups['left_key_fields']}; holdout keys: "
+            f"{groups['right_key_fields']}. Group keys are namespaced by the field that produced "
+            "them, so those records occupy a key space the other side does not reach and "
+            "contribute a guaranteed zero rather than a measured one. Give every record in both "
+            "splits the same identifying field (commonly url, or one id space), or prepare the "
+            "holdout from the corpus the train split was ingested from — ingest mints new ids, "
+            "so a holdout built from the raw corpus no longer shares an id space with the "
+            "ingested one."
         )
 
     group_removals = {
@@ -323,6 +325,14 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
             },
         },
         "group_overlap": {
+            # Published, not merely checked. Which field identified each side is
+            # what makes a low count readable: without it, "50 shared groups" and
+            # "50 shared groups plus 250 records nothing could reach" are the same
+            # number on the page.
+            "left_key_fields": groups["left_key_fields"],
+            "right_key_fields": groups["right_key_fields"],
+            "unmatchable_left": groups["unmatchable_left"],
+            "unmatchable_right": groups["unmatchable_right"],
             "shared_group_count": groups["shared_group_count"],
             "train_documents_affected": len(group_removals),
             "groups": groups["shared_groups"][:50],

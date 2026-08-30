@@ -49,12 +49,17 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 GROUP_KEY_FIELD = "__group_key"
 GROUP_KEY_SOURCE_FIELD = "__group_key_field"
+
+#: The name group_key reports when it fell through to a positional identity.
+#: Per-split by construction, so it never establishes comparability.
+POSITIONAL_FIELD = "_rowid"
 NORM_HASH_FIELD = "__norm_text_hash"
 
 #: Default id namespace for a cross-split comparison. Both sides share it because
@@ -320,17 +325,17 @@ def cross_split_groups(
     split — but that belongs to the caller, not here.
     """
     right_keys: dict[str, list[str]] = {}
-    right_fields: set[str] = set()
+    right_fields: Counter[str] = Counter()
     for record in assign_group_keys(right, right_source, cfg, id_namespace=id_namespace):
         right_keys.setdefault(record[GROUP_KEY_FIELD], []).append(str(record.get("id", "")))
-        right_fields.add(record[GROUP_KEY_SOURCE_FIELD])
+        right_fields[record[GROUP_KEY_SOURCE_FIELD]] += 1
 
     shared: dict[str, dict[str, Any]] = {}
-    left_fields: set[str] = set()
+    left_fields: Counter[str] = Counter()
     left_total = 0
     for record in assign_group_keys(left, left_source, cfg, id_namespace=id_namespace):
         left_total += 1
-        left_fields.add(record[GROUP_KEY_SOURCE_FIELD])
+        left_fields[record[GROUP_KEY_SOURCE_FIELD]] += 1
         key = record[GROUP_KEY_FIELD]
         if key in right_keys:
             entry = shared.setdefault(
@@ -344,14 +349,23 @@ def cross_split_groups(
             )
             entry["left_ids"].append(str(record.get("id", "")))
 
-    # Each key is namespaced by the field that produced it, so two sides keying
-    # off different fields occupy disjoint key spaces: the comparison then
-    # reports zero shared groups for every possible input, including two copies
-    # of the same corpus. That is not a finding of "no overlap", and reporting it
-    # as one is how a decontamination run passes while detecting nothing. Both
-    # sides already record which field produced their key, so the condition is
-    # visible here rather than inferable from the count alone.
-    comparable = bool(left_fields & right_fields) or not (left_fields and right_fields)
+    # Each key is namespaced by the field that produced it, so a record keyed off
+    # a field the other side never uses sits in a key space nothing can match. It
+    # contributes a guaranteed zero, and a count alone cannot distinguish that
+    # from a genuine absence of overlap.
+    #
+    # Counting RECORDS rather than intersecting field NAMES is the whole point.
+    # A holdout that keys half its records off url and half off id shares the url
+    # field with a url-keyed corpus, so an intersection test calls the comparison
+    # sound while the id-keyed half can never match -- and it is the half nobody
+    # is told about. _rowid is excluded on both sides because it is positional
+    # and deliberately per-split: it can never match by construction, so counting
+    # it as a shared field would satisfy the check on its own.
+    left_usable = {f for f in left_fields if f != POSITIONAL_FIELD}
+    right_usable = {f for f in right_fields if f != POSITIONAL_FIELD}
+    unmatchable_left = sum(n for f, n in left_fields.items() if f not in right_usable)
+    unmatchable_right = sum(n for f, n in right_fields.items() if f not in left_usable)
+    comparable = unmatchable_left == 0 and unmatchable_right == 0
 
     return {
         "left_records": left_total,
@@ -359,7 +373,9 @@ def cross_split_groups(
         "shared_group_count": len(shared),
         "left_records_affected": sum(len(v["left_ids"]) for v in shared.values()),
         "shared_groups": [shared[k] for k in sorted(shared)],
-        "left_key_fields": sorted(left_fields),
-        "right_key_fields": sorted(right_fields),
+        "left_key_fields": dict(sorted(left_fields.items())),
+        "right_key_fields": dict(sorted(right_fields.items())),
+        "unmatchable_left": unmatchable_left,
+        "unmatchable_right": unmatchable_right,
         "comparable": comparable,
     }

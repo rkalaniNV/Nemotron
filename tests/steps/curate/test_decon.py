@@ -517,8 +517,10 @@ def test_splits_keyed_by_different_fields_are_refused_not_reported_clean() -> No
     )
 
     assert result["shared_group_count"] == 0, "identical text still shares no key -- that is the bug"
-    assert result["left_key_fields"] == ["url"]
-    assert result["right_key_fields"] == ["id"]
+    assert result["left_key_fields"] == {"url": 1}
+    assert result["right_key_fields"] == {"id": 1}
+    assert result["unmatchable_left"] == 1
+    assert result["unmatchable_right"] == 1
     assert result["comparable"] is False, (
         "disjoint key spaces must be reported as incomparable; a bare count of 0 reads as "
         "'measured, found nothing' when nothing could have been found"
@@ -541,3 +543,53 @@ def test_splits_sharing_a_key_field_stay_comparable() -> None:
     assert result["comparable"] is True
     assert result["shared_group_count"] == 1
     assert result["left_records_affected"] == 1
+
+
+def test_a_holdout_that_mixes_key_fields_is_refused_too() -> None:
+    """The first version of this guard intersected field NAMES, and passed here.
+
+    A holdout keying half its records off url and half off id shares the url
+    field with a url-keyed corpus, so the name intersection is non-empty and the
+    comparison was declared sound -- while the id-keyed half sat in a namespace
+    the corpus never reaches and contributed a guaranteed zero. The count looked
+    like a measurement. Counting unmatchable RECORDS is what distinguishes
+    'searched and found 50' from 'searched half of it'.
+    """
+    from nemotron.steps.curate.runtime import grouping
+
+    text = "Tư bản - Phê phán khoa kinh tế chính trị " * 40
+    url = "https://vi.wikipedia.org/wiki/Tu_ban_"
+    train = [{"id": f"t{i}", "url": f"{url}{i}", "text": text + str(i)} for i in range(100)]
+    holdout = (
+        [{"id": f"h{i}", "url": f"{url}{i}", "text": text + str(i)} for i in range(50)]
+        + [{"id": f"h{i}", "text": text + str(i)} for i in range(50, 100)]
+    )
+
+    result = grouping.cross_split_groups(
+        train, holdout, left_source="train", right_source="holdout",
+        cfg=grouping.GroupKeyConfig(text_field="text"),
+    )
+
+    assert result["shared_group_count"] == 50, "half the duplicates are structurally invisible"
+    assert result["unmatchable_right"] == 50
+    assert result["comparable"] is False, (
+        "a shared field name is not comparability; the id-keyed half can never match"
+    )
+
+
+def test_a_positional_fallback_key_never_establishes_comparability() -> None:
+    """_rowid is per-split by construction, so two sides both falling through to
+    it share a field name and nothing else. Counting it would let the guard be
+    satisfied by the one key that can never match."""
+    from nemotron.steps.curate.runtime import grouping
+
+    train = [{"text": "one"}, {"text": "two"}]
+    holdout = [{"text": "one"}, {"text": "two"}]
+
+    result = grouping.cross_split_groups(
+        train, holdout, left_source="train", right_source="holdout",
+        cfg=grouping.GroupKeyConfig(text_field="text", use_normalized_text=False),
+    )
+
+    assert result["left_key_fields"] == {grouping.POSITIONAL_FIELD: 2}
+    assert result["comparable"] is False
