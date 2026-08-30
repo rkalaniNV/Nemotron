@@ -1,0 +1,1520 @@
+[
+  {
+    "before": "0",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 0,
+    "killed_by": "survived",
+    "lineno": 15,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "0",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 1,
+    "killed_by": "survived",
+    "lineno": 15,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "0",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 2,
+    "killed_by": "survived",
+    "lineno": 15,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "1",
+    "detail": "6 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "1 -> 2",
+    "family": "value",
+    "index": 3,
+    "killed_by": "L2_expected_traces",
+    "lineno": 88,
+    "note": "observable, but no shipped check caught it",
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "kind == 'TXN'",
+    "detail": "6 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 4,
+    "killed_by": "L2_expected_traces",
+    "lineno": 90,
+    "note": "observable, but no shipped check caught it",
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "rail not in ('napas', 'internal')",
+    "detail": "6 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'miss_create_transfer', 'miss_get_transfer_fee']",
+    "edit": "NotIn -> In",
+    "family": "value",
+    "index": 5,
+    "killed_by": "L1_validation_cases",
+    "lineno": 159,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "rail == 'napas'",
+    "detail": "6 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'miss_create_transfer', 'miss_get_transfer_fee']",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 6,
+    "killed_by": "L1_validation_cases",
+    "lineno": 162,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "int(acc['balance_vnd']) < amount + fee",
+    "edit": "Lt -> LtE",
+    "family": "value",
+    "index": 7,
+    "killed_by": "survived",
+    "lineno": 315,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "int(acc['balance_vnd']) - amount - fee",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "Sub -> Add",
+    "family": "value",
+    "index": 8,
+    "killed_by": "L2_expected_traces",
+    "lineno": 326,
+    "note": "observable, but no shipped check caught it",
+    "operator": "swap_arithmetic"
+  },
+  {
+    "before": "reason not in ('goods_not_received', 'duplicate_charge', 'unauthorized', 'amount_mismatch')",
+    "detail": "3 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'miss_create_dispute', 'success_create_dispute']",
+    "edit": "NotIn -> In",
+    "family": "value",
+    "index": 9,
+    "killed_by": "L1_validation_cases",
+    "lineno": 413,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "0",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 10,
+    "killed_by": "L2_expected_traces",
+    "lineno": 51,
+    "note": "observable, but no shipped check caught it",
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "0",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 11,
+    "killed_by": "L2_expected_traces",
+    "lineno": 51,
+    "note": "observable, but no shipped check caught it",
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "0",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 12,
+    "killed_by": "L2_expected_traces",
+    "lineno": 51,
+    "note": "observable, but no shipped check caught it",
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "row.get(key) == value",
+    "detail": "9 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch', 'state_changed']: ['miss_create_dispute', 'miss_create_transfer', 'miss_get_account_balance']",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 13,
+    "killed_by": "L1_validation_cases",
+    "lineno": 134,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "i == len(tiers) - 1",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 14,
+    "killed_by": "survived",
+    "lineno": 145,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "5",
+    "edit": "5 -> 6",
+    "family": "value",
+    "index": 15,
+    "killed_by": "survived",
+    "lineno": 244,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "limit < 1",
+    "edit": "Lt -> LtE",
+    "family": "value",
+    "index": 16,
+    "killed_by": "survived",
+    "lineno": 245,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "status not in ('pending', 'succeeded', 'failed', 'reversed')",
+    "edit": "NotIn -> In",
+    "family": "value",
+    "index": 17,
+    "killed_by": "survived",
+    "lineno": 248,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "amount <= 0",
+    "edit": "LtE -> Lt",
+    "family": "value",
+    "index": 18,
+    "killed_by": "survived",
+    "lineno": 265,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "amount <= 0",
+    "edit": "LtE -> Lt",
+    "family": "value",
+    "index": 19,
+    "killed_by": "survived",
+    "lineno": 293,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "False",
+    "edit": "False -> True",
+    "family": "value",
+    "index": 20,
+    "killed_by": "survived",
+    "lineno": 299,
+    "operator": "negate_bool_literal"
+  },
+  {
+    "before": "amount + fee",
+    "detail": "1 cases ['result_field_mismatch', 'state_changed']: ['rejected_insufficient_funds_fee_gap']",
+    "edit": "Add -> Sub",
+    "family": "value",
+    "index": 21,
+    "killed_by": "L1_validation_cases",
+    "lineno": 315,
+    "operator": "swap_arithmetic"
+  },
+  {
+    "before": "int(acc['balance_vnd']) - amount",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "Sub -> Add",
+    "family": "value",
+    "index": 22,
+    "killed_by": "L2_expected_traces",
+    "lineno": 326,
+    "note": "observable, but no shipped check caught it",
+    "operator": "swap_arithmetic"
+  },
+  {
+    "before": "amount + fee",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "Add -> Sub",
+    "family": "value",
+    "index": 23,
+    "killed_by": "L2_expected_traces",
+    "lineno": 346,
+    "note": "observable, but no shipped check caught it",
+    "operator": "swap_arithmetic"
+  },
+  {
+    "before": "False",
+    "edit": "False -> True",
+    "family": "value",
+    "index": 24,
+    "killed_by": "survived",
+    "lineno": 415,
+    "operator": "negate_bool_literal"
+  },
+  {
+    "before": "txn.get('status') != 'succeeded'",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'success_create_dispute']",
+    "edit": "NotEq -> Eq",
+    "family": "value",
+    "index": 25,
+    "killed_by": "L1_validation_cases",
+    "lineno": 435,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "txn.get('direction') != 'debit'",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'success_create_dispute']",
+    "edit": "NotEq -> Eq",
+    "family": "value",
+    "index": 26,
+    "killed_by": "L1_validation_cases",
+    "lineno": 435,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "t.get('rail') == rail",
+    "detail": "1 cases ['result_field_mismatch', 'state_changed']: ['rejected_insufficient_funds_fee_gap']",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 27,
+    "killed_by": "L1_validation_cases",
+    "lineno": 140,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "len(tiers) - 1",
+    "edit": "Sub -> Add",
+    "family": "value",
+    "index": 28,
+    "killed_by": "survived",
+    "lineno": 145,
+    "operator": "swap_arithmetic"
+  },
+  {
+    "before": "amount_vnd >= lo",
+    "edit": "GtE -> Gt",
+    "family": "value",
+    "index": 29,
+    "killed_by": "survived",
+    "lineno": 147,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "1",
+    "edit": "1 -> 2",
+    "family": "value",
+    "index": 30,
+    "killed_by": "survived",
+    "lineno": 245,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "t.get('account_id') == account_id",
+    "detail": "1 tasks: ['banking_vn__bn_latest_txn_status_dependent__917c32341851132a']",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 31,
+    "killed_by": "L3_assertions",
+    "lineno": 250,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "True",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_list_recent_single__b95fa002ebc011cf', 'banking_vn__bn_latest_txn_status_dependent__917c32341851132a', 'banking_vn__bn_list_recent_single__339849ef340b410f']",
+    "edit": "True -> False",
+    "family": "value",
+    "index": 32,
+    "killed_by": "L2_expected_traces",
+    "lineno": 253,
+    "note": "observable, but no shipped check caught it",
+    "operator": "negate_bool_literal"
+  },
+  {
+    "before": "0",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 33,
+    "killed_by": "survived",
+    "lineno": 265,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "0",
+    "edit": "0 -> 1",
+    "family": "value",
+    "index": 34,
+    "killed_by": "survived",
+    "lineno": 293,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "d.get('transaction_id') == txn_id",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'success_create_dispute']",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 35,
+    "killed_by": "L1_validation_cases",
+    "lineno": 426,
+    "operator": "flip_comparison"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "d.get('status') in openish",
+    "detail": "1 tasks: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef']",
+    "edit": "In -> NotIn",
+    "family": "value",
+    "index": 36,
+    "killed_by": "L3_assertions",
+    "lineno": 426,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "900000 + n",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "Add -> Sub",
+    "family": "value",
+    "index": 37,
+    "killed_by": "L2_expected_traces",
+    "lineno": 91,
+    "note": "observable, but no shipped check caught it",
+    "operator": "swap_arithmetic"
+  },
+  {
+    "before": "1",
+    "edit": "1 -> 2",
+    "family": "value",
+    "index": 38,
+    "killed_by": "survived",
+    "lineno": 145,
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "lo <= amount_vnd <= int(hi)",
+    "edit": "LtE -> Lt",
+    "family": "value",
+    "index": 39,
+    "killed_by": "survived",
+    "lineno": 150,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "lo <= amount_vnd <= int(hi)",
+    "edit": "LtE -> Lt",
+    "family": "value",
+    "index": 40,
+    "killed_by": "survived",
+    "lineno": 150,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "lo <= amount_vnd < int(hi)",
+    "edit": "LtE -> Lt",
+    "family": "value",
+    "index": 41,
+    "killed_by": "survived",
+    "lineno": 152,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "lo <= amount_vnd < int(hi)",
+    "edit": "Lt -> LtE",
+    "family": "value",
+    "index": 42,
+    "killed_by": "survived",
+    "lineno": 152,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "t.get('status') == status",
+    "edit": "Eq -> NotEq",
+    "family": "value",
+    "index": 43,
+    "killed_by": "survived",
+    "lineno": 252,
+    "operator": "flip_comparison"
+  },
+  {
+    "before": "900000",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "900000 -> 900001",
+    "family": "value",
+    "index": 44,
+    "killed_by": "L2_expected_traces",
+    "lineno": 91,
+    "note": "observable, but no shipped check caught it",
+    "operator": "perturb_int_literal"
+  },
+  {
+    "before": "if fn is None:\n    return _err('invalid_argument', field='name', message=f'unknown tool {name!r}')",
+    "edit": "remove guard: fn is None",
+    "family": "guard",
+    "index": 45,
+    "killed_by": "survived",
+    "lineno": 73,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if fn is None:\n    return _err('invalid_argument', field='name', message=f'unknown tool {name!r}')",
+    "detail": "21 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: fn is None",
+    "family": "guard",
+    "index": 46,
+    "killed_by": "L1_validation_cases",
+    "lineno": 73,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "_COUNTERS[kind] += 1",
+    "detail": "6 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "remove: _COUNTERS[kind] += 1",
+    "family": "state",
+    "index": 47,
+    "killed_by": "L2_expected_traces",
+    "lineno": 88,
+    "note": "observable, but no shipped check caught it",
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "if not isinstance(value, str) or not value:\n    return _err('invalid_argument', entity=entity, field=field, message=f'{field} must be a non-empty string')",
+    "edit": "remove guard: not isinstance(value, str) or not value",
+    "family": "guard",
+    "index": 48,
+    "killed_by": "survived",
+    "lineno": 114,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not isinstance(value, str) or not value:\n    return _err('invalid_argument', entity=entity, field=field, message=f'{field} must be a non-empty string')",
+    "detail": "21 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: not isinstance(value, str) or not value",
+    "family": "guard",
+    "index": 49,
+    "killed_by": "L1_validation_cases",
+    "lineno": 114,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if not value.startswith(prefix):\n    return _err('invalid_argument', entity=entity, id=value, field=field, message=f'{field} must start with {prefix}')",
+    "edit": "remove guard: not value.startswith(prefix)",
+    "family": "guard",
+    "index": 50,
+    "killed_by": "survived",
+    "lineno": 121,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not value.startswith(prefix):\n    return _err('invalid_argument', entity=entity, id=value, field=field, message=f'{field} must start with {prefix}')",
+    "detail": "15 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'miss_create_dispute', 'miss_get_account_balance']",
+    "edit": "invert guard: not value.startswith(prefix)",
+    "family": "guard",
+    "index": 51,
+    "killed_by": "L1_validation_cases",
+    "lineno": 121,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if rail not in ('napas', 'internal'):\n    return _err('invalid_argument', field='rail', message='rail must be napas or internal')",
+    "edit": "remove guard: rail not in ('napas', 'internal')",
+    "family": "guard",
+    "index": 52,
+    "killed_by": "survived",
+    "lineno": 159,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if rail not in ('napas', 'internal'):\n    return _err('invalid_argument', field='rail', message='rail must be napas or internal')",
+    "detail": "6 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'miss_create_transfer', 'miss_get_transfer_fee']",
+    "edit": "invert guard: rail not in ('napas', 'internal')",
+    "family": "guard",
+    "index": 53,
+    "killed_by": "L1_validation_cases",
+    "lineno": 159,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if bank is not None:\n    return _err('invalid_argument', field='to_bank_code', message='to_bank_code must be absent for internal')",
+    "edit": "remove guard: bank is not None",
+    "family": "guard",
+    "index": 54,
+    "killed_by": "survived",
+    "lineno": 168,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if bank is not None:\n    return _err('invalid_argument', field='to_bank_code', message='to_bank_code must be absent for internal')",
+    "edit": "invert guard: bank is not None",
+    "family": "guard",
+    "index": 55,
+    "killed_by": "survived",
+    "lineno": 168,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if acc is None:\n    return _err('not_found', entity='accounts', id=account_id, field='account_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "remove guard: acc is None",
+    "family": "guard",
+    "index": 56,
+    "killed_by": "L1_validation_cases",
+    "lineno": 196,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if acc is None:\n    return _err('not_found', entity='accounts', id=account_id, field='account_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: acc is None",
+    "family": "guard",
+    "index": 57,
+    "killed_by": "L1_validation_cases",
+    "lineno": 196,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if card is None:\n    return _err('not_found', entity='cards', id=card_id, field='card_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "remove guard: card is None",
+    "family": "guard",
+    "index": 58,
+    "killed_by": "L1_validation_cases",
+    "lineno": 214,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if card is None:\n    return _err('not_found', entity='cards', id=card_id, field='card_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: card is None",
+    "family": "guard",
+    "index": 59,
+    "killed_by": "L1_validation_cases",
+    "lineno": 214,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if txn is None:\n    return _err('not_found', entity='transactions', id=txn_id, field='transaction_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "remove guard: txn is None",
+    "family": "guard",
+    "index": 60,
+    "killed_by": "L1_validation_cases",
+    "lineno": 232,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if txn is None:\n    return _err('not_found', entity='transactions', id=txn_id, field='transaction_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: txn is None",
+    "family": "guard",
+    "index": 61,
+    "killed_by": "L1_validation_cases",
+    "lineno": 232,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if not isinstance(limit, int) or limit < 1:\n    return _err('invalid_argument', field='limit', message='limit must be a positive integer')",
+    "edit": "remove guard: not isinstance(limit, int) or limit < 1",
+    "family": "guard",
+    "index": 62,
+    "killed_by": "survived",
+    "lineno": 245,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not isinstance(limit, int) or limit < 1:\n    return _err('invalid_argument', field='limit', message='limit must be a positive integer')",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['miss_list_recent_transactions', 'success_list_recent_transactions']",
+    "edit": "invert guard: not isinstance(limit, int) or limit < 1",
+    "family": "guard",
+    "index": 63,
+    "killed_by": "L1_validation_cases",
+    "lineno": 245,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if status is not None and status not in ('pending', 'succeeded', 'failed', 'reversed'):\n    return _err('invalid_argument', field='status', message='invalid sta",
+    "edit": "remove guard: status is not None and status not in ('pending', 'succeeded', 'failed', 'reversed')",
+    "family": "guard",
+    "index": 64,
+    "killed_by": "survived",
+    "lineno": 248,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if status is not None and status not in ('pending', 'succeeded', 'failed', 'reversed'):\n    return _err('invalid_argument', field='status', message='invalid sta",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['miss_list_recent_transactions', 'success_list_recent_transactions']",
+    "edit": "invert guard: status is not None and status not in ('pending', 'succeeded', 'failed', 'reversed')",
+    "family": "guard",
+    "index": 65,
+    "killed_by": "L1_validation_cases",
+    "lineno": 248,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if not isinstance(amount, int) or amount <= 0:\n    return _err('invalid_argument', field='amount_vnd', message='amount_vnd must be a positive integer')",
+    "edit": "remove guard: not isinstance(amount, int) or amount <= 0",
+    "family": "guard",
+    "index": 66,
+    "killed_by": "survived",
+    "lineno": 265,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not isinstance(amount, int) or amount <= 0:\n    return _err('invalid_argument', field='amount_vnd', message='amount_vnd must be a positive integer')",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['miss_get_transfer_fee', 'success_get_transfer_fee']",
+    "edit": "invert guard: not isinstance(amount, int) or amount <= 0",
+    "family": "guard",
+    "index": 67,
+    "killed_by": "L1_validation_cases",
+    "lineno": 265,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if _find('accounts', 'account_id', from_id) is None:\n    return _err('not_found', entity='accounts', id=from_id, field='from_account_id')",
+    "detail": "1 cases ['error_code_mismatch', 'result_class_mismatch']: ['miss_get_transfer_fee']",
+    "edit": "remove guard: _find('accounts', 'account_id', from_id) is None",
+    "family": "guard",
+    "index": 68,
+    "killed_by": "L1_validation_cases",
+    "lineno": 271,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if _find('accounts', 'account_id', from_id) is None:\n    return _err('not_found', entity='accounts', id=from_id, field='from_account_id')",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['miss_get_transfer_fee', 'success_get_transfer_fee']",
+    "edit": "invert guard: _find('accounts', 'account_id', from_id) is None",
+    "family": "guard",
+    "index": 69,
+    "killed_by": "L1_validation_cases",
+    "lineno": 271,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if tier is None:\n    return _err('invalid_argument', field='amount_vnd', message='no fee tier for amount')",
+    "edit": "remove guard: tier is None",
+    "family": "guard",
+    "index": 70,
+    "killed_by": "survived",
+    "lineno": 274,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if tier is None:\n    return _err('invalid_argument', field='amount_vnd', message='no fee tier for amount')",
+    "detail": "1 cases ['error_code_mismatch', 'result_class_mismatch']: ['success_get_transfer_fee']",
+    "edit": "invert guard: tier is None",
+    "family": "guard",
+    "index": 71,
+    "killed_by": "L1_validation_cases",
+    "lineno": 274,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if not isinstance(amount, int) or amount <= 0:\n    return _err('invalid_argument', field='amount_vnd', message='amount_vnd must be a positive integer')",
+    "edit": "remove guard: not isinstance(amount, int) or amount <= 0",
+    "family": "guard",
+    "index": 72,
+    "killed_by": "survived",
+    "lineno": 293,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not isinstance(amount, int) or amount <= 0:\n    return _err('invalid_argument', field='amount_vnd', message='amount_vnd must be a positive integer')",
+    "detail": "4 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'miss_create_transfer', 'rejected_insufficient_funds_fee_gap']",
+    "edit": "invert guard: not isinstance(amount, int) or amount <= 0",
+    "family": "guard",
+    "index": 73,
+    "killed_by": "L1_validation_cases",
+    "lineno": 293,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if not isinstance(confirm, bool):\n    return _err('invalid_argument', field='confirm', message='confirm must be a boolean')",
+    "detail": "1 cases ['error_code_mismatch', 'result_class_mismatch']: ['wrong_type_confirm_create_transfer']",
+    "edit": "remove guard: not isinstance(confirm, bool)",
+    "family": "guard",
+    "index": 74,
+    "killed_by": "L1_validation_cases",
+    "lineno": 300,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not isinstance(confirm, bool):\n    return _err('invalid_argument', field='confirm', message='confirm must be a boolean')",
+    "detail": "5 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'miss_create_transfer', 'rejected_insufficient_funds_fee_gap']",
+    "edit": "invert guard: not isinstance(confirm, bool)",
+    "family": "guard",
+    "index": 75,
+    "killed_by": "L1_validation_cases",
+    "lineno": 300,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if acc is None:\n    return _err('not_found', entity='accounts', id=from_id, field='from_account_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "remove guard: acc is None",
+    "family": "guard",
+    "index": 76,
+    "killed_by": "L1_validation_cases",
+    "lineno": 305,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if acc is None:\n    return _err('not_found', entity='accounts', id=from_id, field='from_account_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: acc is None",
+    "family": "guard",
+    "index": 77,
+    "killed_by": "L1_validation_cases",
+    "lineno": 305,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if tier is None:\n    return _err('invalid_argument', field='amount_vnd', message='no fee tier for amount')",
+    "edit": "remove guard: tier is None",
+    "family": "guard",
+    "index": 78,
+    "killed_by": "survived",
+    "lineno": 308,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if tier is None:\n    return _err('invalid_argument', field='amount_vnd', message='no fee tier for amount')",
+    "detail": "3 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'rejected_insufficient_funds_fee_gap', 'success_create_transfer']",
+    "edit": "invert guard: tier is None",
+    "family": "guard",
+    "index": 79,
+    "killed_by": "L1_validation_cases",
+    "lineno": 308,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "acc['balance_vnd'] = int(acc['balance_vnd']) - amount - fee",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "remove: acc['balance_vnd'] = int(acc['balance_vnd']) - amount - fee",
+    "family": "state",
+    "index": 80,
+    "killed_by": "L2_expected_traces",
+    "lineno": 326,
+    "note": "observable, but no shipped check caught it",
+    "operator": "delete_state_write"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "_STATE.setdefault('transfers', []).append(transfer_row)",
+    "detail": "3 tasks: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e']",
+    "edit": "remove: _STATE.setdefault('transfers', []).append(transfer_row)",
+    "family": "state",
+    "index": 81,
+    "killed_by": "L3_assertions",
+    "lineno": 341,
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "_STATE.setdefault('transactions', []).append(txn_row)",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "remove: _STATE.setdefault('transactions', []).append(txn_row)",
+    "family": "state",
+    "index": 82,
+    "killed_by": "L2_expected_traces",
+    "lineno": 354,
+    "note": "observable, but no shipped check caught it",
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "if row is None:\n    return _err('not_found', entity='vietqr_payments', id=ref, field='payment_ref')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "remove guard: row is None",
+    "family": "guard",
+    "index": 83,
+    "killed_by": "L1_validation_cases",
+    "lineno": 373,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if row is None:\n    return _err('not_found', entity='vietqr_payments', id=ref, field='payment_ref')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: row is None",
+    "family": "guard",
+    "index": 84,
+    "killed_by": "L1_validation_cases",
+    "lineno": 373,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if row is None:\n    return _err('not_found', entity='disputes', id=dispute_id, field='dispute_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "remove guard: row is None",
+    "family": "guard",
+    "index": 85,
+    "killed_by": "L1_validation_cases",
+    "lineno": 394,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if row is None:\n    return _err('not_found', entity='disputes', id=dispute_id, field='dispute_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: row is None",
+    "family": "guard",
+    "index": 86,
+    "killed_by": "L1_validation_cases",
+    "lineno": 394,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if reason not in ('goods_not_received', 'duplicate_charge', 'unauthorized', 'amount_mismatch'):\n    return _err('invalid_argument', field='reason', message='inv",
+    "edit": "remove guard: reason not in ('goods_not_received', 'duplicate_charge', 'unauthorized', 'amount_mismatch')",
+    "family": "guard",
+    "index": 87,
+    "killed_by": "survived",
+    "lineno": 413,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if reason not in ('goods_not_received', 'duplicate_charge', 'unauthorized', 'amount_mismatch'):\n    return _err('invalid_argument', field='reason', message='inv",
+    "detail": "3 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'miss_create_dispute', 'success_create_dispute']",
+    "edit": "invert guard: reason not in ('goods_not_received', 'duplicate_charge', 'unauthorized', 'amount_mismatch')",
+    "family": "guard",
+    "index": 88,
+    "killed_by": "L1_validation_cases",
+    "lineno": 413,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if not isinstance(confirm, bool):\n    return _err('invalid_argument', field='confirm', message='confirm must be a boolean')",
+    "detail": "1 cases ['error_code_mismatch', 'result_class_mismatch']: ['wrong_type_confirm_create_dispute']",
+    "edit": "remove guard: not isinstance(confirm, bool)",
+    "family": "guard",
+    "index": 89,
+    "killed_by": "L1_validation_cases",
+    "lineno": 416,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not isinstance(confirm, bool):\n    return _err('invalid_argument', field='confirm', message='confirm must be a boolean')",
+    "detail": "4 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'miss_create_dispute', 'success_create_dispute']",
+    "edit": "invert guard: not isinstance(confirm, bool)",
+    "family": "guard",
+    "index": 90,
+    "killed_by": "L1_validation_cases",
+    "lineno": 416,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if txn is None:\n    return _err('not_found', entity='transactions', id=txn_id, field='transaction_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "remove guard: txn is None",
+    "family": "guard",
+    "index": 91,
+    "killed_by": "L1_validation_cases",
+    "lineno": 421,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if txn is None:\n    return _err('not_found', entity='transactions', id=txn_id, field='transaction_id')",
+    "detail": "23 cases ['episode_error']: ['confirm_false_create_dispute', 'confirm_false_create_transfer', 'miss_create_dispute']",
+    "edit": "invert guard: txn is None",
+    "family": "guard",
+    "index": 92,
+    "killed_by": "L1_validation_cases",
+    "lineno": 421,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if txn.get('status') != 'succeeded' or txn.get('direction') != 'debit':\n    return _err('not_disputable', entity='transactions', id=txn_id, field='transaction_i",
+    "edit": "remove guard: txn.get('status') != 'succeeded' or txn.get('direction') != 'debit'",
+    "family": "guard",
+    "index": 93,
+    "killed_by": "survived",
+    "lineno": 435,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if txn.get('status') != 'succeeded' or txn.get('direction') != 'debit':\n    return _err('not_disputable', entity='transactions', id=txn_id, field='transaction_i",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'success_create_dispute']",
+    "edit": "invert guard: txn.get('status') != 'succeeded' or txn.get('direction') != 'debit'",
+    "family": "guard",
+    "index": 94,
+    "killed_by": "L1_validation_cases",
+    "lineno": 435,
+    "operator": "invert_guard"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "_STATE.setdefault('disputes', []).append(row)",
+    "detail": "3 tasks: ['banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+    "edit": "remove: _STATE.setdefault('disputes', []).append(row)",
+    "family": "state",
+    "index": 95,
+    "killed_by": "L3_assertions",
+    "lineno": 458,
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "err['message'] = message",
+    "edit": "remove: err['message'] = message",
+    "family": "state",
+    "index": 96,
+    "killed_by": "survived",
+    "lineno": 106,
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "err['detail'] = detail",
+    "edit": "remove: err['detail'] = detail",
+    "family": "state",
+    "index": 97,
+    "killed_by": "survived",
+    "lineno": 108,
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "if bank is None:\n    return _err('invalid_argument', field='to_bank_code', message='to_bank_code required for napas')",
+    "edit": "remove guard: bank is None",
+    "family": "guard",
+    "index": 98,
+    "killed_by": "survived",
+    "lineno": 163,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if bank is None:\n    return _err('invalid_argument', field='to_bank_code', message='to_bank_code required for napas')",
+    "detail": "6 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'miss_create_transfer', 'miss_get_transfer_fee']",
+    "edit": "invert guard: bank is None",
+    "family": "guard",
+    "index": 99,
+    "killed_by": "L1_validation_cases",
+    "lineno": 163,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "if not isinstance(bank, str) or not _BANK_CODE_RE.fullmatch(bank):\n    return _err('invalid_argument', field='to_bank_code', message='to_bank_code must be 6 dig",
+    "edit": "remove guard: not isinstance(bank, str) or not _BANK_CODE_RE.fullmatch(bank)",
+    "family": "guard",
+    "index": 100,
+    "killed_by": "survived",
+    "lineno": 165,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if not isinstance(bank, str) or not _BANK_CODE_RE.fullmatch(bank):\n    return _err('invalid_argument', field='to_bank_code', message='to_bank_code must be 6 dig",
+    "detail": "6 cases ['error_code_mismatch', 'result_class_mismatch', 'result_field_mismatch']: ['confirm_false_create_transfer', 'miss_create_transfer', 'miss_get_transfer_fee']",
+    "edit": "invert guard: not isinstance(bank, str) or not _BANK_CODE_RE.fullmatch(bank)",
+    "family": "guard",
+    "index": 101,
+    "killed_by": "L1_validation_cases",
+    "lineno": 165,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "out['counterparty_name'] = row['counterparty_name']",
+    "detail": "5 tasks differ from baseline: ['banking_vn__bn_txn_status_single__e52b021ffb45d5a9', 'banking_vn__bn_list_recent_single__b95fa002ebc011cf', 'banking_vn__bn_latest_txn_status_dependent__917c32341851132a']",
+    "edit": "remove: out['counterparty_name'] = row['counterparty_name']",
+    "family": "state",
+    "index": 102,
+    "killed_by": "L2_expected_traces",
+    "lineno": 184,
+    "note": "observable, but no shipped check caught it",
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "transfer_row['to_bank_code'] = bank",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "remove: transfer_row['to_bank_code'] = bank",
+    "family": "state",
+    "index": 103,
+    "killed_by": "L2_expected_traces",
+    "lineno": 338,
+    "note": "observable, but no shipped check caught it",
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "transfer_row['memo'] = memo",
+    "edit": "remove: transfer_row['memo'] = memo",
+    "family": "state",
+    "index": 104,
+    "killed_by": "survived",
+    "lineno": 340,
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "txn_row['memo'] = memo",
+    "edit": "remove: txn_row['memo'] = memo",
+    "family": "state",
+    "index": 105,
+    "killed_by": "survived",
+    "lineno": 353,
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "out['transaction_id'] = row['transaction_id']",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_vietqr_status_single__ecf3adfd0029b829', 'banking_vn__bn_vietqr_status_single__9fa5ae9720b3299e']",
+    "edit": "remove: out['transaction_id'] = row['transaction_id']",
+    "family": "state",
+    "index": 106,
+    "killed_by": "L2_expected_traces",
+    "lineno": 382,
+    "note": "observable, but no shipped check caught it",
+    "operator": "delete_state_write"
+  },
+  {
+    "before": "if d.get('transaction_id') == txn_id and d.get('status') in openish:\n    return _err('already_disputed', entity='disputes', id=txn_id, field='transaction_id', m",
+    "edit": "remove guard: d.get('transaction_id') == txn_id and d.get('status') in openish",
+    "family": "guard",
+    "index": 107,
+    "killed_by": "survived",
+    "lineno": 426,
+    "operator": "delete_guard"
+  },
+  {
+    "before": "if d.get('transaction_id') == txn_id and d.get('status') in openish:\n    return _err('already_disputed', entity='disputes', id=txn_id, field='transaction_id', m",
+    "detail": "2 cases ['error_code_mismatch', 'result_class_mismatch']: ['confirm_false_create_dispute', 'success_create_dispute']",
+    "edit": "invert guard: d.get('transaction_id') == txn_id and d.get('status') in openish",
+    "family": "guard",
+    "index": 108,
+    "killed_by": "L1_validation_cases",
+    "lineno": 426,
+    "operator": "invert_guard"
+  },
+  {
+    "before": "row['note'] = note",
+    "edit": "remove: row['note'] = note",
+    "family": "state",
+    "index": 109,
+    "killed_by": "survived",
+    "lineno": 457,
+    "operator": "delete_state_write"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "return {'account_id': acc['account_id'], 'balance_vnd': acc['balance_vnd'], 'currency': 'VND', 'account_type': acc['account_type']}",
+    "detail": "4 tasks: ['banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7', 'banking_vn__bn_balance_single__5425bff786adbd17', 'banking_vn__bn_balance_single__e662949227517360']",
+    "edit": "drop key 'account_id' from result",
+    "family": "contract",
+    "index": 110,
+    "killed_by": "L3_assertions",
+    "lineno": 198,
+    "operator": "drop_result_key"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "return {'account_id': acc['account_id'], 'balance_vnd': acc['balance_vnd'], 'currency': 'VND', 'account_type': acc['account_type']}",
+    "detail": "4 tasks: ['banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7', 'banking_vn__bn_balance_single__5425bff786adbd17', 'banking_vn__bn_balance_single__e662949227517360']",
+    "edit": "drop key 'balance_vnd' from result",
+    "family": "contract",
+    "index": 111,
+    "killed_by": "L3_assertions",
+    "lineno": 198,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'account_id': acc['account_id'], 'balance_vnd': acc['balance_vnd'], 'currency': 'VND', 'account_type': acc['account_type']}",
+    "detail": "4 tasks differ from baseline: ['banking_vn__bn_balance_single__5425bff786adbd17', 'banking_vn__bn_balance_withheld_account__0f34f3476873fef5', 'banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7']",
+    "edit": "drop key 'currency' from result",
+    "family": "contract",
+    "index": 112,
+    "killed_by": "L2_expected_traces",
+    "lineno": 198,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'account_id': acc['account_id'], 'balance_vnd': acc['balance_vnd'], 'currency': 'VND', 'account_type': acc['account_type']}",
+    "detail": "4 tasks differ from baseline: ['banking_vn__bn_balance_single__5425bff786adbd17', 'banking_vn__bn_balance_withheld_account__0f34f3476873fef5', 'banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7']",
+    "edit": "drop key 'account_type' from result",
+    "family": "contract",
+    "index": 113,
+    "killed_by": "L2_expected_traces",
+    "lineno": 198,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "return {'card_id': card['card_id'], 'account_id': card['account_id'], 'remaining_limit_vnd': card['remaining_limit_vnd'], 'currency': 'VND'}",
+    "detail": "2 tasks: ['banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7', 'banking_vn__bn_card_limit_single__eb3437ed113fa3a3']",
+    "edit": "drop key 'card_id' from result",
+    "family": "contract",
+    "index": 114,
+    "killed_by": "L3_assertions",
+    "lineno": 216,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'card_id': card['card_id'], 'account_id': card['account_id'], 'remaining_limit_vnd': card['remaining_limit_vnd'], 'currency': 'VND'}",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_card_limit_single__eb3437ed113fa3a3', 'banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7']",
+    "edit": "drop key 'account_id' from result",
+    "family": "contract",
+    "index": 115,
+    "killed_by": "L2_expected_traces",
+    "lineno": 216,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'card_id': card['card_id'], 'account_id': card['account_id'], 'remaining_limit_vnd': card['remaining_limit_vnd'], 'currency': 'VND'}",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_card_limit_single__eb3437ed113fa3a3', 'banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7']",
+    "edit": "drop key 'remaining_limit_vnd' from result",
+    "family": "contract",
+    "index": 116,
+    "killed_by": "L2_expected_traces",
+    "lineno": 216,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'card_id': card['card_id'], 'account_id': card['account_id'], 'remaining_limit_vnd': card['remaining_limit_vnd'], 'currency': 'VND'}",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_card_limit_single__eb3437ed113fa3a3', 'banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7']",
+    "edit": "drop key 'currency' from result",
+    "family": "contract",
+    "index": 117,
+    "killed_by": "L2_expected_traces",
+    "lineno": 216,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "return {'account_id': account_id, 'transactions': [_txn_view(t) for t in rows[:limit]]}",
+    "detail": "2 tasks: ['banking_vn__bn_list_recent_single__339849ef340b410f', 'banking_vn__bn_list_recent_single__b95fa002ebc011cf']",
+    "edit": "drop key 'account_id' from result",
+    "family": "contract",
+    "index": 118,
+    "killed_by": "L3_assertions",
+    "lineno": 254,
+    "operator": "drop_result_key"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "return {'account_id': account_id, 'transactions': [_txn_view(t) for t in rows[:limit]]}",
+    "detail": "3 tasks: ['banking_vn__bn_latest_txn_status_dependent__917c32341851132a', 'banking_vn__bn_list_recent_single__339849ef340b410f', 'banking_vn__bn_list_recent_single__b95fa002ebc011cf']",
+    "edit": "drop key 'transactions' from result",
+    "family": "contract",
+    "index": 119,
+    "killed_by": "L3_assertions",
+    "lineno": 254,
+    "operator": "drop_result_key"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "return {'fee_vnd': tier['fee_vnd'], 'currency': 'VND', 'eta_hint': tier['eta_hint'], 'rail': rail, 'amount_vnd': amount}",
+    "detail": "2 tasks: ['banking_vn__bn_transfer_fee_single__534fd939df140016', 'banking_vn__bn_transfer_fee_single__ef6282b04fde71fa']",
+    "edit": "drop key 'fee_vnd' from result",
+    "family": "contract",
+    "index": 120,
+    "killed_by": "L3_assertions",
+    "lineno": 276,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'fee_vnd': tier['fee_vnd'], 'currency': 'VND', 'eta_hint': tier['eta_hint'], 'rail': rail, 'amount_vnd': amount}",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_transfer_fee_single__ef6282b04fde71fa', 'banking_vn__bn_transfer_fee_single__534fd939df140016']",
+    "edit": "drop key 'currency' from result",
+    "family": "contract",
+    "index": 121,
+    "killed_by": "L2_expected_traces",
+    "lineno": 276,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'fee_vnd': tier['fee_vnd'], 'currency': 'VND', 'eta_hint': tier['eta_hint'], 'rail': rail, 'amount_vnd': amount}",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_transfer_fee_single__ef6282b04fde71fa', 'banking_vn__bn_transfer_fee_single__534fd939df140016']",
+    "edit": "drop key 'eta_hint' from result",
+    "family": "contract",
+    "index": 122,
+    "killed_by": "L2_expected_traces",
+    "lineno": 276,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'fee_vnd': tier['fee_vnd'], 'currency': 'VND', 'eta_hint': tier['eta_hint'], 'rail': rail, 'amount_vnd': amount}",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_transfer_fee_single__ef6282b04fde71fa', 'banking_vn__bn_transfer_fee_single__534fd939df140016']",
+    "edit": "drop key 'rail' from result",
+    "family": "contract",
+    "index": 123,
+    "killed_by": "L2_expected_traces",
+    "lineno": 276,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'fee_vnd': tier['fee_vnd'], 'currency': 'VND', 'eta_hint': tier['eta_hint'], 'rail': rail, 'amount_vnd': amount}",
+    "detail": "2 tasks differ from baseline: ['banking_vn__bn_transfer_fee_single__ef6282b04fde71fa', 'banking_vn__bn_transfer_fee_single__534fd939df140016']",
+    "edit": "drop key 'amount_vnd' from result",
+    "family": "contract",
+    "index": 124,
+    "killed_by": "L2_expected_traces",
+    "lineno": 276,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'succeeded', 'transfer_id': transfer_id, 'transaction_id': transaction_id, 'amount_vnd': amount, 'fee_vnd': fee, 'rail': rail}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "drop key 'status' from result",
+    "family": "contract",
+    "index": 125,
+    "killed_by": "L2_expected_traces",
+    "lineno": 355,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'succeeded', 'transfer_id': transfer_id, 'transaction_id': transaction_id, 'amount_vnd': amount, 'fee_vnd': fee, 'rail': rail}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "drop key 'transfer_id' from result",
+    "family": "contract",
+    "index": 126,
+    "killed_by": "L2_expected_traces",
+    "lineno": 355,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'succeeded', 'transfer_id': transfer_id, 'transaction_id': transaction_id, 'amount_vnd': amount, 'fee_vnd': fee, 'rail': rail}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "drop key 'transaction_id' from result",
+    "family": "contract",
+    "index": 127,
+    "killed_by": "L2_expected_traces",
+    "lineno": 355,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'succeeded', 'transfer_id': transfer_id, 'transaction_id': transaction_id, 'amount_vnd': amount, 'fee_vnd': fee, 'rail': rail}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "drop key 'amount_vnd' from result",
+    "family": "contract",
+    "index": 128,
+    "killed_by": "L2_expected_traces",
+    "lineno": 355,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'succeeded', 'transfer_id': transfer_id, 'transaction_id': transaction_id, 'amount_vnd': amount, 'fee_vnd': fee, 'rail': rail}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "drop key 'fee_vnd' from result",
+    "family": "contract",
+    "index": 129,
+    "killed_by": "L2_expected_traces",
+    "lineno": 355,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'succeeded', 'transfer_id': transfer_id, 'transaction_id': transaction_id, 'amount_vnd': amount, 'fee_vnd': fee, 'rail': rail}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+    "edit": "drop key 'rail' from result",
+    "family": "contract",
+    "index": 130,
+    "killed_by": "L2_expected_traces",
+    "lineno": 355,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "also_changed_observably": true,
+    "before": "return {'dispute_id': row['dispute_id'], 'transaction_id': row['transaction_id'], 'status': row['status'], 'reason': row['reason'], 'opened_at': row['opened_at'",
+    "detail": "3 tasks: ['banking_vn__bn_dispute_status_single__7f99734bd18a01a8', 'banking_vn__bn_dispute_status_single__b8d6aa4552e94878', 'banking_vn__bn_dispute_status_single__e0d02ed157c586fb']",
+    "edit": "drop key 'dispute_id' from result",
+    "family": "contract",
+    "index": 131,
+    "killed_by": "L3_assertions",
+    "lineno": 396,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'dispute_id': row['dispute_id'], 'transaction_id': row['transaction_id'], 'status': row['status'], 'reason': row['reason'], 'opened_at': row['opened_at'",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_dispute_status_single__7f99734bd18a01a8', 'banking_vn__bn_dispute_status_single__b8d6aa4552e94878', 'banking_vn__bn_dispute_status_single__e0d02ed157c586fb']",
+    "edit": "drop key 'transaction_id' from result",
+    "family": "contract",
+    "index": 132,
+    "killed_by": "L2_expected_traces",
+    "lineno": 396,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'dispute_id': row['dispute_id'], 'transaction_id': row['transaction_id'], 'status': row['status'], 'reason': row['reason'], 'opened_at': row['opened_at'",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_dispute_status_single__7f99734bd18a01a8', 'banking_vn__bn_dispute_status_single__b8d6aa4552e94878', 'banking_vn__bn_dispute_status_single__e0d02ed157c586fb']",
+    "edit": "drop key 'status' from result",
+    "family": "contract",
+    "index": 133,
+    "killed_by": "L2_expected_traces",
+    "lineno": 396,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'dispute_id': row['dispute_id'], 'transaction_id': row['transaction_id'], 'status': row['status'], 'reason': row['reason'], 'opened_at': row['opened_at'",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_dispute_status_single__7f99734bd18a01a8', 'banking_vn__bn_dispute_status_single__b8d6aa4552e94878', 'banking_vn__bn_dispute_status_single__e0d02ed157c586fb']",
+    "edit": "drop key 'reason' from result",
+    "family": "contract",
+    "index": 134,
+    "killed_by": "L2_expected_traces",
+    "lineno": 396,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'dispute_id': row['dispute_id'], 'transaction_id': row['transaction_id'], 'status': row['status'], 'reason': row['reason'], 'opened_at': row['opened_at'",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_dispute_status_single__7f99734bd18a01a8', 'banking_vn__bn_dispute_status_single__b8d6aa4552e94878', 'banking_vn__bn_dispute_status_single__e0d02ed157c586fb']",
+    "edit": "drop key 'opened_at' from result",
+    "family": "contract",
+    "index": 135,
+    "killed_by": "L2_expected_traces",
+    "lineno": 396,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'open', 'dispute_id': dispute_id, 'transaction_id': txn_id, 'reason': reason, 'opened_at': opened_at}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+    "edit": "drop key 'status' from result",
+    "family": "contract",
+    "index": 136,
+    "killed_by": "L2_expected_traces",
+    "lineno": 459,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'open', 'dispute_id': dispute_id, 'transaction_id': txn_id, 'reason': reason, 'opened_at': opened_at}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+    "edit": "drop key 'dispute_id' from result",
+    "family": "contract",
+    "index": 137,
+    "killed_by": "L2_expected_traces",
+    "lineno": 459,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'open', 'dispute_id': dispute_id, 'transaction_id': txn_id, 'reason': reason, 'opened_at': opened_at}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+    "edit": "drop key 'transaction_id' from result",
+    "family": "contract",
+    "index": 138,
+    "killed_by": "L2_expected_traces",
+    "lineno": 459,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'open', 'dispute_id': dispute_id, 'transaction_id': txn_id, 'reason': reason, 'opened_at': opened_at}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+    "edit": "drop key 'reason' from result",
+    "family": "contract",
+    "index": 139,
+    "killed_by": "L2_expected_traces",
+    "lineno": 459,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'open', 'dispute_id': dispute_id, 'transaction_id': txn_id, 'reason': reason, 'opened_at': opened_at}",
+    "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+    "edit": "drop key 'opened_at' from result",
+    "family": "contract",
+    "index": 140,
+    "killed_by": "L2_expected_traces",
+    "lineno": 459,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'awaiting_confirmation', 'transfer_id': None, 'transaction_id': None}",
+    "detail": "1 cases ['result_class_mismatch']: ['confirm_false_create_transfer']",
+    "edit": "drop key 'status' from result",
+    "family": "contract",
+    "index": 141,
+    "killed_by": "L1_validation_cases",
+    "lineno": 313,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'awaiting_confirmation', 'transfer_id': None, 'transaction_id': None}",
+    "edit": "drop key 'transfer_id' from result",
+    "family": "contract",
+    "index": 142,
+    "killed_by": "survived",
+    "lineno": 313,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'awaiting_confirmation', 'transfer_id': None, 'transaction_id': None}",
+    "edit": "drop key 'transaction_id' from result",
+    "family": "contract",
+    "index": 143,
+    "killed_by": "survived",
+    "lineno": 313,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'rejected_insufficient_funds', 'transfer_id': None, 'transaction_id': None, 'amount_vnd': amount, 'fee_vnd': fee}",
+    "detail": "1 cases ['result_field_mismatch']: ['rejected_insufficient_funds_fee_gap']",
+    "edit": "drop key 'status' from result",
+    "family": "contract",
+    "index": 144,
+    "killed_by": "L1_validation_cases",
+    "lineno": 316,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'rejected_insufficient_funds', 'transfer_id': None, 'transaction_id': None, 'amount_vnd': amount, 'fee_vnd': fee}",
+    "detail": "1 tasks differ from baseline: ['banking_vn__bn_transfer_short_of_funds__fd7a78707c222110']",
+    "edit": "drop key 'transfer_id' from result",
+    "family": "contract",
+    "index": 145,
+    "killed_by": "L2_expected_traces",
+    "lineno": 316,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'rejected_insufficient_funds', 'transfer_id': None, 'transaction_id': None, 'amount_vnd': amount, 'fee_vnd': fee}",
+    "detail": "1 tasks differ from baseline: ['banking_vn__bn_transfer_short_of_funds__fd7a78707c222110']",
+    "edit": "drop key 'transaction_id' from result",
+    "family": "contract",
+    "index": 146,
+    "killed_by": "L2_expected_traces",
+    "lineno": 316,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'rejected_insufficient_funds', 'transfer_id': None, 'transaction_id': None, 'amount_vnd': amount, 'fee_vnd': fee}",
+    "detail": "1 tasks differ from baseline: ['banking_vn__bn_transfer_short_of_funds__fd7a78707c222110']",
+    "edit": "drop key 'amount_vnd' from result",
+    "family": "contract",
+    "index": 147,
+    "killed_by": "L2_expected_traces",
+    "lineno": 316,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'rejected_insufficient_funds', 'transfer_id': None, 'transaction_id': None, 'amount_vnd': amount, 'fee_vnd': fee}",
+    "detail": "1 tasks differ from baseline: ['banking_vn__bn_transfer_short_of_funds__fd7a78707c222110']",
+    "edit": "drop key 'fee_vnd' from result",
+    "family": "contract",
+    "index": 148,
+    "killed_by": "L2_expected_traces",
+    "lineno": 316,
+    "note": "observable, but no shipped check caught it",
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'awaiting_confirmation', 'dispute_id': None}",
+    "detail": "1 cases ['result_class_mismatch']: ['confirm_false_create_dispute']",
+    "edit": "drop key 'status' from result",
+    "family": "contract",
+    "index": 149,
+    "killed_by": "L1_validation_cases",
+    "lineno": 445,
+    "operator": "drop_result_key"
+  },
+  {
+    "before": "return {'status': 'awaiting_confirmation', 'dispute_id': None}",
+    "edit": "drop key 'dispute_id' from result",
+    "family": "contract",
+    "index": 150,
+    "killed_by": "survived",
+    "lineno": 445,
+    "operator": "drop_result_key"
+  }
+]

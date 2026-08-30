@@ -1,0 +1,406 @@
+{
+  "arm": "a6",
+  "classes": {
+    "equivalent": "cannot change observable behaviour on any input; unkillable, so not evidence about the pack",
+    "real_gap": "changes observable output on an input the pack DOES supply, and every shipped check still passed",
+    "unreachable": "changes behaviour, but only on an input the pack never supplies; a coverage finding, not a checking one"
+  },
+  "counts": {
+    "equivalent": 3,
+    "real_gap": 4,
+    "severity": {
+      "high": 1,
+      "low": 27,
+      "medium": 17,
+      "none": 3
+    },
+    "unreachable": 41
+  },
+  "verdicts": [
+    {
+      "classification": "equivalent",
+      "index": 0,
+      "lineno": 15,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE with the prior analyst, and I strengthened the proof. I applied the edit (_COUNTERS = {\"TRF\": 1, \"TXN\": 0, \"DSP\": 0}) and diffed full results + final state + assertion verdicts across all 23 validation cases and all 33 reproduced episodes: 0 diffs. The only reader of _COUNTERS is _next_id (line 88), reachable only from _create_transfer (line 324) and _create_dispute (line 447), both of which sit behind a _find() on _STATE. I ran the decisive adversarial probe the analyst only argued: a FRESH module with reset() never called at all. create_transfer{ACC-001,...,confirm:true}, create_dispute{TXN-1015,...} and get_account_balance{ACC-001} return byte-identical not_found on base and on the mutant, because _STATE is {} until reset() deep-copies fixtures, and reset() (line 51) unconditionally rebinds _COUNTERS to zeros in the same call. get_state() returns copy.deepcopy(_STATE) only, never _COUNTERS. No input exists on which this literal is readable.",
+      "severity": "none"
+    },
+    {
+      "classification": "equivalent",
+      "index": 1,
+      "lineno": 15,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE. Same line, TXN counter ({\"TXN\": 1}). Applied and diffed: 0 diffs over 23 validation cases and 33 episodes. Same structural proof as mutant 0 — the TXN counter is read only at line 89-91 inside _next_id, which _create_transfer reaches only after acc = _find(\"accounts\", ...) succeeds (line 304-306), and _STATE is populated exclusively by reset(), which rebinds _COUNTERS to fresh zeros on the same line 51. My no-reset probe confirms the mutant and base return identical not_found for create_transfer, so the import-time value cannot be observed through any result or through get_state().",
+      "severity": "none"
+    },
+    {
+      "classification": "equivalent",
+      "index": 2,
+      "lineno": 15,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE. Same line, DSP counter ({\"DSP\": 1}). Applied and diffed: 0 diffs over 23 validation cases and 33 episodes. The DSP counter is read only at line 447 (_next_id(\"DSP\")), which is guarded by _find(\"transactions\", ...) at line 420 plus the openish-dispute and succeeded/debit checks — all of which need a populated _STATE that only reset() can create, and reset() zeroes _COUNTERS in the same call. Confirmed with a no-reset probe: create_dispute{TXN-1015, unauthorized, confirm:true} returns identical not_found on base and mutant. Dead on arrival.",
+      "severity": "none"
+    },
+    {
+      "classification": "unreachable",
+      "index": 7,
+      "lineno": 315,
+      "operator": "flip_comparison",
+      "reason": "AGREE, and I constructed the killing input they said the pack never supplies, which confirms unreachable rather than equivalent. `<` -> `<=` diverges only when balance == amount + fee exactly. Enumerating every create_transfer that reaches line 315: success_create_transfer ACC-001 5000000 vs 205500; rejected_insufficient_funds_fee_gap ACC-007 500000 vs 505500; tasks ACC-001 5000000 vs 205500, ACC-002 12000000 vs 205500, ACC-006 10000 vs 505500, ACC-001 5000000 vs 1511000. None is on the boundary, and probe shows zero differing observations. The killing input is create_transfer(ACC-007, 9988776655, 494500, napas, 970436, confirm=true): 494500+5500 == 500000 == balance, so the baseline succeeds and the mutant returns rejected_insufficient_funds. The pack tunes ACC-007 to balance == amount, one fee short of the boundary that would actually pin this comparison.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 14,
+      "lineno": 145,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `last = i != len(tiers)-1` sends tier indices 0 and 1 down the inclusive `elif last:` path (line 150). My exhaustive sweep (2292 calls over amounts {0,1,5500,2e5,1e6+/-1,1.5e6,2e6,5e6,1e7+/-1,1.5e7,5e7,1e9}, both rails, all bank codes) found exactly 12 distinguishing calls, all at amount_vnd == 1_000_000 (napas 11000->5500, internal 2000->0) or == 10_000_000 (napas 22000->11000 and eta_hint 'trong ngay'->'vai phut', internal 5000->2000). No pack input is a tier boundary: the 33 traces supply only 500000 (bn_transfer_fee_single x2), 200000 (bn_create_transfer_single x2), 500000 (bn_transfer_short_of_funds) and 1500000 (bn_transfer_amount_corrected, from the slot_update); validation_cases supply 500000 (success/miss_get_transfer_fee, rejected_insufficient_funds_fee_gap) and 200000 (the four create_transfer cases). My own full-signature differential (all 23 cases + all 33 traces, comparing whole result dicts AND whole final state) gives 0 diffs. Note: if the amount_vnd literal [500000, 2000000, 15000000] ever cycled further it still would not hit 1e6/1e7, so this is boundary-value coverage the pack simply has none of.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 15,
+      "lineno": 244,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE on 'unreachable', but I disagree with their reachability argument - it does NOT need synthetic fixtures. I confirmed each of ACC-001..ACC-008 has exactly 2 transactions in fixtures.json, so a single list_recent_transactions never truncates (my 2292-call sweep: 0 distinguishing single calls). But create_transfer appends transactions to _STATE, and on the SHIPPED fixtures a 5-call sequence distinguishes it: 4x create_transfer(ACC-001, 200000, napas, confirm=true) then list_recent_transactions(ACC-001) returns 5 rows on base and 6 on the mutant (verified by execution; ACC-001's 5,000,000 balance funds ~24 such transfers). So the edit is observable with the pack's own data - the pack just has no template that chains create_transfer into list_recent_transactions, and the three executed list calls (ACC-001 x2 via bn_list_recent_single and bn_latest_txn_status_dependent, ACC-002 x1) omit limit while success_list_recent_transactions passes limit:5 explicitly. Worth flagging: the mutant also makes the backend contradict tools.json, which declares limit's \"default\": 5, and no check reads that.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 16,
+      "lineno": 245,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `limit <= 1` rejects limit==1. Sweep: 84 distinguishing calls, every one with limit==1 (base returns the 1 newest transaction, mutant returns invalid_argument). limit==1 is never supplied - the only limit the pack passes is 5 (success_list_recent_transactions); the two list templates have no limit slot so the default path is taken in all three trace calls.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 17,
+      "lineno": 248,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `status is not None and status in (...)` inverts the guard: sweep shows 324 distinguishing calls - every VALID filter ('pending','succeeded','failed','reversed') now returns invalid_argument, while 'bogus' and '' are accepted and silently filter to nothing. Nothing observes it because the `status is not None` conjunct short-circuits identically in base and mutant when status is absent, and status is absent in 100% of the population: 0 of 23 validation cases and 0 of 33 trace calls include it. Confirmed by my full-signature differential (results + final state over all cases and traces): 0 diffs.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 18,
+      "lineno": 265,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `amount <= 0` -> `amount < 0` diverges only at exactly amount_vnd == 0; the only value ever supplied to get_transfer_fee is 500000 (both validation cases, both bn_transfer_fee_single tasks, and Check 7's representative). Probe: zero differing observations. Not equivalent - get_transfer_fee(..., amount_vnd=0) returns invalid_argument on the baseline but {'fee_vnd':5500,'amount_vnd':0,...} on the mutant, since _lookup_fee matches the [0,1e6) napas tier at 0.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 19,
+      "lineno": 293,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `amount <= 0` -> `amount < 0` diverges only at exactly amount_vnd == 0, and the smallest create_transfer amount anywhere in the pack is 200000 (validation cases 200000/500000; tasks 200000/500000/1500000). Probe: zero differing observations. Not equivalent, and the divergence is severe if ever reached: create_transfer(ACC-001, amount_vnd=0, confirm=true) returns invalid_argument on the baseline but commits a real transfer row TRF-000001 with a 5500 VND fee debit on the mutant.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 20,
+      "lineno": 299,
+      "operator": "negate_bool_literal",
+      "reason": "AGREE, and verified rather than eyeballed. Probe over the full supplied input space shows zero differing observations. All 5 create_transfer validation cases pass confirm explicitly (success/miss/rejected_insufficient_funds_fee_gap = true, confirm_false = false, wrong_type_confirm = \"false\" which is non-None so the default is bypassed and line 300 rejects it). All 4 task-driven create_transfer calls in the A0 benchmark parquet carry confirm:true. Check 6's probe reuses confirm_false_create_transfer's arguments. Check 7's representative instances bind the same argument sets. bind_arguments (expected_trace.py:104-124) injects only required params and `confirm` is optional in tools.json:104, so the default is structurally unreachable through generation. I constructed the killing input to prove it is not equivalent: create_transfer(ACC-001, 9876543210, 200000, napas, 970436) with confirm omitted returns awaiting_confirmation on the baseline and status=succeeded with TRF-000001/TXN-900001 and a 205500 VND debit on the mutant. The destructive default of an x-requires-confirmation tool is completely untested.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 24,
+      "lineno": 415,
+      "operator": "negate_bool_literal",
+      "reason": "AGREE on classification, DISAGREE on severity (they said medium; I say high). Verified reachability by exhaustive execution: mutant m0024 differs from baseline on 0 of 56 pack-supplied inputs. All four create_dispute validation cases pass `confirm` explicitly (success/miss = true, confirm_false = false, wrong_type = \"false\"), and the parquet dump of all 33 expected traces shows the only three create_dispute calls are {confirm: true, reason: goods_not_received, transaction_id: TXN-1001/TXN-1011/TXN-1015}. bind_arguments (expected_trace.py:103-124) injects only required schema params (transaction_id, reason) plus the milestone's declared args, and bn_create_dispute_single declares args {confirm: true}, so `confirm` is present in every generated call. No oracle_validation check synthesizes a create_dispute call at all beyond replaying the declared cases (Check 3 only does inspect_backend/list_tools; Check 7 replays the representative instance, which also carries confirm: true). Direct probe with `confirm` omitted: baseline returns awaiting_confirmation and writes nothing, mutant returns {'status':'open','dispute_id':'DSP-000001',...} and appends the row to state. Severity high rather than medium: this inverts the safe default that tools.json itself declares (\"confirm\": {\"type\": \"boolean\", \"default\": false}) on a tool flagged x-mutates + x-requires-confirmation, and Check 6 is the check whose entire purpose is the confirmation policy yet it only ever probes the explicit confirm:false case - the 'default must be safe' property of the gate has zero coverage.",
+      "severity": "high"
+    },
+    {
+      "classification": "unreachable",
+      "index": 28,
+      "lineno": 145,
+      "operator": "swap_arithmetic",
+      "reason": "AGREE with the verdict, and I can state it more strongly than the other analyst did. `len(tiers)+1` makes `last` always False, and `last` is read only at line 149. Line 149's body is already dead in the UNMUTATED backend: for both rails the highest-min fee_schedule row has max_amount_vnd: null, so index 2 always exits at `if hi is None` (line 146) and indices 0-1 always have last==False. My 2292-call sweep found 0 distinguishing calls, and no tool mutates fee_schedule, so no sequence of calls can distinguish it either. It is therefore not merely 'no case supplies the input' but strictly dead code under the shipped fixtures.json - which is exactly the 'code the author paid to write that the benchmark never exercises' finding. I keep 'unreachable' rather than 'equivalent' because the edit is a real semantic change to the program, gated only by a fixture value, and calling it equivalent would wrongly shrink the survival headline.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 29,
+      "lineno": 147,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `amount_vnd > lo` in the unbounded top-tier branch. Sweep: exactly 6 distinguishing calls, all at amount_vnd == 10_000_000 (base returns fee 22000 / 5000; mutant returns invalid_argument 'no fee tier for amount' - a success turning into an error, which would have been trivially killable). I independently confirmed the stronger claim: lines 146-148's `return tier` is NEVER executed for any pack input, because for 500000/200000/1500000 the loop returns at index 0 or 1 and never reaches index 2. The top napas fee tier (fee 22000, eta 'trong ngay') is priced by nothing in the benchmark. The 15000000 literal in bn_transfer_fee_single was never sampled - task_instances.parquet shows both instances of that template bound amount_vnd=500000.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 30,
+      "lineno": 245,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE. I verified by direct execution that `limit < 2` and m16's `limit <= 1` are behaviourally identical on every limit I tried (None/0/1/2/3/5/-1/'5'/True/2.0), and both show the same 84 distinguishing calls in the sweep - all at limit==1. Same reason as m16: the pack passes limit:5 once and otherwise omits it, so limit==1 never occurs.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 33,
+      "lineno": 265,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE. `amount <= 0` -> `amount <= 1` diverges only at exactly amount_vnd == 1; the pack supplies only 500000 to get_transfer_fee. No near-zero boundary probe exists in validation_cases.yaml or the bn_transfer_fee_single slot literals. Probe: zero differing observations. Not equivalent - amount_vnd=1 yields fee 5500 on the baseline and invalid_argument on the mutant.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 34,
+      "lineno": 293,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE. `amount <= 0` -> `amount <= 1` diverges only at exactly amount_vnd == 1. The create_transfer slot literals are [200000] for bn_create_transfer_single and bn_transfer_amount_corrected, [500000] for bn_transfer_short_of_funds, plus the [1500000] correction; validation cases use 200000 and 500000. Probe: zero differing observations. Not equivalent - amount_vnd=1 commits a transfer on the baseline and returns invalid_argument on the mutant.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 38,
+      "lineno": 145,
+      "operator": "perturb_int_literal",
+      "reason": "AGREE. `len(tiers)-2` makes index 1 'last', so the 1e6-1e7 tier's upper bound becomes inclusive. Sweep: exactly 6 distinguishing calls, all at amount_vnd == 10_000_000 (napas fee 22000->11000, internal 5000->2000, and create_transfer on ACC-008 commits fee 11000 instead of 22000). Full-signature differential over the 23 validation cases and 33 traces: 0 diffs. The maximum amount anywhere in the executed population is 1_500_000 (bn_transfer_amount_corrected); the unsampled literals 2000000/15000000 would not hit 1e7 either.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 39,
+      "lineno": 150,
+      "operator": "flip_comparison",
+      "reason": "AGREE. The edit is `lo < amount_vnd <= int(hi)` (lower bound made exclusive) inside the `elif last:` body. That body is unreachable for every possible tool argument under the shipped fee_schedule, because the highest-min row for both napas and internal has max_amount_vnd: null and is caught by `if hi is None` first. Sweep: 0 distinguishing calls out of 2292; full-signature differential over all 23 validation cases and all 33 traces: 0 diffs. Like m28 this is strictly dead code rather than merely un-supplied input; I still classify it 'unreachable' (not 'equivalent') because it is a genuine semantic change gated purely by a fixture value, and it is real evidence that lines 149-151 are never executed.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 40,
+      "lineno": 150,
+      "operator": "flip_comparison",
+      "reason": "AGREE. Sibling of m39 on the same chained comparison: `lo <= amount_vnd < int(hi)` (upper bound made exclusive). Same dead `elif last:` body - both rails' top fee_schedule row has max_amount_vnd: null so index 2 exits at line 146 and indices 0-1 never set last=True. Sweep: 0 distinguishing calls out of 2292; full-signature differential over the 23 cases + 33 traces: 0 diffs. Under a synthetically bounded top tier it would diverge at the tier's max (e.g. 50_000_000), which is why it is not literally equivalent as a program.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 41,
+      "lineno": 152,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `lo < amount_vnd < int(hi)` excludes each non-last tier's lower bound. Sweep: exactly 6 distinguishing calls, all at amount_vnd == 1_000_000 (base -> fee 11000 napas / 2000 internal; mutant -> invalid_argument 'no fee tier for amount'). The other lower bound, lo == 0, is unobservable because both _get_transfer_fee (line 265) and _create_transfer (line 293) already reject amount_vnd <= 0, so `0 < amount` is implied - I verified this in the sweep (amounts 0 and -1 produce identical invalid_argument in base and mutant). No validation case or task supplies exactly 1_000_000; the executed amounts are 200000/500000/1500000 only.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 42,
+      "lineno": 152,
+      "operator": "flip_comparison",
+      "reason": "AGREE. `lo <= amount_vnd <= int(hi)` makes non-last tiers' upper bound inclusive, so boundary amounts fall into the cheaper tier. Sweep: exactly 12 distinguishing calls, at amount_vnd == 1_000_000 (11000->5500 napas, 2000->0 internal) and == 10_000_000 (22000->11000, 5000->2000), including create_transfer variants where the wrong fee is written into the persisted transfer row and the debited balance. Neither boundary is supplied: the 23 validation cases use 200000/500000 and the 33 traces use 200000/500000/1500000.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 43,
+      "lineno": 252,
+      "operator": "flip_comparison",
+      "reason": "AGREE. Line 251's `if status is not None` never fires: success_list_recent_transactions passes {account_id, limit}, miss_list_recent_transactions passes {account_id} only, and the three task-driven list_recent_transactions calls in the A0 parquet (bn_list_recent_single ACC-001 and ACC-002, bn_latest_txn_status_dependent ACC-001) bind only account_id, because `status` is optional in tools.json:57-60 and bind_arguments never injects optional params. Check 7's representative for bn_list_recent_single binds {'account_id':'ACC-001'}. Zero differing observations in the probe. Not equivalent: list_recent_transactions(ACC-001, status='succeeded') returns 2 rows on the baseline and [] on the mutant. The entire status-filter feature is shipped and never exercised.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 45,
+      "lineno": 73,
+      "operator": "delete_guard",
+      "reason": "AGREE. Line 74 executes in zero of the 23 cases and zero of the 33 episodes; applying the edit gives 0 diffs on both. I audited every path that can reach call_tool with a name: L1/L2/L3 replay names come from validation_cases.yaml and from expected traces built by bind_arguments (expected_trace.py:103-124), all of which name one of the 9 declared tools; oracle_validation Check 5 statically rejects an unknown-tool case before executing it (lines 477-486), Check 3 only issues inspect_backend/list_tools, Check 6 and D1/D2 reuse validation-case tool names verbatim, and T1's SLOW_BACKEND_TOOL runs against SLOW_BACKEND_PATH, a different probe backend. I also confirmed the full pipeline (pipeline.py:256-285) never routes model output to the backend — executable_replay.py:38-50 replays only the expected calls — so no arbitrary name can arrive. The edit is behaviour-changing on other input (call_tool('no_such_tool', {}) raises TypeError: 'NoneType' object is not callable instead of returning invalid_argument), so unreachable rather than equivalent. Low severity: with the handlers dict matching _TOOLS exactly, this is purely defensive code with no supplier in this harness.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 48,
+      "lineno": 114,
+      "operator": "delete_guard",
+      "reason": "AGREE, with one correction to their framing of the consequence. Line 115 executes in zero of the 23 cases and zero of the 33 episodes, and applying the edit gives 0 diffs on both. I checked the ENTIRE binding space rather than just the selected instances: every candidate value for account_id, card_id, transaction_id, payment_ref and dispute_id (all fixture primary keys plus all manifest absent_ids, including TXN-ABSENT-2 which the 33 never bind) is a non-empty string, every validation case passes non-empty strings for all _require_str fields, and the two wrong-type cases target confirm (guarded at lines 300/416, not by _require_str). Correction: the analyst described the fallout only as a crash. It is worse than that on one input class — get_transfer_fee{from_account_id: ACC-001, amount_vnd: 500000, rail: napas, to_bank_code: '970436'} with to_account_number omitted returns a full successful fee quote {fee_vnd: 5500, ...} under the mutant instead of invalid_argument. That makes the unexercised surface more valuable, but it does not make it reachable: the pack ships no missing-argument and no wrong-type-id case.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 50,
+      "lineno": 121,
+      "operator": "delete_guard",
+      "reason": "AGREE. Line 122 executes in zero of the 23 cases and zero of the 33 episodes; applying the edit gives 0 diffs on both. I computed prefix conformance over the whole binding space rather than eyeballing the selected instances: for each of the five _PREFIX fields, every fixture primary key plus every manifest absent id starts with its required prefix (ACC-, CARD-, TXN-, VQ-, DSP-) — zero violations, so the claim holds for any tasks_per_category, not just 6. The one unprefixed literal in the pack, to_account_number ('9876543210' / '9988776655'), is not in _PREFIX and never reaches _check_prefix. The edit does change behaviour on other input — get_account_balance{'1012345678901'} goes from invalid_argument to not_found, get_dispute_status{'TXN-1001'} likewise — so this is unreachable, not equivalent. The whole prefix-validation surface is unexercised.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 52,
+      "lineno": 159,
+      "operator": "delete_guard",
+      "reason": "AGREE on the verdict, but the other analyst's mechanism is partly wrong. Sweep: 1060 distinguishing calls, all with rail outside ('napas','internal'). For rail='swift' WITH a to_bank_code the mutant returns invalid_argument field=to_bank_code 'must be absent for internal' (not field=amount_vnd as they claimed); only the rail-omitted, bank-omitted shape falls through to 'no fee tier'. Verdict unchanged: every get_transfer_fee/create_transfer in the pack pins rail='napas' - bn_transfer_fee_single, bn_create_transfer_single, bn_transfer_short_of_funds and bn_transfer_amount_corrected all bind rail from literal:['napas'], and all five transfer validation cases hardcode napas. Additionally tools.json marks rail as required with enum ['napas','internal'], so any input that could reach line 160 is already schema-invalid upstream - this guard is defense-in-depth that duplicates schema validation.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 54,
+      "lineno": 168,
+      "operator": "delete_guard",
+      "reason": "AGREE. Sweep: 246 distinguishing calls, every one with rail='internal' and a to_bank_code present (base rejects with invalid_argument; mutant silently accepts and drops the bank code, so create_transfer writes a transfer row with no to_bank_code). rail='internal' is declared in the tools.json enum and has three fee_schedule rows, but zero of the four transfer templates and zero of the five transfer validation cases use it - all pin literal:['napas']. Lines 168-170 are executed exactly 0 times in both populations.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 55,
+      "lineno": 168,
+      "operator": "invert_guard",
+      "reason": "AGREE. `if not bank is not None:` i.e. reject when the internal transfer correctly omits to_bank_code. Sweep: 301 distinguishing calls - it breaks the internal rail entirely, turning every legitimate internal quote/transfer into invalid_argument, and it also flips the malformed-input cases the other way (bank present now accepted). This is the single most destructive edit in this batch and would be caught instantly by one internal-rail case. It survives only because rail='internal' is supplied by nothing: 0 of 23 validation cases, 0 of 33 traces, 0 of 4 transfer templates. Full-signature differential over the pack population: 0 diffs.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 62,
+      "lineno": 245,
+      "operator": "delete_guard",
+      "reason": "AGREE on classification; I rate severity higher than they did. Sweep: 168 distinguishing calls - limit=0 returns an empty list instead of invalid_argument, limit=-1 silently drops a row, limit='5' raises TypeError inside rows[:limit] (an unstructured crash, which is exactly what the pack's D2 error_shape check exists to prevent). Unlike the rail and status guards, this one is NOT redundant with the schema: tools.json declares limit as {\"type\":\"integer\"} with no \"minimum\", so limit=0 and limit=-1 are schema-valid and only this backend guard rejects them. Still unreachable: the pack supplies limit exactly once (limit:5 in success_list_recent_transactions) and otherwise omits it; bn_list_recent_single and bn_latest_txn_status_dependent have no limit slot, and there is no negative validation case for limit.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 64,
+      "lineno": 248,
+      "operator": "delete_guard",
+      "reason": "AGREE. Sweep: 108 distinguishing calls, all with a status argument outside the enum (e.g. status='bogus' or '': base returns invalid_argument field=status, mutant returns an empty transactions list). No validation case and no task template supplies `status` at all - the three executed list_recent_transactions calls pass only {account_id}, so line 249 (the guard) and line 252 (the filter itself) are both executed 0 times and the entire status-filter feature declared in tools.json is unexercised. Note the guard is also redundant with the tools.json enum for status, so any input reaching it is schema-invalid.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 66,
+      "lineno": 265,
+      "operator": "delete_guard",
+      "reason": "AGREE. Every get_transfer_fee input the pack supplies is the same valid positive int: success_get_transfer_fee and miss_get_transfer_fee both pass 500000, and both bn_transfer_fee_single tasks in the A0 parquet pass 500000 (ACC-001 and ACC-002). Check 7's representative binds amount_vnd=500000 too. Probe shows zero differing observations. Not equivalent: with amount_vnd='oops' the baseline returns invalid_argument 'amount_vnd must be a positive integer' while the mutant raises TypeError inside _lookup_fee. Worth adding to their note: the template's literal list [500000, 2000000, 15000000] never binds its upper two values under the category budget, so the 11000 and 22000 napas fee tiers are never quoted through this tool at all.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 70,
+      "lineno": 274,
+      "operator": "delete_guard",
+      "reason": "AGREE, and verified by construction plus experiment. With line 265 forcing a positive int and _rail_args forcing rail into {napas, internal}, fixtures.json ships contiguous tiers for both rails: [0,1e6) / [1e6,1e7) / [1e7, None-as-open-ended], and _lookup_fee's `hi is None` branch covers everything at or above 1e7, so the union is [0, inf) and tier can never be None for any reachable input under this fixture file. Line 275 is dead. Not equivalent: I deleted the napas [0,1e6) tier from fixtures and get_transfer_fee(500000) then returns invalid_argument 'no fee tier for amount' on the baseline but raises TypeError: 'NoneType' object is not subscriptable on the mutant. Defensive code the benchmark never exercises.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 72,
+      "lineno": 293,
+      "operator": "delete_guard",
+      "reason": "AGREE on the classification, with a correction to their failure model. Every create_transfer amount_vnd the pack supplies is a valid positive int: 200000 (success/miss/confirm_false/wrong_type_confirm cases and two tasks), 500000 (rejected_insufficient_funds_fee_gap and bn_transfer_short_of_funds), 1500000 (bn_transfer_amount_corrected). Probe: zero differing observations. Their reason implies deleting the guard crashes on any bad amount; it does not. With amount_vnd=-5 the mutant does NOT raise - _lookup_fee returns None and the surviving line-308 guard converts it into a different invalid_argument whose message is 'no fee tier for amount' instead of 'amount_vnd must be a positive integer'. Only a non-int (e.g. 'oops') raises TypeError. Either way the divergent input is never supplied.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 78,
+      "lineno": 308,
+      "operator": "delete_guard",
+      "reason": "AGREE, verified the same way as mutant 70. Note line 307 runs before the confirm gate at 312, so _lookup_fee executes on every create_transfer that passes the account lookup - including the confirm-false case - yet still never returns None, because amount is a validated positive int, rail is napas or internal, and both rails' fee_schedule tiers cover [0, inf) contiguously. Probe: zero differing observations. Not equivalent - with a hole punched in the napas schedule the baseline returns invalid_argument 'no fee tier for amount' and the mutant raises TypeError at int(tier['fee_vnd']).",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 87,
+      "lineno": 413,
+      "operator": "delete_guard",
+      "reason": "AGREE. Non-equivalent - probed reason='bogus': baseline returns invalid_argument/field=reason, mutant persists a dispute row carrying reason 'bogus'. Unreached: 0 differences across all 56 pack-supplied inputs. All four create_dispute validation cases pass reason: goods_not_received (in the enum), and the parquet dump confirms all three trace-level create_dispute calls use reason 'goods_not_received'; bn_create_dispute_single binds reason from literal:['goods_not_received','unauthorized'], both enum members. Also checked the one way this could have been reachable without a bad literal - an omitted `reason` would give None, which is also outside the tuple - but `reason` is in tools.json's required list, so bind_arguments (expected_trace.py:119-123) always injects it from the same-named slot, and every validation case supplies it. Severity low: tools.json declares reason as a required enum and validate_task schema-checks generated calls, so the backend guard is a second line of defence; still, it has zero coverage.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 93,
+      "lineno": 435,
+      "operator": "delete_guard",
+      "reason": "AGREE. Non-equivalent - probed TXN-1007 (status failed, direction debit): baseline returns not_disputable with detail {status: failed, direction: debit}, mutant opens DSP-000001 on the failed transaction and mutates state. But unreached: differential run gives 0 differences over all 56 pack-supplied inputs. Computed over fixtures.json: the guard fires only when NOT (status=='succeeded' AND direction=='debit'), i.e. on TXN-1003 (pending), TXN-1007 (failed), TXN-1009 (reversed) or any credit row (TXN-1002/1004/1006/1008/1010/1012/1014/1016). The pack supplies none of these to create_dispute - validation cases use TXN-1015 (succeeded debit) and TXN-ABSENT-1 (short-circuits to not_found at line 422), and bn_create_dispute_single's filter `transaction_id in ['TXN-1001','TXN-1011','TXN-1015']` yields three rows I checked individually in fixtures.json: all status=succeeded, direction=debit. error_code not_disputable appears in no expect block anywhere in validation_cases.yaml. Severity medium: opening disputes against pending/failed/reversed/credit transactions is a real business-rule violation that writes state, but no pack input can reach it.",
+      "severity": "medium"
+    },
+    {
+      "classification": "real_gap",
+      "index": 96,
+      "lineno": 106,
+      "operator": "delete_state_write",
+      "reason": "AGREE, and I confirmed it by execution rather than by reading. I applied the real operator form (line 106 -> ast.Pass, i.e. `if message is not None: pass`) and diffed: exactly 2 of the 23 shipped validation cases change observable output, and 0 of the 33 episodes do. wrong_type_confirm_create_transfer and wrong_type_confirm_create_dispute both go from {\"code\": \"invalid_argument\", \"entity\": null, \"id\": null, \"field\": \"confirm\", \"message\": \"confirm must be a boolean\"} to the same dict minus \"message\". Line tracing confirms line 106 is executed by validation cases but by no episode. Every shipped check still passes: those two cases' expect blocks name only result_class and error_code (both unchanged: structured_error / invalid_argument), the extra-field loop (ladder.py:215-226, mirroring oracle_validation.py:608-620) only compares fields the case explicitly names, D2 (oracle_validation.py:~940-950) only requires err[\"code\"] to be a non-empty string, no function in assertions.py reads error.message (assert_transaction_not_found reads code and id only), and L5's executable_replay only re-runs the expected traces twice against itself. A returned field disappears on an input the pack does supply and nothing notices.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 97,
+      "lineno": 108,
+      "operator": "delete_state_write",
+      "reason": "AGREE. Line tracing shows line 108 executes in zero of the 23 validation cases and zero of the 33 episodes, and applying the edit produces 0 diffs across both. detail= is passed at exactly one call site, the not_disputable error at lines 436-442. I computed the full reachable set: the transactions that would produce not_disputable are TXN-1002/1003/1004/1006/1007/1008/1009/1010/1012/1014/1016, while bn_create_dispute_single's filter admits only TXN-1001, TXN-1011, TXN-1015 (all succeeded debits, none carrying an open-ish dispute — the open-ish ones are TXN-1013 and TXN-1005, neither in the filter), and the four create_dispute validation cases use only TXN-1015 or TXN-ABSENT-1 (which short-circuits to not_found at line 422). The edit IS behaviour-changing on other input — I verified create_dispute{TXN-1003} loses detail={'status':'pending','direction':'debit'} — so it is unreachable, not equivalent: an error branch the author paid to write that the benchmark never exercises.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 98,
+      "lineno": 163,
+      "operator": "delete_guard",
+      "reason": "AGREE, and it is even weaker than they said. Sweep: 55 distinguishing calls, all of the shape {rail:'napas', to_bank_code absent}, and in every one base and mutant BOTH return code=invalid_argument, entity=null, id=null, field=to_bank_code - only the `message` string differs ('to_bank_code required for napas' vs 'must be 6 digits'), because with bank=None the surviving line 165 check fires anyway. L1's expect semantics compare result_class/error_code/declared result fields, never message, so even a case that reached this line could not kill it. Every trace call and all five transfer validation cases pass to_bank_code='970436'. Note tools.json does NOT mark to_bank_code required, so a napas call omitting it is schema-legal - the pack just never makes one.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 100,
+      "lineno": 165,
+      "operator": "delete_guard",
+      "reason": "AGREE. Sweep: 197 distinguishing calls - '97043', '9704365', 'abcdef', '' and the int 970436 all move from invalid_argument to an accepted quote, and on create_transfer the malformed code is persisted into the transfer row's to_bank_code. Not one is supplied: bn_transfer_fee_single / bn_create_transfer_single / bn_transfer_short_of_funds / bn_transfer_amount_corrected all bind to_bank_code from literal:['970436'], and all five transfer validation cases hardcode '970436'. There is no negative validation case for to_bank_code at all, so _BANK_CODE_RE (line 29) is a regex the benchmark never tests.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 104,
+      "lineno": 340,
+      "operator": "delete_state_write",
+      "reason": "AGREE. grep confirms 'memo' appears nowhere in the pack except backend.py and tools.json:101 - no validation case passes it, no task template declares a memo slot or milestone arg, and bind_arguments only injects required params so generation can never produce it. Probe: zero differing observations. Not equivalent: create_transfer(ACC-001, ..., confirm=true, memo='hoa don') writes a transfers row carrying memo on the baseline and one without it on the mutant, which a get_state or L2 final-state diff would catch immediately - nothing supplies the memo.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 105,
+      "lineno": 353,
+      "operator": "delete_state_write",
+      "reason": "AGREE, same input gap as 104 but on the transactions row. Probe: zero differing observations across all 23 cases and 33 traces. Not equivalent: with memo supplied, the baseline's appended txn_row carries 'memo' and the mutant's does not, a difference visible in get_state and in list_recent_transactions' underlying row. `memo` is optional in tools.json and never bound by any template, so the write is shipped and entirely unexercised.",
+      "severity": "low"
+    },
+    {
+      "classification": "unreachable",
+      "index": 107,
+      "lineno": 426,
+      "operator": "delete_guard",
+      "reason": "AGREE. The edit replaces the loop body with `pass`, deleting the already_disputed error entirely, and it is genuinely behaviour-changing (not equivalent): probed TXN-1013 (DSP-0001, status open) - baseline returns error code already_disputed, mutant returns {'status':'open','dispute_id':'DSP-000001'} and appends a 5th dispute row; same for TXN-1005 (DSP-0004, in_review). But it is unreached: differential run over all 23 cases + 33 traces shows 0 differences. Computed against fixtures.json rather than eyeballed - the only create_dispute inputs the pack supplies are TXN-1015 (no dispute row), TXN-ABSENT-1 (returns not_found at line 422 before the loop), TXN-1001 (DSP-0002, status 'resolved', which is outside openish={open,in_review,awaiting_confirmation}) and TXN-1011 (no dispute row). bn_create_dispute_single's filter pins the slot to exactly those three ids, and with tasks_per_category=6 split over the 2 dispute templates the pipeline emits exactly 3 create_dispute instances, one per distinct id, so no id repeats. ladder.Runner.replay prepends {'op':'reset'} to every episode (ladder.py:180,247), so disputes never accumulate across episodes either. No expect block in validation_cases.yaml names error_code already_disputed. Severity medium: duplicate open disputes on the same transaction are a data-integrity defect, but the loss is a refusal, not a silent commit of unauthorised money movement.",
+      "severity": "medium"
+    },
+    {
+      "classification": "unreachable",
+      "index": 109,
+      "lineno": 457,
+      "operator": "delete_state_write",
+      "reason": "AGREE. Non-equivalent - probed with note='khach bao chua nhan hang': the tool result is byte-identical either way, but the baseline's persisted dispute row carries 'note' and the mutant's does not, so only get_state() (or an L2-style full-state diff) could see it. Unreached: 0 differences across all 56 pack-supplied inputs. `note` is a declared optional string in tools.json but appears in no validation case, and bind_arguments injects only required params (transaction_id, reason) plus the milestone's declared {confirm: true} - the parquet dump of all 33 expected traces confirms not one create_dispute call carries `note`. Severity low, and I'd add that the coverage hole is doubled: even if a case did supply note, assert_dispute_opened only checks transaction_id and status=='open', so no shipped assertion inspects the field either - it would take the harness's differential state comparison, which is not a check the pack ships.",
+      "severity": "low"
+    },
+    {
+      "classification": "real_gap",
+      "index": 142,
+      "lineno": 313,
+      "operator": "drop_result_key",
+      "reason": "AGREE. Empirically confirmed: my differential probe over all 23 validation cases + 33 traces + Check 6 probes shows m0142 differs from baseline on exactly two observations, both pack-supplied: case `confirm_false_create_transfer` (validation_cases.yaml:97) returns {'status':'awaiting_confirmation','transaction_id':None} instead of {...,'transfer_id':None,...}, and Check 6 confirmation_policy's probe (oracle_validation.py:694-716) which re-runs those same arguments. Every shipped check passes: _classify_result (oracle_validation.py:145) reads only 'error' and 'status'; the case's expect block is {result_class, state_unchanged} so the per-field loop at oracle_validation.py:608-620 pins nothing; Check 6 asserts only result['status']=='awaiting_confirmation' plus before==after. Stronger than the other analyst stated: the pack's only transfer_id check anywhere, assert_transfer_rejected_for_funds (assertions.py:144), uses result.get('transfer_id') is None, which returns None for an absent key too, so no shipped artifact can distinguish explicit-null from key-absent. L2 cannot help: all 4 task create_transfer calls in the A0 parquet carry confirm:true and return at line 355, never 313.",
+      "severity": "medium"
+    },
+    {
+      "classification": "real_gap",
+      "index": 143,
+      "lineno": 313,
+      "operator": "drop_result_key",
+      "reason": "AGREE. Same reachable input, verified empirically: m0143 differs only on `confirm_false_create_transfer` and the Check 6 create_transfer probe, returning {'status':'awaiting_confirmation','transfer_id':None} with transaction_id gone. Both observers inspect the dict and both still pass, because Check 5 pins only result_class/state_unchanged for this case and Check 6 pins only the status field. The pack ships a dedicated confirmation_policy check for exactly this envelope and it constrains one field out of three, so any other field of the awaiting_confirmation payload can be deleted undetected.",
+      "severity": "medium"
+    },
+    {
+      "classification": "real_gap",
+      "index": 150,
+      "lineno": 445,
+      "operator": "drop_result_key",
+      "reason": "AGREE. Verified by execution: of the 56 inputs the pack supplies (23 validation cases + 33 A0 traces), exactly one differs - validation case `confirm_false_create_dispute` (create_dispute, TXN-1015, reason goods_not_received, confirm: false). TXN-1015 is a succeeded debit with no dispute in fixtures.json, so it passes the not_found, already_disputed and not_disputable guards and reaches line 445 on every run. Baseline returns {'status':'awaiting_confirmation','dispute_id':None}; mutant returns {'status':'awaiting_confirmation'} - the documented dispute_id key is gone. Every shipped check is blind to it: Check 5 (oracle_validation.py:600-620) compares only result_class, error_code, explicitly-listed expect fields and state_unchanged, and this case's expect is just {result_class: awaiting_confirmation, state_unchanged: true}; _classify_result (:145-150) derives the class from result[status_field] alone, which is unchanged; state genuinely does not change. Check 6 (:683-735) re-runs this same case as its confirm-false probe and inspects only result[protocol['status_field']] plus state equality. L3 assertions never see it because all three create_dispute traces bind confirm: true. Severity low: the dropped value is a null placeholder that never reaches a published row, so the corruption is a payload-shape regression confined to the pending-confirmation surface. This is a real gap - the pack ships a confirm-false case and never pins its payload.",
+      "severity": "low"
+    }
+  ],
+  "what": "Adversarial triage of the 48 mutants that survived every layer. Each classification was produced by one analyst and independently re-derived by a second agent that executed the mutant and diffed its output against the unmutated backend, rather than reasoning from the source alone."
+}

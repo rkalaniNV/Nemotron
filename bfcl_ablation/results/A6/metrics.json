@@ -1,0 +1,225 @@
+{
+  "arm": "a6",
+  "backend_lines": 465,
+  "blind_rate": 0.4369,
+  "by_family": {
+    "contract": {
+      "mutants": 41,
+      "survival_rate": 0.0732,
+      "survived": 3
+    },
+    "guard": {
+      "mutants": 52,
+      "survival_rate": 0.3269,
+      "survived": 17
+    },
+    "state": {
+      "mutants": 13,
+      "survival_rate": 0.3846,
+      "survived": 5
+    },
+    "value": {
+      "mutants": 45,
+      "survival_rate": 0.5111,
+      "survived": 23
+    }
+  },
+  "by_layer": {
+    "L1_validation_cases": 47,
+    "L2_expected_traces": 45,
+    "L3_assertions": 11,
+    "survived": 48
+  },
+  "by_operator": {
+    "delete_guard": {
+      "by_layer": {
+        "L1_validation_cases": 10,
+        "survived": 16
+      },
+      "mutants": 26,
+      "survival_rate": 0.6154,
+      "survived": 16
+    },
+    "delete_state_write": {
+      "by_layer": {
+        "L2_expected_traces": 6,
+        "L3_assertions": 2,
+        "survived": 5
+      },
+      "mutants": 13,
+      "survival_rate": 0.3846,
+      "survived": 5
+    },
+    "drop_result_key": {
+      "by_layer": {
+        "L1_validation_cases": 3,
+        "L2_expected_traces": 28,
+        "L3_assertions": 7,
+        "survived": 3
+      },
+      "mutants": 41,
+      "survival_rate": 0.0732,
+      "survived": 3
+    },
+    "flip_comparison": {
+      "by_layer": {
+        "L1_validation_cases": 8,
+        "L2_expected_traces": 1,
+        "L3_assertions": 2,
+        "survived": 12
+      },
+      "mutants": 23,
+      "survival_rate": 0.5217,
+      "survived": 12
+    },
+    "invert_guard": {
+      "by_layer": {
+        "L1_validation_cases": 25,
+        "survived": 1
+      },
+      "mutants": 26,
+      "survival_rate": 0.0385,
+      "survived": 1
+    },
+    "negate_bool_literal": {
+      "by_layer": {
+        "L2_expected_traces": 1,
+        "survived": 2
+      },
+      "mutants": 3,
+      "survival_rate": 0.6667,
+      "survived": 2
+    },
+    "perturb_int_literal": {
+      "by_layer": {
+        "L2_expected_traces": 5,
+        "survived": 8
+      },
+      "mutants": 13,
+      "survival_rate": 0.6154,
+      "survived": 8
+    },
+    "swap_arithmetic": {
+      "by_layer": {
+        "L1_validation_cases": 1,
+        "L2_expected_traces": 4,
+        "survived": 1
+      },
+      "mutants": 6,
+      "survival_rate": 0.1667,
+      "survived": 1
+    }
+  },
+  "caught_by_pack": 58,
+  "definitions": {
+    "L2_expected_traces": "differential against the unmutated backend — NOT a check the pack ships",
+    "survived": "no layer of the pack detected the edit, including a full pipeline run to gold",
+    "unpinned_lines": "source lines where at least one single-edit mutant survived every layer"
+  },
+  "env": {
+    "cwd": "/localhome/local-hndo/Nemotron",
+    "python": "3.12.7",
+    "repo_root": "/localhome/local-hndo/Nemotron"
+  },
+  "episodes_run": 3755,
+  "l5_run": true,
+  "lines_with_a_mutant": 68,
+  "metrics_version": "1.0",
+  "mutants": 151,
+  "observable": 103,
+  "observable_but_unchecked": {
+    "count": 45,
+    "examples": [
+      {
+        "detail": "6 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+        "edit": "1 -> 2",
+        "line": 88,
+        "operator": "perturb_int_literal"
+      },
+      {
+        "detail": "6 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+        "edit": "Eq -> NotEq",
+        "line": 90,
+        "operator": "flip_comparison"
+      },
+      {
+        "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+        "edit": "Sub -> Add",
+        "line": 326,
+        "operator": "swap_arithmetic"
+      },
+      {
+        "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+        "edit": "0 -> 1",
+        "line": 51,
+        "operator": "perturb_int_literal"
+      },
+      {
+        "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+        "edit": "0 -> 1",
+        "line": 51,
+        "operator": "perturb_int_literal"
+      },
+      {
+        "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_dispute_single__9a13aff31ee10eef', 'banking_vn__bn_create_dispute_single__069e782f69b74266', 'banking_vn__bn_create_dispute_single__fac3dccb0bfe459a']",
+        "edit": "0 -> 1",
+        "line": 51,
+        "operator": "perturb_int_literal"
+      },
+      {
+        "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+        "edit": "Sub -> Add",
+        "line": 326,
+        "operator": "swap_arithmetic"
+      },
+      {
+        "detail": "3 tasks differ from baseline: ['banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1', 'banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e', 'banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8']",
+        "edit": "Add -> Sub",
+        "line": 346,
+        "operator": "swap_arithmetic"
+      }
+    ],
+    "note": "changed a returned value or the final state, and no check the pack ships noticed"
+  },
+  "pack": "src/nemotron/steps/byob/data/banking_vn_oracle_pack",
+  "replayed_tasks": 33,
+  "survival_rate": 0.3179,
+  "unchecked": 45,
+  "unobservable": 48,
+  "unpinned_lines": [
+    15,
+    73,
+    106,
+    108,
+    114,
+    121,
+    145,
+    147,
+    150,
+    152,
+    159,
+    163,
+    165,
+    168,
+    244,
+    245,
+    248,
+    252,
+    265,
+    274,
+    293,
+    299,
+    308,
+    313,
+    315,
+    340,
+    353,
+    413,
+    415,
+    426,
+    435,
+    445,
+    457
+  ],
+  "validation_cases": 23
+}

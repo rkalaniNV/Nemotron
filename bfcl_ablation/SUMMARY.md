@@ -13,16 +13,17 @@ appears below.
 ## In one paragraph
 
 Authoring one BFCL Oracle Pack costs ~1,600 hand-written lines, and that cost is the adoption
-barrier. Five ablations asked how much of it can be removed — by code, then by an LLM — without
+barrier. Seven ablations asked how much of it can be removed — by code, then by an LLM — without
 weakening the benchmark. **14.0% comes off with no model involved and is provably equivalent**
 (a further 1.6 points comes from stripping default-valued config, verified as a separate step).
 **An LLM raises linguistic diversity 1.8× at the pack's own task budget and 4.5× if the budget
 is raised with it, without moving ground truth.** But answering the question first required
-building the ability to tell, and that measurement produced the study's main result: **three
+building the ability to tell, and that measurement produced the study's main result: **four
 independent demonstrations that the pipeline's gates check mechanism, not content** — nothing is
 ever dropped; the assertions accept 61% of corrupted argument values; and an LLM asked to author
 tasks produced a benchmark 68% of which calls no tool at all, 70% of whose templates the
-executable oracle cannot falsify, which was nonetheless stamped gold.
+executable oracle cannot falsify, which was nonetheless stamped gold; and 46% of observable corruptions of the *backend itself* pass every check the
+pack ships, with oracle validation and a full pipeline run catching none of them.
 
 ---
 
@@ -47,7 +48,7 @@ Layer 2 turned out to be the prerequisite, and the more consequential half.
 
 ### The ladder
 
-Five arms on the same pack (`banking_vn`: 9 tools, 17 templates, 6 categories, 9 turn policies).
+Seven arms on the same pack (`banking_vn`: 9 tools, 17 templates, 6 categories, 9 turn policies).
 **Each rung opens exactly one degree of freedom**, so when a result moves, the responsible change
 is unambiguous.
 
@@ -58,6 +59,8 @@ is unambiguous.
 | **A2** | user wording only; everything else frozen | yes |
 | **A3** | task semantics; policy sampler system-controlled | yes |
 | **A4** | assertions, plus the mutation gate that makes them measurable | yes |
+| **A5** | nothing in the pack — a target model is scored on A0's wording versus A2's | yes |
+| **A6** | `backend.py`, one edit at a time; everything else frozen | no |
 
 ### Two rules held throughout
 
@@ -365,6 +368,56 @@ model never chains to `get_transaction_status` — and the assertions **correctl
 times. The suite is not uniformly blind; it missed the extra call and caught the missing one,
 which is exactly the shape A4 measured.
 
+### A6 — Backend mutation gate
+
+A4 corrupted an *episode* and asked whether the assertions noticed. A6 corrupts the *oracle*:
+151 single-edit mutations of `backend.py` (465 lines), pushed through every check the pack has,
+cheapest first. 3,755 oracle episodes. No model.
+
+| outcome | mutants | share |
+| --- | ---: | ---: |
+| unobservable — nothing the pack runs reaches it | 44 | 29.1% |
+| observable, caught by a check the pack ships | 58 | 38.4% |
+| **observable, caught by nothing shipped** | **49** | **32.5%** |
+
+**Blind rate 45.8%** (49 of 107 observable). This is the oracle-side view of the hole A4
+measured from the assertion side at 0.610 argument-level false acceptance. Two methods aimed at
+different objects, one gap — and neither is an artefact of the other.
+
+| killing layer | mutants | ships with the pack? |
+| --- | ---: | --- |
+| L1 validation cases | 47 | yes |
+| L2 expected traces | 45 | **no — reference added by this arm** |
+| L3 assertions | 11 | yes |
+| **L4 oracle validation** | **0** | yes |
+| **L5 full pipeline** | **0** | yes |
+| survived | 48 | — |
+
+**The expensive half of the pipeline caught nothing.** Every mutant that reached L4 passed it and
+every mutant that reached L5 published 33 rows at tier `gold` — byte-identical to A0's benchmark.
+The layer is live, not broken: a pack with one tool deleted from `_TOOLS` *is* caught
+(`tier=silver`, five checks failing). It simply has nothing to say about a wrong value.
+
+Three further readouts:
+
+- **Deleting a guard survives 61.5% of the time; inverting the same guard survives 3.8%** — a 16×
+  asymmetry over the same 26 sites. The pack is well defended against rejecting valid input and
+  nearly blind to accepting invalid input, exactly the asymmetry A4 found in the assertions.
+- **Four confirmed real gaps**, and two of them land on a behaviour the pack wrote a dedicated
+  case for: dropping `transfer_id` from the `awaiting_confirmation` result changes validation case
+  `confirm_false_create_transfer` and is seen by oracle check 6 `confirmation_policy`. Both pass,
+  because one pins `result_class` and the other pins `status`. The check exists, is aimed
+  correctly, and still cannot see it.
+- **41 of 48 survivors are unreachable** — `_check_prefix` and the `_require_str` type guards are
+  never exercised by any case or task. That is a coverage finding worth as much as the checking
+  one: lines an author paid to write that the benchmark never touches.
+
+Every survivor was classified by one agent and independently re-derived by a second that
+**executed the mutant and diffed its output** rather than reasoning from source
+(`results/A6/triage.json`): 3 equivalent, 41 unreachable, 4 real gaps. The raw survival count
+(48, 31.8%) is what `run_a6.py` prints and is deliberately *not* the headline — a mutant that
+survives is usually one the benchmark never executes, which measures coverage, not checking.
+
 ---
 
 ## The cross-arm finding
@@ -380,6 +433,7 @@ causal chain, and an earlier draft of this document wrongly presented them as on
 | A4 | the assertions do not check returned values | 61% false acceptance at argument level |
 | A3 | a skewed benchmark passes anyway | 70% of its templates are unfalsifiable by the oracle |
 | A5 | and it happens on real model output | a reworded request changed the model's call set; assertion agreement 1.000, ground-truth agreement 0.939 |
+| A6 | and the oracle itself is barely checked | 45.8% of observable `backend.py` corruptions pass every shipped check; oracle validation and a full pipeline run catch none of them |
 
 **A4 did not explain A0 — until A5.** A0's replay stage passed 33/33 on *uncorrupted* traces;
 nothing ever reached the assertions in a failing condition, so A0's 100% was consistent with
@@ -498,6 +552,8 @@ PYTHONPATH=src python3 bfcl_ablation/run_a1.py            # exits non-zero if no
 PYTHONPATH=src python3 bfcl_ablation/run_a2.py            # needs the model endpoint
 PYTHONPATH=src python3 bfcl_ablation/run_a3.py
 PYTHONPATH=src python3 bfcl_ablation/run_a4.py            # --skip-llm runs the gate with no model
+PYTHONPATH=src python3 bfcl_ablation/run_a5.py            # target model, A0 wording vs A2
+PYTHONPATH=src python3 bfcl_ablation/run_a6.py            # backend mutation gate, no model
 PYTHONPATH=src python3 bfcl_ablation/make_docx.py         # circulation copies
 ```
 
@@ -506,9 +562,9 @@ A2–A4 use `openai/gpt-oss-120b` at `http://127.0.0.1:8000/v1`, overridable via
 
 | where | what |
 | --- | --- |
-| `experiments/a0.md` … `a4.md` | per-arm write-ups, insights first |
+| `experiments/a0.md` … `a6.md` | per-arm write-ups, insights first |
 | `experiments/findings.md` | cross-arm synthesis |
-| `results/A0/` … `A4/` | `report.md` + `metrics.json` per arm |
+| `results/A0/` … `A6/` | `report.md` + `metrics.json` per arm |
 | `results/METRICS.md` | metric contract, versioned |
 | `reports/*.docx` | self-contained circulation copies |
 | `_generated/` | packs, configs, run artifacts, LLM cache — disposable, all regenerable |

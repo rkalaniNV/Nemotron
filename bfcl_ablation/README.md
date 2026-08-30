@@ -14,6 +14,7 @@ A2  LLM surface generation        wording only                     gpt-oss-120b
 A3  LLM task generation           semantics                        gpt-oss-120b
 A4  LLM assertions                last                             gpt-oss-120b
 A5  target-model evaluation       does a conclusion survive A2?     gpt-oss-120b
+A6  backend mutation gate         is the oracle falsifiable?        no model
 ```
 
 A0–A4 measure the benchmark. **A5 is the only arm that measures a model on it**, and it is
@@ -41,6 +42,7 @@ PYTHONPATH=src python3 bfcl_ablation/run_a1.py     # simplify + verify, ~3 min
 PYTHONPATH=src python3 bfcl_ablation/run_a3.py     # sampled cells + LLM task proposals, ~20 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a4.py     # mutation gate + LLM assertions, ~8 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a5.py     # target model on A0 vs A2 wording, ~5 min cold
+PYTHONPATH=src python3 bfcl_ablation/run_a6.py     # 151 backend mutants through every check, ~35 min
 ```
 
 `run_a5.py` needs A0 *and* an A2 variant run on disk; `--a2-run a2_b6_v1` selects a different
@@ -66,6 +68,7 @@ propose/             A3 — coverage spec + controlled sampler, backend result p
                      proposal gates, selection-bias measurement
 mutate/              A4 — mutation operators, the assertion gate, LLM assertion authoring
 target/              A5 — tool-calling client, model rollout loop, paired scoring
+backend_gate/        A6 — backend mutation operators and the kill ladder
 results/             per-arm reports
 ```
 

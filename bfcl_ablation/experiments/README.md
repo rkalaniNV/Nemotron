@@ -12,6 +12,7 @@ the artifacts live.
 | [a3.md](a3.md) | Can an LLM propose the tasks themselves? | measured |
 | [a4.md](a4.md) | Are the assertions actually checking anything? | measured |
 | [a5.md](a5.md) | Does rewording the request change the benchmark's verdict on a model? | measured |
+| [a6.md](a6.md) | Is the oracle itself falsifiable — does anything check the backend? | measured |
 
 [findings.md](findings.md) collects every insight across the five arms in one place.
 

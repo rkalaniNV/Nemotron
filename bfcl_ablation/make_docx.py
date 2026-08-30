@@ -43,6 +43,7 @@ ARMS = {
     "a3": ("A3", "LLM task generation", "Semantics; controlled policy sampler"),
     "a4": ("A4", "LLM assertions and the mutation gate", "Are the assertions checking anything"),
     "a5": ("A5", "Target-model evaluation across wordings", "Does a benchmark conclusion survive a paraphrase"),
+    "a6": ("A6", "Backend mutation gate", "Is the oracle itself falsifiable"),
     "findings": ("ALL", "Findings across the ladder", "Cross-arm synthesis"),
 }
 
@@ -888,6 +889,40 @@ def appendix_a5(document: Document, metrics: dict[str, Any]) -> None:
     )
 
 
+def appendix_a6(document: Document, metrics: dict[str, Any]) -> None:
+    """The layer table and the operator table, which carry the whole result.
+
+    The raw survival count is deliberately NOT the headline here: a surviving mutant is
+    usually one the benchmark never executes. The blind rate is the checking number.
+    """
+    document.add_heading("A.1 Outcome decomposition", level=3)
+    simple_table(
+        document,
+        ["outcome", "mutants"],
+        [
+            ["unobservable (nothing the pack runs reaches it)", metrics.get("unobservable")],
+            ["observable, caught by a shipped check", metrics.get("caught_by_pack")],
+            ["observable, caught by nothing shipped", metrics.get("unchecked")],
+            ["blind rate", metrics.get("blind_rate")],
+        ],
+    )
+    document.add_heading("A.2 Killing layer", level=3)
+    simple_table(
+        document,
+        ["layer", "mutants"],
+        [[k, v] for k, v in (metrics.get("by_layer") or {}).items()],
+    )
+    document.add_heading("A.3 By operator", level=3)
+    simple_table(
+        document,
+        ["operator", "mutants", "survived", "survival rate"],
+        [
+            [name, row["mutants"], row["survived"], row["survival_rate"]]
+            for name, row in (metrics.get("by_operator") or {}).items()
+        ],
+    )
+
+
 APPENDIX = {
     "a0": appendix_a0,
     "a1": appendix_a1,
@@ -895,6 +930,7 @@ APPENDIX = {
     "a3": appendix_a3,
     "a4": appendix_a4,
     "a5": appendix_a5,
+    "a6": appendix_a6,
     "findings": appendix_all,
 }
 
@@ -942,7 +978,9 @@ def cover(document: Document, arm: str, metrics: dict[str, Any] | None) -> None:
         ["Pipeline", "runtime/benchmark_families/bfcl, unmodified"],
         ["Metric contract", (metrics or {}).get("metrics_version", "1.0")],
     ]
-    if arm == "a5":
+    if arm == "a6":
+        facts.append(["Model", "none — this arm is fully deterministic"])
+    elif arm == "a5":
         # A5 is the one arm where the model is the subject rather than an authoring tool,
         # so the cover has to say which side of the experiment it sits on.
         facts.append(["Target model", "openai/gpt-oss-120b, local vLLM, temperature 0, /v1/responses, all calls disk-cached"])
@@ -1035,7 +1073,8 @@ def reproduction(document: Document, arm: str) -> None:
         "a3": "PYTHONPATH=src python3 bfcl_ablation/run_a3.py",
         "a4": "PYTHONPATH=src python3 bfcl_ablation/run_a4.py",
         "a5": "PYTHONPATH=src python3 bfcl_ablation/run_a5.py",
-        "findings": "PYTHONPATH=src python3 bfcl_ablation/run_a0.py   # then a1, a2, a3, a4, a5",
+        "a6": "PYTHONPATH=src python3 bfcl_ablation/run_a6.py",
+        "findings": "PYTHONPATH=src python3 bfcl_ablation/run_a0.py   # then a1, a2, a3, a4, a5, a6",
     }
     document.add_paragraph("Run from the repository root:")
     paragraph = document.add_paragraph()

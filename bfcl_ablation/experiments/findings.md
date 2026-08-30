@@ -97,6 +97,41 @@ discordant pairs), and the paraphrase preserved tool-level intent — A2's check
 correctly. What changed was register. **Intent preservation is not behavioural equivalence**, and
 no arm before this one could tell the difference.
 
+### A6 — and the oracle itself is barely checked
+
+A4 corrupted an *episode* and asked whether the assertions noticed. A6 corrupts the *oracle* —
+151 single-edit mutations of `backend.py` — and asks whether anything notices.
+
+| outcome | mutants |
+| --- | ---: |
+| unobservable — nothing the pack runs reaches it | 44 |
+| observable, caught by a check the pack ships | 58 |
+| **observable, caught by nothing shipped** | **49** |
+
+**Blind rate 45.8%.** Two independent methods aimed at different objects — one corrupts the
+episode, the other the backend — land on the same gap. Neither can be explained as an artefact
+of the other.
+
+Three things sharpen it:
+
+- **`run_oracle_validation` and a full pipeline run killed nothing.** Every mutant that reached
+  them published 33 rows at tier `gold`, byte-identical to A0's benchmark. The layer is live —
+  a pack with a tool deleted *is* caught — it just has nothing to say about a wrong value.
+- **Deleting a guard survives 61.5% of the time; inverting the same guard survives 3.8%.** A 16x
+  asymmetry on the same 26 sites: the pack is well defended against rejecting good input and
+  nearly blind to accepting bad input. That is A4's asymmetry again, in a different artifact.
+- **Two of the four confirmed gaps sit on a behaviour the pack wrote a dedicated case for.**
+  Dropping `transfer_id` from the `awaiting_confirmation` result changes validation case
+  `confirm_false_create_transfer` and is seen by oracle check 6 `confirmation_policy`. Both
+  pass, because one pins `result_class` and the other pins `status`. The check exists, is aimed
+  correctly, and still cannot see it — because it asserts the shape of the answer, never its
+  content.
+
+A6 also found that **41 of 48 survivors are simply unreachable**: whole validation surfaces
+(`_check_prefix`, the `_require_str` type guards) are never exercised by any case or task. That
+is a coverage finding worth as much as the checking one — lines an author paid to write that the
+benchmark never touches.
+
 ### A1 and A2 — the parts that worked
 
 **A1**: 256 of 1642 authored lines (15.6%) come off with no model involved, verified
@@ -174,6 +209,7 @@ moved **zero** at all twelve configurations tested.
 | A3 | [a3.md](a3.md) | `results/A3/` |
 | A4 | [a4.md](a4.md) | `results/A4/` |
 | A5 | [a5.md](a5.md) | `results/A5/` |
+| A6 | [a6.md](a6.md) | `results/A6/` |
 
 Metric definitions are fixed and versioned in [`results/METRICS.md`](../results/METRICS.md);
 every `metrics.json` records the `metrics_version` it was computed under. Arms recorded under
