@@ -43,6 +43,16 @@ from nemo_curator.stages.text.io.writer import JsonlWriter
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 
 
+#: Passed to MultilingualDomainClassifier as max_chars. Its own default of 2000
+#: is not a read limit: tokenizer.py:160 assigns the truncated text back with
+#: ``df[text_field] = df[text_field].str.slice(0, max_chars)``, so the column the
+#: writer emits is the truncated one. On one Vietnamese run that rewrote 53.4% of
+#: documents and destroyed 29.7 million characters, and the run manifest, the
+#: curation ledger and the audit all reported it clean, because all three count
+#: rows. None keeps the delivered text whole.
+DOMAIN_MAX_CHARS = None
+
+
 def keep_language(value: str, allowed: set[str]) -> bool:
     score, lang_code = literal_eval(value)
     return lang_code in allowed and score >= 0.0
@@ -123,6 +133,7 @@ def main() -> None:
                 text_field=cfg["text_field"],
                 filter_by=cfg["domains"],
                 cache_dir=models.get("hf_cache_dir"),
+                max_chars=DOMAIN_MAX_CHARS,
             )
         )
     pipeline.add_stage(JsonlWriter(path=cfg["output_dir"]))
