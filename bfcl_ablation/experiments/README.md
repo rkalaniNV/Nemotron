@@ -11,6 +11,7 @@ the artifacts live.
 | [a2.md](a2.md) | How much diversity can an LLM add while conclusions hold? | measured |
 | [a3.md](a3.md) | Can an LLM propose the tasks themselves? | measured |
 | [a4.md](a4.md) | Are the assertions actually checking anything? | measured |
+| [a5.md](a5.md) | Does rewording the request change the benchmark's verdict on a model? | measured |
 
 [findings.md](findings.md) collects every insight across the five arms in one place.
 
@@ -28,3 +29,8 @@ A0 and A1 use no model. A2, A3 and A4 call a local vLLM server
 (`openai/gpt-oss-120b` at `http://127.0.0.1:8000/v1`); every call is disk-cached under
 `_generated/llm_cache`, so a re-run reproduces the same benchmark and the cache doubles as the
 record of what the model was asked and what it answered.
+
+A5 is the only arm whose subject is a *model* rather than the pack. It calls the same server
+through `/v1/responses` (tool calling is not parsed on `/chat/completions` unless the server is
+started with `--enable-auto-tool-choice --tool-call-parser openai`) and caches under
+`_generated/target_cache`.

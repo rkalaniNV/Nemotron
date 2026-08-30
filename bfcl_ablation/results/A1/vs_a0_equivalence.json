@@ -29,6 +29,7 @@
   "surface": {
     "identical": false,
     "first_turns_identical": true,
+    "opening_turn_may_change": false,
     "tasks_with_changed_first_turn": 0,
     "first_turn_examples": [],
     "tasks_with_changed_wording": 8,

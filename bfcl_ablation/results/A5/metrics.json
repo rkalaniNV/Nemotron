@@ -1,0 +1,479 @@
+{
+  "arm": "a5",
+  "by_category": {
+    "assertion": {
+      "balance_inquiry": {
+        "a0_correct": 6,
+        "a2_correct": 6,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "dispute": {
+        "a0_correct": 6,
+        "a2_correct": 6,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "out_of_scope": {
+        "a0_correct": 3,
+        "a2_correct": 3,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 3
+      },
+      "qr_payment": {
+        "a0_correct": 6,
+        "a2_correct": 6,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "transaction_status": {
+        "a0_correct": 5,
+        "a2_correct": 5,
+        "accuracy_a0": 0.8333,
+        "accuracy_a2": 0.8333,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "transfer": {
+        "a0_correct": 6,
+        "a2_correct": 6,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      }
+    },
+    "ast_match": {
+      "balance_inquiry": {
+        "a0_correct": 6,
+        "a2_correct": 6,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "dispute": {
+        "a0_correct": 6,
+        "a2_correct": 6,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "out_of_scope": {
+        "a0_correct": 3,
+        "a2_correct": 3,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 3
+      },
+      "qr_payment": {
+        "a0_correct": 6,
+        "a2_correct": 6,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "transaction_status": {
+        "a0_correct": 5,
+        "a2_correct": 5,
+        "accuracy_a0": 0.8333,
+        "accuracy_a2": 0.8333,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 6
+      },
+      "transfer": {
+        "a0_correct": 6,
+        "a2_correct": 4,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 0.6667,
+        "agreement": 0.6667,
+        "delta": -0.3333,
+        "flipped_down": 2,
+        "flipped_up": 0,
+        "n": 6
+      }
+    }
+  },
+  "by_turn_policy": {
+    "assertion": {
+      "clarify_only": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "confirmation": {
+        "a0_correct": 5,
+        "a2_correct": 5,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 5
+      },
+      "correction": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "dependent_call": {
+        "a0_correct": 0,
+        "a2_correct": 0,
+        "accuracy_a0": 0.0,
+        "accuracy_a2": 0.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "irrelevant": {
+        "a0_correct": 3,
+        "a2_correct": 3,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 3
+      },
+      "missing_slot": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "multi_tool": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "negative_path": {
+        "a0_correct": 2,
+        "a2_correct": 2,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 2
+      },
+      "single_turn": {
+        "a0_correct": 18,
+        "a2_correct": 18,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 18
+      }
+    },
+    "ast_match": {
+      "clarify_only": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "confirmation": {
+        "a0_correct": 5,
+        "a2_correct": 3,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 0.6,
+        "agreement": 0.6,
+        "delta": -0.4,
+        "flipped_down": 2,
+        "flipped_up": 0,
+        "n": 5
+      },
+      "correction": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "dependent_call": {
+        "a0_correct": 0,
+        "a2_correct": 0,
+        "accuracy_a0": 0.0,
+        "accuracy_a2": 0.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "irrelevant": {
+        "a0_correct": 3,
+        "a2_correct": 3,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 3
+      },
+      "missing_slot": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "multi_tool": {
+        "a0_correct": 1,
+        "a2_correct": 1,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 1
+      },
+      "negative_path": {
+        "a0_correct": 2,
+        "a2_correct": 2,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 2
+      },
+      "single_turn": {
+        "a0_correct": 18,
+        "a2_correct": 18,
+        "accuracy_a0": 1.0,
+        "accuracy_a2": 1.0,
+        "agreement": 1.0,
+        "delta": 0.0,
+        "flipped_down": 0,
+        "flipped_up": 0,
+        "n": 18
+      }
+    }
+  },
+  "definitions": {
+    "assertion": "the pack's success_assertions accept the episode the model produced",
+    "ast_match": "model calls equal expected_tool_calls (name + arguments); order honoured unless call_order is 'any'",
+    "mcnemar_p": "two-sided exact McNemar on discordant pairs; H0 = wording has no effect",
+    "paired_agreement": "share of tasks where both wordings gave the same verdict"
+  },
+  "endpoint": "http://127.0.0.1:8000/v1",
+  "env": {
+    "cwd": "/localhome/local-hndo/Nemotron",
+    "python": "3.12.7",
+    "repo_root": "/localhome/local-hndo/Nemotron"
+  },
+  "episodes_run": 128,
+  "llm": {
+    "cache_hits": 146,
+    "calls_made": 0
+  },
+  "metrics_version": "1.0",
+  "pack": "src/nemotron/steps/byob/data/banking_vn_oracle_pack",
+  "paired": {
+    "assertion": {
+      "accuracy_a0": 0.9697,
+      "accuracy_a0_ci95": [
+        0.8468,
+        0.9946
+      ],
+      "accuracy_a2": 0.9697,
+      "accuracy_a2_ci95": [
+        0.8468,
+        0.9946
+      ],
+      "contingency": {
+        "a0_only": 0,
+        "a2_only": 0,
+        "both_correct": 32,
+        "neither": 1
+      },
+      "delta": 0.0,
+      "discordant": 0,
+      "flipped_task_ids": {
+        "a0_correct_a2_wrong": [],
+        "a2_correct_a0_wrong": []
+      },
+      "mcnemar_p": 1.0,
+      "n": 33,
+      "paired_agreement": 1.0,
+      "verdict": "assertion"
+    },
+    "ast_match": {
+      "accuracy_a0": 0.9697,
+      "accuracy_a0_ci95": [
+        0.8468,
+        0.9946
+      ],
+      "accuracy_a2": 0.9091,
+      "accuracy_a2_ci95": [
+        0.7643,
+        0.9686
+      ],
+      "contingency": {
+        "a0_only": 2,
+        "a2_only": 0,
+        "both_correct": 30,
+        "neither": 1
+      },
+      "delta": -0.0606,
+      "discordant": 2,
+      "flipped_task_ids": {
+        "a0_correct_a2_wrong": [
+          "banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1",
+          "banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8"
+        ],
+        "a2_correct_a0_wrong": []
+      },
+      "mcnemar_p": 0.5,
+      "n": 33,
+      "paired_agreement": 0.9394,
+      "verdict": "ast_match"
+    }
+  },
+  "target_model": "openai/gpt-oss-120b",
+  "tasks_paired": 33,
+  "tasks_reworded": 33,
+  "verdict_disagreement": {
+    "assertion_passed_ast_failed": 2,
+    "ast_passed_assertion_failed": 0,
+    "examples_lenient": [
+      {
+        "arm": "a2",
+        "expected": [
+          [
+            "create_transfer",
+            "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+          ]
+        ],
+        "got": [
+          [
+            "get_transfer_fee",
+            "{\"amount_vnd\": 200000, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+          ],
+          [
+            "create_transfer",
+            "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+          ]
+        ],
+        "task_id": "banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1"
+      },
+      {
+        "arm": "a2",
+        "expected": [
+          [
+            "create_transfer",
+            "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+          ]
+        ],
+        "got": [
+          [
+            "get_transfer_fee",
+            "{\"amount_vnd\": 200000, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+          ],
+          [
+            "create_transfer",
+            "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+          ]
+        ],
+        "task_id": "banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8"
+      }
+    ],
+    "examples_strict": []
+  },
+  "wordings": {
+    "a0": "bfcl_ablation/_generated/runs/a0/bfcl_ablation_a0/benchmark.parquet",
+    "a2": "bfcl_ablation/_generated/runs/a2_b6_v6/bfcl_ablation_a2_b6_v6/benchmark.parquet"
+  }
+}

@@ -192,6 +192,32 @@ class Gate:
             for call in calls
         ]
 
+    def replay(
+        self,
+        *,
+        task: dict[str, Any],
+        calls: list[dict[str, Any]],
+        names: list[str],
+        target: Target,
+    ) -> dict[str, bool]:
+        """Run `names` over an episode built from `calls` — any calls, not only gold.
+
+        A4 needed this for the gold trace and its corruptions only, so it stayed private.
+        A5 points the same operation at what a target model produced: identical steps,
+        a different call list. An episode that fails to run returns `{}` rather than a
+        dict of `False`, so "the harness broke" cannot be read as "the model was wrong".
+        """
+        steps: list[dict[str, Any]] = [{"op": "reset"}]
+        steps.extend(self._call_steps(calls))
+        steps.extend({"op": "run_assertion", "name": name, "task": task} for name in names)
+        outputs = self._episode(task=task, steps=steps, target=target)
+        if isinstance(outputs, str) or not names:
+            return {}
+        return {
+            name: bool(item.get("passed"))
+            for name, item in zip(names, outputs[-len(names) :])
+        }
+
     # -- phase 1: replay the gold episode ---------------------------------------
 
     def plan(self, tasks: list[dict[str, Any]], traces: dict[str, list[dict[str, Any]]], *, target: Target,
@@ -495,6 +521,12 @@ def surviving_mutations(scored: dict[str, Any]) -> dict[str, list[str]]:
     seen: set[tuple[str, str, str]] = set()
     for trial in scored["trials"]:
         if trial["outcome"] != FALSE_ACCEPT:
+            continue
+        # An advisory corruption is one an assertion is *right* to accept, so feeding it
+        # back as a survivor asks the author to reject correct behaviour. `summarize`
+        # already excludes these from every rate; this loop did not, so 10 of the 50
+        # survivors handed to the LLM arm were repeated idempotent reads.
+        if trial["operator"] in ADVISORY_OPERATORS:
             continue
         key = (trial["assertion"], trial["operator"], trial["template_id"])
         if key in seen:

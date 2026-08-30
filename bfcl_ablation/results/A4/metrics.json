@@ -2198,11 +2198,11 @@
       "advisory": {
         "crash": 0,
         "crash_rate": 0.0,
-        "detected": 25,
-        "detection_rate": 0.9615,
+        "detected": 18,
+        "detection_rate": 0.6923,
         "episode_error": 0,
-        "false_accept": 1,
-        "false_acceptance_rate": 0.0385,
+        "false_accept": 8,
+        "false_acceptance_rate": 0.3077,
         "trials": 26
       },
       "authoring": {
@@ -2210,12 +2210,12 @@
         "assertions": {
           "assert_account_balance_reported": {
             "errors": [],
-            "lines": 140,
+            "lines": 162,
             "ok": true
           },
           "assert_card_limit_reported": {
             "errors": [],
-            "lines": 100,
+            "lines": 122,
             "ok": true
           },
           "assert_dispute_opened": {
@@ -2225,7 +2225,7 @@
           },
           "assert_dispute_status_reported": {
             "errors": [],
-            "lines": 103,
+            "lines": 107,
             "ok": true
           },
           "assert_no_tool_called": {
@@ -2245,17 +2245,17 @@
           },
           "assert_status_checked_from_listed_transaction": {
             "errors": [],
-            "lines": 143,
+            "lines": 137,
             "ok": true
           },
           "assert_transaction_not_found": {
             "errors": [],
-            "lines": 71,
+            "lines": 79,
             "ok": true
           },
           "assert_transaction_status_reported": {
             "errors": [],
-            "lines": 101,
+            "lines": 94,
             "ok": true
           },
           "assert_transfer_committed": {
@@ -2265,7 +2265,7 @@
           },
           "assert_transfer_fee_reported": {
             "errors": [],
-            "lines": 113,
+            "lines": 108,
             "ok": true
           },
           "assert_transfer_rejected_for_funds": {
@@ -2279,7 +2279,7 @@
             "ok": true
           }
         },
-        "assertions_loc": 1630,
+        "assertions_loc": 1668,
         "authored": 14,
         "disclosed": {
           "backend_py": false,
@@ -2309,21 +2309,21 @@
             "argument_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 20,
-              "detection_rate": 0.9524,
+              "detected": 21,
+              "detection_rate": 1.0,
               "episode_error": 0,
-              "false_accept": 1,
-              "false_acceptance_rate": 0.0476,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
               "trials": 21
             },
             "call_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 19,
-              "detection_rate": 1.0,
+              "detected": 14,
+              "detection_rate": 0.7368,
               "episode_error": 0,
-              "false_accept": 0,
-              "false_acceptance_rate": 0.0,
+              "false_accept": 5,
+              "false_acceptance_rate": 0.2632,
               "trials": 19
             }
           },
@@ -2331,11 +2331,11 @@
             "argument_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 20,
-              "detection_rate": 0.9524,
+              "detected": 21,
+              "detection_rate": 1.0,
               "episode_error": 0,
-              "false_accept": 1,
-              "false_acceptance_rate": 0.0476,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
               "trials": 21
             },
             "call_level": {
@@ -2351,11 +2351,11 @@
           },
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 39,
-          "detection_rate": 0.975,
+          "detected": 35,
+          "detection_rate": 0.875,
           "episode_error": 0,
-          "false_accept": 1,
-          "false_acceptance_rate": 0.025,
+          "false_accept": 5,
+          "false_acceptance_rate": 0.125,
           "gold_instances": 4,
           "gold_passed": 4,
           "trials": 40
@@ -2365,21 +2365,21 @@
             "argument_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 10,
-              "detection_rate": 0.7143,
+              "detected": 14,
+              "detection_rate": 1.0,
               "episode_error": 0,
-              "false_accept": 4,
-              "false_acceptance_rate": 0.2857,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
               "trials": 14
             },
             "call_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 8,
-              "detection_rate": 0.7273,
+              "detected": 11,
+              "detection_rate": 1.0,
               "episode_error": 0,
-              "false_accept": 3,
-              "false_acceptance_rate": 0.2727,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
               "trials": 11
             }
           },
@@ -2387,31 +2387,31 @@
             "argument_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 10,
-              "detection_rate": 0.7143,
+              "detected": 14,
+              "detection_rate": 1.0,
               "episode_error": 0,
-              "false_accept": 4,
-              "false_acceptance_rate": 0.2857,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
               "trials": 14
             },
             "call_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 6,
-              "detection_rate": 0.75,
+              "detected": 8,
+              "detection_rate": 1.0,
               "episode_error": 0,
-              "false_accept": 2,
-              "false_acceptance_rate": 0.25,
+              "false_accept": 0,
+              "false_acceptance_rate": 0.0,
               "trials": 8
             }
           },
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 18,
-          "detection_rate": 0.72,
+          "detected": 25,
+          "detection_rate": 1.0,
           "episode_error": 0,
-          "false_accept": 7,
-          "false_acceptance_rate": 0.28,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
           "gold_instances": 2,
           "gold_passed": 2,
           "trials": 25
@@ -2787,11 +2787,11 @@
             "call_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 4,
-              "detection_rate": 1.0,
+              "detected": 3,
+              "detection_rate": 0.75,
               "episode_error": 0,
-              "false_accept": 0,
-              "false_acceptance_rate": 0.0,
+              "false_accept": 1,
+              "false_acceptance_rate": 0.25,
               "trials": 4
             }
           },
@@ -2819,11 +2819,11 @@
           },
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 5,
-          "detection_rate": 1.0,
+          "detected": 4,
+          "detection_rate": 0.8,
           "episode_error": 0,
-          "false_accept": 0,
-          "false_acceptance_rate": 0.0,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.2,
           "gold_instances": 1,
           "gold_passed": 1,
           "trials": 5
@@ -2913,11 +2913,11 @@
             "call_level": {
               "crash": 0,
               "crash_rate": 0.0,
-              "detected": 8,
-              "detection_rate": 1.0,
+              "detected": 6,
+              "detection_rate": 0.75,
               "episode_error": 0,
-              "false_accept": 0,
-              "false_acceptance_rate": 0.0,
+              "false_accept": 2,
+              "false_acceptance_rate": 0.25,
               "trials": 8
             }
           },
@@ -2945,11 +2945,11 @@
           },
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 18,
-          "detection_rate": 1.0,
+          "detected": 16,
+          "detection_rate": 0.8889,
           "episode_error": 0,
-          "false_accept": 0,
-          "false_acceptance_rate": 0.0,
+          "false_accept": 2,
+          "false_acceptance_rate": 0.1111,
           "gold_instances": 2,
           "gold_passed": 2,
           "trials": 18
@@ -3029,21 +3029,21 @@
         "argument_level": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 115,
-          "detection_rate": 0.935,
+          "detected": 120,
+          "detection_rate": 0.9756,
           "episode_error": 0,
-          "false_accept": 8,
-          "false_acceptance_rate": 0.065,
+          "false_accept": 3,
+          "false_acceptance_rate": 0.0244,
           "trials": 123
         },
         "call_level": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 119,
-          "detection_rate": 0.9754,
+          "detected": 114,
+          "detection_rate": 0.9344,
           "episode_error": 0,
-          "false_accept": 3,
-          "false_acceptance_rate": 0.0246,
+          "false_accept": 8,
+          "false_acceptance_rate": 0.0656,
           "trials": 122
         },
         "state_level": {
@@ -3061,21 +3061,21 @@
         "argument_level": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 115,
-          "detection_rate": 0.935,
+          "detected": 120,
+          "detection_rate": 0.9756,
           "episode_error": 0,
-          "false_accept": 8,
-          "false_acceptance_rate": 0.065,
+          "false_accept": 3,
+          "false_acceptance_rate": 0.0244,
           "trials": 123
         },
         "call_level": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 94,
-          "detection_rate": 0.9792,
+          "detected": 96,
+          "detection_rate": 1.0,
           "episode_error": 0,
-          "false_accept": 2,
-          "false_acceptance_rate": 0.0208,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
           "trials": 96
         },
         "state_level": {
@@ -3093,11 +3093,11 @@
         "drop_call": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 29,
-          "detection_rate": 0.9667,
+          "detected": 30,
+          "detection_rate": 1.0,
           "episode_error": 0,
-          "false_accept": 1,
-          "false_acceptance_rate": 0.0333,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
           "mutations_generated": 31,
           "op_class": "call_level",
           "semantics": "strict",
@@ -3123,11 +3123,11 @@
         "duplicate_call_readonly": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 25,
-          "detection_rate": 0.9615,
+          "detected": 18,
+          "detection_rate": 0.6923,
           "episode_error": 0,
-          "false_accept": 1,
-          "false_acceptance_rate": 0.0385,
+          "false_accept": 8,
+          "false_acceptance_rate": 0.3077,
           "mutations_generated": 24,
           "op_class": "call_level",
           "semantics": "advisory",
@@ -3138,11 +3138,11 @@
         "inject_extra_call": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 30,
-          "detection_rate": 0.9677,
+          "detected": 31,
+          "detection_rate": 1.0,
           "episode_error": 0,
-          "false_accept": 1,
-          "false_acceptance_rate": 0.0323,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
           "mutations_generated": 33,
           "op_class": "call_level",
           "semantics": "strict",
@@ -3153,11 +3153,11 @@
         "perturb_numeric_large": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 24,
-          "detection_rate": 0.9231,
+          "detected": 25,
+          "detection_rate": 0.9615,
           "episode_error": 0,
-          "false_accept": 2,
-          "false_acceptance_rate": 0.0769,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0385,
           "mutations_generated": 30,
           "op_class": "argument_level",
           "semantics": "strict",
@@ -3168,11 +3168,11 @@
         "perturb_numeric_plus_one": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 24,
-          "detection_rate": 0.9231,
+          "detected": 25,
+          "detection_rate": 0.9615,
           "episode_error": 0,
-          "false_accept": 2,
-          "false_acceptance_rate": 0.0769,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0385,
           "mutations_generated": 30,
           "op_class": "argument_level",
           "semantics": "strict",
@@ -3213,11 +3213,11 @@
         "swap_identity_argument": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 29,
-          "detection_rate": 0.9667,
+          "detected": 30,
+          "detection_rate": 1.0,
           "episode_error": 0,
-          "false_accept": 1,
-          "false_acceptance_rate": 0.0333,
+          "false_accept": 0,
+          "false_acceptance_rate": 0.0,
           "mutations_generated": 31,
           "op_class": "argument_level",
           "semantics": "strict",
@@ -3228,11 +3228,11 @@
         "swap_identity_result": {
           "crash": 0,
           "crash_rate": 0.0,
-          "detected": 38,
-          "detection_rate": 0.9268,
+          "detected": 40,
+          "detection_rate": 0.9756,
           "episode_error": 0,
-          "false_accept": 3,
-          "false_acceptance_rate": 0.0732,
+          "false_accept": 1,
+          "false_acceptance_rate": 0.0244,
           "mutations_generated": 41,
           "op_class": "argument_level",
           "semantics": "strict",
@@ -4351,7 +4351,9 @@
     }
   },
   "assertions_loc": {
-    "human": 182
+    "human": 182,
+    "llm_blind": 1426,
+    "llm_feedback": 1668
   },
   "authoring": {
     "blind": {
@@ -4457,12 +4459,12 @@
       "assertions": {
         "assert_account_balance_reported": {
           "errors": [],
-          "lines": 140,
+          "lines": 162,
           "ok": true
         },
         "assert_card_limit_reported": {
           "errors": [],
-          "lines": 100,
+          "lines": 122,
           "ok": true
         },
         "assert_dispute_opened": {
@@ -4472,7 +4474,7 @@
         },
         "assert_dispute_status_reported": {
           "errors": [],
-          "lines": 103,
+          "lines": 107,
           "ok": true
         },
         "assert_no_tool_called": {
@@ -4492,17 +4494,17 @@
         },
         "assert_status_checked_from_listed_transaction": {
           "errors": [],
-          "lines": 143,
+          "lines": 137,
           "ok": true
         },
         "assert_transaction_not_found": {
           "errors": [],
-          "lines": 71,
+          "lines": 79,
           "ok": true
         },
         "assert_transaction_status_reported": {
           "errors": [],
-          "lines": 101,
+          "lines": 94,
           "ok": true
         },
         "assert_transfer_committed": {
@@ -4512,7 +4514,7 @@
         },
         "assert_transfer_fee_reported": {
           "errors": [],
-          "lines": 113,
+          "lines": 108,
           "ok": true
         },
         "assert_transfer_rejected_for_funds": {
@@ -4526,7 +4528,7 @@
           "ok": true
         }
       },
-      "assertions_loc": 1630,
+      "assertions_loc": 1668,
       "authored": 14,
       "disclosed": {
         "backend_py": false,
@@ -4562,6 +4564,7 @@
     "repo_root": "/localhome/local-hndo/Nemotron"
   },
   "episodes_run": 899,
+  "metrics_version": "1.0",
   "mutations_generated": 265,
   "operator_inventory": {
     "drop_call": {

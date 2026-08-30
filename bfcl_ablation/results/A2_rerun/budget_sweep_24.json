@@ -1,0 +1,22 @@
+[
+  {
+    "budget": 24,
+    "distinct_surfaces": 17,
+    "entities_bound": 32,
+    "entities_total": 50,
+    "policy_counts": {
+      "clarify_only": 2,
+      "confirmation": 12,
+      "correction": 5,
+      "dependent_call": 7,
+      "irrelevant": 3,
+      "missing_slot": 6,
+      "multi_tool": 6,
+      "negative_path": 4,
+      "single_turn": 46
+    },
+    "published": 91,
+    "single_turn_share": 0.5055,
+    "tasks": 91
+  }
+]

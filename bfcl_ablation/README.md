@@ -13,7 +13,12 @@ A1  deterministic simplification  no LLM                           no model
 A2  LLM surface generation        wording only                     gpt-oss-120b
 A3  LLM task generation           semantics                        gpt-oss-120b
 A4  LLM assertions                last                             gpt-oss-120b
+A5  target-model evaluation       does a conclusion survive A2?     gpt-oss-120b
 ```
+
+A0–A4 measure the benchmark. **A5 is the only arm that measures a model on it**, and it is
+the one that closes the loop: A2 showed wording can change without ground truth moving, and
+A5 asks whether the *score* moves anyway.
 
 **Per-arm findings live in [experiments/](experiments/)** — one document per rung, insights
 first. This file is the methodology and the how-to-run.
@@ -35,7 +40,13 @@ PYTHONPATH=src python3 bfcl_ablation/run_a0.py     # baseline, ~1 min
 PYTHONPATH=src python3 bfcl_ablation/run_a1.py     # simplify + verify, ~3 min
 PYTHONPATH=src python3 bfcl_ablation/run_a3.py     # sampled cells + LLM task proposals, ~20 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a4.py     # mutation gate + LLM assertions, ~8 min cold
+PYTHONPATH=src python3 bfcl_ablation/run_a5.py     # target model on A0 vs A2 wording, ~5 min cold
 ```
+
+`run_a5.py` needs A0 *and* an A2 variant run on disk; `--a2-run a2_b6_v1` selects a different
+paraphrase. Its tool calls go through `/v1/responses`, because `/chat/completions` on a vLLM
+started without `--enable-auto-tool-choice --tool-call-parser openai` returns `tool_calls: null`
+and would silently score every task as "called nothing".
 
 `run_a4.py --skip-llm` runs the mutation gate alone and needs no model. It reads
 A0's `stage_cache`, so `run_a0.py` has to have run first.
@@ -54,6 +65,7 @@ equivalence.py       A0-vs-A1 proof obligation
 propose/             A3 — coverage spec + controlled sampler, backend result probe,
                      proposal gates, selection-bias measurement
 mutate/              A4 — mutation operators, the assertion gate, LLM assertion authoring
+target/              A5 — tool-calling client, model rollout loop, paired scoring
 results/             per-arm reports
 ```
 

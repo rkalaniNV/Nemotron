@@ -12,11 +12,16 @@ the fingerprint intact, did the schema match — and none is about content.** Th
 independently and by different mechanisms: A0 finds the gates never fire, A4 finds the assertions
 do not check returned values, A3 finds a badly skewed benchmark passes anyway.
 
-They are **not a causal chain**, and an earlier draft wrongly presented them as one. A4 does not
-explain A0 — A0 replayed uncorrupted traces, so nothing reached the assertions in a failing
-condition. A3 did not exploit A4's gap — it leans on `assert_no_tool_called` for 14 of its 20
-templates, which A4 scored at 0.000 false acceptance. They are also not statistically
-independent: A4 gates exactly A0's 33 tasks from A0's stage cache.
+They are **not a causal chain**, and an earlier draft wrongly presented them as one. A3 did not
+exploit A4's gap — it leans on `assert_no_tool_called` for 14 of its 20 templates, which A4
+scored at 0.000 false acceptance. They are also not statistically independent: A4 gates exactly
+A0's 33 tasks from A0's stage cache.
+
+**A4 did not explain A0 either — until A5.** A0 replayed uncorrupted traces, so nothing reached
+the assertions in a failing condition, and the link stayed inferred. A5 closes it with an
+observation: a target model, given A2's paraphrase of two `confirmation` tasks, emitted an extra
+call; `expected_tool_calls` caught it and the pack's assertions passed all 33 tasks in both
+wordings. Assertion agreement 1.000, ground-truth agreement 0.939.
 
 ---
 
@@ -68,6 +73,30 @@ selection rather than assertion weakness: **14 of the 20 accepted templates (70%
 unfalsifiable by the executable oracle** — they assert that nothing happened, which an oracle
 cannot disprove. Two are labelled `clarify_only` although the pack holds a tool that answers them.
 
+### A5 — and it happens on real model output
+
+The same 33 tasks in two wordings, one target model, paired by `task_id` (which does not cover
+the surface, so both arms share ids exactly):
+
+| verdict | A0 | A2 | paired agreement |
+| --- | ---: | ---: | ---: |
+| calls equal `expected_tool_calls` | 0.970 | 0.909 | 0.939 |
+| the pack's own `success_assertions` | 0.970 | 0.970 | **1.000** |
+
+Two `confirmation` tasks flipped. A0 says *"chuyển **ngay**"* (transfer *immediately*), A2 says
+*"**mong** chuyển"* (*would like to* transfer); without the urgency marker the model checked the
+fee first. The transfer is identical and correct — the call set is not. The assertions passed
+both.
+
+The failure mode is `inject_extra_call`, which A4 had scored at **0.882** false acceptance on
+synthetic corruptions. It is the operator A4 rated most dangerous, and it is the one that showed
+up first in the wild.
+
+Two honest qualifications: the accuracy delta is **not significant** (McNemar p = 0.50 on 2
+discordant pairs), and the paraphrase preserved tool-level intent — A2's checker passed it
+correctly. What changed was register. **Intent preservation is not behavioural equivalence**, and
+no arm before this one could tell the difference.
+
 ### A1 and A2 — the parts that worked
 
 **A1**: 256 of 1642 authored lines (15.6%) come off with no model involved, verified
@@ -94,7 +123,7 @@ moved **zero** at all twelve configurations tested.
 | A2 | ladder 1/5/10/20 | only measurable if the task budget rises with N; at budget 6 the top rungs are indistinguishable |
 | A3 | policy distribution ← system prevents selection bias | **necessary but not sufficient** — bias re-enters at the accept/drop gate |
 | A4 | mutation score alone is insufficient | confirmed: the 0.498 aggregate hides 0.000 at state level and 0.610 at argument level |
-| A4 | assertions stay human until evidence | supported — LLM suites are stricter but false-reject 2–3 of 34 valid tasks at 8x the code |
+| A4 | assertions stay human until evidence | supported — LLM suites are stricter but false-reject 2–3 of 34 valid tasks at 8–9x the code, and the feedback arm also rejects 18 of 26 corruptions that were never defects |
 
 ---
 
@@ -123,9 +152,10 @@ moved **zero** at all twelve configurations tested.
 
 - **One pack, one domain, one language, one model.** `banking_vn`, Vietnamese,
   `gpt-oss-120b`. Every cross-arm claim is a single observation.
-- **No target-model evaluation.** The plan's STEP 4 — running models against the published
-  benchmark and comparing per-policy accuracy and paired agreement — is not implemented. Nothing
-  here says whether benchmark *conclusions* are stable, only whether benchmark *content* is.
+- **Target-model evaluation is one model, one paraphrase.** A5 implements the plan's STEP 4 and
+  found that the assertions cannot see a wording effect the declared ground truth catches. But
+  its accuracy delta rests on 2 discordant pairs (p = 0.50) and its target model is the same
+  family that wrote the paraphrases. It shows the gap is real; it does not yet say how large.
 - **Self-preference is untouched.** It needs at least two generator families.
 - **Small n in places.** A4's state-level result rests on 6 trials; A3's `confirmation` accept
   rate on 3 proposals; A2's false-alarm floor on 17 sentences.
@@ -140,9 +170,10 @@ moved **zero** at all twelve configurations tested.
 | --- | --- | --- |
 | A0 | [a0.md](a0.md) | `results/A0/`, `results/budget_sweep.json` |
 | A1 | [a1.md](a1.md) | `results/A1/` |
-| A2 | [a2.md](a2.md) | `results/A2/` |
+| A2 | [a2.md](a2.md) | `results/A2/`, `results/A2_rerun/` |
 | A3 | [a3.md](a3.md) | `results/A3/` |
 | A4 | [a4.md](a4.md) | `results/A4/` |
+| A5 | [a5.md](a5.md) | `results/A5/` |
 
 Metric definitions are fixed and versioned in [`results/METRICS.md`](../results/METRICS.md);
 every `metrics.json` records the `metrics_version` it was computed under. Arms recorded under

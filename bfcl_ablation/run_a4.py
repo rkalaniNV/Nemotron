@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bfcl_ablation import common  # noqa: E402
+from bfcl_ablation.measurement.metrics import METRIC_CONTRACT_VERSION  # noqa: E402
 from bfcl_ablation.mutate import gate, inputs  # noqa: E402
 from bfcl_ablation.mutate.operators import PackContext  # noqa: E402
 
@@ -77,6 +78,10 @@ def main() -> int:
 
     arms: dict[str, dict] = {}
     raw: dict[str, dict] = {}
+    # Suite size is half the comparison — an arm that buys strictness with 9x the code
+    # is a different trade from one that does it with the same code. Recording only the
+    # human count left that trade unquantified in the artifact.
+    assertions_loc: dict[str, int] = {"human": _loc(pack.paths.assertions_path)}
 
     # The gate's own control. An assertion that does nothing must score gold 1.0 and
     # false acceptance 1.0 on every operator; anything else means the harness is
@@ -116,6 +121,7 @@ def main() -> int:
         raw["llm_blind"] = engine.score(plans, target=blind_target)
         arms["llm_blind"] = gate.summarize(raw["llm_blind"], plans)
         arms["llm_blind"]["authoring"] = blind.report
+        assertions_loc["llm_blind"] = _loc(blind.assertions_path)
         _print_arm(arms["llm_blind"])
 
         started = time.time()
@@ -142,6 +148,7 @@ def main() -> int:
         raw["llm_feedback"] = engine.score(plans, target=feedback_target)
         arms["llm_feedback"] = gate.summarize(raw["llm_feedback"], plans)
         arms["llm_feedback"]["authoring"] = repaired.report
+        assertions_loc["llm_feedback"] = _loc(repaired.assertions_path)
         _print_arm(arms["llm_feedback"])
 
         authoring_report = {
@@ -153,6 +160,10 @@ def main() -> int:
 
     payload = {
         "arm": "a4",
+        # A4 emits a bespoke schema rather than the shared measurement one, but it still
+        # compares against A0's tasks, so it carries the same contract stamp. Without it
+        # nothing distinguishes "computed under a different definition" from "changed".
+        "metrics_version": METRIC_CONTRACT_VERSION,
         "env": common.env_note(),
         "pack": common.rel(pack.paths.pack_root),
         "tasks_gated": len(plans),
@@ -160,11 +171,7 @@ def main() -> int:
         "episodes_run": engine.episodes_run,
         "plan_errors": plan_errors,
         "operator_inventory": _inventory(plans),
-        "assertions_loc": {
-            "human": len(
-                (pack.paths.assertions_path).read_text(encoding="utf-8").splitlines()
-            ),
-        },
+        "assertions_loc": assertions_loc,
         "arms": arms,
         "authoring": authoring_report,
     }
@@ -172,9 +179,147 @@ def main() -> int:
     trials_path = common.dump_result(
         "a4_trials.json", {name: raw[name]["trials"] for name in raw}
     )
+    report_path = common.result_path("a4_report.md")
+    report_path.write_text(_render_report(payload), encoding="utf-8")
     print(f"\nwrote {common.rel(path)}")
     print(f"wrote {common.rel(trials_path)}")
+    print(f"wrote {common.rel(report_path)}")
     return 0
+
+
+def _loc(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8").splitlines())
+
+
+_ARM_ORDER = ("human", "llm_blind", "llm_feedback", "null_control")
+_CLASSES = ("call_level", "argument_level", "state_level")
+
+
+def _render_report(payload: dict) -> str:
+    """Render the arm's Markdown, so A4 files the same artifact pair as every other arm.
+
+    A4 previously emitted `metrics.json` and `trials.json` only, which left its headline
+    table readable exclusively through the write-up in `experiments/a4.md` — and that
+    write-up went stale against the data without anything detecting it.
+    """
+    arms = payload["arms"]
+    loc = payload.get("assertions_loc", {})
+    out: list[str] = [
+        "# BFCL ablation — arm `a4`",
+        "",
+        f"Pack: `{payload['pack']}`",
+        "",
+        f"Metric contract `{payload.get('metrics_version', 'unversioned')}`. "
+        f"{payload['tasks_gated']} tasks gated, {payload['mutations_generated']} mutations, "
+        f"{payload['episodes_run']} oracle episodes.",
+        "",
+        "## 1. False acceptance by operator class",
+        "",
+        "An assertion that passes on a corrupted episode is a **false acceptance**: it is",
+        "not a check. Lower is better. Advisory operators are excluded — those are",
+        "corruptions an assertion is *right* to accept — and reported separately in §3.",
+        "",
+        "| assertions | lines | call level | argument level | state level | unmutated pass |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for name in _ARM_ORDER:
+        if name not in arms:
+            continue
+        strict = arms[name]["by_class_strict"]
+        gold = arms[name]["gold"]
+        cells = []
+        for op_class in _CLASSES:
+            row = strict.get(op_class)
+            if not row or not row["trials"]:
+                cells.append("—")
+            else:
+                cells.append(
+                    f"{row['false_acceptance_rate']:.3f} "
+                    f"({row['false_accept']}/{row['trials']})"
+                )
+        size = f"{loc[name]}" if name in loc else "—"
+        out.append(
+            f"| `{name}` | {size} | {cells[0]} | {cells[1]} | {cells[2]} | "
+            f"{gold['passed']}/{gold['instances']} |"
+        )
+
+    out += [
+        "",
+        "`null_control` is an assertion suite that does nothing. It must score 1.000",
+        "everywhere; anything less would mean the harness detects corruptions by accident",
+        "and every other row is unreadable.",
+        "",
+        "## 2. Per operator",
+        "",
+        "| operator | class | semantics | trials | detected | false accept | rate |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    human = arms.get("human", {}).get("by_operator", {})
+    for name, row in human.items():
+        if not row["trials"]:
+            continue
+        out.append(
+            f"| `{name}` | {row['op_class'].replace('_', ' ')} | {row['semantics']} | "
+            f"{row['trials']} | {row['detected']} | {row['false_accept']} | "
+            f"{row['false_acceptance_rate']:.4f} |"
+        )
+    out += [
+        "",
+        "Rates above are the **human** suite — the pack as authored.",
+        "",
+        "## 3. Over-strictness (advisory operators)",
+        "",
+        "Detection on an advisory operator is not a win. `duplicate_call_readonly` repeats",
+        "an idempotent read: the episode is wasteful, not wrong, so an assertion that",
+        "rejects it is refusing correct behaviour. This is the counterweight to §1 — an arm",
+        "can always buy a lower false-acceptance rate by rejecting more.",
+        "",
+        "| assertions | advisory trials | rejected | rejection rate |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for name in _ARM_ORDER:
+        if name not in arms:
+            continue
+        adv = arms[name]["advisory"]
+        rate = adv["detection_rate"]
+        out.append(
+            f"| `{name}` | {adv['trials']} | {adv['detected']} | "
+            f"{'—' if rate is None else f'{rate:.4f}'} |"
+        )
+
+    out += [
+        "",
+        "## 4. Operator inventory",
+        "",
+        "What the gate could ask, before anything was scored.",
+        "",
+        "| operator | class | delivery | mutations | tasks |",
+        "| --- | --- | --- | ---: | ---: |",
+    ]
+    for name, row in payload["operator_inventory"].items():
+        out.append(
+            f"| `{name}` | {row['op_class'].replace('_', ' ')} | {row['mode']} | "
+            f"{row['mutations']} | {row['tasks']} |"
+        )
+
+    errors = payload.get("plan_errors") or []
+    out += [
+        "",
+        f"Plan errors: {len(errors)}." if errors else "",
+        "",
+        "## 5. Reading this",
+        "",
+        "- **Rows have different denominators.** An (assertion, task) pair whose *unmutated*",
+        "  episode fails is dropped from scoring, so the arms are not scored on identical",
+        "  trial sets. The dropped trials are systematically the ones the LLM suites got wrong.",
+        "- **`llm_feedback` is scored in-sample.** It is shown which mutations `llm_blind`",
+        "  survived and asked to rewrite so those fail, then scored on that same mutation set.",
+        "  Its rate is a training-set number, not a held-out one.",
+        "- **Read §1 and §3 together.** A suite that scores 0.000 in §1 while rejecting most",
+        "  of §3 has traded false acceptance for false rejection, not eliminated error.",
+        "",
+    ]
+    return "\n".join(line for line in out if line is not None) + "\n"
 
 
 def _null_target(names: list[str]) -> gate.Target:

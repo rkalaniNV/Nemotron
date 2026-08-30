@@ -1,0 +1,1740 @@
+[
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "any",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ],
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "final_text": "Dưới đây là thông tin tài khoản và thẻ của bạn:\n\n- **Số dư tài khoản ACC-001:** 5.000.000 VND  \n- **Hạn mức còn lại của thẻ CARD-001:** 15.000.000 VND  \n\nNếu bạn cần kiểm tra chi tiết giao dịch, thay đổi hạn mức, hoặc có bất kỳ yêu cầu nào khác, cứ cho mình biết nhé!",
+    "model_turns": 3,
+    "opening_turn": "Cho mình xem số dư tài khoản ACC-001 và hạn mức thẻ CARD-001 luôn nhé.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ],
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
+    "template_id": "bn_balance_and_card_parallel",
+    "tool_errors": [],
+    "turn_policy": "multi_tool"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "final_text": "Số dư tài khoản **ACC-001** hiện tại là **5.000.000 VND**.",
+    "model_turns": 2,
+    "opening_turn": "Cho mình xem số dư tài khoản ACC-001.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_single__5425bff786adbd17",
+    "template_id": "bn_balance_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "final_text": "Số dư tài khoản **ACC-002** hiện tại là **12.000.000 VND**.",
+    "model_turns": 2,
+    "opening_turn": "Cho mình xem số dư tài khoản ACC-002.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_single__e662949227517360",
+    "template_id": "bn_balance_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "final_text": "Số dư tài khoản **ACC-001** hiện tại là **5.000.000 VND**. Nếu bạn cần kiểm tra thông tin khác hoặc thực hiện giao dịch nào khác, cứ cho mình biết nhé!",
+    "model_turns": 3,
+    "opening_turn": "Cho mình xem số dư tài khoản của mình với.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_withheld_account__0f34f3476873fef5",
+    "template_id": "bn_balance_withheld_account",
+    "tool_errors": [],
+    "turn_policy": "missing_slot"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "final_text": "Hạn mức còn lại của thẻ **CARD-001** là **15.000.000 VND**.",
+    "model_turns": 2,
+    "opening_turn": "Hạn mức còn lại của thẻ CARD-001 là bao nhiêu?",
+    "predicted_calls": [
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_card_limit_single__eb3437ed113fa3a3",
+    "template_id": "bn_card_limit_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [],
+    "final_text": "Để kiểm tra số dư tài khoản, tôi cần biết **mã số tài khoản** của bạn. Bạn vui lòng cung cấp mã tài khoản để tôi có thể thực hiện truy vấn.",
+    "model_turns": 1,
+    "opening_turn": "Cho mình kiểm tra số dư tài khoản với.",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_clarify_lookup_target__c81ee7ddef01f8c5",
+    "template_id": "bn_clarify_lookup_target",
+    "tool_errors": [],
+    "turn_policy": "clarify_only"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1011\"}"
+      ]
+    ],
+    "final_text": "✅ Đã mở tra soát thành công.\n\n- **Mã tra soát:** DSP-000001  \n- **Giao dịch:** TXN-1011  \n- **Lý do:** goods_not_received  \n- **Thời gian mở:** 02/03/2026 09:00 (GMT+7)\n\nBạn cần kiểm tra trạng thái tra soát này hoặc thực hiện thao tác nào khác không?",
+    "model_turns": 3,
+    "opening_turn": "Mở tra soát cho giao dịch TXN-1011, lý do goods_not_received.",
+    "predicted_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1011\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_dispute_single__069e782f69b74266",
+    "template_id": "bn_create_dispute_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "final_text": "✅ Tra soát đã được mở thành công.\n\n- **Mã tra soát:** DSP-000001  \n- **Giao dịch:** TXN-1001  \n- **Lý do:** goods_not_received  \n- **Thời gian mở:** 02/03/2026 09:00 (GMT+7)\n\nBạn có muốn kiểm tra trạng thái của tra soát này không?",
+    "model_turns": 3,
+    "opening_turn": "Mở tra soát cho giao dịch TXN-1001, lý do goods_not_received.",
+    "predicted_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_dispute_single__9a13aff31ee10eef",
+    "template_id": "bn_create_dispute_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1015\"}"
+      ]
+    ],
+    "final_text": "✅ Yêu cầu tra soát đã được tạo thành công.\n\n- **Mã tra soát (Dispute ID):** DSP-000001  \n- **Mã giao dịch:** TXN-1015  \n- **Lý do:** goods_not_received  \n- **Thời gian mở:** 02/03/2026 09:00 (GMT+7)\n\nBạn có muốn kiểm tra trạng thái của yêu cầu tra soát này không? (Trả lời “Có” để xem trạng thái, hoặc “Không” nếu không cần).",
+    "model_turns": 3,
+    "opening_turn": "Mở tra soát cho giao dịch TXN-1015, lý do goods_not_received.",
+    "predicted_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1015\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_dispute_single__fac3dccb0bfe459a",
+    "template_id": "bn_create_dispute_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "✅ Giao dịch chuyển tiền của bạn đã **thành công**.\n\n- **Số tiền**: 200 000 đ  \n- **Phí giao dịch**: 5 500 đ  \n- **Tài khoản nguồn**: ACC-001  \n- **Tài khoản nhận**: 9876543210 (ngân hàng 970436)  \n- **Kênh**: napas  \n- **Mã giao dịch**: TRF-000001  \n- **Mã giao dịch ngân hàng**: TXN-900001  \n\nNếu cần hỗ trợ thêm, vui lòng cho tôi biết!",
+    "model_turns": 3,
+    "opening_turn": "Chuyển ngay 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+    "predicted_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1",
+    "template_id": "bn_create_transfer_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "✅ Giao dịch chuyển tiền của bạn đã **thành công**.\n\n- **Số tiền**: 200 000 đ  \n- **Phí giao dịch**: 5 500 đ  \n- **Tài khoản nguồn**: ACC-002  \n- **Tài khoản nhận**: 9876543210 (ngân hàng 970436)  \n- **Kênh**: napas  \n- **Mã giao dịch**: TRF-000001  \n- **Mã giao dịch ngân hàng**: TXN-900001  \n\nNếu cần hỗ trợ thêm, vui lòng cho tôi biết!",
+    "model_turns": 3,
+    "opening_turn": "Chuyển ngay 200000đ từ ACC-002 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+    "predicted_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8",
+    "template_id": "bn_create_transfer_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0001\"}"
+      ]
+    ],
+    "final_text": "Hồ sơ tra soát **DSP-0001** hiện đang ở trạng thái **“open”** (đang mở).",
+    "model_turns": 2,
+    "opening_turn": "Hồ sơ tra soát DSP-0001 đang ở trạng thái nào?",
+    "predicted_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_dispute_status_single__7f99734bd18a01a8",
+    "template_id": "bn_dispute_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0002\"}"
+      ]
+    ],
+    "final_text": "Hồ sơ tra soát **DSP-0002** hiện đang ở trạng thái **resolved** (đã giải quyết).",
+    "model_turns": 2,
+    "opening_turn": "Hồ sơ tra soát DSP-0002 đang ở trạng thái nào?",
+    "predicted_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_dispute_status_single__b8d6aa4552e94878",
+    "template_id": "bn_dispute_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0003\"}"
+      ]
+    ],
+    "final_text": "Hồ sơ tra soát **DSP-0003** hiện đang ở trạng thái **rejected** (bị từ chối). Nếu bạn cần biết thêm chi tiết về lý do từ chối hoặc muốn thực hiện các bước tiếp theo, vui lòng cho tôi biết!",
+    "model_turns": 2,
+    "opening_turn": "Hồ sơ tra soát DSP-0003 đang ở trạng thái nào?",
+    "predicted_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0003\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_dispute_status_single__e0d02ed157c586fb",
+    "template_id": "bn_dispute_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": false,
+    "ast_match": false,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\"}"
+      ],
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "final_text": "Giao dịch gần nhất của tài khoản **ACC‑001** là:\n\n- **Mã giao dịch:** TXN‑1001  \n- **Thời gian:** 28/02/2026 10:00 (GMT+7)  \n- **Số tiền:** 250 000 VND  \n- **Loại giao dịch:** Rút tiền (debit) qua kênh **napas**  \n- **Trạng thái:** **Thành công** (succeeded)  \n- **Đối tác:** Café Trung Nguyen  \n\nNếu bạn cần thêm chi tiết hoặc muốn thực hiện thao tác nào khác (ví dụ: xem lịch sử giao dịch đầy đủ, t",
+    "model_turns": 2,
+    "opening_turn": "Giao dịch gần nhất của tài khoản ACC-001 hiện thế nào?",
+    "predicted_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\", \"limit\": 1}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_latest_txn_status_dependent__917c32341851132a",
+    "template_id": "bn_latest_txn_status_dependent",
+    "tool_errors": [],
+    "turn_policy": "dependent_call"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "final_text": "Dưới đây là một số giao dịch gần đây của tài khoản **ACC-002**:\n\n| Mã giao dịch | Thời gian | Loại | Số tiền (VND) | Kênh | Trạng thái | Đối tác |\n|--------------|-----------|------|---------------|------|------------|----------|\n| TXN-1003 | 01/03/2026 08:30 | Ghi nợ | 500,000 | internal | pending | — |\n| TXN-1004 | 26/02/2026 14:00 | Ghi có | 2,000,000 | napas | succeeded | Chuyen den |\n\nNếu bạn",
+    "model_turns": 2,
+    "opening_turn": "Liệt kê vài giao dịch gần đây của tài khoản ACC-002.",
+    "predicted_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_list_recent_single__339849ef340b410f",
+    "template_id": "bn_list_recent_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "final_text": "Dưới đây là một số giao dịch gần đây của tài khoản **ACC-001** (mặc định liệt kê 5 giao dịch mới nhất, hiện chỉ có 2 giao dịch được trả về):\n\n| Mã giao dịch | Thời gian | Hướng | Số tiền (VND) | Kênh | Trạng thái | Đối tác |\n|--------------|-----------|-------|---------------|------|------------|----------|\n| TXN-1001 | 28/02/2026 10:00 (GMT+7) | Rút tiền (debit) | 250 000 | napas | succeeded | Ca",
+    "model_turns": 2,
+    "opening_turn": "Liệt kê vài giao dịch gần đây của tài khoản ACC-001.",
+    "predicted_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_list_recent_single__b95fa002ebc011cf",
+    "template_id": "bn_list_recent_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "out_of_scope",
+    "expected_calls": [],
+    "final_text": "Xin lỗi, hiện tại không có công cụ nào trong hệ thống có thể hỗ trợ trực tiếp việc đăng ký mở sổ chứng khoán. Tuy nhiên, mình có thể hướng dẫn bạn các bước thường gặp để thực hiện thủ tục này:\n\n1. **Chuẩn bị hồ sơ**  \n   - CMND/CCCD (bản sao có công chứng hoặc bản sao màu).  \n   - Sổ hộ khẩu (nếu yêu cầu).  \n   - Giấy tờ chứng minh thu nhập (ví dụ: bảng lương, sao kê ngân hàng) – tùy vào quy định ",
+    "model_turns": 1,
+    "opening_turn": "Mình muốn đăng ký mở sổ chứng khoán thì làm thủ tục thế nào?",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_out_of_scope_service__449bf7a6a6104f2f",
+    "template_id": "bn_out_of_scope_service",
+    "tool_errors": [],
+    "turn_policy": "irrelevant"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "out_of_scope",
+    "expected_calls": [],
+    "final_text": "Chào anh/chị,\n\nĐể đăng ký vay tín chấp (vay không cần tài sản bảo đảm) tại ngân hàng, quy trình thường gồm các bước sau:\n\n1. **Chuẩn bị hồ sơ cá nhân**  \n   - CMND/CCCD (bản sao công chứng hoặc bản sao có xác nhận).  \n   - Hộ khẩu thường trú (nếu có).  \n   - Sổ hộ khẩu (bản sao).  \n   - Bảng lương, sao kê tài khoản ngân hàng (2‑3 tháng gần nhất) hoặc giấy tờ chứng minh thu nhập khác (hợp đồng lao ",
+    "model_turns": 1,
+    "opening_turn": "Mình muốn đăng ký vay tín chấp thì làm thủ tục thế nào?",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_out_of_scope_service__c9909f20d070d117",
+    "template_id": "bn_out_of_scope_service",
+    "tool_errors": [],
+    "turn_policy": "irrelevant"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "out_of_scope",
+    "expected_calls": [],
+    "final_text": "Xin lỗi, hiện tại hệ thống của chúng tôi không có công cụ nào hỗ trợ trực tiếp việc đăng ký bảo hiểm nhân thọ. Tuy nhiên, tôi có thể cung cấp cho bạn một số thông tin chung về quy trình đăng ký bảo hiểm nhân thọ, bao gồm:\n\n1. **Tìm hiểu và lựa chọn sản phẩm**  \n   - Nghiên cứu các gói bảo hiểm nhân thọ mà các công ty bảo hiểm cung cấp (ví dụ: bảo hiểm tử vong, bảo hiểm hỗ trợ thu nhập, bảo hiểm sứ",
+    "model_turns": 1,
+    "opening_turn": "Mình muốn đăng ký bảo hiểm nhân thọ thì làm thủ tục thế nào?",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_out_of_scope_service__f26b3695c0f888b0",
+    "template_id": "bn_out_of_scope_service",
+    "tool_errors": [],
+    "turn_policy": "irrelevant"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 1500000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "✅ Giao dịch chuyển tiền đã được thực hiện thành công!\n\n- **Số tiền chuyển:** 1 500 000 đ  \n- **Phí giao dịch:** 11 000 đ  \n- **Tài khoản nguồn:** ACC-001  \n- **Tài khoản nhận:** 9876543210 (ngân hàng 970436)  \n- **Kênh:** napas  \n- **Mã giao dịch:** TRF-000001  \n- **Mã giao dịch ngân hàng:** TXN-900001  \n\nNếu bạn cần hỗ trợ thêm (kiểm tra lịch sử giao dịch, tạo giao dịch khác, …) hãy cho tôi biết ",
+    "model_turns": 4,
+    "opening_turn": "Chuyển 200000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas.",
+    "predicted_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 1500000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e",
+    "template_id": "bn_transfer_amount_corrected",
+    "tool_errors": [],
+    "turn_policy": "correction"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "Phí chuyển tiền 500.000 đ qua kênh **NAPAS** tới tài khoản **9876543210** (ngân hàng **970436**) là **5.500 VND**.",
+    "model_turns": 2,
+    "opening_turn": "Phí chuyển 500000đ từ ACC-002 sang 9876543210 ngân hàng 970436 qua kênh napas là bao nhiêu?",
+    "predicted_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_fee_single__534fd939df140016",
+    "template_id": "bn_transfer_fee_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "Phí chuyển tiền 500.000 đ qua kênh **NAPAS** tới tài khoản **9876543210** (ngân hàng **970436**) là **5.500 VND**.",
+    "model_turns": 2,
+    "opening_turn": "Phí chuyển 500000đ từ ACC-001 sang 9876543210 ngân hàng 970436 qua kênh napas là bao nhiêu?",
+    "predicted_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_fee_single__ef6282b04fde71fa",
+    "template_id": "bn_transfer_fee_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 500000, \"confirm\": true, \"from_account_id\": \"ACC-006\", \"rail\": \"napas\", \"to_account_number\": \"9988776655\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "Giao dịch không thể thực hiện được vì tài khoản **ACC-006** không đủ số dư để chuyển **500 000 đ** (phí giao dịch là 5 500 đ).  \n\nBạn muốn:\n\n* Thử chuyển một số tiền khác?  \n* Kiểm tra số dư hiện có?  \n* Hoặc hủy giao dịch?\n\nVui lòng cho tôi biết cách bạn muốn tiếp tục.",
+    "model_turns": 3,
+    "opening_turn": "Chuyển 500000đ từ ACC-006 sang 9988776655 ngân hàng 970436 qua kênh napas giúp mình.",
+    "predicted_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 500000, \"confirm\": true, \"from_account_id\": \"ACC-006\", \"rail\": \"napas\", \"to_account_number\": \"9988776655\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_short_of_funds__fd7a78707c222110",
+    "template_id": "bn_transfer_short_of_funds",
+    "tool_errors": [],
+    "turn_policy": "negative_path"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1002\"}"
+      ]
+    ],
+    "final_text": "Giao dịch **TXN-1002** đã **thành công** (status: *succeeded*). Nếu bạn cần thêm thông tin chi tiết hoặc muốn thực hiện thao tác khác, cứ cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Kiểm tra giao dịch TXN-1002 đã thành công chưa.",
+    "predicted_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_txn_status_single__c7d5319773cdd101",
+    "template_id": "bn_txn_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "final_text": "Giao dịch **TXN-1001** đã **thành công** (status: *succeeded*).",
+    "model_turns": 2,
+    "opening_turn": "Kiểm tra giao dịch TXN-1001 đã thành công chưa.",
+    "predicted_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_txn_status_single__e52b021ffb45d5a9",
+    "template_id": "bn_txn_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-ABSENT-1\"}"
+      ]
+    ],
+    "final_text": "Xin lỗi, mình không tìm thấy giao dịch có mã **TXN-ABSENT-1** trong hệ thống. Bạn có chắc rằng mã giao dịch đã nhập đúng chưa? Nếu có mã khác hoặc muốn kiểm tra lại, vui lòng cung cấp lại cho mình nhé.",
+    "model_turns": 2,
+    "opening_turn": "Giao dịch TXN-ABSENT-1 của mình hiện thế nào rồi?",
+    "predicted_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-ABSENT-1\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_txn_status_unknown_id__5cec42dc0db8b80c",
+    "template_id": "bn_txn_status_unknown_id",
+    "tool_errors": [
+      "get_transaction_status: {'code': 'not_found', 'entity': 'transactions', 'id': 'TXN-ABSENT-1', 'field': 'transaction_id'}"
+    ],
+    "turn_policy": "negative_path"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1006\"}"
+      ]
+    ],
+    "final_text": "Theo thông tin hệ thống, mã VietQR **VQ‑1006** hiện đang ở trạng thái **đang chờ xử lý (pending)**, chưa được xác nhận đã trừ tiền. Nếu có bất kỳ thắc mắc nào khác hoặc muốn kiểm tra thêm, bạn cứ cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Mã VietQR VQ-1006 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1006\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__7602ac16408e31ce",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1005\"}"
+      ]
+    ],
+    "final_text": "✅ Mã VietQR **VQ-1005** đã được thanh toán thành công.  \n- **Số tiền:** 75.000 VND  \n- **Tên merchant:** ShopeePay Merchant  \n- **Mã giao dịch:** TXN-1011  \n\nNếu bạn cần kiểm tra chi tiết hơn hoặc có thắc mắc khác, cứ cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Mã VietQR VQ-1005 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1005\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__9fa5ae9720b3299e",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1003\"}"
+      ]
+    ],
+    "final_text": "Theo thông tin hệ thống, mã VietQR **VQ‑1003** hiện có trạng thái **“expired”** (hết hạn). Điều này có nghĩa là giao dịch chưa được thực hiện và chưa có khoản tiền nào được trừ từ tài khoản của bạn. Nếu bạn vẫn muốn thanh toán, vui lòng yêu cầu người bán tạo mã QR mới. Nếu có bất kỳ câu hỏi nào khác, bạn cứ cho tôi biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Mã VietQR VQ-1003 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1003\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__c3dd67c0d4abc9a9",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1004\"}"
+      ]
+    ],
+    "final_text": "Theo thông tin hệ thống, mã VietQR **VQ‑1004** có trạng thái **failed** (thất bại). Vì vậy, giao dịch chưa được trừ tiền từ tài khoản của bạn. Nếu bạn vẫn thấy số tiền bị giữ hoặc có thắc mắc khác, vui lòng liên hệ bộ phận hỗ trợ để được kiểm tra chi tiết.",
+    "model_turns": 2,
+    "opening_turn": "Mã VietQR VQ-1004 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1004\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__c5f1ba741f177941",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1002\"}"
+      ]
+    ],
+    "final_text": "Thông tin thanh toán qua mã VietQR **VQ‑1002** hiện đang ở trạng thái **“pending”** (đang chờ xử lý), nên tiền chưa được trừ khỏi tài khoản của bạn.\n\nBạn có muốn kiểm tra thêm thông tin nào khác (ví dụ: lịch sử giao dịch, thời gian dự kiến hoàn thành) không?",
+    "model_turns": 2,
+    "opening_turn": "Mã VietQR VQ-1002 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__e9055fd243738cf8",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a0",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1001\"}"
+      ]
+    ],
+    "final_text": "✅ Mã VietQR **VQ‑1001** đã được thanh toán thành công.  \n- Số tiền: 189 000 VND  \n- Người nhận: Shop Sao Mai  \n- Mã giao dịch ngân hàng: **TXN‑1005**  \n\nNếu bạn cần kiểm tra chi tiết hơn hoặc có thắc mắc khác, cứ cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Mã VietQR VQ-1001 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__ecf3adfd0029b829",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "any",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ],
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "final_text": "Số dư tài khoản **ACC-001**: **5.000.000 VND**  \nHạn mức còn lại của thẻ **CARD-001**: **15.000.000 VND**.",
+    "model_turns": 3,
+    "opening_turn": "Mong được biết số dư tài khoản ACC-001 và hạn mức thẻ CARD-001.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ],
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
+    "template_id": "bn_balance_and_card_parallel",
+    "tool_errors": [],
+    "turn_policy": "multi_tool"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "final_text": "Số tiền còn lại trong tài khoản **ACC-001** là **5.000.000 VND**.",
+    "model_turns": 2,
+    "opening_turn": "Cho mình biết số tiền còn lại trong tài khoản ACC-001.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_single__5425bff786adbd17",
+    "template_id": "bn_balance_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "final_text": "Số tiền còn lại trong tài khoản **ACC-002** là **12.000.000 VND**.",
+    "model_turns": 2,
+    "opening_turn": "Cho mình biết số tiền còn lại trong tài khoản ACC-002.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_single__e662949227517360",
+    "template_id": "bn_balance_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "final_text": "Số dư hiện tại của tài khoản **ACC-001** là **5.000.000 VND**. Nếu bạn cần kiểm tra thông tin khác (ví dụ: hạn mức thẻ, lịch sử giao dịch, hoặc thực hiện giao dịch), cứ cho mình biết nhé!",
+    "model_turns": 3,
+    "opening_turn": "Mình cần biết số dư tài khoản hiện có.",
+    "predicted_calls": [
+      [
+        "get_account_balance",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_balance_withheld_account__0f34f3476873fef5",
+    "template_id": "bn_balance_withheld_account",
+    "tool_errors": [],
+    "turn_policy": "missing_slot"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "final_text": "Thẻ **CARD-001** hiện còn lại **15.000.000 VND** trong hạn mức chi tiêu.",
+    "model_turns": 2,
+    "opening_turn": "Xin hỏi, thẻ CARD-001 còn lại bao nhiêu tiền trong hạn mức?",
+    "predicted_calls": [
+      [
+        "get_card_limit",
+        "{\"card_id\": \"CARD-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_card_limit_single__eb3437ed113fa3a3",
+    "template_id": "bn_card_limit_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "balance_inquiry",
+    "expected_calls": [],
+    "final_text": "Để kiểm tra số dư, tôi cần biết **mã số tài khoản** của bạn. Bạn vui lòng cung cấp account_id nhé.",
+    "model_turns": 1,
+    "opening_turn": "Bạn giúp mình kiểm tra số dư tài khoản nhé.",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_clarify_lookup_target__c81ee7ddef01f8c5",
+    "template_id": "bn_clarify_lookup_target",
+    "tool_errors": [],
+    "turn_policy": "clarify_only"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1011\"}"
+      ]
+    ],
+    "final_text": "✅ Yêu cầu tra soát đã được mở thành công.\n\n- **Mã tra soát (Dispute ID):** DSP-000001  \n- **Mã giao dịch:** TXN-1011  \n- **Lý do:** goods_not_received  \n- **Thời gian mở:** 02/03/2026 09:00 (GMT+7)\n\nBạn có muốn kiểm tra trạng thái của yêu cầu này hoặc cần hỗ trợ gì thêm không?",
+    "model_turns": 3,
+    "opening_turn": "Tôi muốn mở tra soát cho giao dịch TXN-1011 do goods_not_received.",
+    "predicted_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1011\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_dispute_single__069e782f69b74266",
+    "template_id": "bn_create_dispute_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "final_text": "✅ Yêu cầu tra soát đã được mở thành công.\n\n- **Mã tra soát:** DSP-000001  \n- **Giao dịch:** TXN-1001  \n- **Lý do:** goods_not_received  \n- **Thời gian mở:** 02/03/2026 09:00 (GMT+7)\n\nBạn có muốn kiểm tra trạng thái của yêu cầu tra soát này hoặc cần hỗ trợ gì thêm không?",
+    "model_turns": 3,
+    "opening_turn": "Tôi muốn mở tra soát cho giao dịch TXN-1001 do goods_not_received.",
+    "predicted_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_dispute_single__9a13aff31ee10eef",
+    "template_id": "bn_create_dispute_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1015\"}"
+      ]
+    ],
+    "final_text": "✅ Yêu cầu tra soát đã được mở thành công.\n\n- **Mã tra soát (Dispute ID):** DSP-000001  \n- **Mã giao dịch:** TXN-1015  \n- **Lý do:** goods_not_received  \n- **Thời gian mở:** 02/03/2026 09:00 (GMT+7)\n\nBạn có muốn kiểm tra trạng thái của yêu cầu này hoặc cần hỗ trợ gì thêm không?",
+    "model_turns": 3,
+    "opening_turn": "Tôi muốn mở tra soát cho giao dịch TXN-1015 do goods_not_received.",
+    "predicted_calls": [
+      [
+        "create_dispute",
+        "{\"confirm\": true, \"reason\": \"goods_not_received\", \"transaction_id\": \"TXN-1015\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_dispute_single__fac3dccb0bfe459a",
+    "template_id": "bn_create_dispute_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": false,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "✅ Giao dịch chuyển tiền đã **thành công**.\n\n- **Số tiền**: 200.000 đ  \n- **Phí**: 5.500 đ  \n- **Tổng trừ**: 205.500 đ  \n- **Tài khoản nguồn**: ACC-001  \n- **Tài khoản nhận**: 9876543210 (ngân hàng 970436)  \n- **Kênh**: NAPAS  \n- **Mã giao dịch**: TRF-000001 / TXN-900001  \n\nNếu bạn cần hỗ trợ thêm (kiểm tra lịch sử, tạo giao dịch khác, …) hãy cho tôi biết!",
+    "model_turns": 4,
+    "opening_turn": "Mong chuyển 200000đ từ ACC-001 sang 9876543210 tại 970436 qua kênh napas.",
+    "predicted_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 200000, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ],
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1",
+    "template_id": "bn_create_transfer_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": false,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "✅ Giao dịch đã được thực hiện thành công!\n\n- **Mã giao dịch:** TRF-000001  \n- **Mã giao dịch ngân hàng:** TXN-900001  \n- **Số tiền chuyển:** 200.000 đ  \n- **Phí:** 5.500 đ (kênh NAPAS)  \n- **Tài khoản nguồn:** ACC-002  \n- **Tài khoản nhận:** 9876543210 (ngân hàng 970436)\n\nNếu bạn cần hỗ trợ thêm (kiểm tra lịch sử, tạo giao dịch khác, …) hãy cho tôi biết!",
+    "model_turns": 4,
+    "opening_turn": "Mong chuyển 200000đ từ ACC-002 sang 9876543210 tại 970436 qua kênh napas.",
+    "predicted_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 200000, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ],
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 200000, \"confirm\": true, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8",
+    "template_id": "bn_create_transfer_single",
+    "tool_errors": [],
+    "turn_policy": "confirmation"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0001\"}"
+      ]
+    ],
+    "final_text": "Hồ sơ **DSP‑0001** hiện đang ở trạng thái **“open”** (đang mở).  \n\n- **Mã giao dịch liên quan:** TXN‑1013  \n- **Lý do khiếu nại:** goods_not_received (hàng hoá chưa nhận được)  \n- **Thời gian mở hồ sơ:** 18 Feb 2026, 09:00 (GMT+7)  \n\nNếu bạn cần thực hiện bất kỳ thao tác nào khác (ví dụ: cập nhật thông tin, yêu cầu hoàn tiền, hoặc đóng hồ sơ), vui lòng cho mình biết để mình hỗ trợ tiếp nhé.",
+    "model_turns": 2,
+    "opening_turn": "Cho mình biết trạng thái hiện thời của hồ sơ DSP-0001 nhé.",
+    "predicted_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_dispute_status_single__7f99734bd18a01a8",
+    "template_id": "bn_dispute_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0002\"}"
+      ]
+    ],
+    "final_text": "Hồ sơ tranh chấp **DSP‑0002** hiện đang ở trạng thái **đã giải quyết (resolved)**.  \n\n- **Mã giao dịch liên quan:** TXN‑1001  \n- **Lý do giải quyết:** trùng lặp phí (duplicate_charge)  \n- **Ngày mở hồ sơ:** 10 / 02 / 2026 11:00 (giờ Việt Nam)  \n\nNếu bạn cần thêm thông tin chi tiết hoặc muốn thực hiện bất kỳ thao tác nào khác (ví dụ: yêu cầu hoàn tiền, mở tranh chấp mới, …), vui lòng cho mình biết!",
+    "model_turns": 2,
+    "opening_turn": "Cho mình biết trạng thái hiện thời của hồ sơ DSP-0002 nhé.",
+    "predicted_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_dispute_status_single__b8d6aa4552e94878",
+    "template_id": "bn_dispute_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "dispute",
+    "expected_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0003\"}"
+      ]
+    ],
+    "final_text": "Hồ sơ tranh chấp **DSP‑0003** hiện đang ở trạng thái **“rejected”** (bị từ chối).  \n\n- **Lý do từ chối:** giao dịch không được ủy quyền (unauthorized).  \n- **Ngày mở hồ sơ:** 12 / 02 / 2026, 14:00 (giờ Việt Nam).  \n\nNếu bạn cần thêm thông tin chi tiết hoặc muốn thực hiện bất kỳ hành động nào khác (ví dụ: khiếu nại lại, cung cấp bằng chứng…), vui lòng cho mình biết!",
+    "model_turns": 2,
+    "opening_turn": "Cho mình biết trạng thái hiện thời của hồ sơ DSP-0003 nhé.",
+    "predicted_calls": [
+      [
+        "get_dispute_status",
+        "{\"dispute_id\": \"DSP-0003\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_dispute_status_single__e0d02ed157c586fb",
+    "template_id": "bn_dispute_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": false,
+    "ast_match": false,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\"}"
+      ],
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "final_text": "Giao dịch gần nhất của tài khoản **ACC-001** là:\n\n- **Mã giao dịch:** TXN-1001  \n- **Thời gian:** 28/02/2026 10:00 (GMT+7)  \n- **Số tiền:** 250.000 VND (rút tiền)  \n- **Trạng thái:** **Thành công (succeeded)**  \n- **Kênh:** napas  \n- **Đối tác:** Cafe Trung Nguyen  \n\nNếu bạn cần thêm chi tiết hoặc muốn kiểm tra trạng thái của một giao dịch cụ thể khác, hãy cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Cho mình biết tình trạng giao dịch gần nhất của tài khoản ACC-001 nhé.",
+    "predicted_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\", \"limit\": 1}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_latest_txn_status_dependent__917c32341851132a",
+    "template_id": "bn_latest_txn_status_dependent",
+    "tool_errors": [],
+    "turn_policy": "dependent_call"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "final_text": "Dưới đây là danh sách các giao dịch gần nhất trên tài khoản **ACC-002** (mặc định hiển thị 5 giao dịch mới nhất, hiện có 2 giao dịch):\n\n| Mã giao dịch | Thời gian | Hướng | Số tiền (VND) | Kênh | Trạng thái | Đối tác |\n|--------------|-----------|-------|---------------|------|------------|----------|\n| TXN-1003 | 01/03/2026 08:30 | Gửi tiền (debit) | 500 000 | internal | pending | — |\n| TXN-1004 ",
+    "model_turns": 2,
+    "opening_turn": "Tôi muốn xem các giao dịch gần đây trên tài khoản ACC-002.",
+    "predicted_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_list_recent_single__339849ef340b410f",
+    "template_id": "bn_list_recent_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "final_text": "Dưới đây là 5 giao dịch gần nhất của tài khoản **ACC-001**:\n\n| Mã giao dịch | Thời gian | Hướng | Số tiền (VND) | Kênh | Trạng thái | Đối tác |\n|--------------|-----------|-------|---------------|------|------------|----------|\n| TXN-1001 | 28/02/2026 10:00 | Gửi tiền (debit) | 250 000 | napas | succeeded | Cafe Trung Nguyen |\n| TXN-1002 | 27/02/2026 09:00 | Nhận tiền (credit) | 1 000 000 | intern",
+    "model_turns": 2,
+    "opening_turn": "Tôi muốn xem các giao dịch gần đây trên tài khoản ACC-001.",
+    "predicted_calls": [
+      [
+        "list_recent_transactions",
+        "{\"account_id\": \"ACC-001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_list_recent_single__b95fa002ebc011cf",
+    "template_id": "bn_list_recent_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "out_of_scope",
+    "expected_calls": [],
+    "final_text": "Chắc chắn rồi! Dưới đây là quy trình chung để đăng ký mở sổ chứng khoán tại ngân hàng (hoặc công ty chứng khoán) tại Việt Nam:\n\n### 1. Chuẩn bị hồ sơ\nBạn cần chuẩn bị các giấy tờ sau:\n| STT | Hồ sơ | Ghi chú |\n|-----|-------|----------|\n| 1 | CMND/CCCD (bản gốc + bản sao) | Nếu là người nước ngoài, cần hộ chiếu và thẻ tạm trú. |\n| 2 | Sổ hộ khẩu (bản sao) | Đối với một số ngân hàng yêu cầu. |\n| 3 ",
+    "model_turns": 1,
+    "opening_turn": "Có thể chỉ cho mình quy trình đăng ký mở sổ chứng khoán không?",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_out_of_scope_service__449bf7a6a6104f2f",
+    "template_id": "bn_out_of_scope_service",
+    "tool_errors": [],
+    "turn_policy": "irrelevant"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "out_of_scope",
+    "expected_calls": [],
+    "final_text": "Chắc chắn rồi! Dưới đây là quy trình chung để đăng ký vay tín chấp (vay không có tài sản bảo đảm) tại ngân hàng:\n\n| Bước | Nội dung | Ghi chú |\n|------|----------|---------|\n| **1. Kiểm tra điều kiện vay** | - Độ tuổi: thường từ 21‑60 tuổi (tùy ngân hàng). <br> - Thu nhập ổn định: ít nhất 3‑6 tháng lương (hoặc thu nhập tự doanh ổn định). <br> - Lịch sử tín dụng: không có nợ xấu, trả nợ đúng hạn. |",
+    "model_turns": 1,
+    "opening_turn": "Có thể chỉ cho mình quy trình đăng ký vay tín chấp không?",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_out_of_scope_service__c9909f20d070d117",
+    "template_id": "bn_out_of_scope_service",
+    "tool_errors": [],
+    "turn_policy": "irrelevant"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "out_of_scope",
+    "expected_calls": [],
+    "final_text": "Chắc chắn rồi! Dưới đây là quy trình chung để đăng ký bảo hiểm nhân thọ tại ngân hàng (hoặc công ty bảo hiểm) – lưu ý rằng các bước cụ thể có thể hơi khác nhau tùy theo sản phẩm và đơn vị cung cấp, nhưng nguyên tắc cơ bản thường giống nhau:\n\n---\n\n### 1. **Tìm hiểu nhu cầu & lựa chọn sản phẩm**\n- **Xác định mục tiêu bảo hiểm**: bảo vệ tài chính cho gia đình, tích lũy tài sản, hưu trí, hoặc kết hợp ",
+    "model_turns": 1,
+    "opening_turn": "Có thể chỉ cho mình quy trình đăng ký bảo hiểm nhân thọ không?",
+    "predicted_calls": [],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_out_of_scope_service__f26b3695c0f888b0",
+    "template_id": "bn_out_of_scope_service",
+    "tool_errors": [],
+    "turn_policy": "irrelevant"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 1500000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "✅ Giao dịch chuyển tiền của bạn đã **thành công**.\n\n**Chi tiết giao dịch**\n- **Số tiền:** 1 500 000 đ\n- **Phí:** 11 000 đ (được trừ cùng với số tiền)\n- **Tài khoản nguồn:** ACC-001  \n- **Tài khoản nhận:** 9876543210 (ngân hàng 970436)  \n- **Kênh:** napas  \n- **Mã giao dịch:** TXN-900001  \n- **Mã chuyển tiền:** TRF-000001  \n\nNếu bạn cần hỗ trợ gì thêm, hãy cho mình biết nhé!",
+    "model_turns": 4,
+    "opening_turn": "Chuyển 200000đ từ ACC-001 tới 9876543210 tại 970436 qua napas cho mình nhé.",
+    "predicted_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 1500000, \"confirm\": true, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_amount_corrected__6e95d16d34c5b41e",
+    "template_id": "bn_transfer_amount_corrected",
+    "tool_errors": [],
+    "turn_policy": "correction"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "Phí chuyển tiền qua kênh **NAPAS** cho giao dịch:\n\n- **Số tiền**: 500.000 đ\n- **Tài khoản nguồn**: ACC-002\n- **Số tài khoản nhận**: 9876543210\n- **Mã ngân hàng nhận**: 970436\n- **Phí**: **5.500 đ** (khoảng 5.5 nghìn đồng)\n\nThời gian dự kiến giao dịch sẽ hoàn tất trong vòng vài phút. Nếu bạn muốn tiến hành chuyển tiền này, vui lòng xác nhận để tôi có thể tạo lệnh chuyển khoản cho bạn.",
+    "model_turns": 2,
+    "opening_turn": "Cần biết phí chuyển 500000đ từ ACC-002 tới 9876543210 ngân hàng 970436 qua kênh napas.",
+    "predicted_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-002\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_fee_single__534fd939df140016",
+    "template_id": "bn_transfer_fee_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "Phí chuyển tiền 500 000 đ qua kênh **NAPAS** tới tài khoản **9876543210** (ngân hàng mã 970436) là **5 500 VND**. \n\nNếu bạn muốn tiến hành chuyển tiền này, vui lòng xác nhận để tôi có thể tạo lệnh chuyển khoản cho bạn.",
+    "model_turns": 2,
+    "opening_turn": "Cần biết phí chuyển 500000đ từ ACC-001 tới 9876543210 ngân hàng 970436 qua kênh napas.",
+    "predicted_calls": [
+      [
+        "get_transfer_fee",
+        "{\"amount_vnd\": 500000, \"from_account_id\": \"ACC-001\", \"rail\": \"napas\", \"to_account_number\": \"9876543210\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_fee_single__ef6282b04fde71fa",
+    "template_id": "bn_transfer_fee_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transfer",
+    "expected_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 500000, \"confirm\": true, \"from_account_id\": \"ACC-006\", \"rail\": \"napas\", \"to_account_number\": \"9988776655\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "final_text": "Xin lỗi, lệnh chuyển tiền của bạn không thể thực hiện được vì **số dư tài khoản không đủ** để chi trả số tiền 500 000 đ (và phí giao dịch 5 500 đ).\n\nBạn có muốn:\n\n* Kiểm tra số dư hiện tại của tài khoản **ACC-006**?  \n* Thực hiện một lệnh chuyển với số tiền khác?  \n* Hoặc hủy bỏ thao tác này?\n\nVui lòng cho tôi biết bạn muốn làm gì tiếp theo.",
+    "model_turns": 3,
+    "opening_turn": "Bạn có thể thực hiện chuyển 500000đ từ ACC-006 tới 9988776655 ngân hàng 970436 bằng napas không?",
+    "predicted_calls": [
+      [
+        "create_transfer",
+        "{\"amount_vnd\": 500000, \"confirm\": true, \"from_account_id\": \"ACC-006\", \"rail\": \"napas\", \"to_account_number\": \"9988776655\", \"to_bank_code\": \"970436\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_transfer_short_of_funds__fd7a78707c222110",
+    "template_id": "bn_transfer_short_of_funds",
+    "tool_errors": [],
+    "turn_policy": "negative_path"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1002\"}"
+      ]
+    ],
+    "final_text": "Giao dịch **TXN-1002** đã **hoàn thành** (status: *succeeded*). Nếu bạn cần thêm thông tin chi tiết hoặc hỗ trợ gì khác, cứ cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Bạn kiểm tra giúp xem giao dịch TXN-1002 đã xong chưa?",
+    "predicted_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_txn_status_single__c7d5319773cdd101",
+    "template_id": "bn_txn_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "final_text": "Giao dịch **TXN-1001** đã **hoàn thành** (status: *succeeded*). Thông tin chi tiết:\n\n- **Số tài khoản:** ACC-001  \n- **Loại giao dịch:** Rút tiền (debit)  \n- **Số tiền:** 250 000 VND  \n- **Kênh:** napas  \n- **Thời gian:** 28/02/2026 10:00 (GMT+7)  \n- **Đối tác:** Cafe Trung Nguyen  \n\nNếu bạn cần thêm thông tin hoặc hỗ trợ gì khác, cứ cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Bạn kiểm tra giúp xem giao dịch TXN-1001 đã xong chưa?",
+    "predicted_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-1001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_txn_status_single__e52b021ffb45d5a9",
+    "template_id": "bn_txn_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "transaction_status",
+    "expected_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-ABSENT-1\"}"
+      ]
+    ],
+    "final_text": "Xin lỗi, hệ thống không tìm thấy giao dịch có mã **TXN-ABSENT-1**. Có thể mã giao dịch bạn cung cấp không chính xác hoặc giao dịch chưa được ghi nhận. Bạn vui lòng kiểm tra lại mã giao dịch và cho tôi biết nếu có thông tin khác (ví dụ: ngày giao dịch, số tiền, hoặc mã tham chiếu khác) để tôi có thể hỗ trợ tốt hơn.",
+    "model_turns": 2,
+    "opening_turn": "Mình đang thắc mắc giao dịch TXN-ABSENT-1 hiện tại như thế nào?",
+    "predicted_calls": [
+      [
+        "get_transaction_status",
+        "{\"transaction_id\": \"TXN-ABSENT-1\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_txn_status_unknown_id__5cec42dc0db8b80c",
+    "template_id": "bn_txn_status_unknown_id",
+    "tool_errors": [
+      "get_transaction_status: {'code': 'not_found', 'entity': 'transactions', 'id': 'TXN-ABSENT-1', 'field': 'transaction_id'}"
+    ],
+    "turn_policy": "negative_path"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1006\"}"
+      ]
+    ],
+    "final_text": "Mã VietQR **VQ‑1006** hiện đang ở trạng thái **pending** (đang chờ xử lý), nên tiền chưa được trừ khỏi tài khoản của bạn. Nếu bạn muốn kiểm tra lại sau, vui lòng thử lại sau một thời gian hoặc liên hệ trực tiếp với ngân hàng để được hỗ trợ chi tiết.",
+    "model_turns": 2,
+    "opening_turn": "Vui lòng cho biết mã VietQR VQ-1006 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1006\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__7602ac16408e31ce",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1005\"}"
+      ]
+    ],
+    "final_text": "Mã VietQR **VQ‑1005** đã được trừ tiền thành công.\n\n- **Trạng thái:** Đã thanh toán (paid)  \n- **Số tiền:** 75.000 VND  \n- **Tên người nhận:** ShopeePay Merchant  \n- **Mã giao dịch:** TXN‑1011  \n\nNếu bạn cần kiểm tra chi tiết hơn hoặc có thắc mắc khác, vui lòng cho tôi biết!",
+    "model_turns": 2,
+    "opening_turn": "Vui lòng cho biết mã VietQR VQ-1005 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1005\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__9fa5ae9720b3299e",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1003\"}"
+      ]
+    ],
+    "final_text": "Mã VietQR **VQ‑1003** hiện có trạng thái **“expired”** (hết hạn). Điều này có nghĩa là giao dịch chưa được thực hiện và tiền chưa được trừ tài khoản của bạn. Nếu bạn vẫn muốn thanh toán, vui lòng yêu cầu người bán cung cấp một mã QR mới hoặc tạo lại giao dịch. Nếu có bất kỳ thắc mắc nào khác, hãy cho tôi biết!",
+    "model_turns": 2,
+    "opening_turn": "Vui lòng cho biết mã VietQR VQ-1003 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1003\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__c3dd67c0d4abc9a9",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1004\"}"
+      ]
+    ],
+    "final_text": "Mã VietQR **VQ‑1004** hiện tại có trạng thái **failed** → nghĩa là giao dịch chưa được trừ tiền.  \n\nNếu bạn cần hỗ trợ thêm (ví dụ: kiểm tra lại giao dịch, thực hiện thanh toán lại, hoặc hỏi về các giao dịch khác), vui lòng cho mình biết nhé!",
+    "model_turns": 2,
+    "opening_turn": "Vui lòng cho biết mã VietQR VQ-1004 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1004\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__c5f1ba741f177941",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1002\"}"
+      ]
+    ],
+    "final_text": "Mã VietQR **VQ‑1002** hiện vẫn ở trạng thái **pending** (đang chờ xử lý), nên tiền chưa được trừ khỏi tài khoản của bạn. Nếu bạn muốn kiểm tra lại sau một thời gian hoặc có thắc mắc khác, vui lòng cho tôi biết!",
+    "model_turns": 2,
+    "opening_turn": "Vui lòng cho biết mã VietQR VQ-1002 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1002\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__e9055fd243738cf8",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  },
+  {
+    "arm": "a2",
+    "assertion": true,
+    "ast_match": true,
+    "call_order": "strict",
+    "category": "qr_payment",
+    "expected_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1001\"}"
+      ]
+    ],
+    "final_text": "Mã VietQR **VQ‑1001** đã được trừ tiền thành công.\n\n- **Trạng thái:** Đã thanh toán (paid)  \n- **Số tiền:** 189 000 VND  \n- **Tên người bán:** Shop Sao Mai  \n- **Mã giao dịch:** TXN‑1005  \n\nNếu bạn cần thêm thông tin hoặc hỗ trợ gì khác, vui lòng cho tôi biết!",
+    "model_turns": 2,
+    "opening_turn": "Vui lòng cho biết mã VietQR VQ-1001 đã trừ tiền chưa?",
+    "predicted_calls": [
+      [
+        "get_vietqr_payment_status",
+        "{\"payment_ref\": \"VQ-1001\"}"
+      ]
+    ],
+    "stop_reason": "answered",
+    "task_id": "banking_vn__bn_vietqr_status_single__ecf3adfd0029b829",
+    "template_id": "bn_vietqr_status_single",
+    "tool_errors": [],
+    "turn_policy": "single_turn"
+  }
+]

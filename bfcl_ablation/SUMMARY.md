@@ -77,10 +77,10 @@ is unambiguous.
   same benchmark, and the cache is the record of what was asked. Model: `openai/gpt-oss-120b`,
   local vLLM.
 - **Metric definitions are pinned in `METRICS.md` and stamped `metrics_version: 1.0`** into the
-  result files of the arms that use the shared measurement schema — A0, A1 and A3. A2 and A4 emit
-  bespoke schemas and **carry no version stamp**, and **no code compares versions across arms**.
-  Version comparability is a convention enforced by reading the contract, not a mechanism. That
-  is a gap, listed under next steps.
+  result files of A0, A1 and A3 (shared measurement schema) and of A4 (bespoke schema, stamped
+  explicitly). **A2 emits a bespoke schema and still carries no version stamp**, and **no code
+  compares versions across arms**. Version comparability is a convention enforced by reading the
+  contract, not a mechanism. That is a gap, listed under next steps.
 
 ### The proof obligation
 
@@ -285,12 +285,16 @@ existing `trace` override, and 1 resets state while replaying the real trace.
 False-acceptance rate on mutations an assertion **must** catch (lower is better; the null control
 is an empty suite and sets the ceiling at 1.000):
 
-| assertions | call level | argument level | state level | unmutated pass |
-| --- | ---: | ---: | ---: | ---: |
-| **human (182 lines)** | 0.380 | **0.610** | 0.000 | 34/34 |
-| LLM, blind (1426 lines) | 0.300 | 0.248 | 0.000 | 32/34 |
-| LLM + mutation feedback (1630 lines) | 0.021 | 0.065 | 0.000 | 31/34 |
-| null control (does nothing) | 1.000 | 1.000 | 1.000 | 34/34 |
+| assertions | call level | argument level | state level | unmutated pass | advisory rejected |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **human (182 lines)** | 0.380 | **0.610** | 0.000 | 34/34 | 0.000 |
+| LLM, blind (1426 lines) | 0.300 | 0.248 | 0.000 | 32/34 | 0.308 |
+| LLM + mutation feedback (1668 lines) | 0.000 | 0.024 | 0.000 | 31/34 | **0.692** |
+| null control (does nothing) | 1.000 | 1.000 | 1.000 | 34/34 | 0.000 |
+
+The last column is the counterweight: an arm can always lower false acceptance by
+rejecting more, and `llm_feedback` rejects **69%** of the corruptions an assertion is
+*right* to accept. Its near-zero false acceptance is a trade, not a free win.
 
 Per operator, the human suite catches a missing call (0.061) and a wrong tool (0.061) and always
 notices unchanged final state (0.000) — but **misses a perturbed number 87.5% of the time, a
@@ -310,17 +314,56 @@ Four caveats on the table:
   are dropped from scoring, so human is scored on 255 strict trials, `llm_blind` on 233 and
   `llm_feedback` on 223. The dropped trials are systematically the ones the LLM suites got wrong.
 - **`llm_feedback` is scored in-sample.** It is shown the specific mutations `llm_blind` survived
-  and asked to rewrite so those fail, then scored on the same mutation set. Its 0.065 is a
+  and asked to rewrite so those fail, then scored on the same mutation set. Its 0.024 is a
   training-set number, not a held-out one.
-- **The gains are not all attributable to feedback.** Human → feedback is 9.4× at argument level,
-  but that bundles two interventions. Feedback alone (`llm_blind` → `llm_feedback`) is **3.8×**.
+- **The gains are not all attributable to feedback.** Human → feedback is 25× at argument level,
+  but that bundles two interventions. Feedback alone (`llm_blind` → `llm_feedback`) is **10.2×**.
 - **24 of the 265 mutations are excluded** from every rate as advisory
   (`duplicate_call_readonly`), on the ground that an assertion accepting a repeated idempotent
-  read is behaving correctly.
+  read is behaving correctly. They are not discarded: rejection rate on them is the
+  over-strictness readout in the table's last column.
 
 LLM assertions are not simply better: they **false-reject 2 and 3 of 34 assertion instances**
-(across 33 unmutated episodes) where the human suite rejects none, at **7.8× and 9.0× the code**.
+(across 33 unmutated episodes) where the human suite rejects none, at **7.8× and 9.2× the code**
+— and the feedback arm additionally rejects **18 of 26** corruptions that were never defects.
 The result that generalises is that **the mutation gate is what makes either kind measurable**.
+
+### A5 — Target-model evaluation across wordings
+
+The same 33 tasks in two wordings — A0's authored sentence and A2's paraphrase — scored on one
+target model. `task_id` does not cover the surface, so both arms carry identical ids and every
+task is its own control; the statistic is McNemar's exact test on the discordant pairs. The A2
+side is `a2_b6_v6`, the one variant whose paraphrases A2's intent checker left entirely
+unflagged, honouring A2's own rule that a model comparison must gate on `substituted` first.
+
+| verdict | A0 | A2 | delta | paired agreement | discordant | McNemar p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `ast_match` — calls equal `expected_tool_calls` | 0.970 | 0.909 | **−0.061** | 0.939 | 2 | 0.50 |
+| `assertion` — the pack's own `success_assertions` | 0.970 | 0.970 | +0.000 | **1.000** | 0 | 1.00 |
+
+**Two tasks changed answer when the sentence changed; the pack's assertions saw none of it.**
+Both flips are `confirmation` tasks where A0 says *"chuyển **ngay**"* (transfer *immediately*)
+and A2 says *"**mong** chuyển"* (*would like to* transfer). The urgency marker was doing work:
+without it the model inserted a `get_transfer_fee` call before the transfer. The transfer itself
+is identical and correct — the call *set* is not.
+
+Three things follow, and the third is the one to act on:
+
+- **The effect is entirely in `confirmation`** — 5 tasks, 1.00 → 0.60. The 18 `single_turn`
+  tasks did not move at all. The pooled −0.061 hides the whole result, which is why per-cell
+  reporting is mandatory for this arm.
+- **Intent preservation is not behavioural equivalence.** A2's checker asks which tools a request
+  needs; both wordings need the same one, so it passed the paraphrase and was right to. Nothing
+  in A2 can see a change of register that leaves the tool set intact and still changes what a
+  model does.
+- **Not statistically significant.** p = 0.50 on 2 discordant pairs. The load-bearing number is
+  not the accuracy delta but the **agreement gap**: 1.000 by assertion versus 0.939 by declared
+  ground truth. That is a statement about what the gates can see, and it does not depend on n.
+
+One control worth stating: the single `dependent_call` task fails under *both* wordings — the
+model never chains to `get_transaction_status` — and the assertions **correctly failed it** both
+times. The suite is not uniformly blind; it missed the extra call and caught the missing one,
+which is exactly the shape A4 measured.
 
 ---
 
@@ -336,11 +379,16 @@ causal chain, and an earlier draft of this document wrongly presented them as on
 | A0 | the gates never fire | nothing is dropped at any stage, at any budget |
 | A4 | the assertions do not check returned values | 61% false acceptance at argument level |
 | A3 | a skewed benchmark passes anyway | 70% of its templates are unfalsifiable by the oracle |
+| A5 | and it happens on real model output | a reworded request changed the model's call set; assertion agreement 1.000, ground-truth agreement 0.939 |
 
-**A4 does not explain A0.** A0's replay stage passed 33/33 on *uncorrupted* traces; nothing ever
-reached the assertions in a failing condition, so A0's 100% is consistent with assertion blindness
-but not evidence of it. Establishing the causal link would require running A0's published
-benchmark against a model that produces wrong values and showing they publish clean.
+**A4 did not explain A0 — until A5.** A0's replay stage passed 33/33 on *uncorrupted* traces;
+nothing ever reached the assertions in a failing condition, so A0's 100% was consistent with
+assertion blindness but not evidence of it. Establishing the link required running the published
+benchmark against a model that produces wrong output and showing it publishes clean. **A5 is that
+run, and it does.** A target model, given A2's paraphrase of two `confirmation` tasks, emitted an
+extra `get_transfer_fee` call; `expected_tool_calls` caught it, and the pack's own assertions
+passed all 33 tasks in both wordings. The failure mode is `inject_extra_call`, which A4 had scored
+at 0.882 false acceptance on synthetic corruptions. The chain is now observed, not inferred.
 
 **A3 did not exploit A4's gap.** A3 leans on `assert_no_tool_called` for 14 of its 20 templates,
 and A4 scored that assertion at **0.000 false acceptance** — one of the strongest in the suite.
@@ -364,7 +412,7 @@ assertion library. The three are independent in *method*, not in *data*.
 | A2 ladder 1/5/10/20 | only measurable if the task budget rises with N |
 | system-controlled policy sampler prevents selection bias | **necessary but not sufficient** — the gate amplifies bias the sampler only partly avoids |
 | mutation score alone is insufficient | confirmed: the 0.498 aggregate hides 0.000 at state level and 0.610 at argument level |
-| assertions stay human until evidence | supported — LLM suites are stricter but false-reject valid tasks at ~8× the code, and the best of them is scored in-sample |
+| assertions stay human until evidence | supported — LLM suites are stricter but false-reject valid tasks at ~8–9× the code, the best of them is scored in-sample, and it rejects 69% of corruptions that were never defects |
 
 One error was caught by the harness rather than by review: deriving `call_order: any` as `strict`
 would have silently serialised a parallel call group, and the round trip flagged it
@@ -379,8 +427,10 @@ checking it.
 
 - **n = 1 at the pack level.** One pack, one domain (Vietnamese banking), one model. Every
   cross-arm claim is a single observation.
-- **No target-model evaluation.** Nothing here says whether benchmark *conclusions* are stable —
-  only whether benchmark *content* is. That needs paired per-task tests across models.
+- **Target-model evaluation covers one model and one paraphrase.** A5 runs `gpt-oss-120b` against
+  A0 versus one A2 variant. It is enough to show the assertions cannot see a wording effect; it is
+  **not** enough to say whether conclusions are stable in general. That needs a second model
+  family and several paraphrases per task, and its headline delta is not significant at n=33.
 - **A2's intent checker shares a model family with the generator**, so 94.1% is a self-check and
   an upper bound. It needs re-running against a second family.
 - **A4's `llm_feedback` arm is scored in-sample** and its numbers are not held out.
@@ -391,7 +441,7 @@ checking it.
   `confirmation` on 3 proposals; A2's false-alarm floor on 17 sentences.
 - **Three milestone-compiler rules are untested** because the pack contains no such case.
 - **The funnel's drop-reason breakdown has never fired**, so it is implemented but unverified.
-- **`metrics_version` is not enforced** and is absent from A2 and A4.
+- **`metrics_version` is not enforced** by any code. A4 now stamps it; A2 still does not.
 - **A2 and A3 do not compose.** They are independent arms.
 
 ---
@@ -425,8 +475,14 @@ checking it.
 
 **Then the open research question**
 
-10. Target-model evaluation: paired per-task tests across models, A0 versus A2, per-policy
-    accuracy delta. This is the only thing that answers whether benchmark conclusions hold.
+10. **Extend A5, now that it exists.** The paired harness is built and the first run found what
+    it was designed to find, but on one model, one paraphrase and 2 discordant pairs. Three
+    extensions, in order of what they buy:
+    (a) **a second model family** as target, which also decouples A5 from the family that wrote
+    the paraphrases; (b) **every unflagged A2 variant** (`--a2-run` over the nine other clean
+    indices), turning a point estimate into an effect distribution; (c) **budget 24**, where 91
+    tasks give McNemar something to work with. Until (c), report A5's agreement gap, not its
+    accuracy delta.
 
 ---
 

@@ -42,6 +42,7 @@ ARMS = {
     "a2": ("A2", "LLM surface generation", "Wording only; ground truth frozen"),
     "a3": ("A3", "LLM task generation", "Semantics; controlled policy sampler"),
     "a4": ("A4", "LLM assertions and the mutation gate", "Are the assertions checking anything"),
+    "a5": ("A5", "Target-model evaluation across wordings", "Does a benchmark conclusion survive a paraphrase"),
     "findings": ("ALL", "Findings across the ladder", "Cross-arm synthesis"),
 }
 
@@ -826,12 +827,74 @@ def appendix_all(document: Document, _metrics: dict[str, Any] | None = None) -> 
         )
 
 
+def appendix_a5(document: Document, metrics: dict[str, Any]) -> None:
+    """The paired table and the per-policy breakdown, which is where the result lives.
+
+    The pooled delta averages 18 `single_turn` tasks that did not move with 5
+    `confirmation` tasks that dropped 40%, so the per-policy table is not supporting
+    detail — it is the finding.
+    """
+    paired = metrics.get("paired") or {}
+    document.add_heading("A.1 Paired outcome, both verdicts", level=3)
+    simple_table(
+        document,
+        ["verdict", "A0", "A2", "delta", "agreement", "discordant", "McNemar p"],
+        [
+            [
+                key,
+                row.get("accuracy_a0"),
+                row.get("accuracy_a2"),
+                row.get("delta"),
+                row.get("paired_agreement"),
+                row.get("discordant"),
+                row.get("mcnemar_p"),
+            ]
+            for key, row in paired.items()
+        ],
+    )
+
+    ast = paired.get("ast_match") or {}
+    contingency = ast.get("contingency") or {}
+    document.add_heading("A.2 Contingency (ast_match)", level=3)
+    simple_table(
+        document,
+        ["", "A2 correct", "A2 wrong"],
+        [
+            ["A0 correct", contingency.get("both_correct"), contingency.get("a0_only")],
+            ["A0 wrong", contingency.get("a2_only"), contingency.get("neither")],
+        ],
+    )
+
+    document.add_heading("A.3 Per turn policy (ast_match)", level=3)
+    simple_table(
+        document,
+        ["policy", "n", "A0", "A2", "delta", "flipped down", "flipped up"],
+        [
+            [name, row["n"], row["accuracy_a0"], row["accuracy_a2"], row["delta"],
+             row["flipped_down"], row["flipped_up"]]
+            for name, row in ((metrics.get("by_turn_policy") or {}).get("ast_match") or {}).items()
+        ],
+    )
+
+    disagreement = metrics.get("verdict_disagreement") or {}
+    document.add_heading("A.4 Verdict disagreement", level=3)
+    simple_table(
+        document,
+        ["case", "count"],
+        [
+            ["assertions passed while the calls were wrong", disagreement.get("assertion_passed_ast_failed")],
+            ["calls right while assertions failed", disagreement.get("ast_passed_assertion_failed")],
+        ],
+    )
+
+
 APPENDIX = {
     "a0": appendix_a0,
     "a1": appendix_a1,
     "a2": appendix_a2,
     "a3": appendix_a3,
     "a4": appendix_a4,
+    "a5": appendix_a5,
     "findings": appendix_all,
 }
 
@@ -879,7 +942,11 @@ def cover(document: Document, arm: str, metrics: dict[str, Any] | None) -> None:
         ["Pipeline", "runtime/benchmark_families/bfcl, unmodified"],
         ["Metric contract", (metrics or {}).get("metrics_version", "1.0")],
     ]
-    if arm in {"a2", "a3", "a4", "findings"}:
+    if arm == "a5":
+        # A5 is the one arm where the model is the subject rather than an authoring tool,
+        # so the cover has to say which side of the experiment it sits on.
+        facts.append(["Target model", "openai/gpt-oss-120b, local vLLM, temperature 0, /v1/responses, all calls disk-cached"])
+    elif arm in {"a2", "a3", "a4", "findings"}:
         facts.append(["Model", "openai/gpt-oss-120b, local vLLM, temperature 0, seed 0, all calls disk-cached"])
     else:
         facts.append(["Model", "none — this arm is fully deterministic"])
@@ -967,7 +1034,8 @@ def reproduction(document: Document, arm: str) -> None:
         "a2": "PYTHONPATH=src python3 bfcl_ablation/run_a2.py",
         "a3": "PYTHONPATH=src python3 bfcl_ablation/run_a3.py",
         "a4": "PYTHONPATH=src python3 bfcl_ablation/run_a4.py",
-        "findings": "PYTHONPATH=src python3 bfcl_ablation/run_a0.py   # then a1, a2, a3, a4",
+        "a5": "PYTHONPATH=src python3 bfcl_ablation/run_a5.py",
+        "findings": "PYTHONPATH=src python3 bfcl_ablation/run_a0.py   # then a1, a2, a3, a4, a5",
     }
     document.add_paragraph("Run from the repository root:")
     paragraph = document.add_paragraph()

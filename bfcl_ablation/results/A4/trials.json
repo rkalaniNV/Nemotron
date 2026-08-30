@@ -5407,7 +5407,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 5000000 -> 5000001",
-      "message": "balance mismatch: reported 5000001, state 5000000",
+      "message": "Reported balance 5000001 does not match state balance 5000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -5417,7 +5417,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 5000000 -> 105000000",
-      "message": "balance mismatch: reported 105000000, state 5000000",
+      "message": "Reported balance 105000000 does not match state balance 5000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -5427,7 +5427,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].account_id ACC-001 -> ACC-002",
-      "message": "get_account_balance result account_id mismatch (got 'ACC-002')",
+      "message": "get_account_balance result account_id mismatch (got 'ACC-002', expected 'ACC-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5437,7 +5437,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "dropped call[0] get_account_balance",
-      "message": "missing required call: get_account_balance",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -5447,7 +5447,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0] get_account_balance -> list_recent_transactions",
-      "message": "unexpected tool call: list_recent_transactions",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -5457,17 +5457,17 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "duplicated call[0] get_account_balance",
-      "message": "duplicate calls to get_account_balance",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_balance_single__5425bff786adbd17",
       "template_id": "bn_balance_single"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-002'})",
-      "message": "duplicate calls to get_account_balance",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-002', expected 'ACC-001')",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -5477,7 +5477,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0].account_id ACC-001 -> ACC-002",
-      "message": "get_account_balance called with wrong account_id (got 'ACC-002')",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-002', expected 'ACC-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -5487,7 +5487,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[0].remaining_limit_vnd 15000000 -> 15000001",
-      "message": "remaining_limit_vnd mismatch: expected 15000000, got 15000001",
+      "message": "remaining_limit_vnd mismatch",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -5497,7 +5497,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[0].remaining_limit_vnd 15000000 -> 115000000",
-      "message": "remaining_limit_vnd mismatch: expected 15000000, got 115000000",
+      "message": "remaining_limit_vnd mismatch",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -5507,7 +5507,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[0].account_id ACC-001 -> ACC-002",
-      "message": "account_id mismatch in get_card_limit result (got ACC-002, expected ACC-001)",
+      "message": "account_id mismatch in get_card_limit result",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5517,7 +5517,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[0].card_id CARD-001 -> CARD-002",
-      "message": "get_card_limit result card_id mismatch (got CARD-002)",
+      "message": "get_card_limit result card_id mismatch",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5527,7 +5527,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "dropped call[0] get_card_limit",
-      "message": "assistant never called get_card_limit",
+      "message": "required tool get_card_limit not called",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -5547,7 +5547,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "duplicated call[0] get_card_limit",
-      "message": "duplicate get_card_limit call",
+      "message": "multiple calls to required tool get_card_limit",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -5567,7 +5567,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "call[0].card_id CARD-001 -> CARD-002",
-      "message": "get_card_limit called with wrong card_id (got CARD-002, expected CARD-001)",
+      "message": "get_card_limit called with wrong card_id",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -5577,7 +5577,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 5000000 -> 5000001",
-      "message": "balance mismatch: reported 5000001, state 5000000",
+      "message": "Reported balance 5000001 does not match state balance 5000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -5587,7 +5587,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 5000000 -> 105000000",
-      "message": "balance mismatch: reported 105000000, state 5000000",
+      "message": "Reported balance 105000000 does not match state balance 5000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -5597,7 +5597,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].account_id ACC-001 -> ACC-002",
-      "message": "get_account_balance result account_id mismatch (got 'ACC-002')",
+      "message": "get_account_balance result account_id mismatch (got 'ACC-002', expected 'ACC-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5607,7 +5607,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "dropped call[0] get_account_balance",
-      "message": "missing required call: get_account_balance",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -5617,7 +5617,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0] get_account_balance -> list_recent_transactions",
-      "message": "unexpected tool call: list_recent_transactions",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -5627,17 +5627,17 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "duplicated call[0] get_account_balance",
-      "message": "duplicate calls to get_account_balance",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_balance_withheld_account__0f34f3476873fef5",
       "template_id": "bn_balance_withheld_account"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-002'})",
-      "message": "duplicate calls to get_account_balance",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-002', expected 'ACC-001')",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -5647,7 +5647,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0].account_id ACC-001 -> ACC-002",
-      "message": "get_account_balance called with wrong account_id (got 'ACC-002')",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-002', expected 'ACC-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -5667,7 +5667,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 5000000 -> 5000001",
-      "message": "balance mismatch: reported 5000001, state 5000000",
+      "message": "Reported balance 5000001 does not match state balance 5000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -5677,17 +5677,17 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[0].balance_vnd 5000000 -> 5000001",
-      "message": null,
+      "message": "balance_vnd mismatch",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 5000000 -> 105000000",
-      "message": "balance mismatch: reported 105000000, state 5000000",
+      "message": "Reported balance 105000000 does not match state balance 5000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -5697,17 +5697,17 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[0].balance_vnd 5000000 -> 105000000",
-      "message": null,
+      "message": "balance_vnd mismatch",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].account_id ACC-001 -> ACC-002",
-      "message": "get_account_balance result account_id mismatch (got 'ACC-002')",
+      "message": "get_account_balance result account_id mismatch (got 'ACC-002', expected 'ACC-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5717,17 +5717,17 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[0].account_id ACC-001 -> ACC-002",
-      "message": null,
+      "message": "get_account_balance result account_id mismatch",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[1].remaining_limit_vnd 15000000 -> 15000001",
-      "message": "limit mismatch: reported 15000001, state 15000000",
+      "message": "Reported remaining_limit_vnd 15000001 does not match state 15000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -5737,7 +5737,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[1].remaining_limit_vnd 15000000 -> 15000001",
-      "message": "remaining_limit_vnd mismatch: expected 15000000, got 15000001",
+      "message": "remaining_limit_vnd mismatch",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -5747,7 +5747,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[1].remaining_limit_vnd 15000000 -> 115000000",
-      "message": "limit mismatch: reported 115000000, state 15000000",
+      "message": "Reported remaining_limit_vnd 115000000 does not match state 15000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -5757,7 +5757,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[1].remaining_limit_vnd 15000000 -> 115000000",
-      "message": "remaining_limit_vnd mismatch: expected 15000000, got 115000000",
+      "message": "remaining_limit_vnd mismatch",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -5767,17 +5767,17 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[1].account_id ACC-001 -> ACC-002",
-      "message": null,
+      "message": "get_card_limit result account_id mismatch (got 'ACC-002', expected 'ACC-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[1].account_id ACC-001 -> ACC-002",
-      "message": "account_id mismatch in get_card_limit result (got ACC-002, expected ACC-001)",
+      "message": "account_id mismatch in get_card_limit result",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5787,7 +5787,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[1].card_id CARD-001 -> CARD-002",
-      "message": "get_card_limit result card_id mismatch (got 'CARD-002')",
+      "message": "get_card_limit result card_id mismatch (got 'CARD-002', expected 'CARD-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5797,7 +5797,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "result[1].card_id CARD-001 -> CARD-002",
-      "message": "get_card_limit result card_id mismatch (got CARD-002)",
+      "message": "get_card_limit result card_id mismatch",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -5807,7 +5807,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "dropped call[0] get_account_balance",
-      "message": "missing required call: get_account_balance",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -5817,17 +5817,17 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "dropped call[0] get_account_balance",
-      "message": null,
+      "message": "required tool get_account_balance not called",
       "op_class": "call_level",
       "operator": "drop_call",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0] get_account_balance -> list_recent_transactions",
-      "message": "unexpected tool call: list_recent_transactions",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -5847,27 +5847,27 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "duplicated call[0] get_account_balance",
-      "message": "duplicate calls to get_account_balance",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_card_limit_reported",
       "detail": "duplicated call[0] get_account_balance",
-      "message": null,
+      "message": "multiple calls to required tool get_account_balance",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "dropped call[1] get_card_limit",
-      "message": "missing required call: get_card_limit",
+      "message": "Required tool 'get_card_limit' was not called",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -5877,7 +5877,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "dropped call[1] get_card_limit",
-      "message": "assistant never called get_card_limit",
+      "message": "required tool get_card_limit not called",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -5887,7 +5887,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[1] get_card_limit -> create_dispute",
-      "message": "unexpected tool call: create_dispute",
+      "message": "Required tool 'get_card_limit' was not called",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -5907,17 +5907,17 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "duplicated call[1] get_card_limit",
-      "message": "duplicate calls to get_card_limit",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_card_limit_reported",
       "detail": "duplicated call[1] get_card_limit",
-      "message": "duplicate get_card_limit call",
+      "message": "multiple calls to required tool get_card_limit",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -5927,7 +5927,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-002'})",
-      "message": "duplicate calls to get_account_balance",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-002', expected 'ACC-001')",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -5937,17 +5937,17 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-002'})",
-      "message": null,
+      "message": "multiple calls to required tool get_account_balance",
       "op_class": "call_level",
       "operator": "inject_extra_call",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0].account_id ACC-001 -> ACC-002",
-      "message": "get_account_balance called with wrong account_id (got 'ACC-002')",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-002', expected 'ACC-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -5957,17 +5957,17 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "call[0].account_id ACC-001 -> ACC-002",
-      "message": null,
+      "message": "get_account_balance called with wrong account_id",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
-      "outcome": "false_accept",
+      "outcome": "detected",
       "task_id": "banking_vn__bn_balance_and_card_parallel__4f7a18e5a1f5f8a7",
       "template_id": "bn_balance_and_card_parallel"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[1].card_id CARD-001 -> CARD-002",
-      "message": "get_card_limit called with wrong card_id (got 'CARD-002')",
+      "message": "get_card_limit called with wrong card_id (got 'CARD-002', expected 'CARD-001')",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -5977,7 +5977,7 @@
     {
       "assertion": "assert_card_limit_reported",
       "detail": "call[1].card_id CARD-001 -> CARD-002",
-      "message": "get_card_limit called with wrong card_id (got CARD-002, expected CARD-001)",
+      "message": "get_card_limit called with wrong card_id",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -5987,7 +5987,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 12000000 -> 12000001",
-      "message": "balance mismatch: reported 12000001, state 12000000",
+      "message": "Reported balance 12000001 does not match state balance 12000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -5997,7 +5997,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].balance_vnd 12000000 -> 112000000",
-      "message": "balance mismatch: reported 112000000, state 12000000",
+      "message": "Reported balance 112000000 does not match state balance 12000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -6007,7 +6007,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "result[0].account_id ACC-002 -> ACC-001",
-      "message": "get_account_balance result account_id mismatch (got 'ACC-001')",
+      "message": "get_account_balance result account_id mismatch (got 'ACC-001', expected 'ACC-002')",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -6017,7 +6017,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "dropped call[0] get_account_balance",
-      "message": "missing required call: get_account_balance",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -6027,7 +6027,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0] get_account_balance -> list_recent_transactions",
-      "message": "unexpected tool call: list_recent_transactions",
+      "message": "Required tool 'get_account_balance' was not called",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6037,17 +6037,17 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "duplicated call[0] get_account_balance",
-      "message": "duplicate calls to get_account_balance",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_balance_single__e662949227517360",
       "template_id": "bn_balance_single"
     },
     {
       "assertion": "assert_account_balance_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "duplicate calls to get_account_balance",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-001', expected 'ACC-002')",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -6057,7 +6057,7 @@
     {
       "assertion": "assert_account_balance_reported",
       "detail": "call[0].account_id ACC-002 -> ACC-001",
-      "message": "get_account_balance called with wrong account_id (got 'ACC-001')",
+      "message": "get_account_balance called with wrong account_id (got 'ACC-001', expected 'ACC-002')",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -6067,7 +6067,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "result[0].amount_vnd 250000 -> 250001",
-      "message": "Result fields do not match state: amount_vnd: expected 250000, got 250001",
+      "message": "Result from get_transaction_status does not match state: amount_vnd: expected 250000, got 250001",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -6077,7 +6077,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "result[0].amount_vnd 250000 -> 100250000",
-      "message": "Result fields do not match state: amount_vnd: expected 250000, got 100250000",
+      "message": "Result from get_transaction_status does not match state: amount_vnd: expected 250000, got 100250000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -6087,7 +6087,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "result[0].account_id ACC-001 -> ACC-002",
-      "message": "Result fields do not match state: account_id: expected 'ACC-001', got 'ACC-002'",
+      "message": "Result from get_transaction_status does not match state: account_id: expected 'ACC-001', got 'ACC-002'",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -6107,7 +6107,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "dropped call[0] get_transaction_status",
-      "message": "No `get_transaction_status` tool call found in trace",
+      "message": "No tool call found in trace",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -6117,7 +6117,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "call[0] get_transaction_status -> create_dispute",
-      "message": "No `get_transaction_status` tool call found in trace",
+      "message": "Tool called was 'create_dispute', expected 'get_transaction_status'",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6127,7 +6127,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "duplicated call[0] get_transaction_status",
-      "message": "`get_transaction_status` called 2 times; expected exactly once",
+      "message": "Unexpected extra tool call(s): get_transaction_status",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -6137,7 +6137,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call `get_account_balance` found in trace",
+      "message": "Unexpected extra tool call(s): get_account_balance",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -6147,7 +6147,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "call[0].transaction_id TXN-1001 -> TXN-1002",
-      "message": "`get_transaction_status` called with transaction_id 'TXN-1002', expected 'TXN-1001'",
+      "message": "get_transaction_status called with transaction_id 'TXN-1002', expected 'TXN-1001'",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -6237,7 +6237,7 @@
     {
       "assertion": "assert_transaction_not_found",
       "detail": "dropped call[0] get_transaction_status",
-      "message": "Expected exactly one `get_transaction_status` call, found 0",
+      "message": "No tool calls were made; expected a `get_transaction_status` call",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -6247,7 +6247,7 @@
     {
       "assertion": "assert_transaction_not_found",
       "detail": "call[0] get_transaction_status -> create_dispute",
-      "message": "Expected exactly one `get_transaction_status` call, found 0",
+      "message": "Unexpected tool call `create_dispute`; only `get_transaction_status` is allowed for this task",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6257,17 +6257,17 @@
     {
       "assertion": "assert_transaction_not_found",
       "detail": "duplicated call[0] get_transaction_status",
-      "message": "Expected exactly one `get_transaction_status` call, found 2",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_txn_status_unknown_id__5cec42dc0db8b80c",
       "template_id": "bn_txn_status_unknown_id"
     },
     {
       "assertion": "assert_transaction_not_found",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call `get_account_balance` observed in trace",
+      "message": "Unexpected tool call `get_account_balance`; only `get_transaction_status` is allowed for this task",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -6277,7 +6277,7 @@
     {
       "assertion": "assert_transaction_not_found",
       "detail": "call[0].transaction_id TXN-ABSENT-1 -> TXN-1001",
-      "message": "`get_transaction_status` called with transaction_id 'TXN-1001', expected 'TXN-ABSENT-1'",
+      "message": "`get_transaction_status` was called, but never with the expected `transaction_id` 'TXN-ABSENT-1'",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -6357,7 +6357,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "dropped call[0] list_recent_transactions",
-      "message": "missing list_recent_transactions call",
+      "message": "missing required tool call(s): tools=['list_recent_transactions']",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -6367,7 +6367,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "call[0] list_recent_transactions -> get_account_balance",
-      "message": "unexpected tool call(s): extra=['get_account_balance']",
+      "message": "unexpected tool call(s): tools=['get_account_balance']",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6377,7 +6377,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "duplicated call[0] list_recent_transactions",
-      "message": "duplicate list_recent_transactions call: count=2",
+      "message": "tool called wrong number of times: tool='list_recent_transactions': count=2",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -6387,7 +6387,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "dropped call[1] get_transaction_status",
-      "message": "missing get_transaction_status call",
+      "message": "missing required tool call(s): tools=['get_transaction_status']",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -6397,7 +6397,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "call[1] get_transaction_status -> create_dispute",
-      "message": "unexpected tool call(s): extra=['create_dispute']",
+      "message": "unexpected tool call(s): tools=['create_dispute']",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6407,7 +6407,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "duplicated call[1] get_transaction_status",
-      "message": "duplicate get_transaction_status call: count=2",
+      "message": "tool called wrong number of times: tool='get_transaction_status': count=2",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -6417,7 +6417,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "swapped call[0] list_recent_transactions with call[1] get_transaction_status",
-      "message": "get_transaction_status call occurs before list_recent_transactions",
+      "message": "missing get_transaction_status call after listing",
       "op_class": "call_level",
       "operator": "reorder_calls",
       "outcome": "detected",
@@ -6427,7 +6427,7 @@
     {
       "assertion": "assert_status_checked_from_listed_transaction",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "unexpected tool call(s): extra=['get_account_balance']",
+      "message": "unexpected tool call(s): tools=['get_account_balance']",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -6457,7 +6457,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "result[0].amount_vnd 1000000 -> 1000001",
-      "message": "Result fields do not match state: amount_vnd: expected 1000000, got 1000001",
+      "message": "Result from get_transaction_status does not match state: amount_vnd: expected 1000000, got 1000001",
       "op_class": "argument_level",
       "operator": "perturb_numeric_plus_one",
       "outcome": "detected",
@@ -6467,7 +6467,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "result[0].amount_vnd 1000000 -> 101000000",
-      "message": "Result fields do not match state: amount_vnd: expected 1000000, got 101000000",
+      "message": "Result from get_transaction_status does not match state: amount_vnd: expected 1000000, got 101000000",
       "op_class": "argument_level",
       "operator": "perturb_numeric_large",
       "outcome": "detected",
@@ -6477,7 +6477,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "result[0].account_id ACC-001 -> ACC-002",
-      "message": "Result fields do not match state: account_id: expected 'ACC-001', got 'ACC-002'",
+      "message": "Result from get_transaction_status does not match state: account_id: expected 'ACC-001', got 'ACC-002'",
       "op_class": "argument_level",
       "operator": "swap_identity_result",
       "outcome": "detected",
@@ -6497,7 +6497,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "dropped call[0] get_transaction_status",
-      "message": "No `get_transaction_status` tool call found in trace",
+      "message": "No tool call found in trace",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -6507,7 +6507,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "call[0] get_transaction_status -> create_dispute",
-      "message": "No `get_transaction_status` tool call found in trace",
+      "message": "Tool called was 'create_dispute', expected 'get_transaction_status'",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6517,7 +6517,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "duplicated call[0] get_transaction_status",
-      "message": "`get_transaction_status` called 2 times; expected exactly once",
+      "message": "Unexpected extra tool call(s): get_transaction_status",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -6527,7 +6527,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call `get_account_balance` found in trace",
+      "message": "Unexpected extra tool call(s): get_account_balance",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -6537,7 +6537,7 @@
     {
       "assertion": "assert_transaction_status_reported",
       "detail": "call[0].transaction_id TXN-1002 -> TXN-1001",
-      "message": "`get_transaction_status` called with transaction_id 'TXN-1001', expected 'TXN-1002'",
+      "message": "get_transaction_status called with transaction_id 'TXN-1001', expected 'TXN-1002'",
       "op_class": "argument_level",
       "operator": "swap_identity_argument",
       "outcome": "detected",
@@ -6677,7 +6677,7 @@
     {
       "assertion": "assert_transfer_fee_reported",
       "detail": "call[0] get_transfer_fee -> create_transfer",
-      "message": "Assistant never called get_transfer_fee successfully",
+      "message": "Unexpected tool call(s) detected: create_transfer",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6687,17 +6687,17 @@
     {
       "assertion": "assert_transfer_fee_reported",
       "detail": "duplicated call[0] get_transfer_fee",
-      "message": "Assistant called get_transfer_fee 2 times; exactly one successful call is required",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_transfer_fee_single__ef6282b04fde71fa",
       "template_id": "bn_transfer_fee_single"
     },
     {
       "assertion": "assert_transfer_fee_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call: 'get_account_balance'",
+      "message": "Unexpected tool call(s) detected: get_account_balance",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -6877,7 +6877,7 @@
     {
       "assertion": "assert_transfer_fee_reported",
       "detail": "call[0] get_transfer_fee -> create_transfer",
-      "message": "Assistant never called get_transfer_fee successfully",
+      "message": "Unexpected tool call(s) detected: create_transfer",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -6887,17 +6887,17 @@
     {
       "assertion": "assert_transfer_fee_reported",
       "detail": "duplicated call[0] get_transfer_fee",
-      "message": "Assistant called get_transfer_fee 2 times; exactly one successful call is required",
+      "message": null,
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
-      "outcome": "detected",
+      "outcome": "false_accept",
       "task_id": "banking_vn__bn_transfer_fee_single__534fd939df140016",
       "template_id": "bn_transfer_fee_single"
     },
     {
       "assertion": "assert_transfer_fee_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call: 'get_account_balance'",
+      "message": "Unexpected tool call(s) detected: get_account_balance",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -7437,7 +7437,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "dropped call[0] get_dispute_status",
-      "message": "Expected exactly one get_dispute_status call, found 0",
+      "message": "Expected exactly one tool call, found 0",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -7447,7 +7447,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "call[0] get_dispute_status -> create_dispute",
-      "message": "Expected exactly one get_dispute_status call, found 0",
+      "message": "Unexpected tool 'create_dispute', expected 'get_dispute_status'",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -7457,7 +7457,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "duplicated call[0] get_dispute_status",
-      "message": "Expected exactly one get_dispute_status call, found 2",
+      "message": "Expected exactly one tool call, found 2",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -7467,7 +7467,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call 'get_account_balance' found in trace",
+      "message": "Expected exactly one tool call, found 2",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -7587,7 +7587,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "dropped call[0] get_dispute_status",
-      "message": "Expected exactly one get_dispute_status call, found 0",
+      "message": "Expected exactly one tool call, found 0",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -7597,7 +7597,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "call[0] get_dispute_status -> create_dispute",
-      "message": "Expected exactly one get_dispute_status call, found 0",
+      "message": "Unexpected tool 'create_dispute', expected 'get_dispute_status'",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -7607,7 +7607,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "duplicated call[0] get_dispute_status",
-      "message": "Expected exactly one get_dispute_status call, found 2",
+      "message": "Expected exactly one tool call, found 2",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -7617,7 +7617,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call 'get_account_balance' found in trace",
+      "message": "Expected exactly one tool call, found 2",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",
@@ -7737,7 +7737,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "dropped call[0] get_dispute_status",
-      "message": "Expected exactly one get_dispute_status call, found 0",
+      "message": "Expected exactly one tool call, found 0",
       "op_class": "call_level",
       "operator": "drop_call",
       "outcome": "detected",
@@ -7747,7 +7747,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "call[0] get_dispute_status -> create_dispute",
-      "message": "Expected exactly one get_dispute_status call, found 0",
+      "message": "Unexpected tool 'create_dispute', expected 'get_dispute_status'",
       "op_class": "call_level",
       "operator": "swap_tool",
       "outcome": "detected",
@@ -7757,7 +7757,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "duplicated call[0] get_dispute_status",
-      "message": "Expected exactly one get_dispute_status call, found 2",
+      "message": "Expected exactly one tool call, found 2",
       "op_class": "call_level",
       "operator": "duplicate_call_readonly",
       "outcome": "detected",
@@ -7767,7 +7767,7 @@
     {
       "assertion": "assert_dispute_status_reported",
       "detail": "appended unrequested get_account_balance({'account_id': 'ACC-001'})",
-      "message": "Unexpected tool call 'get_account_balance' found in trace",
+      "message": "Expected exactly one tool call, found 2",
       "op_class": "call_level",
       "operator": "inject_extra_call",
       "outcome": "detected",

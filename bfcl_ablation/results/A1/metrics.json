@@ -104,6 +104,7 @@
         "first_turns_identical": true,
         "identical": false,
         "note": "Simulator replies are drawn from pack-wide canonical templates at A1, so a changed first-turn surface would be a real regression while a changed later turn is the intended trade.",
+        "opening_turn_may_change": false,
         "tasks_with_changed_first_turn": 0,
         "tasks_with_changed_wording": 8
       },
@@ -721,6 +722,7 @@
       "first_turns_identical": true,
       "identical": false,
       "note": "Simulator replies are drawn from pack-wide canonical templates at A1, so a changed first-turn surface would be a real regression while a changed later turn is the intended trade.",
+      "opening_turn_may_change": false,
       "tasks_with_changed_first_turn": 0,
       "tasks_with_changed_wording": 8
     },

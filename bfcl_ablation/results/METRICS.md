@@ -161,10 +161,46 @@ tracked separately from a detection.
 validates the harness; a null control below 1.000 means mutations are not reaching the
 assertion.
 
+## Solve accuracy across wordings (A5)
+
+Every metric above describes the benchmark. These describe a **target model measured on
+it**, and are the only ones whose subject is not the pack.
+
+**`ast_match`** — the model's tool calls equal `expected_tool_calls`: same function
+names, same arguments, compared after normalising both sides to sorted-key JSON (the
+published row encodes arguments as `[[key, canonical_json]]` pairs, a model returns a
+dict). Order is part of the claim **unless** the template declares `call_order: any`, in
+which case the comparison is order-insensitive. A1 proved `call_order` is not derivable,
+so it is read from the template and never inferred.
+
+**`assertion`** — the same episode judged by the pack's own `success_assertions`, run
+through `ProcessWorker.run_episode` exactly as the gold replay is. Reported **beside**
+`ast_match`, never instead of it: A4 measured this pack's assertions at 0.610
+false acceptance on argument-level corruptions, so a model can pass this column while
+reporting a fabricated value. The gap between the columns is a readout, not noise.
+
+A task with no `success_assertions` is recorded as `assertion: false` rather than
+silently passing. An episode that fails to execute returns no verdict at all, so a
+broken harness cannot be read as a wrong model.
+
+**`paired_agreement`** — share of tasks on which both wordings produced the same verdict.
+The pairing is exact: `task_id` is hashed over pack, template, fixture refs, slot
+bindings and variant index, and **not** over the surface, so the same task carries the
+same id under both wordings.
+
+**`mcnemar_p`** — two-sided **exact** McNemar on the discordant pairs, H0 = wording has
+no effect. Exact rather than chi-square because the discordant count here is far below
+the ~25 the approximation needs. A non-significant p at this n means *not detected*, not
+*no effect*.
+
+**Per-cell reporting is mandatory.** Accuracy is reported per `turn_policy` and per
+`category` with the count printed alongside every rate. Pooled accuracy is dominated by
+`single_turn` (18 of 33 tasks) and hides the policies the ladder exists to compare.
+
 ---
 
 ## Changelog
 
 | version | change |
 | --- | --- |
-| 1.0 | Initial contract. Covers A0 baseline; A1–A4 compare against it. |
+| 1.0 | Initial contract. Covers A0 baseline; A1–A4 compare against it. A5 solve-accuracy metrics added under the same version: they are new metrics, not changes to existing ones, so no arm's numbers move. |
