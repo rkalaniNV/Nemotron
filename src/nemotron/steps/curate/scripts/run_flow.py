@@ -569,7 +569,7 @@ def materialise_policy(
             actual = integrity.corpus_fingerprint(
                 verified, corpus.get("text_field", "text"), corpus.get("id_field")
             )
-        except integrity.UnreadableCorpus as exc:
+        except integrity.UnreadableCorpusError as exc:
             raise FlowConfigError(
                 f"the approval cannot be verified against {verified}: {exc} Enable "
                 "steps.ingest so the corpus is read into JSONL first, or set "
@@ -804,7 +804,7 @@ def main() -> None:
     except FlowConfigError as exc:
         print(f"curate/flow: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    except policy_module.PolicyNotPromotable as exc:
+    except policy_module.PolicyNotPromotableError as exc:
         print(f"curate/flow: approve block refused: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 

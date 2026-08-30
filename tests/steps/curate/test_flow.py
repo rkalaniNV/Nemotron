@@ -833,7 +833,7 @@ def test_the_fingerprint_refuses_a_corpus_it_cannot_read(tmp_path) -> None:
     binary = tmp_path / "part_0.parquet"
     binary.write_bytes(b"PAR1\x00\x01\x02\x03rows and columns, not lines\xff\xfePAR1")
 
-    with pytest.raises(integrity.UnreadableCorpus, match="JSONL-only"):
+    with pytest.raises(integrity.UnreadableCorpusError, match="JSONL-only"):
         integrity.corpus_fingerprint(str(binary), "text", "id")
 
 
@@ -848,7 +848,7 @@ def test_two_unreadable_corpora_cannot_verify_as_each_other(tmp_path) -> None:
     english.write_bytes(b"PAR1\x00\xff\x02 english rows PAR1")
 
     for path in (hindi, english):
-        with pytest.raises(integrity.UnreadableCorpus):
+        with pytest.raises(integrity.UnreadableCorpusError):
             integrity.corpus_fingerprint(str(path), "text", "id")
 
 
@@ -865,7 +865,7 @@ def test_an_absent_corpus_is_refused_rather_than_fingerprinted(tmp_path) -> None
     """
     from nemotron.steps.curate.runtime import integrity
 
-    with pytest.raises(integrity.UnreadableCorpus, match="matched no files"):
+    with pytest.raises(integrity.UnreadableCorpusError, match="matched no files"):
         integrity.corpus_fingerprint(str(tmp_path / "nothing" / "*.jsonl"), "text", "id")
 
 
@@ -1038,7 +1038,7 @@ def test_a_policy_is_refused_when_the_corpus_it_names_is_absent(tmp_path) -> Non
     cfg["approve"] = approve_block()
     resolved, paths = run_flow.derive(cfg)
 
-    with pytest.raises((integrity.UnreadableCorpus, run_flow.FlowConfigError)) as caught:
+    with pytest.raises((integrity.UnreadableCorpusError, run_flow.FlowConfigError)) as caught:
         run_flow.materialise_policy(cfg, resolved, paths)
 
     assert "matched no files" in str(caught.value) or "does not exist" in str(caught.value)

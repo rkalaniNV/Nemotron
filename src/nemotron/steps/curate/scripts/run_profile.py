@@ -58,7 +58,7 @@ SHARD_SOURCE_NOTE = (
 MIN_SCORED_FRACTION = 0.5
 
 
-class SignalUnavailable(RuntimeError):
+class SignalUnavailableError(RuntimeError):
     """A registered signal could not be constructed for this run."""
 
 
@@ -217,7 +217,7 @@ def score_sample(
             document_filter = signal.build(*thresholds, **extra_kwargs.get(signal.name, {}))
             load_models(document_filter)
         except Exception as exc:  # noqa: BLE001 - surfaced as a finding, not a stack trace
-            raise SignalUnavailable(f"{signal.name} could not be constructed: {exc}") from exc
+            raise SignalUnavailableError(f"{signal.name} could not be constructed: {exc}") from exc
 
         failures = 0
         by_source: dict[str, list[float]] = {}
@@ -634,16 +634,16 @@ def main() -> None:
 
     try:
         run(cfg)
-    except (langpack.LanguagePackNotFound, langpack.LanguagePackInvalid) as exc:
+    except (langpack.LanguagePackNotFoundError, langpack.LanguagePackInvalidError) as exc:
         print(f"curate/profile: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    except (signal_registry.UnknownSignal, signal_registry.SignalRequirementsUnmet) as exc:
+    except (signal_registry.UnknownSignalError, signal_registry.SignalRequirementsUnmetError) as exc:
         print(f"curate/profile: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
     except ConfigError as exc:
         print(f"curate/profile: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    except profiling.DirectionMismatch as exc:
+    except profiling.DirectionMismatchError as exc:
         print(f"curate/profile: {exc}", file=sys.stderr)
         raise SystemExit(3) from exc
 

@@ -90,7 +90,7 @@ class DeconError(ValueError):
     """A decontamination run cannot proceed as specified."""
 
 
-class HoldoutModified(DeconError):
+class HoldoutModifiedError(DeconError):
     """Something tried to change a held-out split. It is never allowed."""
 
 
@@ -287,7 +287,7 @@ def assert_holdout_untouched(before: Sequence[str], after: Sequence[str]) -> Non
     """
     lost = sorted(set(before) - set(after))
     if lost:
-        raise HoldoutModified(
+        raise HoldoutModifiedError(
             f"{len(lost)} document(s) were removed from the holdout split, e.g. "
             f"{', '.join(repr(d) for d in lost[:3])}. Only the training split may shrink: "
             "changing a benchmark to agree with the training data invalidates every "

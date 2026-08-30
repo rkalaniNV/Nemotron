@@ -76,7 +76,7 @@ def test_a_matching_direction_verifies_quietly() -> None:
 
 def test_a_contradicting_keep_document_stops_the_run() -> None:
     """Retention derived from the wrong comparison would be silently inverted."""
-    with pytest.raises(p.DirectionMismatch, match="keep_document disagrees"):
+    with pytest.raises(p.DirectionMismatchError, match="keep_document disagrees"):
         p.verify_direction(_signal(_Disagrees), [0.1, 0.3, 0.5, 0.7, 0.9])
 
 
@@ -84,7 +84,7 @@ def test_a_filter_that_cannot_be_built_is_reported_not_swallowed() -> None:
     def explode(**kwargs):
         raise RuntimeError("needs a model")
 
-    with pytest.raises(p.DirectionMismatch, match="could not construct"):
+    with pytest.raises(p.DirectionMismatchError, match="could not construct"):
         p.verify_direction(_signal(explode), [0.1, 0.5])
 
 

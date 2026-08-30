@@ -70,7 +70,7 @@ class SubsetError(ValueError):
     """A subset cannot be produced as specified."""
 
 
-class NestingViolation(SubsetError):
+class NestingViolationError(SubsetError):
     """A tier is not contained in a larger tier. Indicates a defect here."""
 
 
@@ -406,7 +406,7 @@ def _assert_quotas_are_monotonic(budgets: list[int], quotas: dict[int, dict[str,
     for smaller, larger in zip(budgets, budgets[1:], strict=False):
         for stratum, quota in quotas[smaller].items():
             if quotas[larger].get(stratum, 0) < quota:
-                raise NestingViolation(
+                raise NestingViolationError(
                     f"stratum {stratum!r} was allocated {quota} tokens at budget {smaller} but "
                     f"{quotas[larger].get(stratum, 0)} at budget {larger}. Raising a budget must "
                     "never take a document away; the apportionment is not house-monotone."

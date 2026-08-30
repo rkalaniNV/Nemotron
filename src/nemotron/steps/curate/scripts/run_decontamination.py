@@ -383,7 +383,7 @@ def main() -> None:
     except ConfigError as exc:
         print(f"curate/decontamination: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    except decon.HoldoutModified as exc:
+    except decon.HoldoutModifiedError as exc:
         print(f"curate/decontamination: {exc}", file=sys.stderr)
         raise SystemExit(3) from exc
 

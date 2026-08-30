@@ -224,7 +224,7 @@ def test_an_impossible_threshold_is_refused() -> None:
 
 def test_removing_from_the_holdout_is_refused() -> None:
     """Changing a benchmark to agree with training data invalidates every result."""
-    with pytest.raises(decon.HoldoutModified) as excinfo:
+    with pytest.raises(decon.HoldoutModifiedError) as excinfo:
         decon.assert_holdout_untouched(["h1", "h2", "h3"], ["h1", "h3"])
 
     assert "h2" in str(excinfo.value)

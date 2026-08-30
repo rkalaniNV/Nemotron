@@ -45,7 +45,7 @@ MACRO = "macro"
 MICRO = "micro"
 
 
-class DirectionMismatch(RuntimeError):
+class DirectionMismatchError(RuntimeError):
     """The registry's stated direction contradicts the filter's own keep_document."""
 
 
@@ -95,13 +95,13 @@ def verify_direction(
             document_filter = signal.build(*thresholds, **(build_kwargs or {}))
             actual = np.array([bool(document_filter.keep_document(float(s))) for s in sample])
         except Exception as exc:  # noqa: BLE001 - a filter we cannot build cannot be verified
-            raise DirectionMismatch(
+            raise DirectionMismatchError(
                 f"{signal.name}: could not construct the filter to verify its direction: {exc}"
             ) from exc
 
         expected = keep_mask(sample, signal.direction, *thresholds)
         if not np.array_equal(actual, expected):
-            raise DirectionMismatch(
+            raise DirectionMismatchError(
                 f"{signal.name}: registry declares direction={signal.direction!r} but the "
                 f"filter's own keep_document disagrees at threshold {t:g}. Refusing to report "
                 "retention figures derived from the wrong comparison."

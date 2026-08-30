@@ -230,7 +230,7 @@ def test_macro_and_micro_differ_on_unequal_sources(tmp_path, curator_stub) -> No
 
 
 def test_a_named_unsupported_signal_fails(tmp_path, curator_stub) -> None:
-    with pytest.raises(r.SignalRequirementsUnmet):
+    with pytest.raises(r.SignalRequirementsUnmetError):
         run_profile.build_report(_config(tmp_path, signals=["token_count"]))
 
 

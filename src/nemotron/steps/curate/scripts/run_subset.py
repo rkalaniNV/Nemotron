@@ -286,7 +286,7 @@ def main() -> None:
     except ConfigError as exc:
         print(f"curate/subset: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    except subset.NestingViolation as exc:
+    except subset.NestingViolationError as exc:
         print(f"curate/subset: {exc}", file=sys.stderr)
         raise SystemExit(3) from exc
     except subset.SubsetError as exc:
@@ -331,7 +331,7 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
     # second catches a writing one, and they are different failures.
     problems = subset.verify_nesting(results)
     if problems:
-        raise subset.NestingViolation(
+        raise subset.NestingViolationError(
             "the tiers do not nest, so they cannot support the ablation they exist for: "
             + "; ".join(problems)
         )
@@ -379,7 +379,7 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
         {b: subset.TierResult(b, sorted(ids), 0, 0, {}, 0, []) for b, ids in written_ids.items()}
     )
     if written_problems:
-        raise subset.NestingViolation("written tiers do not nest: " + "; ".join(written_problems))
+        raise subset.NestingViolationError("written tiers do not nest: " + "; ".join(written_problems))
 
     report = {
         "schema_version": subset.SCHEMA_VERSION,

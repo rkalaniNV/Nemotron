@@ -289,7 +289,7 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
         for path in ledger_paths:
             try:
                 ledgers.append(ledger.load_ledger(path))
-            except ledger.LedgerInvalid as exc:
+            except ledger.LedgerInvalidError as exc:
                 findings.append({"name": "ledger_unreadable", "message": str(exc)})
 
         if ledgers:
