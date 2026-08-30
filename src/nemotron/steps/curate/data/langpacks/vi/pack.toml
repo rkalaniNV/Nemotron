@@ -1,0 +1,40 @@
+# Vietnamese language pack.
+#
+# Data only. Nothing here is code, and nothing in runtime/ knows this language
+# exists — adding a language means adding a directory like this one.
+
+[pack]
+pack_id      = "vi-generic"
+language_tag = "vi"
+version      = "2.0"
+schema       = 1
+
+[sources]
+stopwords = { file = "stopwords.txt", n = 287, origin = "SOVAI Vietnamese CPT curation run", license = "CC0-1.0" }
+charset = { file = "charset.txt", script = "Latn", note = "base Latin plus every marked Vietnamese form" }
+boilerplate = { file = "boilerplate.txt", n = 31, origin = "observed on Vietnamese news and forum crawls" }
+
+[orthography]
+sentence_terminators = [".", "!", "?"]
+
+# The fold map lives here rather than in code. Vietnamese "đ" does not decompose
+# under NFD, so removing it has to be declared somewhere, and declaring it in the
+# runtime would put one language inside the language-neutral layer.
+[fold_map]
+"đ" = "d"
+"Đ" = "D"
+
+[capabilities]
+supports = [
+    "script_ratio",
+    "diacritic_ratio",
+    "stopword_ratio",
+    "stopword_ratio_folded",
+    "boilerplate_hits",
+    "sentence_end_ratio",
+]
+
+[notes]
+folded_stopwords = """Folding merges distinct stopwords together — mà, má, mã and mạ all become ma. \
+The collision count is reported alongside any folded figure, because it is a property of the \
+language rather than a defect in the word list."""

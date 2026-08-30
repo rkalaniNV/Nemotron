@@ -1,0 +1,10 @@
+# Regular expressions matching Thai web boilerplate.
+# English strings appear because Thai sites carry them untranslated.
+อ่านเพิ่มเติม
+โฆษณา
+แชร์
+บทความที่เกี่ยวข้อง
+ลิขสิทธิ์
+Read more
+Share
+Advertisement

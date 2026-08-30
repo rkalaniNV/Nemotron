@@ -1,0 +1,27 @@
+# English language pack.
+#
+# Latin script without a fold map: English does not treat diacritics as
+# removable marks. Vietnamese tone marks strip to degraded but readable text,
+# so a diacritic ratio measures something; English "café" is a loanword, not
+# an optional orthography, so diacritic_ratio and stopword_ratio_folded are
+# undeclared — the same reason Hindi omits them.
+
+[pack]
+pack_id      = "en-generic"
+language_tag = "en"
+version      = "1.0"
+schema       = 1
+
+[sources]
+stopwords = { file = "stopwords.txt", n = 110, origin = "assembled for C4-en transfer validation", license = "CC0-1.0" }
+charset = { file = "charset.txt", script = "Latn", note = "unmarked Latin a-zA-Z" }
+boilerplate = { file = "boilerplate.txt", n = 12, origin = "observed on English news and forum crawls" }
+
+[orthography]
+sentence_terminators = [".", "!", "?"]
+
+[capabilities]
+supports = ["script_ratio", "stopword_ratio", "boilerplate_hits", "sentence_end_ratio"]
+
+[notes]
+absent_capabilities = """diacritic_ratio and stopword_ratio_folded are not declared. English does not have a productive system of removable marks; measuring their density would score loanwords, not orthographic quality."""

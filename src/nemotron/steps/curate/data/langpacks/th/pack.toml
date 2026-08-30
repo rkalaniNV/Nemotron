@@ -1,0 +1,33 @@
+# Thai language pack.
+#
+# An abugida like Devanagari: tone marks and vowel signs are obligatory, not
+# removable. They occupy Unicode categories Mn and Mc. Sentences may end with
+# ฯ (paiyannoi) as well as .!?. Digits exist in both ASCII and Thai scripts.
+
+[pack]
+pack_id      = "th-generic"
+language_tag = "th"
+version      = "1.0"
+schema       = 1
+
+[sources]
+stopwords = { file = "stopwords.txt", n = 38, origin = "assembled for C4-th transfer validation", license = "CC0-1.0" }
+charset = { file = "charset.txt", script = "Thai", note = "Thai block including tone marks (Mn) and vowel signs (Mc)" }
+boilerplate = { file = "boilerplate.txt", n = 8, origin = "observed on Thai news and forum crawls" }
+
+[orthography]
+sentence_terminators = [".", "!", "?", "ฯ"]
+
+[capabilities]
+supports = ["script_ratio", "boilerplate_hits", "sentence_end_ratio"]
+
+[notes]
+absent_capabilities = """diacritic_ratio and stopword_ratio_folded are not declared. Thai tone marks are obligatory vowels like Devanagari matras; stripping them yields nonsense, so the measurement is absent from the report rather than computed on a false premise."""
+stopword_ratio_not_declared = """Measured on 20,000 C4-th documents: 53.1% score EXACTLY
+zero, and 90.1% of those are correct Thai (script_ratio > 0.5). The signal tokenises on
+whitespace and Thai prose is unsegmented, so a "token" is a whole run of text and never
+matches a stopword. That is not an undercount — the signal cannot distinguish "not Thai"
+from "Thai, written normally", which is the one distinction it exists to make. Declaring it
+would produce a clean-looking distribution over nothing. A dictionary-based segmenter
+(pythainlp) is a runtime change, not a pack change; when one exists it can be declared."""
+digits = """Thai digits (๐-๙) are Unicode category Nd and satisfy str.isdigit(), but do not match [0-9]. Curator's NumbersFilter therefore reads 0 on Thai-digit text. Recorded here; correcting NumbersFilter is upstream work."""

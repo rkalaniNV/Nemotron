@@ -1,0 +1,12 @@
+# Regular expressions matching Japanese web boilerplate.
+# English strings appear because Japanese sites carry them untranslated.
+続きを読む
+関連記事
+広告
+シェア
+コメント
+トップへ戻る
+利用規約
+プライバシー
+Read more
+Share

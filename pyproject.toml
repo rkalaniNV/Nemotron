@@ -183,6 +183,12 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nemotron", "src/nemo_runspec"]
+# Language packs are data, not code, and a wheel that drops them leaves
+# curate/profile able to name a language it cannot load. Declared explicitly
+# rather than relying on the default file sweep.
+artifacts = [
+    "src/nemotron/steps/curate/data/langpacks/**",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
