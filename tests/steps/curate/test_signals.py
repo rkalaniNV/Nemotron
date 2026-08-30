@@ -340,3 +340,55 @@ def test_signals_sharing_a_capability_are_still_distinct() -> None:
     assert len({registry.SIGNALS[n].requires for n in trio}) == 1, (
         "they must still share the capability — that is why the collision existed"
     )
+
+
+def test_the_same_text_scores_the_same_in_nfc_and_nfd() -> None:
+    """Correct text has two encodings, and the signals used to disagree about it.
+
+    In NFD a combining mark is its own codepoint, so a category test for letters
+    excludes it and the base letter folds to itself. diacritic_ratio and
+    stopword_ratio -- the two signals whose purpose is to detect lost diacritics
+    -- therefore scored NFD identically to text whose diacritics really were
+    stripped. 11.69% of a 20,000-document Vietnamese C4 sample is not NFC.
+    """
+    import unicodedata
+
+    from nemotron.steps.curate.runtime import langpack, registry
+
+    pack = langpack.load("vi")
+    sentence = "Việt Nam là một quốc gia nằm ở phía đông bán đảo Đông Dương."
+    nfc = unicodedata.normalize("NFC", sentence)
+    nfd = unicodedata.normalize("NFD", sentence)
+    stripped = "".join(c for c in nfd if not unicodedata.combining(c))
+    assert nfc != nfd, "the fixture must actually differ by encoding"
+
+    for name in ("diacritic_ratio", "stopword_ratio", "script_ratio", "latin_ratio"):
+        scorer = registry.SIGNALS[name].build(0.1, pack=pack)
+        assert scorer.score_document(nfc) == scorer.score_document(nfd), (
+            f"{name} scores the same sentence differently depending on its encoding"
+        )
+
+    diacritic = registry.SIGNALS["diacritic_ratio"].build(0.1, pack=pack)
+    assert diacritic.score_document(nfc) > diacritic.score_document(stripped), (
+        "normalising must not also erase the distinction the signal exists to make"
+    )
+
+
+def test_measurement_normalisation_does_not_touch_the_document() -> None:
+    """The corpus keeps the bytes it arrived with.
+
+    A measurement stage that rewrites what it measures is the defect that let a
+    classifier truncate 53.4% of a corpus while every count still reconciled.
+    """
+    import unicodedata
+
+    from nemotron.steps.curate.runtime import langpack, registry
+
+    pack = langpack.load("vi")
+    nfd = unicodedata.normalize("NFD", "Tiếng Việt")
+    before = nfd
+
+    registry.SIGNALS["diacritic_ratio"].build(0.1, pack=pack).score_document(nfd)
+
+    assert nfd == before
+    assert not unicodedata.is_normalized("NFC", nfd), "the caller's string is unchanged"

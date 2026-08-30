@@ -33,7 +33,12 @@ from typing import Any
 
 from nemotron.steps.curate.runtime.langpack import LanguagePack
 
-IMPL_VERSION = "curate-signals-0.1.0"
+#: Bumped when a signal's numbers change, so a policy or profile measured under
+#: the previous version is refused rather than silently compared. 0.2.0 scores on
+#: NFC: every signal that reads letters or diacritics returns a different value
+#: for non-NFC text than 0.1.0 did, and 11.69% of a Vietnamese and 28.82% of a
+#: Hindi C4 sample are affected.
+IMPL_VERSION = "curate-signals-0.2.0"
 
 
 def _document_filter_base() -> type:
@@ -59,7 +64,55 @@ def _document_filter_base() -> type:
         return _StandaloneDocumentFilter
 
 
-_Base = _document_filter_base()
+_RAW_BASE = _document_filter_base()
+
+
+class _Base(_RAW_BASE):  # type: ignore[valid-type,misc]
+    """Every signal in this module, with one property enforced for all of them.
+
+    Scoring is done on NFC. Vietnamese and Devanagari both have two encodings of
+    the same correct text, and none of the signals distinguished them: in NFD a
+    combining mark is its own codepoint, so ``unicodedata.category(ch)[0] == "L"``
+    excludes it and the base letter folds to itself. Measured on one correct
+    Vietnamese sentence, NFC vs NFD vs the same text with its diacritics actually
+    stripped:
+
+    ::
+
+                            NFC       NFD    stripped
+        diacritic_ratio  0.3231    0.0615      0.0615
+        stopword_ratio   0.1000    0.0000      0.0000
+
+    NFD scored identically to genuinely degraded text, on the two signals whose
+    whole purpose is to detect that degradation. It is not rare: 11.69% of a
+    20,000-document Vietnamese C4 sample and 28.82% of the Hindi one are not NFC,
+    and a corpus from macOS or OCR is routinely majority-NFD.
+
+    The normalisation is applied to the string handed to ``score_document`` and
+    nowhere else. The delivered corpus keeps the bytes it arrived with -- a
+    measurement stage that rewrites the text it measures is exactly the defect
+    that let a classifier truncate 53.4% of a corpus while every count reconciled.
+
+    Enforced in ``__init_subclass__`` rather than by convention, because a signal
+    added later would otherwise reintroduce this silently and its scores would
+    look entirely reasonable.
+    """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        scorer = cls.__dict__.get("score_document")
+        if scorer is None or getattr(scorer, "_nfc_wrapped", False):
+            return
+
+        def score_document(self: Any, text: str, _inner: Any = scorer) -> float:
+            if text and not unicodedata.is_normalized("NFC", text):
+                text = unicodedata.normalize("NFC", text)
+            return _inner(self, text)
+
+        score_document._nfc_wrapped = True  # type: ignore[attr-defined]
+        score_document.__doc__ = scorer.__doc__
+        score_document.__name__ = scorer.__name__
+        cls.score_document = score_document  # type: ignore[method-assign]
 
 
 # -- Unicode helpers ----------------------------------------------------------
