@@ -160,6 +160,71 @@ DEFAULT_LANGID_SCORE = 0.3
 #: does not touch the corpus.
 DOMAIN_MAX_CHARS = None
 
+MODES = ("filter", "annotate", "both")
+
+
+def resolve_policy(cfg: dict) -> tuple[list[dict], dict, list[str]]:
+    """Load the approved filtering policy, if one is configured.
+
+    Returns the thresholds to apply, the language pack the policy declares it was
+    derived from, and any warnings to log. A policy that has not been approved is
+    refused: distribution analysis can say what a threshold removes, never whether
+    removing it is right, so promoting a candidate is a separate act that records
+    who did it and on what evidence.
+    """
+    block = cfg.get("heuristic_filters") or {}
+    path = block.get("approved_policy")
+    if not path:
+        return [], {}, []
+
+    from nemotron.steps.curate.runtime import policy as policy_module
+
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    try:
+        warnings = list(
+            policy_module.require_approved(
+                document, allow_unvalidated=bool(block.get("allow_unvalidated_policy"))
+            )
+        )
+    except policy_module.PolicyNotApproved as exc:
+        # require_approved reports which fields are unmet but never sees a path.
+        # A run that names several policies needs to know which one was refused.
+        raise policy_module.PolicyNotApproved(f"{path}: {exc}") from exc
+    warnings = [f"{path}: {w}" for w in warnings]
+
+    # The scorers themselves are versioned. Thresholds were calibrated by one
+    # implementation; running them under another silently measures a different
+    # quantity, and the profile records the version precisely so this can be
+    # checked rather than assumed.
+    from nemotron.steps.curate.runtime import registry as signal_registry
+
+    declared_impl = document.get("signals_impl_version")
+    if declared_impl and declared_impl != signal_registry.IMPL_VERSION:
+        raise ValueError(
+            f"{path}: thresholds were calibrated by signals implementation {declared_impl}, "
+            f"but this run has {signal_registry.IMPL_VERSION}. A scorer change moves the "
+            "numbers the thresholds refer to; re-profile against the current implementation."
+        )
+
+    declared_pack = dict(document.get("langpack") or {})
+    declared = declared_pack.get("content_hash")
+    expected = block.get("langpack_content_hash")
+    if declared and expected and declared != expected:
+        raise ValueError(
+            f"{path}: policy was derived from language pack {declared}, but this run loads "
+            f"{expected}. Thresholds do not transfer between packs; re-profile or pin the pack."
+        )
+
+    # Config supplies what only the run knows: where packs live, and which
+    # tokenizer to count with. Both travel with the pack spec so policy_stages
+    # has one place to look.
+    for key in ("langpack_dir", "tokenizer"):
+        if block.get(key) is not None:
+            declared_pack[key] = block[key]
+
+    return list(document.get("thresholds") or []), declared_pack, warnings
+
+
 #: Requirements a signal may declare that are satisfied by loading a language
 #: pack. Every one of these is also a pack *capability* name, which is why the
 #: pack itself is the thing that supplies them.
@@ -180,6 +245,52 @@ PACK_REQUIREMENTS: frozenset[str] = frozenset(
 KNOWN_REQUIREMENTS: frozenset[str] = PACK_REQUIREMENTS | {"tokenizer"}
 
 
+def load_policy_pack(langpack_spec: dict, needed_by: list[str]):
+    """Load the language pack a policy was derived from.
+
+    Half the registry's signals are parameterised by a pack — their word lists,
+    character set and patterns arrive as data — so a policy naming one cannot be
+    executed without it. ``curate/profile`` emits candidates for exactly these
+    signals, so a policy that could be produced but not run would be a dead end
+    between the two steps.
+
+    The declared hash is checked against the pack actually loaded, not merely
+    against another string in the config. Thresholds are calibrated against a
+    pack's contents; running them against a different revision of that pack
+    silently measures something else.
+    """
+    from nemotron.steps.curate.runtime import langpack
+
+    tag = langpack_spec.get("language_tag") or langpack_spec.get("id")
+    if not tag:
+        raise ValueError(
+            f"policy uses language-pack signals {sorted(needed_by)} but declares no "
+            "langpack.language_tag. There is no default language: a wrong one produces "
+            "plausible numbers for the wrong corpus."
+        )
+
+    pack = langpack.load(tag, langpack_spec.get("langpack_dir") or langpack.BUNDLED)
+    declared = langpack_spec.get("content_hash")
+    if not declared:
+        # Required, not merely compared when present. A policy that does not say
+        # which pack revision calibrated its thresholds cannot be checked at all,
+        # and an unenforced guarantee reads exactly like an enforced one.
+        raise ValueError(
+            f"policy uses language-pack signals {sorted(needed_by)} but declares no "
+            "langpack.content_hash. Thresholds are calibrated against a pack's word lists "
+            "and character set; without the hash there is nothing to verify them against. "
+            "Re-run curate/profile, which records it."
+        )
+    if pack.content_hash != declared:
+        raise ValueError(
+            f"policy was derived from language pack {tag} at {declared}, but the pack on this "
+            f"machine hashes to {pack.content_hash}. Thresholds are calibrated against a pack's "
+            "word lists and character set and do not transfer across revisions; re-profile "
+            "against the current pack or pin the pack version."
+        )
+    return pack
+
+
 #: Which bound keys a policy may set, per signal direction. Enforced rather than
 #: inferred: ``min``/``max`` zipped positionally onto ``threshold_params`` maps a
 #: ``max:`` bound onto a ``min_*`` parameter and silently inverts the gate, so a
@@ -189,6 +300,129 @@ BOUND_KEYS: dict[str, tuple[str, ...]] = {
     "max": ("max",),
     "interval": ("min", "max"),
 }
+
+
+def threshold_bounds(signal, entry: dict) -> tuple[float, ...]:
+    """Map a policy entry's ``min``/``max`` onto the signal's threshold parameters.
+
+    Refuses a bound the signal's direction cannot express. The alternative —
+    accepting whatever keys are present and zipping them positionally — produces
+    a working pipeline that gates the wrong way round, which no test of the
+    pipeline's *shape* can catch.
+    """
+    expected = BOUND_KEYS.get(signal.direction)
+    if expected is None:
+        raise ValueError(f"{signal.name}: unknown direction {signal.direction!r}")
+
+    present = tuple(key for key in ("min", "max") if key in entry)
+    if not present:
+        if not signal.curator_default:
+            raise ValueError(
+                f"{signal.name} sets neither min nor max and has no shipped default, so there "
+                "is no threshold to apply. Give it an explicit bound."
+            )
+        return signal.curator_default
+
+    wrong = [key for key in present if key not in expected]
+    if wrong:
+        raise ValueError(
+            f"{signal.name} is a {signal.direction}-direction signal and takes "
+            f"{' and '.join(expected)}, but the policy sets {wrong[0]!r}. Applying it as "
+            f"{expected[0]!r} would invert the gate and keep exactly the documents the "
+            "policy meant to drop."
+        )
+    if len(present) != len(expected):
+        missing = [key for key in expected if key not in present]
+        raise ValueError(
+            f"{signal.name} gates from both sides and needs {' and '.join(expected)}; "
+            f"the policy omits {missing[0]!r}. A two-sided gate given one bound would fix "
+            "the other at an unstated value and attribute all of the effect to the one set."
+        )
+    return tuple(entry[key] for key in expected)
+
+
+def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_spec: dict | None = None):
+    """Turn approved thresholds into Curator stages.
+
+    Signal names resolve through the closed allowlist, never an import path from
+    config: a policy file is a document people paste between machines.
+    """
+    if not thresholds:
+        # No policy configured. Import nothing, add nothing: a run that predates
+        # F2 must build exactly the pipeline it built before.
+        return []
+
+    from nemotron.steps.curate.runtime import registry as signal_registry
+
+    named = [entry.get("signal") for entry in thresholds]
+    unknown = [n for n in named if n not in signal_registry.SIGNALS]
+    if unknown:
+        raise ValueError(
+            f"unknown signal {unknown[0]!r} in policy. Allowed: {sorted(signal_registry.SIGNALS)}. "
+            "Signals are a closed allowlist; a policy cannot name an import path."
+        )
+
+    # Driven by each signal's declared `requires`, not by a hand-maintained set of
+    # pack-backed names: a set has to be remembered, and the one thing already
+    # forgotten was token_count, which needs a tokenizer and is proposed by
+    # curate/profile whenever models.tokenizer is set.
+    spec = dict(langpack_spec or {})
+    requirements = {req for n in named for req in signal_registry.SIGNALS[n].requires}
+    unsupported = requirements - KNOWN_REQUIREMENTS
+    if unsupported:
+        raise ValueError(
+            f"policy names signal(s) requiring {sorted(unsupported)}, which this step cannot "
+            f"supply. Known requirements: {sorted(KNOWN_REQUIREMENTS)}. Either the registry "
+            "gained a requirement the filter step was not taught to satisfy, or the policy "
+            "names a signal that only curate/profile can run."
+        )
+
+    # Load the pack once, and only if something actually needs it, so a policy of
+    # pack-free signals still runs on a machine with no packs installed.
+    pack_backed = sorted({n for n in named if signal_registry.SIGNALS[n].requires})
+    pack = load_policy_pack(spec, pack_backed) if requirements & PACK_REQUIREMENTS else None
+
+    tokenizer = spec.get("tokenizer")
+    if "tokenizer" in requirements and not tokenizer:
+        needs = sorted(n for n in named if "tokenizer" in signal_registry.SIGNALS[n].requires)
+        raise ValueError(
+            f"policy names {needs}, which counts tokens and therefore needs a tokenizer, but "
+            "heuristic_filters.tokenizer is not set. A token budget counted by a different "
+            "tokenizer is a different budget, so there is no safe default."
+        )
+
+    _, ScoreFilter = text_filter_stages()
+    Score = score_stage() if mode == "annotate" else None
+
+    stages = []
+    for entry in thresholds:
+        name = entry["signal"]
+        signal = signal_registry.SIGNALS[name]
+        bounds = threshold_bounds(signal, entry)
+        extra: dict[str, Any] = {}
+        if PACK_REQUIREMENTS & set(signal.requires):
+            extra["pack"] = pack
+        if "tokenizer" in signal.requires:
+            extra["hf_model_name"] = tokenizer
+        document_filter = signal.build(*bounds, **extra)
+
+        if mode == "annotate":
+            # Score never filters, so every row survives carrying its score.
+            stages.append(
+                Score(document_filter, score_field=f"__{name}", text_field=text_field)
+            )
+        elif mode == "both":
+            # ScoreFilter writes score_field before applying keep_document, so one
+            # stage already does score-then-filter. Score + Filter would be a
+            # two-pass spelling of the same result.
+            stages.append(
+                ScoreFilter(document_filter, text_field=text_field, score_field=f"__{name}")
+            )
+        else:
+            # score_field defaults to None, which discards the score after use —
+            # the same shape as the WordCountFilter gate above it.
+            stages.append(ScoreFilter(document_filter, text_field=text_field))
+    return stages
 
 
 def visible_gpu_count() -> int:
@@ -338,7 +572,13 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
             domain_kwargs["score_field"] = cfg["domain_score_field"]
 
         pipeline.add_stage(MultilingualDomainClassifier(**domain_kwargs))
-    policy_warnings: list[str] = []
+    # F2: approved-policy filtering. Absent config adds nothing, so a run that
+    # predates it builds exactly the pipeline it built before.
+    thresholds, langpack_spec, policy_warnings = resolve_policy(cfg)
+    for warning in policy_warnings:
+        print(f"curate/nemo_curator: WARNING {warning}")
+    for stage in policy_stages(thresholds, cfg["text_field"], mode, langpack_spec):
+        pipeline.add_stage(stage)
 
     pipeline.add_stage(JsonlWriter(path=cfg["output_dir"]))
     return pipeline, policy_warnings
@@ -350,7 +590,10 @@ def run(cfg: dict) -> dict[str, Any]:
     The uniform entry point every curate step exposes. Does not raise
     ``SystemExit``: a caller running several steps decides what a failure means.
     """
+    # Validate before any work: a typo in mode should not cost a snapshot download.
     mode = cfg.get("mode", "filter")
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
 
     if cfg.get("dataset"):
         snapshot_download(**cfg["dataset"])
