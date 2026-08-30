@@ -1,0 +1,24 @@
+# Tiny profiling smoke over the packaged fixture.
+#
+# The fixture has deliberately unequal source sizes so the macro and micro views
+# differ; a fixture where they agree would not exercise the distinction.
+
+input_glob: /nemo_run/code/src/nemotron/steps/curate/profile/data/tiny/*.jsonl
+output_dir: ${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/curate_profile_tiny
+
+language: vi
+langpack_dir: bundled
+
+text_field: text
+source_field: source
+id_field: id
+
+signals: []
+max_total_docs: 0
+seed: 0
+
+band_search:
+  min_keep_rate: 0.80
+  max_keep_rate: 0.995
+
+models: {}
