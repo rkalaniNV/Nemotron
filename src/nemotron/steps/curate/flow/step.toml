@@ -1,0 +1,103 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[step]
+id = "curate/flow"
+name = "Curate Flow (one config, five steps)"
+category = "curate"
+description = """Run profile, filter, audit, subset and decontamination from a single config with per-step enable flags. Derives every cross-step path so a producer and its consumer cannot disagree, refuses a misconfigured run before any step does work, and keeps the policy approval a separate deliberate act rather than a default."""
+tags = ["curate", "pipeline", "orchestration", "one-config"]
+
+[[consumes]]
+type = "raw_jsonl"
+description = "The unfiltered corpus, read once by profile and once by the filter."
+
+[[produces]]
+type = "filtered_jsonl"
+description = "The curated corpus, plus whatever the enabled steps write beneath output_root."
+
+[[produces]]
+type = "curation_report"
+description = "flow_report.json: which steps ran, which were disabled, every warning, and whether the audit passed. flow_plan.json records the derived per-step configs before anything runs."
+
+[[parameters]]
+name = "corpus"
+description = "Shared inputs: input (the UNFILTERED corpus), text_field, id_field, source_field, language, metadata_fields. id_field is required by subset and decontamination — both are statements about sets of document ids. language is a BCP-47 tag with no default."
+
+[[parameters]]
+name = "output_root"
+description = "One root for every artifact. The manifest and ledger paths the audit compares against are derived from it, which is what stops the producer and the auditor pointing at different files."
+default = "./output/curate"
+
+[[parameters]]
+name = "steps"
+description = "One block per step, each with enabled plus any override for that step's own parameters. A disabled step is skipped; a later step that needs its output either reuses a previous run's artifact or the flow refuses and names the step that would have produced it."
+
+[[parameters]]
+name = "approve"
+description = "The deliberate act that makes thresholds executable: thresholds, approver, date, method, evidence. Absent on a first run because the candidates it selects from do not exist until profile has read the corpus. Goes through runtime/policy.py::promote, the only function allowed to mark a policy approved."
+default = "null"
+
+[[strategies]]
+when = "You are curating a corpus for the first time"
+then = "Leave approve absent and enable profile, filter and audit. The filter runs without threshold gating, so nothing is removed on a policy nobody has reviewed, and profile_report.json tells you what each threshold would remove."
+
+[[strategies]]
+when = "You have read the profile and want to apply thresholds"
+then = "Write the approve block into the same config, set steps.profile.enabled to false, and re-run. The flow promotes the candidate, verifies the corpus fingerprint against the data actually present, and applies the policy."
+
+[[strategies]]
+when = "You want to see what a config would do before it does it"
+then = "Pass --plan. It writes flow_plan.json with every derived per-step config and prints which steps would run, without running any of them."
+
+[[strategies]]
+when = "You are re-running one step against an earlier run's output"
+then = "Disable the steps you do not want and keep output_root pointing at the previous run. A disabled producer's artifact is reused when it exists; when it does not, the flow refuses rather than letting the downstream step report an empty-looking result."
+
+[[strategies]]
+when = "You need decontamination but have no GPU"
+then = "Set steps.decontamination.skip_similarity to true. The exact source-identity pass runs on CPU and catches same-document leaks at any similarity; the report then states that near-duplicate overlap was not measured rather than reporting none."
+
+[[errors]]
+name = "missing_upstream_artifact"
+recovery = "An enabled step needs an artifact whose producer is disabled and which is not on disk. Enable the producing step, or point output_root at a previous run that has it. The message names both."
+
+[[errors]]
+name = "score_column_never_written"
+recovery = "steps.subset.quality_score_field names a column, but steps.filter.mode is 'filter', which discards scores after use. Set mode to 'annotate' or 'both', or drop quality_score_field. Refused at preflight because the alternative is a subset stratified on a column that does not exist."
+
+[[errors]]
+name = "approval_corpus_mismatch"
+recovery = "The approve block was granted against a corpus whose fingerprint differs from the data present now. Thresholds and the signature approving them do not transfer between corpora — re-profile, or set approve.verify_corpus to false if you accept that the approval describes different data."
+
+[[errors]]
+name = "approve_before_profile"
+recovery = "approve.from points at a candidate_policies.yaml that does not exist. Run once with steps.profile enabled: there is nothing to approve until the corpus has been measured."
+
+[[errors]]
+name = "no_steps_enabled"
+recovery = "Every steps.<name>.enabled is false. Enable at least one."
+
+[[errors]]
+name = "decontamination_needs_a_holdout"
+recovery = "steps.decontamination.holdout is required. The split being protected cannot be guessed, and decontaminating against the wrong holdout is worse than not decontaminating."
+
+[[errors]]
+name = "no_gpu_available"
+recovery = "The decontamination similarity pass calls Curator's GPU MinHash/LSH stages. Set run.env.gpus_per_node to 1 in this config, or set steps.decontamination.skip_similarity to true."
+
+[reference]
+skill = "src/nemotron/steps/curate/flow/README.md"
+script = "src/nemotron/steps/curate/scripts/run_flow.py"
+docs = "https://docs.nvidia.com/nemo/curator/latest/"

@@ -1,0 +1,131 @@
+# Worked example: Vietnamese web corpus (C4-vi shape).
+#
+#   uv run nemotron steps run curate/flow -c vi_c4 \
+#     corpus.input='./raw_jsonl/*.jsonl' output_root=./output/vi
+#
+# Every number below was measured on 20,000 real C4-vi documents, not guessed.
+# Copy this file, change corpus.input and output_root, and you have your own.
+#
+# ── Why this corpus needs a language pack ────────────────────────────────────
+# Curator ships two heuristic cascades, and the non-English one deliberately
+# omits three filters the English one uses: NonAlphaNumericFilter,
+# CommonEnglishWordsFilter, WordsWithoutAlphabetsFilter. All three assume ASCII,
+# so dropping them is correct — NonAlphaNumericFilter counts only [a-zA-Z0-9\n?!,.]
+# as alphanumeric, and at its 0.25 default it would retain 1.40% of this corpus
+# because precomposed Vietnamese letters are category Ll and it reads every one
+# as junk.
+#
+# But dropping them leaves this corpus with no character-composition gate and no
+# vocabulary gate at all. The signals below restore both in a script-aware form:
+# unicode_alpha_numeric retains 93.78% here at that same 0.25, and stopword_ratio
+# is the non-English counterpart of CommonEnglishWordsFilter. That is the reason
+# to profile before filtering, and the reason `language` has no default.
+
+corpus:
+  # The UNFILTERED corpus. profile reads this deliberately: profiling the
+  # filtered output measures the gates after they have already run.
+  input: ./raw_jsonl/*.jsonl
+  text_field: text
+
+  # Required by subset and decontamination. C4 ships no id, so mint one from
+  # content before running this — a positional id does not survive resharding:
+  #   id = "c4vi-" + sha256(url + "\n" + text)[:16]
+  id_field: id
+  source_field: source
+
+  language: vi
+  metadata_fields: [id, source, url]
+
+output_root: ./output/vi
+
+steps:
+  # Raw parquet or JSONL in, curatable JSONL out: mints a content-derived id when
+  # the corpus has none. Off by default — a corpus already in that shape should
+  # not be rewritten just to be read.
+  ingest:
+    enabled: false
+    on_duplicate: refuse
+
+  profile:
+    enabled: true
+    # Named rather than auto-selected: a named signal is a question you asked,
+    # and naming one the pack cannot support is an error rather than a silent skip.
+    signals:
+      - unicode_alpha_numeric
+      - diacritic_ratio
+      - stopword_ratio
+      - stopword_ratio_folded
+      - boilerplate_hits
+      - sentence_end_ratio
+      - script_ratio
+    max_total_docs: 200000
+    seed: 0
+
+  filter:
+    enabled: true
+    # both: rows are dropped AND survivors keep __<signal>, so subset can
+    # stratify on a score column without a second pass over the corpus.
+    mode: both
+    # Language identification is TWO decisions, and they live in two keys:
+    #
+    #   language_codes                     WHICH languages to keep
+    #   quality_filters.min_langid_score   how SURE FastText has to be
+    #
+    # Both gates are separate stages. The score gate runs first and drops
+    # documents the model was unsure about, whatever language it guessed; the
+    # code gate then drops the languages you did not ask for.
+    #
+    # [] disables both. Enabling needs the model file as well — language_codes
+    # without models.fasttext_langid is a KeyError, not a silent skip.
+    language_codes: []
+    # models:
+    #   fasttext_langid: ./models/lid.176.bin    # 126 MB, download separately
+    domains: []
+    quality_filters:
+      # Only read when language_codes is non-empty. Curator's default;
+      # omitting it used to mean 0.0, i.e. no confidence gate at all.
+      min_langid_score: 0.3
+
+  audit:
+    enabled: true
+    mode: digest
+
+  subset:
+    enabled: false
+    token_budgets: [100000000, 500000000, 2000000000]
+    tokenizer:
+      name: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+      revision: 97ab8012882a655dc38df4fee47422aca9caca07
+    token_cache: ./cache/vi/token_counts.json
+    quality_score_field: __stopword_ratio
+    length_bands: [128, 512, 2048, 8192]
+    seed: 0
+
+  decontamination:
+    enabled: false
+    holdout: ./data/holdout/*.jsonl
+    threshold: 0.8
+    skip_similarity: false
+
+# ── Run 1 leaves this absent ─────────────────────────────────────────────────
+# There is nothing to approve until profile has measured the corpus. Read
+# output/vi/profile/profile_report.json, pick thresholds from the retention
+# curves, then uncomment, set steps.profile.enabled to false, and re-run.
+#
+# Pick values the profile actually swept. The grid is i/63, so round numbers
+# like 0.30 are never measured points and their retention is not in the report;
+# promote() warns when you choose one.
+#
+# approve:
+#   thresholds:
+#     - {signal: unicode_alpha_numeric, max: 0.2381}   # retains ~87.6% here
+#     - {signal: stopword_ratio, min: 0.0159}
+#   approver: you@nvidia.com
+#   date: 2026-08-27
+#   method: manual
+#   evidence: >-
+#     Retention curves on 20,000 c4_vi documents. Both thresholds are swept grid
+#     points inside the retention-stable band. Curator's non-English cascade
+#     applies no character-composition gate here; the Unicode-aware one retains
+#     93.78% at 0.25, where the ASCII filter it replaces would retain 1.40%.
+approve: null

@@ -1,0 +1,37 @@
+# Smoke config: the packaged fixtures every curate step ships, run end to end on
+# CPU. No tokenizer download, no GPU, no policy — approve is absent because a
+# first run has nothing to approve.
+
+corpus:
+  input: /nemo_run/code/src/nemotron/steps/curate/profile/data/tiny/*.jsonl
+  text_field: text
+  id_field: id
+  source_field: source
+  language: vi
+  metadata_fields: [id, source]
+
+output_root: ${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/curate_flow_tiny
+
+steps:
+  # Raw parquet or JSONL in, curatable JSONL out: mints a content-derived id when
+  # the corpus has none. Off by default — a corpus already in that shape should
+  # not be rewritten just to be read.
+  ingest:
+    enabled: false
+    on_duplicate: refuse
+
+  profile:
+    enabled: true
+    signals: [unicode_alpha_numeric, stopword_ratio]
+    max_total_docs: 500
+    seed: 0
+  filter:
+    enabled: false     # needs nemo_curator + a Ray cluster
+  audit:
+    enabled: false     # nothing to audit without the filter
+  subset:
+    enabled: false
+  decontamination:
+    enabled: false
+
+approve: null

@@ -1,0 +1,120 @@
+# Worked example: Hindi corpus with mixed provenance (Sangraha `verified` shape).
+#
+#   uv run nemotron steps run curate/flow -c hi_sangraha \
+#     corpus.input='./raw_jsonl/*.jsonl' output_root=./output/hi
+#
+# Kept beside vi_c4.yaml because the two differ in ways a single-language config
+# would hide, and every difference below was measured on 20,000 real documents.
+#
+# ── 1. The pack declares fewer capabilities, and that is the point ───────────
+# The `hi` pack declares script, stopword, boilerplate and sentence-end. It does
+# NOT declare diacritic_ratio or stopword_ratio_folded: Devanagari matras are
+# obligatory vowels, so stripping them yields nonsense rather than degraded but
+# readable text. Naming either signal here is an error, not a silent skip.
+#
+# ── 2. The gap Curator's non-English cascade leaves is wider here ────────────
+# Curator's non-English pipeline omits NonAlphaNumericFilter for good reason:
+# Devanagari matches nothing in [a-zA-Z0-9], so at its 0.25 default it would
+# retain 0.01% of this corpus — 2 documents out of 20,000. But omitting it means
+# no character-composition gate at all. The Unicode-aware signal restores one
+# and retains 99.34%.
+#
+# ── 3. source_field carries provenance, and it changes the answer ────────────
+# Sangraha's `type` column is web / pdf / speech: PDF is OCR-extracted and speech
+# is ASR-transcribed, and both carry artifacts a quality gate rejects correctly.
+# Measured here, a sentence_end_ratio >= 0.8 gate retains 86.8% of web but only
+# 15.9% of pdf and 7.7% of speech, while the corpus figure is a reassuring 78.4%.
+# That is why both macro and micro views are reported, and why this config does
+# NOT gate on sentence_end_ratio: it would delete the OCR and ASR sources rather
+# than clean them.
+
+corpus:
+  input: ./raw_jsonl/*.jsonl
+  text_field: text
+
+  # Sangraha ships doc_id, so nothing needs minting — map it on ingest.
+  id_field: id
+  # The provenance column. Without it every shard becomes its own "source" and
+  # the per-source figures describe shards rather than web/pdf/speech.
+  source_field: source
+
+  language: hi
+  metadata_fields: [id, source]
+
+output_root: ./output/hi
+
+steps:
+  # Raw parquet or JSONL in, curatable JSONL out: mints a content-derived id when
+  # the corpus has none. Off by default — a corpus already in that shape should
+  # not be rewritten just to be read.
+  ingest:
+    enabled: false
+    on_duplicate: refuse
+
+  profile:
+    enabled: true
+    # No diacritic_ratio, no stopword_ratio_folded: the hi pack does not declare
+    # them, and naming an unsupported signal is a hard error.
+    signals:
+      - unicode_alpha_numeric
+      - script_ratio
+      - foreign_script_ratio
+      - latin_ratio
+      - stopword_ratio
+      - boilerplate_hits
+      - sentence_end_ratio
+    max_total_docs: 200000
+    seed: 0
+
+  filter:
+    enabled: true
+    mode: both
+    # Language identification is TWO decisions, and they live in two keys:
+    #
+    #   language_codes                     WHICH languages to keep
+    #   quality_filters.min_langid_score   how SURE FastText has to be
+    #
+    # Both gates are separate stages. The score gate runs first and drops
+    # documents the model was unsure about, whatever language it guessed; the
+    # code gate then drops the languages you did not ask for.
+    #
+    # [] disables both. Enabling needs the model file as well — language_codes
+    # without models.fasttext_langid is a KeyError, not a silent skip.
+    language_codes: []
+    # models:
+    #   fasttext_langid: ./models/lid.176.bin    # 126 MB, download separately
+    domains: []
+    quality_filters:
+      # Only read when language_codes is non-empty. Curator's default;
+      # omitting it used to mean 0.0, i.e. no confidence gate at all.
+      min_langid_score: 0.3
+
+  audit:
+    enabled: true
+    mode: digest
+
+  subset:
+    enabled: false
+    token_budgets: [100000000, 500000000]
+    tokenizer:
+      name: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+      revision: 97ab8012882a655dc38df4fee47422aca9caca07
+    token_cache: ./cache/hi/token_counts.json
+    # Leave unset unless you have checked the starved-strata warning: source x
+    # length x decile is 90+ strata here, and `speech` is 0.13% of the corpus,
+    # so it vanishes from the smaller tiers entirely.
+    quality_score_field: null
+    length_bands: [128, 512, 2048, 8192]
+    seed: 0
+
+  decontamination:
+    enabled: false
+    holdout: ./data/holdout/*.jsonl
+    threshold: 0.8
+    # Sangraha has no url column, so the identity pass resolves on doc_id.
+    # Measured: 8 groups of byte-identical text across 20,000 documents (328
+    # redundant, largest group 293 copies) while every doc_id is unique — so an
+    # id-based dedup finds nothing and only content comparison sees it.
+    skip_similarity: false
+
+approve: null

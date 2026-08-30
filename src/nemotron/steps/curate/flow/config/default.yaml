@@ -1,0 +1,115 @@
+# One config for the whole curate flow. Provide this file and your data.
+#
+# Run it twice, on purpose:
+#   1. approve absent  -> profile measures, filter runs without a policy, audit checks
+#   2. you read profile_report.json, write the approve block below, disable profile,
+#      and re-run -> the filter now applies thresholds a person signed for
+#
+# The gate is not collapsible into one run: candidate_policies.yaml does not exist
+# until the profile has read your corpus, so there is nothing to approve on run 1.
+
+corpus:
+  # The UNFILTERED corpus. profile deliberately reads this, not the output —
+  # profiling filtered data measures the gates after they have already run.
+  input: ./raw_jsonl/*.jsonl
+  text_field: text
+
+  # id_field is the corpus's own identifier and is required by subset and
+  # decontamination: both are statements about sets of document ids, and
+  # Curator's AddId is positional so it does not survive resharding.
+  id_field: id
+  source_field: source
+
+  # BCP-47 tag. No default — a wrong one produces plausible numbers for the
+  # wrong language, which is worse than refusing to start.
+  language: vi
+
+  # Columns to carry through the reader. Anything omitted is dropped at the
+  # first stage, including the id above.
+  metadata_fields: [id, source, url]
+
+# Every artifact lands under here. The manifest and ledger paths the audit
+# compares against are derived from it, so producer and consumer cannot disagree.
+output_root: ./output/curate
+
+steps:
+  # Raw parquet or JSONL in, curatable JSONL out: mints a content-derived id when
+  # the corpus has none. Off by default — a corpus already in that shape should
+  # not be rewritten just to be read.
+  ingest:
+    enabled: false
+    on_duplicate: refuse
+
+  profile:
+    enabled: true
+    # [] auto-selects what the language pack supports, skipping the rest with a
+    # note. Naming a signal the pack cannot support is an error instead: a named
+    # signal is a question you asked.
+    signals: []
+    max_total_docs: 200000
+    seed: 0
+
+  filter:
+    enabled: true
+    # filter   drop rows, discard scores, add no columns
+    # annotate score every row, drop nothing
+    # both     drop rows, and keep each score in __<signal> for the survivors
+    mode: both
+    # Language identification is TWO decisions, and they live in two keys:
+    #
+    #   language_codes                     WHICH languages to keep
+    #   quality_filters.min_langid_score   how SURE FastText has to be
+    #
+    # Both gates are separate stages. The score gate runs first and drops
+    # documents the model was unsure about, whatever language it guessed; the
+    # code gate then drops the languages you did not ask for.
+    #
+    # [] disables both. Enabling needs the model file as well — language_codes
+    # without models.fasttext_langid is a KeyError, not a silent skip.
+    language_codes: []
+    # models:
+    #   fasttext_langid: ./models/lid.176.bin    # 126 MB, download separately
+    domains: []
+    quality_filters:
+      # Only read when language_codes is non-empty. Curator's default;
+      # omitting it used to mean 0.0, i.e. no confidence gate at all.
+      min_langid_score: 0.3
+
+  audit:
+    enabled: true
+    mode: digest
+
+  subset:
+    enabled: false
+    token_budgets: [100000000, 500000000]
+    # Pinned: counts from two revisions are not comparable, so two subsets
+    # counted under different revisions are not an ablation pair. null counts
+    # whitespace words instead and every artifact then records unit: words.
+    tokenizer:
+      name: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+      revision: 97ab8012882a655dc38df4fee47422aca9caca07
+    quality_score_field: null
+
+  decontamination:
+    # Needs a GPU for the MinHash/LSH pass. Enabling it also needs
+    # run.env.gpus_per_node: 1 in this file, or skip_similarity: true to run the
+    # exact source-identity pass on CPU alone.
+    enabled: false
+    holdout: ./data/holdout/*.jsonl
+    threshold: 0.8
+    skip_similarity: false
+
+# Absent on the first run. Filling it in is the deliberate act that makes a
+# threshold executable, and it records who decided and on what evidence.
+#
+# approve:
+#   thresholds:
+#     - {signal: unicode_alpha_numeric, max: 0.2381}
+#     - {signal: stopword_ratio, min: 0.0159}
+#   approver: you@example.com
+#   date: 2026-08-26
+#   method: manual
+#   evidence: >-
+#     Retention curves in profile_report.json on 200k documents. Both thresholds
+#     are swept grid points inside the retention-stable band.
+approve: null
