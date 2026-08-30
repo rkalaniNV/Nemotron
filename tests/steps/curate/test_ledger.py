@@ -44,7 +44,7 @@ def test_an_unbalanced_ledger_names_the_gap() -> None:
     led.add_input(100)
     led.add_success(70)
 
-    with pytest.raises(ledger.LedgerImbalance) as excinfo:
+    with pytest.raises(ledger.LedgerImbalanceError) as excinfo:
         led.assert_balanced()
 
     message = str(excinfo.value)
@@ -57,7 +57,7 @@ def test_writing_an_unbalanced_ledger_is_refused(tmp_path) -> None:
     led = ledger.StageLedger(stage="s")
     led.add_input(10)
 
-    with pytest.raises(ledger.LedgerImbalance):
+    with pytest.raises(ledger.LedgerImbalanceError):
         led.write(tmp_path / "ledger.json")
 
     assert not (tmp_path / "ledger.json").exists()
@@ -96,7 +96,7 @@ def test_a_truncated_shard_reports_zero_rows_and_still_counts_as_a_loss() -> Non
     assert led.n_failed == 0, "the record count genuinely cannot see this"
     assert led.balanced, "and the reconciliation is satisfied too"
 
-    with pytest.raises(ledger.LedgerImbalance, match="1 unit"):
+    with pytest.raises(ledger.LedgerImbalanceError, match="1 unit"):
         ledger.assert_no_lost_units([led], "classify")
 
 
@@ -206,7 +206,7 @@ def test_a_non_ledger_document_is_refused(tmp_path) -> None:
     path = tmp_path / "not-a-ledger.json"
     path.write_text('{"hello": "world"}', encoding="utf-8")
 
-    with pytest.raises(ledger.LedgerInvalid, match="no 'stage' field"):
+    with pytest.raises(ledger.LedgerInvalidError, match="no 'stage' field"):
         ledger.load_ledger(path)
 
 
@@ -214,7 +214,7 @@ def test_invalid_json_is_refused(tmp_path) -> None:
     path = tmp_path / "broken.json"
     path.write_text("{not json", encoding="utf-8")
 
-    with pytest.raises(ledger.LedgerInvalid, match="not valid JSON"):
+    with pytest.raises(ledger.LedgerInvalidError, match="not valid JSON"):
         ledger.load_ledger(path)
 
 

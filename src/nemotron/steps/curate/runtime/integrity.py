@@ -54,7 +54,7 @@ class ReleaseLayoutError(ValueError):
     """Raised when the corpus on disk does not match the layout the caller described."""
 
 
-class UnreadableCorpus(ValueError):
+class UnreadableCorpusError(ValueError):
     """Raised when a fingerprint was asked for over data this reader cannot read."""
 
 
@@ -378,13 +378,13 @@ def corpus_fingerprint(
         # empty corpus — and the approve gate compares exactly this value to
         # decide whether a policy describes the data in front of it. Returning it
         # let an approval be verified against a corpus that did not exist yet.
-        raise UnreadableCorpus(
+        raise UnreadableCorpusError(
             f"{pattern} matched no files. A fingerprint over no input is the same value for "
             "every such corpus, so it cannot stand for this one — and the approve gate would "
             "compare it as though it did."
         )
     if not documents:
-        raise UnreadableCorpus(
+        raise UnreadableCorpusError(
             f"{pattern} resolved to {len(resolved)} file(s) but no JSONL document with a "
             f"{text_field!r} string field. This reader is JSONL-only; a fingerprint over "
             "zero documents is the same value for every corpus, so it cannot stand for this "

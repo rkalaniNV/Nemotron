@@ -195,18 +195,18 @@ def test_a_capability_present_makes_its_signal_available() -> None:
 
 def test_naming_an_unsupported_signal_fails_rather_than_skipping() -> None:
     """Silently dropping a named signal would answer a question nobody asked."""
-    with pytest.raises(r.SignalRequirementsUnmet, match="token_count requires"):
+    with pytest.raises(r.SignalRequirementsUnmetError, match="token_count requires"):
         r.resolve(["token_count"], capabilities=set())
 
 
 def test_naming_an_unknown_signal_fails() -> None:
-    with pytest.raises(r.UnknownSignal):
+    with pytest.raises(r.UnknownSignalError):
         r.resolve(["definitely_not_a_signal"], capabilities=set())
 
 
 def test_config_cannot_name_an_import_path() -> None:
     """The allowlist is closed: a config is a document people paste between machines."""
-    with pytest.raises(r.UnknownSignal):
+    with pytest.raises(r.UnknownSignalError):
         r.resolve(["nemo_curator.stages.text.filters.heuristic.string.WordCountFilter"], set())
 
 
@@ -245,7 +245,7 @@ def test_the_hash_order_dependent_ngram_filter_is_excluded() -> None:
     assert "RepeatingTopNGramsFilter" in r.EXCLUDED
     assert "PYTHONHASHSEED" in r.EXCLUDED["RepeatingTopNGramsFilter"]
 
-    with pytest.raises(r.UnknownSignal):
+    with pytest.raises(r.UnknownSignalError):
         r.resolve(["repeating_top_ngrams"], set())
 
 

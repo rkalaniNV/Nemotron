@@ -107,7 +107,7 @@ def test_an_unsupported_capability_removes_its_signals_from_the_run() -> None:
 def test_naming_a_signal_the_pack_cannot_support_fails() -> None:
     hi = langpack.load("hi")
 
-    with pytest.raises(r.SignalRequirementsUnmet, match="diacritic_ratio"):
+    with pytest.raises(r.SignalRequirementsUnmetError, match="diacritic_ratio"):
         r.resolve(["diacritic_ratio"], hi.capabilities)
 
 
@@ -121,7 +121,7 @@ def test_a_capability_declared_without_its_data_is_rejected(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(langpack.LanguagePackInvalid, match="without the data behind them"):
+    with pytest.raises(langpack.LanguagePackInvalidError, match="without the data behind them"):
         langpack.load_pack(pack_dir)
 
 
@@ -135,7 +135,7 @@ def test_an_unknown_capability_is_rejected(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(langpack.LanguagePackInvalid, match="unknown capabilities"):
+    with pytest.raises(langpack.LanguagePackInvalidError, match="unknown capabilities"):
         langpack.load_pack(pack_dir)
 
 
@@ -144,12 +144,12 @@ def test_an_unknown_capability_is_rejected(tmp_path) -> None:
 
 def test_there_is_no_default_language() -> None:
     """A wrong default produces plausible numbers for the wrong language."""
-    with pytest.raises(langpack.LanguagePackNotFound, match="no default"):
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="no default"):
         langpack.load("")
 
 
 def test_an_unknown_tag_names_what_is_available() -> None:
-    with pytest.raises(langpack.LanguagePackNotFound, match="Available"):
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="Available"):
         langpack.load("xx-nonexistent")
 
 

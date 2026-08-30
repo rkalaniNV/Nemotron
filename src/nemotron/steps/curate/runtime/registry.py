@@ -39,11 +39,11 @@ IMPL_VERSION = "curate-runtime-0.1.0"
 Direction = Literal["min", "max", "interval", "categorical"]
 
 
-class SignalRequirementsUnmet(ValueError):
+class SignalRequirementsUnmetError(ValueError):
     """A named signal needs capabilities the loaded language pack lacks."""
 
 
-class UnknownSignal(KeyError):
+class UnknownSignalError(KeyError):
     """A config named a signal that is not in the allowlist."""
 
 
@@ -530,7 +530,7 @@ def resolve(
     if requested:
         unknown = [name for name in requested if name not in SIGNALS]
         if unknown:
-            raise UnknownSignal(
+            raise UnknownSignalError(
                 f"unknown signal(s) {unknown}. Registered: {sorted(SIGNALS)}. "
                 "Signals are a closed allowlist; config cannot name an import path."
             )
@@ -539,7 +539,7 @@ def resolve(
             signal = SIGNALS[name]
             missing = tuple(c for c in signal.requires if c not in capabilities)
             if missing:
-                raise SignalRequirementsUnmet(
+                raise SignalRequirementsUnmetError(
                     f"{name} requires {list(missing)}, which is not available. "
                     "Supply it or remove the signal from the list."
                 )

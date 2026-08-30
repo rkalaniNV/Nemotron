@@ -186,10 +186,10 @@ def resolve_policy(cfg: dict) -> tuple[list[dict], dict, list[str]]:
                 document, allow_unvalidated=bool(block.get("allow_unvalidated_policy"))
             )
         )
-    except policy_module.PolicyNotApproved as exc:
+    except policy_module.PolicyNotApprovedError as exc:
         # require_approved reports which fields are unmet but never sees a path.
         # A run that names several policies needs to know which one was refused.
-        raise policy_module.PolicyNotApproved(f"{path}: {exc}") from exc
+        raise policy_module.PolicyNotApprovedError(f"{path}: {exc}") from exc
     warnings = [f"{path}: {w}" for w in warnings]
 
     # The scorers themselves are versioned. Thresholds were calibrated by one
@@ -391,8 +391,8 @@ def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_s
             "tokenizer is a different budget, so there is no safe default."
         )
 
-    _, ScoreFilter = text_filter_stages()
-    Score = score_stage() if mode == "annotate" else None
+    _, ScoreFilter = text_filter_stages()  # noqa: N806 -- these are Curator stage classes, not variables
+    Score = score_stage() if mode == "annotate" else None  # noqa: N806 -- these are Curator stage classes, not variables
 
     stages = []
     for entry in thresholds:
@@ -488,7 +488,7 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
     pipeline = Pipeline(name="curate_nemo_curator")
     pipeline.add_stage(JsonlReader(file_paths=cfg["input_glob"], fields=reader_fields(cfg)))
     if allowed_languages:
-        Filter, ScoreFilter = text_filter_stages()
+        Filter, ScoreFilter = text_filter_stages()  # noqa: N806 -- these are Curator stage classes, not variables
         from nemo_curator.stages.text.filters.fasttext import FastTextLangId
 
         pipeline.add_stage(
@@ -536,7 +536,7 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
     if has_word_filter:
         if not all(key in quality_filters for key in ("min_words", "max_words")):
             raise ValueError("quality_filters must set both min_words and max_words to enable WordCountFilter")
-        _, ScoreFilter = text_filter_stages()
+        _, ScoreFilter = text_filter_stages()  # noqa: N806 -- these are Curator stage classes, not variables
         from nemo_curator.stages.text.filters.heuristic import WordCountFilter
 
         pipeline.add_stage(

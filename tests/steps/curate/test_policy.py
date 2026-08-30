@@ -215,7 +215,7 @@ def test_an_approved_policy_passes_the_gate() -> None:
 
 
 def test_an_unapproved_policy_is_refused_by_default() -> None:
-    with pytest.raises(policy.PolicyNotApproved, match="not approved for execution"):
+    with pytest.raises(policy.PolicyNotApprovedError, match="not approved for execution"):
         policy.require_approved(_candidates())
 
 
@@ -362,7 +362,7 @@ def test_promote_accepts_thresholds_with_no_signature() -> None:
 
 def test_promote_refuses_a_signal_the_profile_never_measured() -> None:
     """A threshold for an unprofiled signal is a number with no evidence."""
-    with pytest.raises(policy.PolicyNotPromotable, match="not profiled on this corpus"):
+    with pytest.raises(policy.PolicyNotPromotableError, match="not profiled on this corpus"):
         policy.promote(
             _candidate_with_bands(),
             thresholds=[{"signal": "word_count", "min": 50, "max": 100000}],
@@ -371,7 +371,7 @@ def test_promote_refuses_a_signal_the_profile_never_measured() -> None:
 
 
 def test_promote_refuses_a_bound_that_would_invert_the_gate() -> None:
-    with pytest.raises(policy.PolicyNotPromotable, match="invert the gate"):
+    with pytest.raises(policy.PolicyNotPromotableError, match="invert the gate"):
         policy.promote(
             _candidate_with_bands(),
             thresholds=[{"signal": "stopword_ratio", "max": 0.9}],
@@ -387,12 +387,12 @@ def test_promote_refuses_to_re_approve_an_approved_policy() -> None:
         approval=APPROVAL,
     )
 
-    with pytest.raises(policy.PolicyNotPromotable, match="already approved"):
+    with pytest.raises(policy.PolicyNotPromotableError, match="already approved"):
         policy.promote(document, thresholds=[{"signal": "x", "max": 1}], approval=APPROVAL)
 
 
 def test_promote_refuses_a_policy_that_gates_nothing() -> None:
-    with pytest.raises(policy.PolicyNotPromotable, match="gates nothing"):
+    with pytest.raises(policy.PolicyNotPromotableError, match="gates nothing"):
         policy.promote(_candidate_with_bands(), thresholds=[], approval=APPROVAL)
 
 
@@ -444,7 +444,7 @@ def test_a_candidate_without_a_fingerprint_cannot_be_promoted() -> None:
     candidate = _candidate_with_bands()
     candidate["corpus"] = {"glob": "./x/*.jsonl", "document_count": 10}
 
-    with pytest.raises(policy.PolicyNotPromotable, match="fingerprint"):
+    with pytest.raises(policy.PolicyNotPromotableError, match="fingerprint"):
         policy.promote(
             candidate,
             thresholds=[{"signal": "unicode_alpha_numeric", "max": 0.30}],

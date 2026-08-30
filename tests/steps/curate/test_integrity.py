@@ -382,11 +382,11 @@ def test_counting_damage_is_optional(tmp_path) -> None:
 # same digest for every such corpus. The approve gate rests on this value: its
 # whole promise is "thresholds calibrated on corpus A do not silently apply to
 # corpus B". Two unreadable corpora sharing one value defeats that exactly where
-# it matters, and the module already declares UnreadableCorpus for the purpose.
+# it matters, and the module already declares UnreadableCorpusError for the purpose.
 
 
 def test_a_corpus_with_no_files_is_refused_not_digested(tmp_path) -> None:
-    with pytest.raises(integrity.UnreadableCorpus, match="no files"):
+    with pytest.raises(integrity.UnreadableCorpusError, match="no files"):
         integrity.corpus_fingerprint(str(tmp_path / "*.jsonl"), "text", "id")
 
 
@@ -397,7 +397,7 @@ def test_two_unreadable_corpora_cannot_share_a_fingerprint(tmp_path) -> None:
     b.mkdir()
 
     for empty in (a, b):
-        with pytest.raises(integrity.UnreadableCorpus):
+        with pytest.raises(integrity.UnreadableCorpusError):
             integrity.corpus_fingerprint(f"{empty}/*.jsonl", "text", "id")
 
 
@@ -405,7 +405,7 @@ def test_a_corpus_whose_files_hold_no_documents_is_refused(tmp_path) -> None:
     """Files that exist but yield nothing readable are the same failure."""
     (tmp_path / "a.jsonl").write_text("", encoding="utf-8")
 
-    with pytest.raises(integrity.UnreadableCorpus):
+    with pytest.raises(integrity.UnreadableCorpusError):
         integrity.corpus_fingerprint(f"{tmp_path}/*.jsonl", "text", "id")
 
 

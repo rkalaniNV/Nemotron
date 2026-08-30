@@ -66,11 +66,11 @@ KNOWN_CAPABILITIES = frozenset(
 DEFAULT_SENTENCE_TERMINATORS = (".", "!", "?")
 
 
-class LanguagePackNotFound(FileNotFoundError):
+class LanguagePackNotFoundError(FileNotFoundError):
     """No pack for the requested tag."""
 
 
-class LanguagePackInvalid(ValueError):
+class LanguagePackInvalidError(ValueError):
     """A pack exists but does not meet the contract."""
 
 
@@ -140,7 +140,7 @@ class LanguagePack:
 
 def _read_lines(path: Path) -> list[str]:
     if not path.is_file():
-        raise LanguagePackInvalid(f"pack file is missing: {path}")
+        raise LanguagePackInvalidError(f"pack file is missing: {path}")
     return [
         line.strip()
         for line in path.read_text(encoding="utf-8").splitlines()
@@ -167,26 +167,26 @@ def load_pack(directory: str | Path) -> LanguagePack:
     root = Path(directory)
     manifest_path = root / "pack.toml"
     if not manifest_path.is_file():
-        raise LanguagePackNotFound(f"no pack.toml under {root}")
+        raise LanguagePackNotFoundError(f"no pack.toml under {root}")
 
     with manifest_path.open("rb") as handle:
         raw = tomllib.load(handle)
 
     pack = raw.get("pack") or {}
     if pack.get("schema") != SCHEMA_VERSION:
-        raise LanguagePackInvalid(
+        raise LanguagePackInvalidError(
             f"{manifest_path}: pack.schema must be {SCHEMA_VERSION}, got {pack.get('schema')!r}"
         )
     for key in ("pack_id", "language_tag", "version"):
         if not pack.get(key):
-            raise LanguagePackInvalid(f"{manifest_path}: pack.{key} is required")
+            raise LanguagePackInvalidError(f"{manifest_path}: pack.{key} is required")
 
     declared = raw.get("capabilities", {}).get("supports")
     if not isinstance(declared, list) or not declared:
-        raise LanguagePackInvalid(f"{manifest_path}: capabilities.supports must be a non-empty list")
+        raise LanguagePackInvalidError(f"{manifest_path}: capabilities.supports must be a non-empty list")
     unknown = sorted(set(declared) - KNOWN_CAPABILITIES)
     if unknown:
-        raise LanguagePackInvalid(
+        raise LanguagePackInvalidError(
             f"{manifest_path}: unknown capabilities {unknown}. Known: {sorted(KNOWN_CAPABILITIES)}. "
             "A typo here would read as 'this language cannot do that'."
         )
@@ -212,7 +212,7 @@ def load_pack(directory: str | Path) -> LanguagePack:
         try:
             patterns.append(re.compile(pattern))
         except re.error as exc:
-            raise LanguagePackInvalid(f"{root}: boilerplate pattern {pattern!r} does not compile: {exc}") from exc
+            raise LanguagePackInvalidError(f"{root}: boilerplate pattern {pattern!r} does not compile: {exc}") from exc
 
     fold_map = {str(k): str(v) for k, v in (raw.get("fold_map") or {}).items()}
     terminators = tuple(
@@ -259,7 +259,7 @@ def _assert_capabilities_are_backed(pack: LanguagePack, manifest_path: Path) -> 
             if not getattr(pack, requirement):
                 missing.append(f"{capability} needs {requirement}")
     if missing:
-        raise LanguagePackInvalid(
+        raise LanguagePackInvalidError(
             f"{manifest_path}: capabilities declared without the data behind them: {missing}"
         )
 
@@ -278,7 +278,7 @@ def load(language_tag: str, langpack_dir: str | Path | None = BUNDLED) -> Langua
     wrong numbers for a corpus, which is worse than an error.
     """
     if not language_tag:
-        raise LanguagePackNotFound(
+        raise LanguagePackNotFoundError(
             "language is required and has no default: a wrong default silently produces "
             "wrong numbers. Set it to the BCP-47 tag of the corpus."
         )
@@ -289,7 +289,7 @@ def load(language_tag: str, langpack_dir: str | Path | None = BUNDLED) -> Langua
         return load_pack(candidate)
 
     available = sorted(p.name for p in root.iterdir() if (p / "pack.toml").is_file()) if root.is_dir() else []
-    raise LanguagePackNotFound(
+    raise LanguagePackNotFoundError(
         f"no pack for {language_tag!r} under {root}. Available: {available or 'none'}. "
         "See data/langpacks/SPEC.md to author one."
     )

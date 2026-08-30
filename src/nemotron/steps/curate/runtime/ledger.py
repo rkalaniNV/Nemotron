@@ -62,11 +62,11 @@ class TerminalState(str, Enum):
     QUARANTINED = "quarantined"
 
 
-class LedgerImbalance(RuntimeError):
+class LedgerImbalanceError(RuntimeError):
     """Inputs do not equal the sum of the terminal states."""
 
 
-class LedgerInvalid(ValueError):
+class LedgerInvalidError(ValueError):
     """A ledger document cannot be read as one."""
 
 
@@ -192,7 +192,7 @@ class StageLedger:
 
     def assert_balanced(self) -> None:
         if not self.balanced:
-            raise LedgerImbalance(
+            raise LedgerImbalanceError(
                 f"[{self.stage}/{self.source or 'all'}] record reconciliation failed: "
                 f"inputs={self.n_input:,} but success={self.n_success:,} + "
                 f"filtered={self.n_filtered:,} + failed={self.n_failed:,} + "
@@ -236,9 +236,9 @@ def load_ledger(path: os.PathLike[str] | str) -> StageLedger:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise LedgerInvalid(f"{path}: not valid JSON ({exc})") from exc
+        raise LedgerInvalidError(f"{path}: not valid JSON ({exc})") from exc
     if not isinstance(data, dict) or "stage" not in data:
-        raise LedgerInvalid(f"{path}: not a ledger — no 'stage' field")
+        raise LedgerInvalidError(f"{path}: not a ledger — no 'stage' field")
 
     ledger = StageLedger(stage=data["stage"], source=data.get("source", ""))
     ledger.n_input = int(data.get("n_input", 0))
@@ -292,7 +292,7 @@ def assert_no_lost_units(ledgers: list[StageLedger], stage: str, where: str = ""
     """Refuse to exit successfully when any unit failed or was quarantined."""
     report = lost_unit_report(ledgers, stage, where)
     if report:
-        raise LedgerImbalance(report)
+        raise LedgerImbalanceError(report)
 
 
 # -- attribution --------------------------------------------------------------

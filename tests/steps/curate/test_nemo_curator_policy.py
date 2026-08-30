@@ -219,7 +219,7 @@ def test_a_candidate_policy_is_refused(step, tmp_path) -> None:
     """curate/profile emits approved: false on purpose; this is the other half."""
     path = write_policy(tmp_path, approved_policy(approved=False), "candidate_policies.yaml")
 
-    with pytest.raises(policy_module.PolicyNotApproved) as excinfo:
+    with pytest.raises(policy_module.PolicyNotApprovedError) as excinfo:
         step.resolve_policy({"heuristic_filters": {"approved_policy": str(path)}})
 
     message = str(excinfo.value)

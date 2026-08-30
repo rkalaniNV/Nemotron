@@ -57,7 +57,7 @@ APPROVED_REQUIRED = (
 APPROVAL_METHODS = ("manual", "ablation")
 
 
-class PolicyNotApproved(ValueError):
+class PolicyNotApprovedError(ValueError):
     """A policy was used for filtering while still marked unapproved."""
 
 
@@ -133,7 +133,7 @@ def _swept_values(signal: Any) -> list[float]:
         return []
 
 
-class PolicyNotPromotable(ValueError):
+class PolicyNotPromotableError(ValueError):
     """A candidate cannot be turned into an approved policy as specified."""
 
 
@@ -166,14 +166,14 @@ def promote(
     actually measured, which is a number nobody has evidence for.
     """
     if not isinstance(candidate, dict):
-        raise PolicyNotPromotable(f"candidate must be a mapping, got {type(candidate).__name__}")
+        raise PolicyNotPromotableError(f"candidate must be a mapping, got {type(candidate).__name__}")
     if candidate.get("approved") is True:
-        raise PolicyNotPromotable(
+        raise PolicyNotPromotableError(
             "this document is already approved. Promoting an approved policy again would "
             "replace one approval record with another and lose the first."
         )
     if not thresholds:
-        raise PolicyNotPromotable("no thresholds chosen; an approved policy that gates nothing is not one")
+        raise PolicyNotPromotableError("no thresholds chosen; an approved policy that gates nothing is not one")
 
     from nemotron.steps.curate.runtime import registry as signal_registry
 
@@ -183,7 +183,7 @@ def promote(
     for entry in thresholds:
         name = entry.get("signal")
         if name not in profiled:
-            raise PolicyNotPromotable(
+            raise PolicyNotPromotableError(
                 f"{name!r} was not profiled on this corpus (profiled: {sorted(profiled)}). "
                 "Approving a threshold for a signal nobody measured here is a number without evidence."
             )
@@ -228,7 +228,7 @@ def promote(
 
     problems = validate_approved_policy(document)
     if problems:
-        raise PolicyNotPromotable(
+        raise PolicyNotPromotableError(
             "the promoted policy would not be executable: "
             + "; ".join(problems)
             + ". Returning it anyway would move the failure to whoever runs the pipeline."
@@ -343,7 +343,7 @@ def require_approved(document: Mapping[str, Any], *, allow_unvalidated: bool = F
             "approval contract. Unmet: " + "; ".join(problems)
         ]
 
-    raise PolicyNotApproved(
+    raise PolicyNotApprovedError(
         "policy is not approved for execution: "
         + "; ".join(problems)
         + ". Promote it deliberately, or set allow_unvalidated_policy to override."
