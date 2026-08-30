@@ -11,6 +11,13 @@ output_dir: ${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/curate_nemo_curator_tiny
 
 dataset: null
 
+# Exercises the manifest path in the smoke run. The packaged tiny JSONL has no
+# id/source columns, so both stay null and the manifest carries counts only.
+metadata_fields: []
+id_field: null
+source_field: null
+emit_manifest: ${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/curate_nemo_curator_tiny/run_manifest.json
+
 models: {}
 
 quality_filters: {}
