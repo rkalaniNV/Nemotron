@@ -238,6 +238,15 @@ def build_evidence_bundle(
             "intake_config_digest": sha256_json(intake.raw_document),
             "source_config_digest": report.document["source_config_digest"],
             "discovery_report_digest": report.document["report_digest"],
+            **(
+                {
+                    "authorization_context_digest": (
+                        identity.authorization_context_digest
+                    )
+                }
+                if identity.authorization_context_digest is not None
+                else {}
+            ),
         },
         "vocabulary": {
             "confirmation_parameter": config.results.confirmation_parameter,

@@ -42,7 +42,7 @@ import json
 import math
 import re
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, cast
@@ -282,7 +282,12 @@ def _boolean(value: Any, artifact: str, *, recovery: str) -> bool:
     return value
 
 
-def verify_eval_source(config: BfclEvalConfig, *, probe_oracle: bool = True) -> VerifiedEvalSource:
+def verify_eval_source(
+    config: BfclEvalConfig,
+    *,
+    probe_oracle: bool = True,
+    revocation_check: Callable[[str], object] | None = None,
+) -> VerifiedEvalSource:
     """Verify the source an eval config resolved, and return the runner's handle.
 
     ``probe_oracle`` controls only whether a Python backend is imported in a
@@ -292,6 +297,30 @@ def verify_eval_source(config: BfclEvalConfig, *, probe_oracle: bool = True) -> 
     """
     checks: list[SourceCheck] = []
     manifest = _verify_commit_marker(config, checks)
+    if revocation_check is not None:
+        pack = manifest.get("pack")
+        fingerprint = pack.get("content_hash") if isinstance(pack, Mapping) else None
+        if not isinstance(fingerprint, str):
+            raise SourceVerificationError(
+                "source_verification",
+                "source manifest lacks a release fingerprint for revocation policy",
+                expected="pack.content_hash bound to the frozen release",
+                recovery="regenerate the source publication with release lineage",
+            )
+        verdict = revocation_check(fingerprint)
+        checks.append(
+            SourceCheck(
+                name="release_revocation",
+                detail=(
+                    "authenticated revocation policy applied"
+                    + (
+                        "; release_revoked warning accepted"
+                        if getattr(verdict, "revoked", False)
+                        else ""
+                    )
+                ),
+            )
+        )
     publication, raw_path, published_path = _verify_published_bytes(config, manifest, checks)
     projection = _verify_publication_semantics(publication, raw_path, published_path, checks)
     index = _build_task_index(projection, checks)

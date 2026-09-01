@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import (
+    CredentialReference,
+    CredentialResolver,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.mcp.config import (
     McpOracleConfig,
@@ -183,15 +187,23 @@ def build_stdio_environment(
 def resolve_http_headers(
     config: StreamableHttpTransportConfig,
     environ: Mapping[str, str],
+    *,
+    credential_resolver: CredentialResolver | None = None,
 ) -> tuple[dict[str, str], tuple[str, ...]]:
     """Resolve named secret references without placing literals in config or reports."""
     headers: dict[str, str] = {}
     secrets: list[str] = []
-    token_env = config.auth.bearer_token_env
-    if token_env is not None:
-        token = environ.get(token_env)
-        if not token:
-            raise McpCredentialError(f"HTTP auth references missing or empty environment variable {token_env!r}")
+    resolver = credential_resolver or CredentialResolver(environ=environ)
+    token_reference = config.auth.bearer_token_ref
+    if config.auth.bearer_token_env is not None:
+        token_reference = CredentialReference.environment(
+            config.auth.bearer_token_env
+        )
+    if token_reference is not None:
+        try:
+            token = resolver.resolve(token_reference).reveal()
+        except ValueError as exc:
+            raise McpCredentialError(str(exc)) from exc
         headers["Authorization"] = f"Bearer {token}"
         secrets.append(token)
     for header, env_name in sorted(config.auth.headers.items()):
@@ -202,6 +214,13 @@ def resolve_http_headers(
             )
         if "\r" in value or "\n" in value:
             raise McpCredentialError(f"HTTP header environment variable {env_name!r} contains a line break")
+        headers[header] = value
+        secrets.append(value)
+    for header, reference in sorted(config.auth.header_refs.items()):
+        try:
+            value = resolver.resolve(reference).reveal()
+        except ValueError as exc:
+            raise McpCredentialError(str(exc)) from exc
         headers[header] = value
         secrets.append(value)
     return headers, tuple(secrets)
@@ -476,6 +495,7 @@ async def open_mcp_connection(
     config: McpOracleConfig,
     *,
     environ: Mapping[str, str] | None = None,
+    credential_resolver: CredentialResolver | None = None,
     executable_policies: TrustedExecutablePolicies | None = None,
 ) -> AsyncIterator[ConnectedMcpClient]:
     """Open one MCP SDK v2 connection for discovery, then close it deterministically."""
@@ -523,7 +543,11 @@ async def open_mcp_connection(
                 import httpx2
                 from mcp.client.streamable_http import streamable_http_client
 
-                headers, secrets.values = resolve_http_headers(config.transport, environ)
+                headers, secrets.values = resolve_http_headers(
+                    config.transport,
+                    environ,
+                    credential_resolver=credential_resolver,
+                )
                 # Every request is already bounded by asyncio.wait_for, so the transport
                 # budget stays the looser one; otherwise raw httpx timeouts would preempt
                 # the typed catalog and control failures operators need to diagnose.

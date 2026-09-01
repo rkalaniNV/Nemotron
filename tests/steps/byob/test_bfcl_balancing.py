@@ -313,6 +313,157 @@ def test_turn_and_tool_call_targets_are_satisfied_together(
     assert summary["unmet_targets"] == []
 
 
+def test_policy_mix_targets_the_conversation_shape_directly(tmp_path: Path) -> None:
+    # Conversation policy is what a candidate most often fails, and inventory skews
+    # towards cheap lookups, so a release has to be able to demand the harder shapes
+    # rather than accept whatever expansion produced.
+    tasks = [
+        *[_task(f"lookup-{index}") for index in range(4)],
+        *[
+            _task(f"refuse-{index}", turn_policy="clarify_only", num_tool_calls=0)
+            for index in range(2)
+        ],
+    ]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+
+    _, _, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={
+                "tasks_per_category": 4,
+                "policy_mix": {"single_turn": 0.5, "clarify_only": 0.5},
+            },
+        ),
+        tasks,
+        surfaces,
+    )
+
+    assert summary["target_counts"]["turn_policy"] == {
+        "clarify_only": 2,
+        "single_turn": 2,
+    }
+    assert summary["actual_counts"]["turn_policy"] == {
+        "clarify_only": 2,
+        "single_turn": 2,
+    }
+    assert summary["unmet_targets"] == []
+
+
+def test_execution_case_cap_publishes_each_executable_case_once(
+    tmp_path: Path,
+) -> None:
+    # Two rows that call the same tools with the same arguments against the same state
+    # score one behavior twice, so a release can require every published row to be a
+    # distinct executable case even when the wording differs.
+    tasks = [
+        _task("a", slots={"account_id": "ACC-1"}),
+        _task("b", slots={"account_id": "ACC-1"}),
+        _task("c", slots={"account_id": "ACC-2"}),
+        _task("d", slots={"account_id": "ACC-2"}),
+    ]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+
+    decisions, _, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={"tasks_per_category": 4, "target_published_tasks": 4},
+            dedup={"max_execution_case_reuse": 1},
+        ),
+        tasks,
+        surfaces,
+    )
+
+    assert sum(decision.selected for decision in decisions) == 2
+    assert summary["group_diversity"]["execution_case_hash"] == {
+        "unique": 2,
+        "max_reuse": 1,
+        "cap": 1,
+    }
+    assert summary["unmet_targets"] == [
+        {
+            "dimension": "publication_count",
+            "bucket": "all",
+            "target": 4,
+            "actual": 2,
+            "inventory": 4,
+            "reason": "execution_case_cap_limits_inventory",
+        }
+    ]
+
+
+def test_intent_cap_stops_one_intent_from_owning_the_release(tmp_path: Path) -> None:
+    tasks = [
+        *[_task(f"lookup-{index}", slots={"n": index}) for index in range(3)],
+        _task("transfer-0", intent="transfer", slots={"n": 9}),
+    ]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+
+    decisions, records, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={"tasks_per_category": 4},
+            dedup={"max_rows_per_intent": 2},
+        ),
+        tasks,
+        surfaces,
+    )
+
+    by_id = {decision.task_id: decision for decision in decisions}
+    assert sum(decision.selected for decision in decisions) == 3
+    assert by_id["transfer-0"].selected is True
+    assert summary["group_diversity"]["intent"] == {
+        "unique": 2,
+        "max_reuse": 2,
+        "cap": 2,
+    }
+    dropped = next(record for record in records if not record["selected"])
+    assert dropped["drop_reason"] == "balance_quota"
+    assert dropped["balance_dimension"] == "intent"
+
+
+def test_category_budget_outranks_a_declared_mix(tmp_path: Path) -> None:
+    # Coverage locks are the only thing allowed to push a category past its cap, and
+    # they force one unavoidable overflow row here. The declared mix could be met
+    # exactly by adding a second overflow row, so this pins the ranking: the category
+    # budget is honoured before a mix target rather than traded against it at equal
+    # weight.
+    tasks = [
+        *[_task(f"locked-{index}", category="a") for index in range(3)],
+        _task("spare-a", category="a"),
+        *[_task(f"b-{index}", category="b", difficulty="hard") for index in range(2)],
+    ]
+    surfaces = {task["task_id"]: _surface(task["task_id"]) for task in tasks}
+    edges = {
+        task["task_id"]: ([f"edge_{task['task_id']}"] if task["task_id"].startswith("locked-") else [])
+        for task in tasks
+    }
+
+    decisions, _, summary = _run(
+        _config(
+            tmp_path,
+            task_generation={
+                "tasks_per_category": 2,
+                "difficulty_mix": {"easy": 1.0},
+            },
+        ),
+        tasks,
+        surfaces,
+        edge_signatures_by_task_id=edges,
+    )
+
+    selected = {decision.task_id for decision in decisions if decision.selected}
+    assert {"locked-0", "locked-1", "locked-2"} <= selected
+    assert "spare-a" not in selected
+    assert summary["actual_counts"]["category"] == {"a": 3, "b": 1}
+    assert [
+        (entry["dimension"], entry["bucket"], entry["reason"])
+        for entry in summary["unmet_targets"]
+    ] == [
+        ("category", "a", "coverage_constraint"),
+        ("difficulty", "easy", "coverage_or_cross_dimension_constraint"),
+    ]
+
+
 def test_coverage_survivor_overrides_a_soft_mix_target(tmp_path: Path) -> None:
     tasks = [
         *[_task(f"easy-{index}") for index in range(4)],

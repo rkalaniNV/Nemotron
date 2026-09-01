@@ -28,34 +28,40 @@ Those are necessary evidence, not substitutes for fresh BFCL validation.
 
 ## Capability matrix
 
-| Capability | Current status | Gold requirement or boundary |
-| --- | --- | --- |
-| Strict `mcp_oracle.yaml` | Implemented | Unknown keys and literal credentials are rejected. |
-| stdio transport | Implemented, experimental | Host-owned executable path, digest, argv, and cwd policy are mandatory. |
-| Streamable HTTP transport | Implemented, experimental | HTTPS is mandatory except explicit loopback debugging; redirects and ambient proxy trust are disabled. |
-| MCP protocol | SDK v2 runtime, profile `2026-07-28` | Runtime refuses MCP SDK majors other than 2. |
-| Tool discovery | Implemented | All pages must be consumed within configured limits. |
-| Catalog normalization | Implemented | Unsupported or ambiguous schemas are excluded with reasons; no guessing. |
-| Business/control separation | Implemented | Control tools are never model-facing. |
-| Synchronous tool calls | Implemented | One request must produce one bounded result. |
-| JSON-object `structuredContent` | Implemented | Required for the current profile; non-object projection is deferred. |
-| MCP Tasks / claimed results | Refused | A conversation-level contract is required first. |
-| `InputRequiredResult` | Refused | BFCL v1 cannot authorize hidden extra MCP exchanges. |
-| Reset/state/end control mapping | Implemented and probed | P4/P5 prove lifecycle and deterministic fresh replay. |
-| Process/namespace episode isolation | Implemented and probed | P6 interleaves two live endpoint sessions and checks state separation. |
-| Confirmation boundary | Implemented and probed | P8 proves an unconfirmed mutation leaves state unchanged. |
-| Resources and prompts | Out of scope | They are not Oracle Pack truth sources in this profile. |
-| Dynamic `listChanged` catalogs | Refused for a run | Catalog identity must remain pinned from discovery through publication. |
-| LLM authoring | Implemented as evidence-bound drafting | Model output is a draft; compilation, validation, and review remain authoritative. |
-| Review and immutable freeze | Implemented | Approval covers exact bytes and cannot raise conformance level. |
-| BFCL publication handoff | Implemented for Mode A | Fresh Gold plus independently verified publishable `L2` remains mandatory. |
+Every implemented/refused claim names its executable evidence. Broader adapter status is
+in [bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md).
+
+| Capability | Current status | Gold requirement or boundary | Evidence |
+| --- | --- | --- | --- |
+| Strict `mcp_oracle.yaml` | implemented, experimental | Unknown keys and literal credentials are rejected. | [`test_bfcl_mcp_config.py`](../../../../../tests/steps/byob/test_bfcl_mcp_config.py) |
+| stdio transport | implemented, experimental | Host-owned executable path, digest, argv, and cwd policy are mandatory. | [`test_bfcl_mcp_transport_integration.py`](../../../../../tests/steps/byob/test_bfcl_mcp_transport_integration.py) |
+| Streamable HTTP transport | implemented, experimental | HTTPS is mandatory except explicit loopback debugging; redirects and ambient proxy trust are disabled. | [`test_bfcl_mcp_transport_integration.py`](../../../../../tests/steps/byob/test_bfcl_mcp_transport_integration.py) |
+| MCP protocol | implemented, experimental | SDK v2 runtime and profile `2026-07-28`; other SDK majors are refused. | [`test_bfcl_mcp_discovery.py`](../../../../../tests/steps/byob/test_bfcl_mcp_discovery.py) |
+| Tool discovery | implemented, experimental | All pages must be consumed within configured limits. | [`test_bfcl_mcp_discovery.py`](../../../../../tests/steps/byob/test_bfcl_mcp_discovery.py) |
+| Catalog normalization | implemented, experimental | Unsupported or ambiguous schemas are excluded; no guessing. | [`test_bfcl_mcp_discovery.py`](../../../../../tests/steps/byob/test_bfcl_mcp_discovery.py) |
+| Business/control separation | implemented, experimental | Control tools are never model-facing. | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| Synchronous tool calls | implemented, experimental | One request produces one bounded result. | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| JSON-object `structuredContent` | implemented, experimental | Non-object projection is unimplemented. | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| MCP Tasks / claimed results | refused | A conversation-level contract is required first. | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| `InputRequiredResult` | refused | BFCL v1 cannot authorize hidden extra MCP exchanges. | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| Reset/state/end control mapping | implemented, experimental | P4/P5 prove lifecycle and deterministic fresh replay. | [`test_bfcl_mcp_target_probes.py`](../../../../../tests/steps/byob/test_bfcl_mcp_target_probes.py) |
+| Process/namespace isolation | implemented, experimental | P6 interleaves live sessions and checks state separation. | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| Confirmation boundary | implemented, experimental | P8 proves unconfirmed mutation leaves state unchanged. | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| Resources and prompts as truth | refused | They are not Oracle Pack truth sources in this profile. | [`test_bfcl_mcp_discovery.py`](../../../../../tests/steps/byob/test_bfcl_mcp_discovery.py) |
+| Dynamic `listChanged` catalog | refused | Catalog identity remains pinned through publication. | [`test_bfcl_mcp_discovery.py`](../../../../../tests/steps/byob/test_bfcl_mcp_discovery.py) |
+| Evidence-bound LLM drafting | implemented, experimental | Compilation, validation, and review remain authoritative. | [`test_bfcl_mcp_authoring.py`](../../../../../tests/steps/byob/test_bfcl_mcp_authoring.py) |
+| Review and immutable freeze | implemented, experimental | Approval cannot raise conformance level. | [`test_bfcl_authoring_release.py`](../../../../../tests/steps/byob/test_bfcl_authoring_release.py) |
+| Mode A publication handoff | implemented, experimental | Fresh Gold plus independently verified publishable L2. | [`test_bfcl_authoring_e2e.py`](../../../../../tests/steps/byob/test_bfcl_authoring_e2e.py) |
+| Mode B executable shim | unimplemented | Discovery shape does not authorize execution. | unimplemented |
+| Mode C executable snapshot | unimplemented | Snapshot shape does not authorize execution. | unimplemented |
 
 ## Supported operating modes
 
-- **Mode A — cooperative server:** server exposes reviewed describe/reset/state/end controls.
-- **Mode B — shimmed server:** a reviewed, fingerprinted adapter supplies the missing controls.
-- **Mode C — immutable read-only snapshot:** only snapshot-safe, non-mutating behavior is eligible;
-  snapshot and read-only boundaries must be explicit.
+- **Mode A — cooperative server:** implemented and experimental; server exposes reviewed
+  describe/reset/state/end controls
+  ([`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py)).
+- **Mode B — shimmed server:** **unimplemented** executable target.
+- **Mode C — immutable read-only snapshot:** **unimplemented** executable target.
 
 Mode is not a quality tier. `L0`, `L1`, and `L2` describe independently attained conformance:
 

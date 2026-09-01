@@ -8,11 +8,16 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import OraclePackRef
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.json_schema import (
     apply_declared_defaults,
     validate_function_arguments,
     validate_function_schema,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+    resolve_declared_pack_paths,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
     canonical_json,
@@ -24,6 +29,9 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
     primary_key_for,
     task_id_for,
     task_seed_for,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
+    derive_pack_tier,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.schema_validation import (
     validate_task,
@@ -2174,3 +2182,86 @@ def test_non_english_gold_surface_requires_a_pack_system_prompt(tmp_path: Path) 
     )
     assert prompt_bundle["origin"].startswith("bfcl/prompts/")
     assert surfaces[str(task["task_id"])]["language"] == "vi"
+
+
+DATA_ROOT = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "nemotron"
+    / "steps"
+    / "byob"
+    / "data"
+)
+MANUAL_PACKS = ("tiny_oracle_pack", "banking_vn_oracle_pack")
+FLOW_TWO_ARTIFACTS = frozenset(
+    {
+        "source_declaration.json",
+        "source_declaration.yaml",
+        "source_evidence.json",
+        "source_observations.json",
+        "certification_report.json",
+        "intake_provenance.json",
+        "resolved_authoring_config.json",
+        "domain_brief.md",
+        "held_out_redaction_report.json",
+    }
+)
+MANIFEST_ADAPTER_KEYS = frozenset(
+    {"adapter_kind", "source_declaration", "certification", "source_evidence"}
+)
+
+
+@pytest.mark.parametrize("pack_name", MANUAL_PACKS)
+def test_manual_oracle_packs_require_no_flow_two_adapter_metadata(
+    pack_name: str,
+) -> None:
+    """A manual pack must load from the manual contract alone, with no adapter records."""
+    pack_root = DATA_ROOT / pack_name
+    present = sorted(
+        item.name for item in pack_root.iterdir() if item.name in FLOW_TWO_ARTIFACTS
+    )
+    assert not present, f"{pack_name} ships Flow 2 artifacts: {present}"
+
+    manifest = yaml.safe_load((pack_root / "manifest.yaml").read_text("utf-8"))
+    assert not MANIFEST_ADAPTER_KEYS & set(manifest)
+
+    paths = resolve_declared_pack_paths(
+        OraclePackRef(manifest_path=pack_root / "manifest.yaml"),
+        (pack_root,),
+    )
+    assert paths.endpoint_config_path is None
+    assert paths.backend_path is not None
+    for declared in (
+        paths.tools_path,
+        paths.templates_path,
+        paths.assertions_path,
+        paths.validation_cases_path,
+        paths.backend_path,
+    ):
+        assert declared.is_file()
+        assert declared.name not in FLOW_TWO_ARTIFACTS
+
+
+def test_manual_gold_tier_ignores_adapter_and_certification_fields() -> None:
+    """Flow 2 records in a report may not move the manual Gold verdict either way."""
+    gold: dict[str, Any] = {
+        "checks": [{"status": "pass", "failures": []}],
+        "stats": {
+            "has_oracle": True,
+            "n_templates": 1,
+            "n_assertions": 1,
+            "n_tools": 1,
+        },
+    }
+    assert derive_pack_tier(dict(gold)) == (True, "gold")
+
+    decorated = {
+        **gold,
+        "adapter_kind": "mcp_mode_a",
+        "certification": {"attained_tier": "A2", "issuer": "bfcl"},
+        "source_evidence": {"schema_version": "bfcl-source-evidence-v2"},
+    }
+    assert derive_pack_tier(dict(decorated)) == (True, "gold")
+
+    failing = {**decorated, "checks": [{"status": "fail", "failures": ["replay"]}]}
+    assert derive_pack_tier(dict(failing)) == (False, "silver")

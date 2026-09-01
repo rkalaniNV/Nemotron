@@ -2,15 +2,39 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
 CACHE_SCHEMA_VERSION = "1.1"
+
+
+@contextmanager
+def exclusive_model_io_cache_lock(path: Path) -> Iterator[None]:
+    """Serialize append and retention replacement through a stable sidecar inode."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.parent / f".{path.name}.lock"
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(lock_path, flags, 0o600)
+    try:
+        if os.fstat(descriptor).st_mode & 0o077:
+            raise PermissionError(
+                "model I/O cache lock must not grant group or other access"
+            )
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def request_hash(
@@ -76,6 +100,10 @@ class ImmutableModelIOCache:
         entry = self._entries.get(key)
         return None if entry is None else entry["response"]
 
+    def entry_documents(self) -> tuple[dict[str, Any], ...]:
+        """Return validated entries for workspace retention under an external lock."""
+        return tuple(dict(self._entries[key]) for key in sorted(self._entries))
+
     def put(
         self,
         key: str,
@@ -93,22 +121,33 @@ class ImmutableModelIOCache:
             "response_hash": (f"sha256:{hashlib.sha256(response_json.encode()).hexdigest()}"),
             "response": response,
         }
-        existing = self._entries.get(key)
-        if existing is not None:
-            if existing != entry:
-                raise ValueError(f"refusing to replace immutable model I/O cache entry {key}")
-            return existing
+        with exclusive_model_io_cache_lock(self.path):
+            self._entries = self._read_entries()
+            existing = self._entries.get(key)
+            if existing is not None:
+                if existing != entry:
+                    raise ValueError(
+                        f"refusing to replace immutable model I/O cache entry {key}"
+                    )
+                return existing
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        encoded = (json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
-        descriptor = os.open(
-            self.path,
-            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
-            0o600,
-        )
-        with os.fdopen(descriptor, "ab") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(descriptor)
-        self._entries[key] = entry
-        return entry
+            encoded = (
+                json.dumps(
+                    entry,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            descriptor = os.open(
+                self.path,
+                os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+                0o600,
+            )
+            with os.fdopen(descriptor, "ab") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(descriptor)
+            self._entries[key] = entry
+            return entry

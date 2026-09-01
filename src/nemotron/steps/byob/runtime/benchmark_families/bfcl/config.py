@@ -13,6 +13,7 @@ import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
     DEDUP_BALANCING_CONTRACT_VERSION,
+    TURN_POLICIES,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_quality_contract import (
     SURFACE_QUALITY_CONTRACT_VERSION,
@@ -123,6 +124,7 @@ _TASK_GENERATION_KEYS = frozenset(
         "difficulty_mix",
         "turn_mix",
         "tool_call_count_mix",
+        "policy_mix",
     }
 )
 _DEDUP_KEYS = frozenset(
@@ -135,6 +137,8 @@ _DEDUP_KEYS = frozenset(
         "remove_duplicates",
         "max_exact_surface_reuse",
         "min_exact_surface_ratio",
+        "max_rows_per_intent",
+        "max_execution_case_reuse",
         "representative_source_preference",
         "unmet_target_policy",
     }
@@ -769,7 +773,7 @@ class BfclConfig:
                 "task_generation.candidate_tasks_per_category must be greater "
                 "than or equal to task_generation.tasks_per_category"
             )
-        for key in ("difficulty_mix", "turn_mix", "tool_call_count_mix"):
+        for key in ("difficulty_mix", "turn_mix", "tool_call_count_mix", "policy_mix"):
             if key in task_generation:
                 task_generation[key] = _require_probability_mix(task_generation[key], f"task_generation.{key}")
         turn_keys = set(task_generation.get("turn_mix") or {})
@@ -778,6 +782,9 @@ class BfclConfig:
         call_count_keys = set(task_generation.get("tool_call_count_mix") or {})
         if unknown := sorted(call_count_keys - {"1", "2", "3+"}):
             raise ValueError("task_generation.tool_call_count_mix has unknown keys: " + ", ".join(unknown))
+        policy_keys = set(task_generation.get("policy_mix") or {})
+        if unknown := sorted(policy_keys - TURN_POLICIES):
+            raise ValueError("task_generation.policy_mix has unknown keys: " + ", ".join(unknown))
         dedup = sections["semantic_deduplication_config"]
         dedup_contract_version = dedup.get(
             "contract_version",
@@ -837,6 +844,13 @@ class BfclConfig:
                 "semantic_deduplication_config.max_exact_surface_reuse",
                 minimum=1,
             )
+        for key in ("max_rows_per_intent", "max_execution_case_reuse"):
+            if key in dedup:
+                _require_int(
+                    dedup[key],
+                    f"semantic_deduplication_config.{key}",
+                    minimum=1,
+                )
         if "min_exact_surface_ratio" in dedup:
             ratio = _require_number(
                 dedup["min_exact_surface_ratio"],

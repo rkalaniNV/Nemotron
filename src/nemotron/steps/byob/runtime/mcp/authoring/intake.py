@@ -17,6 +17,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import (
+    CredentialReference,
+    build_authorization_context,
+)
 from nemotron.steps.byob.runtime.mcp.config import (
     LoadedMcpOracleConfig,
     load_mcp_oracle_config,
@@ -40,7 +44,11 @@ _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 class _StrictModel(BaseModel):
     # Mirrors the oracle profile: an unknown key is refused rather than ignored, so a
     # misspelled intake field cannot silently fall back to a default.
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+    )
 
 
 def _digest(value: str, label: str) -> str:
@@ -70,10 +78,16 @@ class GatewayAuthConfig(_StrictModel):
     """Environment variable *names*; no intake file ever holds a credential."""
 
     bearer_token_env: StrictStr | None = None
+    bearer_token_ref: CredentialReference | None = None
     headers: dict[StrictStr, StrictStr] = Field(default_factory=dict)
+    header_refs: dict[StrictStr, CredentialReference] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check(self) -> GatewayAuthConfig:
+        if self.bearer_token_env is not None and self.bearer_token_ref is not None:
+            raise ValueError(
+                "gateway.auth cannot set bearer_token_env and bearer_token_ref"
+            )
         if self.bearer_token_env is not None and not _ENV_NAME.match(
             self.bearer_token_env
         ):
@@ -95,7 +109,31 @@ class GatewayAuthConfig(_StrictModel):
                 raise ValueError(
                     f"gateway.auth.headers[{header!r}] must name an environment variable"
                 )
+        overlap = set(self.headers) & set(self.header_refs)
+        if overlap:
+            raise ValueError(f"gateway auth header is declared twice: {sorted(overlap)}")
+        for header in self.header_refs:
+            if not _HEADER_NAME.match(header):
+                raise ValueError(
+                    f"gateway.auth.header_refs key {header!r} is not an HTTP token"
+                )
+            if header.lower() in {"authorization", "host", "content-length"}:
+                raise ValueError(
+                    f"gateway.auth.header_refs key {header!r} is reserved"
+                )
         return self
+
+    def credential_references(self) -> tuple[CredentialReference, ...]:
+        references = []
+        if self.bearer_token_env is not None:
+            references.append(CredentialReference.environment(self.bearer_token_env))
+        elif self.bearer_token_ref is not None:
+            references.append(self.bearer_token_ref)
+        references.extend(
+            CredentialReference.environment(name) for name in self.headers.values()
+        )
+        references.extend(self.header_refs.values())
+        return tuple(references)
 
 
 class GatewayConfig(_StrictModel):
@@ -105,6 +143,9 @@ class GatewayConfig(_StrictModel):
     auth: GatewayAuthConfig = Field(default_factory=GatewayAuthConfig)
     ca_bundle_path: Path | None = None
     gateway_artifact_digest: StrictStr
+    principal_digest: StrictStr | None = None
+    permission_digest: StrictStr | None = None
+    authorization_context_digest: StrictStr | None = None
     # Applicable to modes B and C respectively. Which ones are required, and which are
     # forbidden, is decided by the gateway identity function so both sides cannot disagree.
     shim_artifact_digest: StrictStr | None = None
@@ -138,6 +179,9 @@ class GatewayConfig(_StrictModel):
             )
         _digest(self.gateway_artifact_digest, "gateway.gateway_artifact_digest")
         for label, value in (
+            ("principal_digest", self.principal_digest),
+            ("permission_digest", self.permission_digest),
+            ("authorization_context_digest", self.authorization_context_digest),
             ("shim_artifact_digest", self.shim_artifact_digest),
             ("snapshot_digest", self.snapshot_digest),
         ):
@@ -149,6 +193,30 @@ class GatewayConfig(_StrictModel):
         ):
             if limit <= 0:
                 raise ValueError(f"gateway.{name} must be a positive integer")
+        references = self.auth.credential_references()
+        if references:
+            if (
+                self.principal_digest is None
+                or self.permission_digest is None
+                or self.authorization_context_digest is None
+            ):
+                raise ValueError(
+                    "authenticated gateway requires principal_digest, "
+                    "permission_digest, and authorization_context_digest"
+                )
+            context = build_authorization_context(
+                references,
+                principal_digest=self.principal_digest,
+                permission_digest=self.permission_digest,
+            )
+            if (
+                context.authorization_context_digest
+                != self.authorization_context_digest
+            ):
+                raise ValueError(
+                    "gateway.authorization_context_digest does not match credential "
+                    "references, principal, and permissions"
+                )
         return self
 
 

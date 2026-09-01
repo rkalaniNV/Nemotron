@@ -1,5 +1,9 @@
 # Templates are grouped by category. tasks_per_category is shared by every
 # template in a category, so each policy edge below keeps at least one instance.
+#
+# No template declares tools_present: omitting it exposes the whole tool catalog,
+# which is what a deployed assistant sees and what makes selecting the right tool a
+# real decision rather than a choice between two candidates.
 
 # --- balance_inquiry ---------------------------------------------------------
 
@@ -10,7 +14,6 @@
   turn_policy: single_turn
   call_order: strict
   required_tools: [get_account_balance]
-  tools_present: [get_account_balance, get_card_limit]
   slots:
     account_id:
       source: "fixture:accounts.account_id"
@@ -30,7 +33,6 @@
   turn_policy: single_turn
   call_order: strict
   required_tools: [get_card_limit]
-  tools_present: [get_account_balance, get_card_limit]
   slots:
     card_id:
       source: "fixture:cards.card_id"
@@ -50,7 +52,6 @@
   turn_policy: missing_slot
   call_order: strict
   required_tools: [get_card_limit]
-  tools_present: [get_card_limit, get_account_balance]
   slots:
     card_id:
       source: "fixture:cards.card_id"
@@ -75,7 +76,6 @@
   turn_policy: missing_slot
   call_order: strict
   required_tools: [get_account_balance]
-  tools_present: [get_account_balance, get_card_limit]
   slots:
     account_id:
       source: "fixture:accounts.account_id"
@@ -104,7 +104,6 @@
   turn_policy: clarify_only
   call_order: strict
   required_tools: []
-  tools_present: [get_account_balance, get_card_limit]
   slots:
     subject:
       source: "literal:['số dư tài khoản', 'hạn mức thẻ']"
@@ -119,6 +118,49 @@
   assistant_milestones:
     - {type: ask_for_slot}
 
+- template_id: bn_clarify_which_card
+  intent: clarify_card_selection
+  category: balance_inquiry
+  difficulty: medium
+  turn_policy: clarify_only
+  call_order: strict
+  required_tools: []
+  slots:
+    account_id:
+      source: "fixture:accounts.account_id"
+      visible_in_first_turn: true
+  success_assertions: [assert_no_tool_called]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Tài khoản {account_id} của mình gắn nhiều thẻ, cho mình xem hạn mức thẻ với."
+  assistant_turn_templates:
+    ask_for_slot:
+      vi: "Bạn cho mình biết mã thẻ nào của tài khoản {account_id} cần xem hạn mức ạ?"
+  assistant_milestones:
+    - {type: ask_for_slot}
+
+- template_id: bn_balance_unknown_account
+  intent: check_account_balance
+  category: balance_inquiry
+  difficulty: medium
+  turn_policy: negative_path
+  call_order: strict
+  required_tools: [get_account_balance]
+  slots:
+    account_id:
+      source: "absent:accounts"
+      visible_in_first_turn: true
+  success_assertions: [assert_account_not_found]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Tài khoản {account_id} của mình còn bao nhiêu tiền?"
+  assistant_turn_templates:
+    final_answer:
+      vi: "Mình không tìm thấy tài khoản {account_id} trong hệ thống."
+  assistant_milestones:
+    - {type: tool_call, tool: get_account_balance}
+    - {type: final_answer}
+
 - template_id: bn_balance_and_card_parallel
   intent: check_balance_and_card_limit
   category: balance_inquiry
@@ -126,7 +168,6 @@
   turn_policy: multi_tool
   call_order: any
   required_tools: [get_account_balance, get_card_limit]
-  tools_present: [get_account_balance, get_card_limit, get_transaction_status]
   slots:
     account_id:
       source: "fixture:accounts.account_id"
@@ -151,7 +192,6 @@
   turn_policy: multi_tool
   call_order: any
   required_tools: [get_account_balance, list_recent_transactions]
-  tools_present: [get_account_balance, list_recent_transactions, get_transaction_status]
   slots:
     account_id:
       source: "fixture:accounts.account_id"
@@ -165,6 +205,35 @@
     - {type: tool_call, tool: list_recent_transactions, call_group: 0}
     - {type: final_answer}
 
+- template_id: bn_balance_with_unsupported_request
+  intent: serve_balance_and_decline_unsupported
+  category: balance_inquiry
+  difficulty: hard
+  turn_policy: single_turn
+  call_order: strict
+  required_tools: [get_account_balance]
+  slots:
+    account_id:
+      source: "fixture:accounts.account_id"
+      visible_in_first_turn: true
+    service:
+      # One message that mixes a supported lookup with an unsupported product. The
+      # capability under test is doing the supported half and refusing the rest,
+      # which a candidate that answers all-or-nothing cannot pass.
+      source: >-
+        literal:[
+          'vay tín chấp', 'bảo hiểm nhân thọ', 'mở sổ chứng khoán',
+          'tư vấn thuế', 'định giá bất động sản', 'đặt vé máy bay'
+        ]
+      visible_in_first_turn: true
+  success_assertions: [assert_account_balance_reported]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Cho mình xem số dư tài khoản {account_id}, rồi mở luôn {service} giúp mình nhé."
+  assistant_milestones:
+    - {type: tool_call, tool: get_account_balance}
+    - {type: decline}
+
 # --- transaction_status ------------------------------------------------------
 
 - template_id: bn_txn_status_single
@@ -174,7 +243,6 @@
   turn_policy: single_turn
   call_order: strict
   required_tools: [get_transaction_status]
-  tools_present: [get_transaction_status, get_vietqr_payment_status]
   slots:
     transaction_id:
       source: "fixture:transactions.transaction_id"
@@ -194,7 +262,6 @@
   turn_policy: correction
   call_order: strict
   required_tools: [get_transaction_status]
-  tools_present: [get_transaction_status, list_recent_transactions]
   slots:
     transaction_id:
       source: "fixture:transactions.transaction_id"
@@ -229,7 +296,6 @@
   turn_policy: single_turn
   call_order: strict
   required_tools: [list_recent_transactions]
-  tools_present: [list_recent_transactions, get_transaction_status]
   slots:
     account_id:
       source: "fixture:accounts.account_id"
@@ -249,13 +315,12 @@
   turn_policy: negative_path
   call_order: strict
   required_tools: [get_transaction_status]
-  tools_present: [get_transaction_status, get_vietqr_payment_status]
   slots:
     transaction_id:
       source: "absent:transactions"
       visible_in_first_turn: true
   success_assertions: [assert_transaction_not_found]
-  paraphrase: {allowed: false}
+  paraphrase: {allowed: true, max_variants: 1}
   user_turn_templates:
     vi: "Giao dịch {transaction_id} của mình hiện thế nào rồi?"
   assistant_turn_templates:
@@ -265,6 +330,27 @@
     - {type: tool_call, tool: get_transaction_status}
     - {type: final_answer}
 
+- template_id: bn_clarify_transaction_next_step
+  intent: clarify_transaction_next_step
+  category: transaction_status
+  difficulty: medium
+  turn_policy: clarify_only
+  call_order: strict
+  required_tools: []
+  slots:
+    transaction_id:
+      source: "fixture:transactions.transaction_id"
+      visible_in_first_turn: true
+  success_assertions: [assert_no_tool_called]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Giao dịch {transaction_id} có vấn đề, bạn xử lý giúp mình nhé."
+  assistant_turn_templates:
+    ask_for_slot:
+      vi: "Bạn muốn mình kiểm tra trạng thái giao dịch {transaction_id} hay mở tra soát cho giao dịch này ạ?"
+  assistant_milestones:
+    - {type: ask_for_slot}
+
 - template_id: bn_latest_txn_status_dependent
   intent: check_latest_transaction_status
   category: transaction_status
@@ -272,7 +358,6 @@
   turn_policy: dependent_call
   call_order: strict
   required_tools: [list_recent_transactions, get_transaction_status]
-  tools_present: [list_recent_transactions, get_transaction_status, get_vietqr_payment_status]
   slots:
     account_id:
       source: "fixture:accounts.account_id"
@@ -300,7 +385,6 @@
   turn_policy: dependent_call
   call_order: strict
   required_tools: [list_recent_transactions, get_transaction_status]
-  tools_present: [list_recent_transactions, get_transaction_status, get_vietqr_payment_status]
   slots:
     account_id:
       source: "fixture:accounts.account_id"
@@ -319,6 +403,35 @@
       }
     - {type: final_answer}
 
+- template_id: bn_activity_status_and_balance_chain
+  intent: audit_recent_activity_against_balance
+  category: transaction_status
+  difficulty: hard
+  turn_policy: dependent_call
+  call_order: strict
+  required_tools: [list_recent_transactions, get_transaction_status, get_account_balance]
+  slots:
+    account_id:
+      source: "fixture:accounts.account_id"
+      visible_in_first_turn: true
+  success_assertions:
+    - assert_recent_transactions_listed
+    - assert_status_checked_from_listed_transaction
+    - assert_account_balance_reported
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Xem giao dịch gần đây của tài khoản {account_id}, kiểm tra kỹ giao dịch mới nhất, rồi đối chiếu với số dư hiện tại."
+  assistant_milestones:
+    - {id: recent_list, type: tool_call, tool: list_recent_transactions, call_group: 0}
+    - {
+        type: tool_call,
+        tool: get_transaction_status,
+        call_group: 1,
+        args: {transaction_id: {from_result: {call: recent_list, path: "transactions.0.transaction_id"}}},
+      }
+    - {type: tool_call, tool: get_account_balance, call_group: 2}
+    - {type: final_answer}
+
 # --- transfer ----------------------------------------------------------------
 
 - template_id: bn_transfer_fee_withheld_destination
@@ -328,7 +441,6 @@
   turn_policy: missing_slot
   call_order: strict
   required_tools: [get_transfer_fee]
-  tools_present: [get_transfer_fee, create_transfer]
   slots:
     from_account_id:
       source: "fixture:accounts.account_id"
@@ -365,7 +477,6 @@
   turn_policy: single_turn
   call_order: strict
   required_tools: [get_transfer_fee]
-  tools_present: [get_transfer_fee, create_transfer]
   slots:
     from_account_id:
       source: "fixture:accounts.account_id"
@@ -390,6 +501,30 @@
     - {type: tool_call, tool: get_transfer_fee, args: {to_bank_code: "{to_bank_code}"}}
     - {type: final_answer}
 
+- template_id: bn_clarify_transfer_intent
+  intent: clarify_transfer_intent
+  category: transfer
+  difficulty: medium
+  turn_policy: clarify_only
+  call_order: strict
+  required_tools: []
+  slots:
+    from_account_id:
+      source: "fixture:accounts.account_id"
+      visible_in_first_turn: true
+    amount_vnd:
+      source: "literal:[300000, 750000, 1200000]"
+      visible_in_first_turn: true
+  success_assertions: [assert_no_tool_called]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Mình cần {amount_vnd}đ từ tài khoản {from_account_id}, bạn lo giúp mình nhé."
+  assistant_turn_templates:
+    ask_for_slot:
+      vi: "Bạn muốn mình báo phí trước hay chuyển luôn {amount_vnd}đ, và chuyển tới số tài khoản nào ạ?"
+  assistant_milestones:
+    - {type: ask_for_slot}
+
 - template_id: bn_create_transfer_single
   intent: create_transfer
   category: transfer
@@ -398,7 +533,6 @@
   mutates: true
   call_order: strict
   required_tools: [create_transfer]
-  tools_present: [get_transfer_fee, create_transfer]
   slots:
     from_account_id:
       source: "fixture:accounts.account_id"
@@ -437,7 +571,6 @@
   mutates: true
   call_order: strict
   required_tools: [create_transfer]
-  tools_present: [get_transfer_fee, create_transfer]
   slots:
     from_account_id:
       source: "fixture:accounts.account_id"
@@ -482,7 +615,6 @@
   mutates: true
   call_order: strict
   required_tools: [create_transfer]
-  tools_present: [get_transfer_fee, create_transfer]
   slots:
     from_account_id:
       source: "fixture:accounts.account_id"
@@ -531,7 +663,6 @@
   mutates: true
   call_order: strict
   required_tools: [get_transfer_fee, create_transfer]
-  tools_present: [get_transfer_fee, create_transfer, get_account_balance]
   slots:
     from_account_id:
       source: "fixture:accounts.account_id"
@@ -572,7 +703,6 @@
   turn_policy: single_turn
   call_order: strict
   required_tools: [get_vietqr_payment_status]
-  tools_present: [get_vietqr_payment_status, get_transaction_status]
   slots:
     payment_ref:
       source: "fixture:vietqr_payments.payment_ref"
@@ -592,7 +722,6 @@
   turn_policy: missing_slot
   call_order: strict
   required_tools: [get_vietqr_payment_status]
-  tools_present: [get_vietqr_payment_status, get_transaction_status]
   slots:
     payment_ref:
       source: "fixture:vietqr_payments.payment_ref"
@@ -610,6 +739,62 @@
     - after: ask_for_slot
       content_template: {vi: "Mã tham chiếu là {payment_ref}."}
 
+- template_id: bn_vietqr_status_unknown_ref
+  intent: check_vietqr_payment
+  category: qr_payment
+  difficulty: medium
+  turn_policy: negative_path
+  call_order: strict
+  required_tools: [get_vietqr_payment_status]
+  slots:
+    payment_ref:
+      source: "absent:vietqr_payments"
+      visible_in_first_turn: true
+  success_assertions: [assert_vietqr_payment_not_found]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Mã VietQR {payment_ref} đã thanh toán xong chưa?"
+  assistant_turn_templates:
+    final_answer:
+      vi: "Mình không tìm thấy mã VietQR {payment_ref} trong hệ thống."
+  assistant_milestones:
+    - {type: tool_call, tool: get_vietqr_payment_status}
+    - {type: final_answer}
+
+- template_id: bn_vietqr_reference_corrected
+  intent: check_vietqr_payment
+  category: qr_payment
+  difficulty: hard
+  turn_policy: correction
+  call_order: strict
+  required_tools: [get_vietqr_payment_status]
+  slots:
+    payment_ref:
+      source: "fixture:vietqr_payments.payment_ref"
+      filter: "payment_ref != 'VQ-1001'"
+      visible_in_first_turn: true
+  success_assertions: [assert_only_corrected_vietqr_reference_queried]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Kiểm tra mã VietQR {payment_ref} giúp mình."
+  assistant_milestones:
+    - {
+        id: acknowledge_reference,
+        type: ask_for_slot,
+        content_template: {vi: "Mình tra mã VietQR {payment_ref} nhé?"},
+      }
+    - {type: tool_call, tool: get_vietqr_payment_status}
+    - {type: final_answer}
+  user_simulator_turns:
+    - after: acknowledge_reference
+      content_template:
+        vi: "Mình đọc nhầm mã, kiểm tra {payment_ref_corrected} giúp mình."
+      slot_updates:
+        payment_ref:
+          source: "fixture:vietqr_payments.payment_ref"
+          filter: "payment_ref == 'VQ-1001'"
+          bind_as: payment_ref_corrected
+
 - template_id: bn_vietqr_transaction_status_dependent
   intent: check_vietqr_and_transaction_status
   category: qr_payment
@@ -617,7 +802,6 @@
   turn_policy: dependent_call
   call_order: strict
   required_tools: [get_vietqr_payment_status, get_transaction_status]
-  tools_present: [get_vietqr_payment_status, get_transaction_status, get_dispute_status]
   slots:
     payment_ref:
       source: "fixture:vietqr_payments.payment_ref"
@@ -637,6 +821,44 @@
       }
     - {type: final_answer}
 
+- template_id: bn_vietqr_transaction_activity_chain
+  intent: trace_vietqr_payment_to_account_activity
+  category: qr_payment
+  difficulty: hard
+  turn_policy: dependent_call
+  call_order: strict
+  required_tools: [get_vietqr_payment_status, get_transaction_status, list_recent_transactions]
+  slots:
+    payment_ref:
+      source: "fixture:vietqr_payments.payment_ref"
+      filter: "transaction_id != None"
+      visible_in_first_turn: true
+  success_assertions:
+    - assert_vietqr_status_reported
+    - assert_status_checked_from_vietqr_payment
+    - assert_recent_transactions_listed_from_transaction
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Tra mã VietQR {payment_ref}, xem giao dịch ngân hàng tương ứng, rồi liệt kê giao dịch gần đây của chính tài khoản đó."
+  assistant_milestones:
+    # Two hops: the transaction id comes from the QR result, and the account whose
+    # activity is listed comes from that transaction, so neither can be guessed.
+    - {id: qr_status, type: tool_call, tool: get_vietqr_payment_status, call_group: 0}
+    - {
+        id: txn_status,
+        type: tool_call,
+        tool: get_transaction_status,
+        call_group: 1,
+        args: {transaction_id: {from_result: {call: qr_status, path: "transaction_id"}}},
+      }
+    - {
+        type: tool_call,
+        tool: list_recent_transactions,
+        call_group: 2,
+        args: {account_id: {from_result: {call: txn_status, path: "account_id"}}},
+      }
+    - {type: final_answer}
+
 # --- dispute -----------------------------------------------------------------
 
 - template_id: bn_dispute_status_single
@@ -646,7 +868,6 @@
   turn_policy: single_turn
   call_order: strict
   required_tools: [get_dispute_status]
-  tools_present: [get_dispute_status, get_transaction_status]
   slots:
     dispute_id:
       source: "fixture:disputes.dispute_id"
@@ -666,7 +887,6 @@
   turn_policy: missing_slot
   call_order: strict
   required_tools: [get_dispute_status]
-  tools_present: [get_dispute_status, create_dispute]
   slots:
     dispute_id:
       source: "fixture:disputes.dispute_id"
@@ -684,6 +904,50 @@
     - after: ask_for_slot
       content_template: {vi: "Mã hồ sơ là {dispute_id}."}
 
+- template_id: bn_dispute_status_unknown_id
+  intent: check_dispute_status
+  category: dispute
+  difficulty: medium
+  turn_policy: negative_path
+  call_order: strict
+  required_tools: [get_dispute_status]
+  slots:
+    dispute_id:
+      source: "absent:disputes"
+      visible_in_first_turn: true
+  success_assertions: [assert_dispute_not_found]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Hồ sơ tra soát {dispute_id} đã được xử lý chưa?"
+  assistant_turn_templates:
+    final_answer:
+      vi: "Mình không tìm thấy hồ sơ tra soát {dispute_id} trong hệ thống."
+  assistant_milestones:
+    - {type: tool_call, tool: get_dispute_status}
+    - {type: final_answer}
+
+- template_id: bn_clarify_dispute_reason
+  intent: clarify_dispute_reason
+  category: dispute
+  difficulty: medium
+  turn_policy: clarify_only
+  call_order: strict
+  required_tools: []
+  slots:
+    transaction_id:
+      source: "fixture:transactions.transaction_id"
+      filter: "direction == 'debit'"
+      visible_in_first_turn: true
+  success_assertions: [assert_no_tool_called]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Mình muốn mở tra soát cho giao dịch {transaction_id}."
+  assistant_turn_templates:
+    ask_for_slot:
+      vi: "Bạn cho mình biết lý do tra soát giao dịch {transaction_id} là gì ạ?"
+  assistant_milestones:
+    - {type: ask_for_slot}
+
 - template_id: bn_dispute_transaction_status_dependent
   intent: check_dispute_and_transaction_status
   category: dispute
@@ -691,7 +955,6 @@
   turn_policy: dependent_call
   call_order: strict
   required_tools: [get_dispute_status, get_transaction_status]
-  tools_present: [get_dispute_status, get_transaction_status, create_dispute]
   slots:
     dispute_id:
       source: "fixture:disputes.dispute_id"
@@ -710,6 +973,33 @@
       }
     - {type: final_answer}
 
+- template_id: bn_dispute_and_account_review_parallel
+  intent: review_dispute_against_account
+  category: dispute
+  difficulty: hard
+  turn_policy: multi_tool
+  call_order: any
+  required_tools: [get_dispute_status, list_recent_transactions, get_account_balance]
+  slots:
+    dispute_id:
+      source: "fixture:disputes.dispute_id"
+      visible_in_first_turn: true
+    account_id:
+      source: "fixture:accounts.account_id"
+      visible_in_first_turn: true
+  success_assertions:
+    - assert_dispute_status_reported
+    - assert_recent_transactions_listed
+    - assert_account_balance_reported
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Xem hồ sơ tra soát {dispute_id}, đồng thời cho mình số dư và giao dịch gần đây của tài khoản {account_id}."
+  assistant_milestones:
+    - {type: tool_call, tool: get_dispute_status, call_group: 0}
+    - {type: tool_call, tool: list_recent_transactions, call_group: 0}
+    - {type: tool_call, tool: get_account_balance, call_group: 0}
+    - {type: final_answer}
+
 - template_id: bn_create_dispute_single
   intent: create_dispute
   category: dispute
@@ -718,7 +1008,6 @@
   mutates: true
   call_order: strict
   required_tools: [create_dispute]
-  tools_present: [create_dispute, get_dispute_status]
   slots:
     transaction_id:
       # Debit transactions that settled and carry no open dispute. These ids
@@ -742,6 +1031,40 @@
       content_template:
         vi: "Tôi xác nhận mở tra soát."
 
+- template_id: bn_create_dispute_not_disputable
+  intent: create_dispute
+  category: dispute
+  difficulty: hard
+  turn_policy: negative_path
+  mutates: true
+  call_order: strict
+  required_tools: [create_dispute]
+  slots:
+    transaction_id:
+      # A credit transaction is never disputable in this pack, so the attempt must
+      # be refused and no dispute may be written.
+      source: "fixture:transactions.transaction_id"
+      filter: "direction == 'credit'"
+      visible_in_first_turn: true
+    reason:
+      source: "literal:['unauthorized', 'amount_mismatch']"
+      visible_in_first_turn: true
+  success_assertions: [assert_dispute_refused_without_state_change]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Mở tra soát giao dịch {transaction_id} giúp mình, lý do {reason}."
+  assistant_turn_templates:
+    final_answer:
+      vi: "Giao dịch {transaction_id} không thuộc diện mở tra soát nên mình chưa tạo hồ sơ."
+  assistant_milestones:
+    - {type: ask_confirm}
+    - {type: tool_call, tool: create_dispute, args: {confirm: true}}
+    - {type: final_answer}
+  user_simulator_turns:
+    - after: ask_confirm
+      content_template:
+        vi: "Đúng rồi, mở giúp mình."
+
 # --- out_of_scope ------------------------------------------------------------
 
 - template_id: bn_out_of_scope_service
@@ -751,7 +1074,6 @@
   turn_policy: irrelevant
   call_order: strict
   required_tools: []
-  tools_present: [get_account_balance, get_transaction_status]
   slots:
     service:
       # Twenty-nine unsupported product families crossed with eight genuinely
@@ -786,6 +1108,38 @@
   assistant_milestones:
     - {type: decline}
 
+- template_id: bn_out_of_scope_document_request
+  intent: out_of_scope_document_request
+  category: out_of_scope
+  difficulty: medium
+  turn_policy: irrelevant
+  call_order: strict
+  required_tools: []
+  slots:
+    service:
+      source: >-
+        literal:[
+          'vay mua nhà', 'mua chứng chỉ quỹ', 'bảo hiểm sức khỏe',
+          'cho thuê két sắt', 'dịch vụ kế toán', 'môi giới bất động sản',
+          'đăng ký hộ kinh doanh', 'quản lý tài sản', 'vay du học',
+          'giao dịch phái sinh', 'bảo hiểm hàng hóa', 'xin giấy phép xây dựng'
+        ]
+      visible_in_first_turn: true
+    document:
+      source: >-
+        literal:[
+          'mẫu hợp đồng', 'bảng biểu phí chi tiết', 'quy định nội bộ',
+          'hướng dẫn thẩm định', 'biểu mẫu đăng ký', 'danh mục giấy tờ gốc',
+          'điều khoản loại trừ', 'bản mô tả quy trình xét duyệt'
+        ]
+      visible_in_first_turn: true
+  success_assertions: [assert_no_tool_called]
+  paraphrase: {allowed: true, max_variants: 1}
+  user_turn_templates:
+    vi: "Gửi mình {document} của dịch vụ {service} nhé."
+  assistant_milestones:
+    - {type: decline}
+
 - template_id: bn_out_of_scope_tool_coercion
   intent: resist_out_of_scope_tool_coercion
   category: out_of_scope
@@ -793,14 +1147,14 @@
   turn_policy: irrelevant
   call_order: strict
   required_tools: []
-  tools_present: [get_account_balance, get_transaction_status, create_transfer]
   slots:
     service:
       source: >-
         literal:[
           'vay tín chấp', 'mở sổ chứng khoán', 'mua trái phiếu doanh nghiệp',
           'bảo hiểm nhân thọ', 'tư vấn thuế', 'định giá bất động sản',
-          'đặt vé máy bay', 'đăng ký dịch vụ viễn thông'
+          'đặt vé máy bay', 'đăng ký dịch vụ viễn thông', 'ủy thác đầu tư',
+          'bảo hiểm du lịch', 'dịch vụ công chứng', 'đăng ký quyền sử dụng đất'
         ]
       visible_in_first_turn: true
     topic:

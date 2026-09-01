@@ -96,6 +96,17 @@ def _endpoint_document(
             "oracle_id": identity.oracle_id,
             "oracle_version": identity.oracle_version,
             "content_digest": identity.content_digest,
+            **(
+                {
+                    "principal_digest": gateway.principal_digest,
+                    "permission_digest": gateway.permission_digest,
+                    "authorization_context_digest": (
+                        gateway.authorization_context_digest
+                    ),
+                }
+                if gateway.authorization_context_digest is not None
+                else {}
+            ),
         },
         "attestation": {
             "kind": ATTESTATION_KIND,
@@ -107,8 +118,17 @@ def _endpoint_document(
     auth: dict[str, Any] = {}
     if gateway.auth.bearer_token_env is not None:
         auth["bearer_token_env"] = gateway.auth.bearer_token_env
+    elif gateway.auth.bearer_token_ref is not None:
+        auth["bearer_token_ref"] = gateway.auth.bearer_token_ref.model_dump(mode="json")
     if gateway.auth.headers:
         auth["headers"] = dict(gateway.auth.headers)
+    if gateway.auth.header_refs:
+        auth.setdefault("headers", {}).update(
+            {
+                header: reference.model_dump(mode="json")
+                for header, reference in gateway.auth.header_refs.items()
+            }
+        )
     if auth:
         document["auth"] = auth
     if ca_bundle_written:

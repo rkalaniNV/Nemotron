@@ -53,6 +53,7 @@ def _committed_session(
     revision_content_address: str | None = None,
     approval_evidence_digest: str | None = None,
     source_identity_digest: str | None = None,
+    with_approval: bool = True,
 ) -> tuple[Path, AuthoringResumeGate, str, dict[str, Path]]:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -77,9 +78,17 @@ def _committed_session(
         },
         paths["approval"],
     )
-    approval = ApprovalBinding(
-        artifact=bind_artifact(workspace, paths["approval"], digest_kind="canonical_json"),
-        evidence_digest=observed_evidence.bundle_digest,
+    approval = (
+        ApprovalBinding(
+            artifact=bind_artifact(
+                workspace,
+                paths["approval"],
+                digest_kind="canonical_json",
+            ),
+            evidence_digest=observed_evidence.bundle_digest,
+        )
+        if with_approval
+        else None
     )
     bindings = SessionBindings(
         source=bind_artifact(workspace, paths["source"]),
@@ -347,6 +356,29 @@ def test_resume_refuses_bound_artifact_drift(
     with pytest.raises(AuthoringResumeError) as refused:
         gate.open(session_digest, command="draft")
     assert refused.value.code == "session_binding_drift"
+    assert refused.value.recovery
+
+
+@pytest.mark.parametrize("artifact", ["source", "evidence", "config"])
+def test_resume_refuses_missing_bound_artifact(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    _workspace, gate, session_digest, paths = _committed_session(tmp_path)
+    paths[artifact].unlink()
+
+    with pytest.raises(AuthoringResumeError) as refused:
+        gate.open(session_digest, command="draft")
+    assert refused.value.code == "artifact_missing"
+    assert refused.value.recovery
+
+
+def test_resume_refuses_an_unknown_session_digest(tmp_path: Path) -> None:
+    _workspace, gate, _session_digest, _paths = _committed_session(tmp_path)
+
+    with pytest.raises(AuthoringResumeError) as refused:
+        gate.open("sha256:" + "e" * 64, command="draft")
+    assert refused.value.code == "session_invalid"
     assert refused.value.recovery
 
 

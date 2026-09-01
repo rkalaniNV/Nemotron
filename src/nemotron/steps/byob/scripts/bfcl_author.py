@@ -9,16 +9,33 @@ freeze are adapter-neutral; publication remains adapter-scoped.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import sys
 import urllib.parse
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+from nemotron.steps.byob.runtime.authoring_workflow.cache_retention import (
+    CACHE_PURGE_AUDIT_FILE_NAME,
+    infer_authoring_cache_path,
+    purge_authoring_cache,
+)
+from nemotron.steps.byob.runtime.authoring_workflow.events import (
+    EVENT_FILE_NAME,
+    AdapterIdentityPayload,
+    CertificationPayload,
+    FileAuthoringEventSink,
+    RefusalPayload,
+    ReleaseFrozenPayload,
+    ValidationVerdictPayload,
+    emit_authoring_event,
+)
 from nemotron.steps.byob.runtime.authoring_workflow.resolved_config import (
     RESOLVED_AUTHORING_CONFIG_FILE,
     AdapterKind,
+    load_resolved_authoring_config,
     resolve_authoring_config,
     write_resolved_authoring_config,
 )
@@ -132,6 +149,17 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+    purge_cache = subparsers.add_parser(
+        "purge-cache",
+        help="Plan or execute reference-aware authoring cache retention",
+    )
+    _add_workspace(purge_cache)
+    purge_cache.add_argument("--cache", type=Path)
+    purge_cache.add_argument("--actor", required=True)
+    purge_cache.add_argument("--reason-code", required=True)
+    purge_cache.add_argument("--execute", action="store_true")
+    purge_cache.add_argument("--expected-plan-digest")
+
     answer = subparsers.add_parser("answer", help="Apply reviewed answers as a new revision")
     _add_workspace(answer)
     answer.add_argument("--evidence", type=Path, required=True)
@@ -179,6 +207,27 @@ def _parser() -> argparse.ArgumentParser:
 
 def _print(document: dict[str, Any]) -> None:
     print(json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _event_sink(workspace: Path) -> FileAuthoringEventSink:
+    return FileAuthoringEventSink(workspace.resolve() / ".events" / EVENT_FILE_NAME)
+
+
+def _emit_cli_refusal(args: argparse.Namespace, code: str) -> None:
+    try:
+        emit_authoring_event(
+            _event_sink(args.workspace),
+            "refusal_recorded",
+            RefusalPayload(
+                primary_classification="command_refused",
+                reason_codes=(code,) if code and code[0].islower() else (),
+            ),
+            tenant_id=args.tenant_id,
+            run_id=args.run_id,
+            session_digest=None,
+        )
+    except (OSError, ValueError):
+        pass
 
 
 def _delegate(module_name: str, arguments: list[str]) -> None:
@@ -236,7 +285,7 @@ def _commit_transition(
     *,
     phase: AuthoringPhase,
     updates: dict[str, Any],
-) -> None:
+) -> str:
     parent = gate.load_state(resumed.verdict.session_digest)
     bindings = parent.bindings.model_copy(update=updates)
     state = build_session_state(
@@ -247,6 +296,53 @@ def _commit_transition(
         parent_session_digest=parent.session_digest,
     )
     gate.commit_state(state, lease=resumed.lease)
+    sink = _event_sink(args.workspace)
+    if phase == "review_ready":
+        binding = state.bindings.review_packet
+        assert binding is not None
+        packet = json.loads(
+            (args.workspace.resolve() / binding.path).read_text(encoding="utf-8")
+        )
+        validation = packet["adapter_review"]["validation"]
+        fingerprint = str(validation["pack_fingerprint"])
+        if not fingerprint.startswith("sha256:"):
+            fingerprint = f"sha256:{fingerprint}"
+        emit_authoring_event(
+            sink,
+            "validation_verdict",
+            ValidationVerdictPayload(
+                stage="review",
+                tier=validation["tier"],
+                gold_eligible=validation["gold"],
+                pack_fingerprint=fingerprint,
+                validation_report_digest=packet["source_digests"][
+                    "validation_report"
+                ],
+            ),
+            tenant_id=args.tenant_id,
+            run_id=args.run_id,
+            session_digest=state.session_digest,
+        )
+    elif phase == "frozen":
+        binding = state.bindings.frozen_manifest
+        assert binding is not None
+        manifest = json.loads(
+            (args.workspace.resolve() / binding.path).read_text(encoding="utf-8")
+        )
+        emit_authoring_event(
+            sink,
+            "release_frozen",
+            ReleaseFrozenPayload(
+                adapter_kind=manifest["adapter_kind"],
+                manifest_digest=manifest["manifest_digest"],
+                frozen_pack_fingerprint=manifest["frozen_pack_fingerprint"],
+                review_packet_digest=manifest["review_packet_digest"],
+                review_approval_digest=manifest["review_approval_digest"],
+            ),
+            tenant_id=args.tenant_id,
+            run_id=args.run_id,
+            session_digest=state.session_digest,
+        )
     write_canonical_json(
         {
             "schema_version": "bfcl-authoring-head-v1",
@@ -257,6 +353,7 @@ def _commit_transition(
         },
         args.workspace.resolve() / "authoring_head.json",
     )
+    return state.session_digest
 
 
 def _detect_adapter(source: Path) -> str:
@@ -439,6 +536,48 @@ def _commit_intake_session(
         ),
     )
     gate.commit_state(state, lease=lease)
+    resolved = load_resolved_authoring_config(config_path)
+    adapter_kind = cast(AdapterKind, evidence.source_adapter.kind)
+    authorization_context_digest = next(
+        (
+            artifact.digest
+            for artifact in evidence.identity.artifacts
+            if artifact.role == "authorization_context"
+        ),
+        None,
+    )
+    sink = _event_sink(workspace)
+    emit_authoring_event(
+        sink,
+        "adapter_identity_bound",
+        AdapterIdentityPayload(
+            adapter_kind=adapter_kind,
+            source_identity_digest=state.bindings.source_identity_digest,
+            evidence_bundle_digest=evidence.bundle_digest,
+            descriptor_digest=evidence.certification.descriptor_digest,
+            authorization_context_digest=authorization_context_digest,
+        ),
+        tenant_id=tenant_id,
+        run_id=run_id,
+        session_digest=state.session_digest,
+    )
+    emit_authoring_event(
+        sink,
+        "certification_verified",
+        CertificationPayload(
+            adapter_kind=adapter_kind,
+            attained_tier=evidence.certification.attained_tier,
+            required_tier=cast(
+                Literal["A0", "A1", "A2"],
+                resolved.semantic_payload.required_certification_tier.value,
+            ),
+            profile_id=evidence.certification.profile_id,
+            report_digest=evidence.certification.report_digest,
+        ),
+        tenant_id=tenant_id,
+        run_id=run_id,
+        session_digest=state.session_digest,
+    )
     write_canonical_json(
         {
             "schema_version": "bfcl-authoring-head-v1",
@@ -650,6 +789,55 @@ def main() -> None:
                     recovery="run bfcl_author.py resume --help",
                 )
             _run_resume(args)
+        elif args.command == "purge-cache":
+            if remainder:
+                raise GuidedCliError(
+                    "unexpected_arguments",
+                    f"purge-cache received unknown arguments: {remainder!r}",
+                    recovery="run bfcl_author.py purge-cache --help",
+                )
+            if args.execute and args.expected_plan_digest is None:
+                raise GuidedCliError(
+                    "cache_purge_plan_required",
+                    "execute requires the digest returned by a prior dry-run",
+                    recovery=(
+                        "run purge-cache without --execute, review the eligible hashes, "
+                        "then pass --expected-plan-digest"
+                    ),
+                )
+            cache_path = args.cache or infer_authoring_cache_path(
+                args.workspace,
+                tenant_id=args.tenant_id,
+                run_id=args.run_id,
+            )
+            plan, audit = purge_authoring_cache(
+                args.workspace,
+                cache_path,
+                tenant_id=args.tenant_id,
+                run_id=args.run_id,
+                actor=args.actor,
+                reason_code=args.reason_code,
+                dry_run=not args.execute,
+                expected_plan_digest=args.expected_plan_digest,
+            )
+            _print(
+                {
+                    "status": "dry_run" if audit.dry_run else "purged",
+                    "cache": str(cache_path.resolve()),
+                    "plan_digest": plan.plan_digest,
+                    "eligible_request_hashes": list(
+                        plan.eligible_request_hashes
+                    ),
+                    "retained_count": audit.retained_count,
+                    "purged_count": audit.purged_count,
+                    "audit": str(
+                        args.workspace.resolve()
+                        / ".events"
+                        / CACHE_PURGE_AUDIT_FILE_NAME
+                    ),
+                    "audit_record_digest": audit.record_digest,
+                }
+            )
         elif args.command == "answer":
             gate, resumed = _current_session(args, "answer")
             with resumed:
@@ -835,7 +1023,7 @@ def main() -> None:
                 config = BfclConfig.from_yaml(
                     _required_path_argument(remainder, "--config")
                 )
-                _commit_transition(
+                session_digest = _commit_transition(
                     args,
                     gate,
                     resumed,
@@ -850,9 +1038,45 @@ def main() -> None:
                         )
                     },
                 )
+                report_path = (
+                    config.output_dir
+                    / config.expt_name
+                    / "stage_cache"
+                    / "oracle_validation_report.json"
+                )
+                if report_path.is_file():
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                    config_fingerprint = report.get("validation_config_fingerprint")
+                    if (
+                        isinstance(config_fingerprint, str)
+                        and not config_fingerprint.startswith("sha256:")
+                    ):
+                        config_fingerprint = f"sha256:{config_fingerprint}"
+                    pack_fingerprint = str(report["pack_fingerprint"])
+                    if not pack_fingerprint.startswith("sha256:"):
+                        pack_fingerprint = f"sha256:{pack_fingerprint}"
+                    emit_authoring_event(
+                        _event_sink(args.workspace),
+                        "validation_verdict",
+                        ValidationVerdictPayload(
+                            stage="publication",
+                            tier=report["tier"],
+                            gold_eligible=report["gold_eligible"],
+                            pack_fingerprint=pack_fingerprint,
+                            validation_report_digest=(
+                                "sha256:"
+                                + hashlib.sha256(report_path.read_bytes()).hexdigest()
+                            ),
+                            validation_config_fingerprint=config_fingerprint,
+                        ),
+                        tenant_id=args.tenant_id,
+                        run_id=args.run_id,
+                        session_digest=session_digest,
+                    )
         else:  # pragma: no cover - argparse keeps this unreachable
             parser.error(f"unsupported command {args.command}")
     except GuidedCliError as exc:
+        _emit_cli_refusal(args, exc.code)
         _print(
             {
                 "status": "fail",
@@ -863,6 +1087,10 @@ def main() -> None:
         )
         raise SystemExit(1) from exc
     except (OSError, ValueError) as exc:
+        _emit_cli_refusal(
+            args,
+            str(getattr(exc, "code", "guided_command_failed")),
+        )
         _print(
             {
                 "status": "fail",

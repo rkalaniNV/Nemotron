@@ -2,7 +2,10 @@
 
 This guide is for operators onboarding an MCP server and for server authors implementing the
 BFCL MCP Oracle Profile. The path remains feature-flagged; Mode A can publish only after fresh,
-independent P4–P11 evidence passes.
+independent P4–P11 evidence passes
+([`test_bfcl_authoring_e2e.py`](../../../../../tests/steps/byob/test_bfcl_authoring_e2e.py)).
+For the shared local/HTTP/MCP workflow, use
+[bfcl-authoring-user-guide.md](bfcl-authoring-user-guide.md).
 
 ## 1. Choose an operating mode
 
@@ -10,15 +13,18 @@ independent P4–P11 evidence passes.
 - Use **Mode B** only with a separately reviewed and fingerprinted shim.
 - Use **Mode C** only for an immutable, read-only snapshot.
 
-Mode A is the only executable gateway mode currently implemented. Mode B and C configurations
-remain useful discovery records but are not executable through the gateway MVP.
+Mode A is the only executable gateway mode currently implemented
+([`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py)).
+Mode B and C execution is **unimplemented**; their declarations are inert discovery records.
 
 ## 2. Install the isolated transport runtime
 
 The MCP 2026 protocol requires SDK v2, while model-authoring dependencies may require SDK v1.
 Do not resolve them into one environment.
 
-```bash
+This environment-setup template is not an executable documentation smoke:
+
+```text
 uv sync --extra bfcl-mcp
 export BFCL_ENABLE_MCP_MODE_A=1
 ```
@@ -44,9 +50,16 @@ Start from the normative schema in
 alias them to stable BFCL names where needed, and declare mutation and confirmation behavior in
 the reviewed profile. Control tools must not appear in `tools.include`.
 
-The first discovery run may bootstrap the catalog digest:
+Inspect the discovery CLI:
 
-```bash
+<!-- doc-smoke: mcp-discovery-help -->
+```shell
+python -m nemotron.steps.byob.scripts.discover_mcp_oracle --help
+```
+
+The first discovery run may bootstrap the catalog digest. This is an operator template:
+
+```text
 python -m nemotron.steps.byob.scripts.discover_mcp_oracle \
   --config mcp_oracle.yaml \
   --output mcp_discovery_report.json \
@@ -60,9 +73,16 @@ not approval.
 ## 4. Run the gateway
 
 The gateway is the only MCP execution boundary. It exposes BFCL Oracle HTTP v1 and keeps
-`generate_bfcl` unaware of MCP:
+`generate_bfcl` unaware of MCP. Inspect its arguments:
 
-```bash
+<!-- doc-smoke: mcp-gateway-help -->
+```shell
+python -m nemotron.steps.byob.scripts.run_mcp_gateway --help
+```
+
+The live-server command below is an operator template:
+
+```text
 python -m nemotron.steps.byob.scripts.run_mcp_gateway \
   --config mcp_oracle.yaml \
   --gateway-artifact-digest sha256:<digest> \
@@ -77,9 +97,9 @@ reference. A gateway process must be treated as part of the fingerprinted execut
 The first gateway starts at L0. Use it to validate the provisional pack and retain
 `mcp_probe_report` from `oracle_validation_report.json`. Run the BFCL-owned controlled hanging
 fixture through `run_gateway_timeout_conformance` and write its returned suite to
-`gateway_suite.json`. Restart the same pinned gateway artifact with:
+`gateway_suite.json`. Restart the same pinned gateway artifact with this operator template:
 
-```bash
+```text
 python -m nemotron.steps.byob.scripts.run_mcp_gateway \
   --config mcp_oracle.yaml \
   --gateway-artifact-digest sha256:<digest> \
@@ -198,7 +218,14 @@ validation pass rate, tool coverage, replay stability, row count, and optional e
 The experiment pins one domain artifact, evaluator configuration, and held-out policy. Scores
 must be present for all nine runs or omitted for all nine; partial scoring is refused.
 
-```bash
+<!-- doc-smoke: mcp-ablation-help -->
+```shell
+python -m nemotron.steps.byob.scripts.compare_bfcl_onboarding_flows --help
+```
+
+Run the comparison with this operator template:
+
+```text
 python -m nemotron.steps.byob.scripts.compare_bfcl_onboarding_flows \
   --input three_flow_observations.json \
   --output three_flow_ablation_report.json

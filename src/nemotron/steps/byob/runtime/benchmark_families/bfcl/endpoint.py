@@ -16,6 +16,11 @@ from typing import Any
 
 import yaml
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import (
+    CredentialReference,
+    CredentialResolver,
+    build_authorization_context,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
     ATTESTATION_KIND,
 )
@@ -37,9 +42,16 @@ _CONFIG_KEYS = frozenset(
         "max_response_bytes",
     }
 )
-_AUTH_KEYS = frozenset({"bearer_token_env", "headers"})
+_AUTH_KEYS = frozenset({"bearer_token_env", "bearer_token_ref", "headers"})
 _EXPECTED_KEYS = frozenset(
-    {"oracle_id", "oracle_version", "content_digest", "principal_digest"}
+    {
+        "oracle_id",
+        "oracle_version",
+        "content_digest",
+        "principal_digest",
+        "permission_digest",
+        "authorization_context_digest",
+    }
 )
 _ATTESTATION_KEYS = frozenset({"kind", "expected_digest"})
 _TLS_KEYS = frozenset({"ca_bundle_path"})
@@ -53,6 +65,8 @@ class EndpointIdentity:
     oracle_version: str
     content_digest: str
     principal_digest: str | None = None
+    permission_digest: str | None = None
+    authorization_context_digest: str | None = None
 
     @classmethod
     def from_mapping(cls, value: Any, *, source: str) -> EndpointIdentity:
@@ -64,7 +78,11 @@ class EndpointIdentity:
             "oracle_version",
             "content_digest",
         }
-        allowed = required | {"principal_digest"}
+        allowed = required | {
+            "principal_digest",
+            "permission_digest",
+            "authorization_context_digest",
+        }
         unknown = sorted(set(value) - allowed)
         if unknown:
             raise ValueError(f"{source} has unknown fields: {', '.join(unknown)}")
@@ -85,16 +103,34 @@ class EndpointIdentity:
             int(digest.removeprefix("sha256:"), 16)
         except ValueError as exc:
             raise ValueError(f"{source} content_digest is not hexadecimal") from exc
-        principal_digest = value.get("principal_digest")
-        if principal_digest is not None:
-            if (
-                not isinstance(principal_digest, str)
-                or _ATTESTATION_DIGEST.fullmatch(principal_digest) is None
-            ):
-                raise ValueError(
-                    f"{source} principal_digest must be sha256:<64 lowercase hex characters>"
-                )
-        return cls(**fields, principal_digest=principal_digest)
+        optional_digests = {
+            name: value.get(name)
+            for name in (
+                "principal_digest",
+                "permission_digest",
+                "authorization_context_digest",
+            )
+        }
+        for name, optional_digest in optional_digests.items():
+            if optional_digest is not None:
+                if (
+                    not isinstance(optional_digest, str)
+                    or _ATTESTATION_DIGEST.fullmatch(optional_digest) is None
+                ):
+                    raise ValueError(
+                        f"{source} {name} must be sha256:<64 lowercase hex characters>"
+                    )
+        return cls(
+            protocol_version=fields["protocol_version"],
+            oracle_id=fields["oracle_id"],
+            oracle_version=fields["oracle_version"],
+            content_digest=fields["content_digest"],
+            principal_digest=optional_digests["principal_digest"],
+            permission_digest=optional_digests["permission_digest"],
+            authorization_context_digest=optional_digests[
+                "authorization_context_digest"
+            ],
+        )
 
     def as_dict(self) -> dict[str, str]:
         result = {
@@ -103,8 +139,13 @@ class EndpointIdentity:
             "oracle_version": self.oracle_version,
             "content_digest": self.content_digest,
         }
-        if self.principal_digest is not None:
-            result["principal_digest"] = self.principal_digest
+        for name, value in (
+            ("principal_digest", self.principal_digest),
+            ("permission_digest", self.permission_digest),
+            ("authorization_context_digest", self.authorization_context_digest),
+        ):
+            if value is not None:
+                result[name] = value
         return result
 
 
@@ -126,6 +167,8 @@ class EndpointConfig:
     attestation: ExpectedAttestation | None = None
     bearer_token_env: str | None = None
     header_env: tuple[tuple[str, str], ...] = ()
+    bearer_token_ref: CredentialReference | None = None
+    header_refs: tuple[tuple[str, CredentialReference], ...] = ()
     ca_bundle_path: Path | None = None
     max_request_bytes: int = 10 * 1024 * 1024
     max_response_bytes: int = 10 * 1024 * 1024
@@ -141,6 +184,17 @@ def _nonempty_string(value: Any, source: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{source} must be a non-empty string")
     return value.strip()
+
+
+def _credential_reference(value: Any, source: str) -> CredentialReference:
+    if isinstance(value, str):
+        return CredentialReference.environment(_nonempty_string(value, source))
+    if not isinstance(value, dict):
+        raise ValueError(f"{source} must be an environment name or credential reference")
+    try:
+        return CredentialReference.model_validate(value)
+    except ValueError as exc:
+        raise ValueError(f"{source} is invalid: {exc}") from exc
 
 
 def load_endpoint_config(
@@ -175,19 +229,40 @@ def load_endpoint_config(
         raise ValueError("endpoint auth must be a mapping")
     _reject_unknown(auth, _AUTH_KEYS, "endpoint auth")
     bearer = auth.get("bearer_token_env")
+    bearer_ref_value = auth.get("bearer_token_ref")
+    if bearer is not None and bearer_ref_value is not None:
+        raise ValueError(
+            "endpoint auth must not set both bearer_token_env and bearer_token_ref"
+        )
+    bearer_ref = None
     if bearer is not None:
         bearer = _nonempty_string(bearer, "endpoint auth.bearer_token_env")
+        bearer_ref = CredentialReference.environment(bearer)
+    elif bearer_ref_value is not None:
+        bearer_ref = _credential_reference(
+            bearer_ref_value,
+            "endpoint auth.bearer_token_ref",
+        )
+        if bearer_ref.resolver == "environment":
+            bearer = bearer_ref.name
     headers = auth.get("headers") or {}
     if not isinstance(headers, dict):
         raise ValueError("endpoint auth.headers must map HTTP header names to environment names")
     header_env: list[tuple[str, str]] = []
-    for header, env_name in headers.items():
+    header_refs: list[tuple[str, CredentialReference]] = []
+    for header, reference_value in headers.items():
         header_name = _nonempty_string(header, "endpoint auth header name")
         if _HEADER_NAME.fullmatch(header_name) is None:
             raise ValueError(f"endpoint auth header {header_name!r} is not a valid HTTP field name")
         if header_name.lower() in {"authorization", "host", "content-length"}:
             raise ValueError(f"endpoint auth header {header_name!r} is reserved")
-        header_env.append((header_name, _nonempty_string(env_name, f"endpoint auth.headers.{header_name}")))
+        reference = _credential_reference(
+            reference_value,
+            f"endpoint auth.headers.{header_name}",
+        )
+        header_refs.append((header_name, reference))
+        if reference.resolver == "environment":
+            header_env.append((header_name, reference.name))
 
     tls = raw.get("tls") or {}
     if not isinstance(tls, dict):
@@ -227,16 +302,49 @@ def load_endpoint_config(
             raise ValueError("endpoint attestation.expected_digest must be sha256:<64 lowercase hex characters>")
         attestation = ExpectedAttestation(kind=kind, expected_digest=digest)
 
+    expected_identity = EndpointIdentity.from_mapping(
+        {"protocol_version": protocol, **expected},
+        source="endpoint expected",
+    )
+    credential_refs = tuple(
+        reference
+        for reference in (
+            bearer_ref,
+            *(reference for _, reference in header_refs),
+        )
+        if reference is not None
+    )
+    if credential_refs and expected_identity.authorization_context_digest is not None:
+        if (
+            expected_identity.principal_digest is None
+            or expected_identity.permission_digest is None
+        ):
+            raise ValueError(
+                "authorization_context_digest requires principal_digest and "
+                "permission_digest"
+            )
+        context = build_authorization_context(
+            credential_refs,
+            principal_digest=expected_identity.principal_digest,
+            permission_digest=expected_identity.permission_digest,
+        )
+        if (
+            context.authorization_context_digest
+            != expected_identity.authorization_context_digest
+        ):
+            raise ValueError(
+                "endpoint expected authorization_context_digest does not match "
+                "credential references, principal, and permissions"
+            )
     return EndpointConfig(
         path=path,
         base_url=base_url,
-        expected=EndpointIdentity.from_mapping(
-            {"protocol_version": protocol, **expected},
-            source="endpoint expected",
-        ),
+        expected=expected_identity,
         attestation=attestation,
         bearer_token_env=bearer,
         header_env=tuple(sorted(header_env)),
+        bearer_token_ref=bearer_ref,
+        header_refs=tuple(sorted(header_refs, key=lambda item: item[0])),
         ca_bundle_path=ca_bundle_path,
         max_request_bytes=request_limit,
         max_response_bytes=response_limit,
@@ -246,20 +354,19 @@ def load_endpoint_config(
 def resolve_endpoint_headers(
     config: EndpointConfig,
     environ: Mapping[str, str] | None = None,
+    *,
+    credential_resolver: CredentialResolver | None = None,
 ) -> dict[str, str]:
     """Resolve configured secret references without retaining their values in config."""
-    source = os.environ if environ is None else environ
+    resolver = credential_resolver or CredentialResolver(
+        environ=os.environ if environ is None else environ
+    )
     headers: dict[str, str] = {}
-    if config.bearer_token_env is not None:
-        token = source.get(config.bearer_token_env)
-        if not token or "\r" in token or "\n" in token:
-            raise ValueError(f"endpoint authentication environment variable {config.bearer_token_env!r} is missing")
-        headers["Authorization"] = f"Bearer {token}"
-    for name, env_name in config.header_env:
-        value = source.get(env_name)
-        if not value or "\r" in value or "\n" in value:
-            raise ValueError(f"endpoint authentication environment variable {env_name!r} is missing")
-        headers[name] = value
+    if config.bearer_token_ref is not None:
+        token = resolver.resolve(config.bearer_token_ref)
+        headers["Authorization"] = f"Bearer {token.reveal()}"
+    for name, reference in config.header_refs:
+        headers[name] = resolver.resolve(reference).reveal()
     return headers
 
 

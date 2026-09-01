@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator, model_validator
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import CredentialResolver
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_json,
     write_canonical_json,
@@ -550,6 +551,7 @@ def run_conventional_intake(
     required_tier: AdapterTier = AdapterTier.A0,
     local_probe_plan: LocalProbePlan | None = None,
     http_environ: Mapping[str, str] | None = None,
+    credential_resolver: CredentialResolver | None = None,
     http_client_factory: HttpClientFactory | None = None,
     resolved_authoring_config_digest: str | None = None,
 ) -> SourceIntakeResult:
@@ -639,6 +641,7 @@ def run_conventional_intake(
             source_path,
             allowed_roots=allowed_roots,
             environ=http_environ,
+            credential_resolver=credential_resolver,
             client_factory=http_client_factory,
         )
         collection = SourceCollection(

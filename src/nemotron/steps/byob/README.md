@@ -76,14 +76,21 @@ contract, draft a canonical Oracle Pack from sanitized evidence, and carry a rev
 pack into the existing generation path. Install that transport runtime separately with
 `uv sync --extra bfcl-mcp`; the model-authoring environment may use a different MCP SDK major.
 
-This path is not publication-ready yet. The independent P4–P11 probe suite is still pending,
-so MCP gateways currently attain `L0` and the Gold Gate correctly refuses publication. Human
-approval and freeze do not raise that level. Set `BFCL_ENABLE_MCP_MODE_A=1` to opt into
-live discovery, gateway startup, or intake; the default is disabled. The legacy
+Mode A discovery, P4–P11 probing, L2 attestation, shared review/freeze, and fresh-Gold
+publication handoff are implemented and remain experimental
+([`test_bfcl_mcp_gateway.py`](../../../../tests/steps/byob/test_bfcl_mcp_gateway.py),
+[`test_bfcl_authoring_e2e.py`](../../../../tests/steps/byob/test_bfcl_authoring_e2e.py)).
+Mode B and Mode C execution are **unimplemented**. Human approval and freeze never raise
+the attained conformance level. Set `BFCL_ENABLE_MCP_MODE_A=1` to opt into live
+discovery, gateway startup, or intake; the default is disabled. The legacy
 `BFCL_ENABLE_EXPERIMENTAL_MCP` name remains a temporary compatibility alias. See the
 [MCP support matrix](references/bfcl-mcp-support-matrix.md) before integrating a server, then
 use the normative
 [MCP Oracle contract](references/bfcl-mcp-oracle-contract.md) for profile and control details.
+
+For local Python, reviewed HTTP, and MCP assisted authoring, start with the
+[assisted-authoring user guide](references/bfcl-authoring-user-guide.md) and
+[support matrix](references/bfcl-authoring-support-matrix.md).
 
 ## CLI And Config Knobs
 

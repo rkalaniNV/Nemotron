@@ -36,6 +36,10 @@ from nemotron.steps.byob.runtime.authoring_release.review import (
     write_review_approval,
     write_review_packet,
 )
+from nemotron.steps.byob.runtime.authoring_workflow.events import (
+    EVENT_FILE_NAME,
+    load_authoring_events,
+)
 from nemotron.steps.byob.runtime.authoring_workflow.resume import (
     bind_artifact,
     build_session_state,
@@ -498,6 +502,9 @@ def test_real_local_guided_publication_runs_stage_all(
     assert manifest["gold_eligible"] is True
     assert manifest["gold_ineligibility_reasons"] == []
     assert manifest["oracle"]["origin"]["adapter_kind"] == "local_python"
+    events = load_authoring_events(workspace / ".events" / EVENT_FILE_NAME)
+    assert [event.event_type for event in events] == ["validation_verdict"]
+    assert events[0].payload["stage"] == "publication"
 
 
 def test_below_a2_and_stale_approval_fail_before_publication(

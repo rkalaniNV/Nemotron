@@ -409,7 +409,19 @@ quotas. Stage 4 expands to that candidate ceiling; Stage 11 still enforces
 publication ceiling.
 Declare `task_generation.target_published_tasks` when a release also requires
 an exact run-wide row count. A diversity or inventory shortfall then becomes an
-explicit unmet target governed by `unmet_target_policy`.
+explicit unmet target governed by `unmet_target_policy`, and the report names the
+bound that produced it — candidate inventory, category cap, exact-surface
+diversity, the declared mix, or coverage — so the shortfall is actionable.
+
+Two optional `semantic_deduplication_config` limits constrain repeated wording
+independently of embedding similarity: `max_exact_surface_reuse` caps how many
+published rows may share one masked surface, and `min_exact_surface_ratio`
+requires a minimum share of distinct masked surfaces. Both participate in
+selection rather than filtering afterwards. Because a masked surface is what they
+count, they bound publication by wording inventory: a category needs at least
+`tasks_per_category / max_exact_surface_reuse` masked surfaces of its own, which
+is a property of how many templates it declares and how many of them opt into
+paraphrasing, not of how many fixture bindings exist.
 
 Generation rejects unsupported task-generation keys instead of recording
 targets that no stage applies. Category budgets are consumed by expansion and
@@ -576,7 +588,12 @@ tool argument names do not prove which fixture, if any, the backend dereferences
 the executed probe instead returns `not_found`, a mismatch records the matching
 argument, collection, and canonical held-out fixture reference in the validation
 report.
-Each row exposes exactly the tool definitions named by its `tools_present`.
+Each row exposes exactly the tool definitions named by its `tools_present`. A
+template that omits `tools_present` exposes the pack's entire tool catalog, which
+is the realistic default: a deployed assistant sees every tool it owns, not a
+pre-narrowed shortlist. Declaring the field narrows that exposure and is checked
+to name known tools and to cover the template's `required_tools`, so a narrowed
+row can never hide a tool its own gold calls need.
 Rows from `lineage.policy: smoke_no_publication` retain the pack's validation
 `tier` but set `gold_eligible: false`.
 
@@ -610,9 +627,10 @@ uv run nemotron steps run byob/bfcl \
 `lineage.policy: smoke_no_publication`; neither is publication-eligible.
 `banking_vn` is the reference domain pack: it declares a template for every
 policy edge the pipeline supports (`single_turn`, `missing_slot`, `confirmation`,
-`multi_tool`, `dependent_call`, `negative_path`, `clarify_only`, `irrelevant`) and
-every template carries a distractor in `tools_present`. Point `config/default.yaml` at it for a
-publication-oriented run.
+`correction`, `multi_tool`, `dependent_call`, `negative_path`, `clarify_only`,
+`irrelevant`), and no template narrows `tools_present`, so every row must pick
+its calls out of the full nine-tool catalog. Point `config/default.yaml` at it
+for a publication-oriented run.
 `config/default.yaml` is the publication-oriented template. Its
 `oracle_pack.manifest_path` is a `REPLACE_ME_*` placeholder so the template can never
 publish an example domain by omission; point it at your own pack and the config runs
@@ -623,7 +641,10 @@ remaining `REPLACE_ME_*` entries only matter once the corresponding role is enab
 
 Generation supports reference profiling, controlled paraphrasing, Stage 10
 surface-quality validation, and optional Stage 11 semantic deduplication and
-balancing. Stage 11 fails closed on backend/artifact errors and requires an
+balancing. Paraphrasing asks each binding for a different structural style, so a
+pack whose domain or language needs other registers declares its own list in
+`surface_generation.surface_style_axes`; `paraphrases_per_template` may not exceed
+that axis count, because one binding cannot be asked for the same style twice. Stage 11 fails closed on backend/artifact errors and requires an
 explicit abort-or-non-gold policy for unmet targets. Stage 12 supports
 `exports.bfcl_json` and `exports.nemo_evaluator_bundle`; unknown export names and
 settings owned by later stages are refused rather than ignored.

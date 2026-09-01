@@ -42,6 +42,8 @@ def temporary_endpoint_config(
         expected=EndpointIdentity.from_mapping(identity.as_dict(), source="gateway identity"),
         bearer_token_env=gateway.auth.bearer_token_env,
         header_env=tuple(sorted(gateway.auth.headers.items())),
+        bearer_token_ref=gateway.auth.bearer_token_ref,
+        header_refs=tuple(sorted(gateway.auth.header_refs.items())),
         ca_bundle_path=gateway.ca_bundle_path,
         max_request_bytes=gateway.max_request_bytes,
         max_response_bytes=gateway.max_response_bytes,

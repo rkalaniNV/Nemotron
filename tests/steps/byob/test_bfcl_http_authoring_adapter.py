@@ -7,6 +7,10 @@ from typing import Any
 import pytest
 import yaml
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import (
+    CredentialReference,
+    build_authorization_context,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
     ATTESTATION_KIND,
     HTTP_PROFILE_VERSION,
@@ -114,11 +118,15 @@ class _Client:
         names: list[str] | None = None,
         metadata_digest: str = DIGEST_A,
         principal_digest: str | None = None,
+        permission_digest: str | None = None,
+        authorization_context_digest: str | None = None,
     ) -> None:
         self.attestation = attestation
         self.names = ["lookup"] if names is None else names
         self.metadata_digest = metadata_digest
         self.principal_digest = principal_digest
+        self.permission_digest = permission_digest
+        self.authorization_context_digest = authorization_context_digest
         self.closed = False
 
     def metadata(self) -> dict[str, str]:
@@ -134,6 +142,10 @@ class _Client:
         }
         if self.principal_digest is not None:
             result["principal_digest"] = self.principal_digest
+        if self.permission_digest is not None:
+            result["permission_digest"] = self.permission_digest
+        if self.authorization_context_digest is not None:
+            result["authorization_context_digest"] = self.authorization_context_digest
         return result
 
     def list_tools(self) -> list[str]:
@@ -279,32 +291,80 @@ def test_http_identity_binds_credential_reference_without_persisting_secret(
         )
     assert missing_principal.value.code == "unsupported_auth"
 
-    config["expected"]["principal_digest"] = DIGEST_B
+    first_context = build_authorization_context(
+        (CredentialReference.environment("TOKEN_A"),),
+        principal_digest=DIGEST_B,
+        permission_digest=DIGEST_C,
+    )
+    config["expected"].update(
+        {
+            "principal_digest": DIGEST_B,
+            "permission_digest": DIGEST_C,
+            "authorization_context_digest": first_context.authorization_context_digest,
+        }
+    )
     config_path.write_text(yaml.safe_dump(config, sort_keys=True), encoding="utf-8")
     first = inspect_http_package(
         package,
         allowed_roots=(tmp_path,),
         environ={"TOKEN_A": "first-secret"},
-        client_factory=_factory(_Client(attestation, principal_digest=DIGEST_B)),
+        client_factory=_factory(
+            _Client(
+                attestation,
+                principal_digest=DIGEST_B,
+                permission_digest=DIGEST_C,
+                authorization_context_digest=first_context.authorization_context_digest,
+            )
+        ),
     )
 
     config["auth"] = {"bearer_token_env": "TOKEN_B"}
+    second_context = build_authorization_context(
+        (CredentialReference.environment("TOKEN_B"),),
+        principal_digest=DIGEST_B,
+        permission_digest=DIGEST_C,
+    )
+    config["expected"]["authorization_context_digest"] = (
+        second_context.authorization_context_digest
+    )
     config_path.write_text(yaml.safe_dump(config, sort_keys=True), encoding="utf-8")
     second = inspect_http_package(
         package,
         allowed_roots=(tmp_path,),
         environ={"TOKEN_B": "second-secret"},
-        client_factory=_factory(_Client(attestation, principal_digest=DIGEST_B)),
+        client_factory=_factory(
+            _Client(
+                attestation,
+                principal_digest=DIGEST_B,
+                permission_digest=DIGEST_C,
+                authorization_context_digest=second_context.authorization_context_digest,
+            )
+        ),
     )
 
     assert first.identity.source_config_digest != second.identity.source_config_digest
     config["expected"]["principal_digest"] = DIGEST_C
+    third_context = build_authorization_context(
+        (CredentialReference.environment("TOKEN_B"),),
+        principal_digest=DIGEST_C,
+        permission_digest=DIGEST_C,
+    )
+    config["expected"]["authorization_context_digest"] = (
+        third_context.authorization_context_digest
+    )
     config_path.write_text(yaml.safe_dump(config, sort_keys=True), encoding="utf-8")
     third = inspect_http_package(
         package,
         allowed_roots=(tmp_path,),
         environ={"TOKEN_B": "third-secret"},
-        client_factory=_factory(_Client(attestation, principal_digest=DIGEST_C)),
+        client_factory=_factory(
+            _Client(
+                attestation,
+                principal_digest=DIGEST_C,
+                permission_digest=DIGEST_C,
+                authorization_context_digest=third_context.authorization_context_digest,
+            )
+        ),
     )
     assert second.identity.source_config_digest != third.identity.source_config_digest
     persisted = json.dumps(
@@ -317,3 +377,39 @@ def test_http_identity_binds_credential_reference_without_persisting_secret(
     assert "first-secret" not in persisted
     assert "second-secret" not in persisted
     assert "third-secret" not in persisted
+
+
+def test_http_inspection_redacts_credential_reflection_from_errors(
+    tmp_path: Path,
+) -> None:
+    package, attestation = _package(tmp_path)
+    config_path = package / "endpoint_config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    context = build_authorization_context(
+        (CredentialReference.environment("TOKEN_A"),),
+        principal_digest=DIGEST_B,
+        permission_digest=DIGEST_C,
+    )
+    config["auth"] = {"bearer_token_env": "TOKEN_A"}
+    config["expected"].update(
+        {
+            "principal_digest": DIGEST_B,
+            "permission_digest": DIGEST_C,
+            "authorization_context_digest": context.authorization_context_digest,
+        }
+    )
+    config_path.write_text(yaml.safe_dump(config, sort_keys=True), encoding="utf-8")
+
+    class ReflectingClient(_Client):
+        def metadata(self) -> dict[str, str]:
+            raise RuntimeError("server reflected reflected-secret")
+
+    with pytest.raises(HttpPackageError) as failure:
+        inspect_http_package(
+            package,
+            allowed_roots=(tmp_path,),
+            environ={"TOKEN_A": "reflected-secret"},
+            client_factory=_factory(ReflectingClient(attestation)),
+        )
+    assert "reflected-secret" not in str(failure.value)
+    assert failure.value.__cause__ is None

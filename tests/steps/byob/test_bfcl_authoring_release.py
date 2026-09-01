@@ -16,7 +16,11 @@ from nemotron.steps.byob.runtime.authoring_release.freeze import (
     load_frozen_release,
 )
 from nemotron.steps.byob.runtime.authoring_release.handoff import (
+    AuthoringHandoffError,
     handoff_frozen_release,
+)
+from nemotron.steps.byob.runtime.authoring_release.publication import (
+    BfclPublicationAdapter,
 )
 from nemotron.steps.byob.runtime.authoring_release.review import (
     REQUIRED_CHECKLIST_V2,
@@ -341,6 +345,47 @@ def test_v2_approval_cannot_float_to_changed_packet(tmp_path: Path) -> None:
             adapter=_adapter(),
         )
     assert raised.value.code == "release_digest_mismatch"
+
+
+@pytest.mark.parametrize("adapter_kind", ["local_python", "mcp_mode_a"])
+def test_publication_refuses_fresh_validation_for_a_different_pack(
+    adapter_kind: str,
+) -> None:
+    frozen = "sha256:" + "1" * 64
+    gold = {
+        "checks": [{"status": "pass", "failures": []}],
+        "stats": {
+            "has_oracle": True,
+            "n_templates": 1,
+            "n_assertions": 1,
+            "n_tools": 1,
+        },
+        "pack_fingerprint": "2" * 64,
+    }
+    adapter = (
+        McpReleaseAdapter(identity_digest=SHA_A)
+        if adapter_kind == "mcp_mode_a"
+        else BfclPublicationAdapter("local_python")
+    )
+
+    with pytest.raises(AuthoringHandoffError) as stale:
+        adapter.require_fresh_gold(gold, frozen)
+    assert stale.value.code == "fresh_validation_stale"
+
+    # A report that covers the frozen pack passes the staleness boundary, so the
+    # refusal above is specific to the fingerprint rather than the report shape.
+    matching = {**gold, "pack_fingerprint": frozen.removeprefix("sha256:")}
+    if adapter_kind == "local_python":
+        adapter.require_fresh_gold(matching, frozen)
+    else:
+        with pytest.raises(AuthoringHandoffError) as conformance:
+            adapter.require_fresh_gold(matching, frozen)
+        assert conformance.value.code != "fresh_validation_stale"
+
+    failed = {**matching, "checks": [{"status": "fail", "failures": ["replay"]}]}
+    with pytest.raises(AuthoringHandoffError) as not_gold:
+        adapter.require_fresh_gold(failed, frozen)
+    assert not_gold.value.code == "fresh_gold_required"
 
 
 def test_v2_freeze_requires_a2_certification(tmp_path: Path) -> None:

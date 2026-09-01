@@ -162,6 +162,7 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
                 "difficulty_mix",
                 "turn_mix",
                 "tool_call_count_mix",
+                "policy_mix",
                 "max_turns",
                 "max_tool_calls",
             }
