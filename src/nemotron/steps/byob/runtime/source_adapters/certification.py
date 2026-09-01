@@ -1116,8 +1116,23 @@ _MCP_REFERENCE_PROFILE = _reference_profile(
     profile_id="mcp-mode-a-v1",
     adapter_kind="mcp_mode_a",
     cleanup=CleanupKind.SESSION,
-    timeout_s=10.0,
-    max_wall_time_s=100.0,
+    # A probe against Mode A crosses two hops, the gateway and the MCP server behind it,
+    # and every episode pays a session open on both. The old ten-second, twenty-four-call
+    # budget only ever covered discovery, so it decided this transport's tier by
+    # arithmetic. These budgets are the endpoint ones, because the cost is the same shape.
+    timeout_s=60.0,
+    max_wall_time_s=600.0,
+    max_total_calls=128,
+    max_call_overrides={
+        CertificationProbe.IDENTITY_INTEGRITY: 2,
+        CertificationProbe.EXECUTABLE_OBSERVATION: 16,
+        CertificationProbe.STRUCTURED_ERROR_SHAPE: 8,
+        CertificationProbe.RESET_DETERMINISM: 32,
+        CertificationProbe.EPISODE_ISOLATION: 16,
+        CertificationProbe.CONFIRMATION_SAFETY: 16,
+        CertificationProbe.MUTATION_DECLARATION: 16,
+        CertificationProbe.RESULT_SHAPE_COVERAGE: 16,
+    },
 )
 _LOCAL_PYTHON_REFERENCE_PROFILE = _reference_profile(
     profile_id="local-python-v1",
@@ -1141,9 +1156,26 @@ _HTTP_PACKAGE_REFERENCE_PROFILE = _reference_profile(
     profile_id="http-package-v1",
     adapter_kind="http_package",
     cleanup=CleanupKind.SESSION,
-    timeout_s=15.0,
-    max_wall_time_s=150.0,
-    max_call_overrides={CertificationProbe.IDENTITY_INTEGRITY: 2},
+    # One probe is several episodes, and one episode against an endpoint costs a worker
+    # start and a fresh session. Fifteen seconds bounded a probe that only read identity;
+    # it would now fail an honest source for being remote rather than for misbehaving.
+    # The deadline that still means something is the per-call one the runner enforces.
+    timeout_s=60.0,
+    max_wall_time_s=600.0,
+    max_total_calls=128,
+    # An endpoint is probed by calling it, and one call per tool per probe is the floor
+    # for that. The earlier budget of two calls could only cover identity and catalog,
+    # which capped this transport at A0 by arithmetic rather than by evidence.
+    max_call_overrides={
+        CertificationProbe.IDENTITY_INTEGRITY: 2,
+        CertificationProbe.EXECUTABLE_OBSERVATION: 16,
+        CertificationProbe.STRUCTURED_ERROR_SHAPE: 8,
+        CertificationProbe.RESET_DETERMINISM: 32,
+        CertificationProbe.EPISODE_ISOLATION: 16,
+        CertificationProbe.CONFIRMATION_SAFETY: 16,
+        CertificationProbe.MUTATION_DECLARATION: 16,
+        CertificationProbe.RESULT_SHAPE_COVERAGE: 16,
+    },
 )
 PUBLISHED_CERTIFICATION_PROFILES: Mapping[str, CertificationProfile] = (
     MappingProxyType(

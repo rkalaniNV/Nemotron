@@ -3,7 +3,9 @@
 This guide covers Flow 2: producing a reviewed Oracle Pack from one source declaration
 and one domain brief. The manual Oracle Pack path remains unchanged and is documented in
 [bfcl-oracle-pack.md](bfcl-oracle-pack.md). Current adapter and publication status is
-test-linked in [bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md).
+test-linked in [bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md). To
+watch the whole lane run once before reading it step by step, see
+[bfcl-llm-generated-demo.md](bfcl-llm-generated-demo.md).
 
 ## Install and inspect the CLI
 
@@ -25,9 +27,20 @@ version come from policy or explicit confirmation; CI never guesses or prompts.
 Two decisions are required at this first command rather than deferred. A held-out
 decision — either `--held-out-policy` or `--held-out-not-applicable-reason`, with
 `--held-out-reviewed-by` — must be stated before any evidence exists, because evidence
-that has already been collected cannot be retroactively declared clean. A local Python
-source reaching A1 or A2 also needs `--probe-plan`, since those tiers are earned from
-observed probe outcomes and nothing else can supply them.
+that has already been collected cannot be retroactively declared clean. A source reaching
+A1 or A2 also needs `--probe-plan`, since those tiers are earned from observed probe
+outcomes and nothing else can supply them.
+
+The probe plan is one document for every transport. It names a case per published tool,
+at least one structured error if the source has error codes, and a case the tool cannot
+finish inside the deadline; the same plan then drives a local package through a child
+process, an HTTP endpoint through one session per episode, or an MCP Mode A gateway
+through one gateway session per episode. Any session-based plan — HTTP or MCP — must
+carry `fixtures`, because a session is handed its world at open rather than reading it
+from a reviewed file. MCP plans are supplied to `build_mcp_intake.py --probe-plan` and
+are accepted for Mode A only, since Mode A is the only mode whose reset and state are
+control tools; without a plan MCP intake certifies A0, exactly as the other transports
+do.
 
 <!-- doc-smoke: bfcl-author-author-help -->
 ```shell
@@ -79,9 +92,18 @@ python -m nemotron.steps.byob.scripts.bfcl_author publish --help
 Drafting stops at proposals, and it writes them beside a pack rather than into one. The
 assembler turns them into a loadable pack and derives everything mechanical from evidence
 that is already trusted: pack identity and the manifest from the verified bundle,
-`backend.py`, `tools.json`, and `fixtures.json` copied byte for byte from the source tree
-certification fingerprinted, and `assertions.py` from drafts that compiled without a
-blocker.
+`tools.json` from the catalog certification observed, and `assertions.py` from drafts that
+compiled without a blocker.
+
+Where the oracle itself comes from depends on what kind of source was certified. A
+`local_python` source is a tree, so `backend.py` and `fixtures.json` are copied into the
+pack byte for byte from the tree certification fingerprinted. An `http_package` or MCP
+source is a session, and there is nothing to copy: the pack names the certified endpoint,
+pinned to the identity and TLS bundle intake verified, and takes its fixtures from the
+reviewed probe plan those sessions were opened with. Either way the fixtures a pack claims
+must be the fixtures the source was certified against, so an endpoint that pins another
+oracle, a catalog that drifted, or fixtures the plan does not name are all refused
+([`test_bfcl_mcp_pack_assembly.py`](../../../../../tests/steps/byob/test_bfcl_mcp_pack_assembly.py)).
 
 What remains is what a model that has only read a catalog must not state: slots bound to
 fixture columns, turn policies, per-language user turns, and the validation cases that
@@ -90,6 +112,17 @@ file, and every tool and assertion it names is checked back against the evidence
 compiled assertions, so a supplement cannot introduce a tool the source never published
 or an assertion nobody compiled. Assembly writes `candidate_pack_provenance.json`
 recording the digest of every input and every file it produced.
+
+Inside a guided session, assembly is a step of the flow rather than a separate tool:
+`bfcl_author assemble` reads the drafts and evidence the session already bound, binds the
+pack it writes back into the session, and leaves `review` as the next command. The
+standalone assembler remains available for a pack assembled outside a session, where the
+evidence, drafts, and probe plan are passed explicitly.
+
+<!-- doc-smoke: guide-author-assemble-help -->
+```shell
+python -m nemotron.steps.byob.scripts.bfcl_author assemble --help
+```
 
 <!-- doc-smoke: guide-assemble-help -->
 ```shell
@@ -152,8 +185,9 @@ python -m nemotron.steps.byob.scripts.revoke_authoring_release --help
 - `session_binding_drift`: restore the bound artifact or resume from the last verified
   session.
 - `adapter_under_certified`: collect the missing A2 observations; approval cannot raise
-  certification. A local Python source needs `--probe-plan` at `author`, including a case
-  the tool cannot finish in time, or timeout cleanup stays unobserved.
+  certification. Every source needs `--probe-plan`, including a case the tool cannot
+  finish in time, or timeout cleanup stays unobserved; for MCP the plan is passed to
+  `build_mcp_intake.py`, and it is accepted for Mode A only.
 - `source_identity_mismatch`: the source tree changed after certification; assemble the
   exact revision intake certified, or rerun intake.
 - `supplement_assertion_unknown`: the supplement names an assertion drafting never

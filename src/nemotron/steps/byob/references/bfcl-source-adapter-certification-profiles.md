@@ -51,11 +51,18 @@ digest-bound evidence. Missing observations become `probe_missing`; they never b
 
 ### `mcp_mode_a` / `mcp-mode-a-v1`
 
-- Maximum total calls: 24.
-- Maximum summed probe timeout: 100 seconds.
-- Per-probe timeout and cleanup timeout: 10 seconds.
+- Maximum total calls: 128 across the same bounded plan the local and endpoint profiles
+  accept.
+- Maximum summed probe timeout: 600 seconds.
+- Per-probe timeout and cleanup timeout: 60 seconds. A Mode A probe crosses two hops, the
+  gateway and the MCP server behind it, and every episode pays a session open on both, so
+  the endpoint budgets apply here for the same reason.
 - Cleanup boundary: MCP session.
-- Existing MCP P1-P11 projection remains the reference realization.
+- Without a reviewed probe plan intake pins an identity-only descriptor and only the
+  discovery projection applies, which caps the attained tier at A0. With a plan, Mode A
+  runs the same probe choreography as the conventional transports over the gateway's
+  BFCL Oracle HTTP v1 routes. Only Mode A is probeable, because only Mode A exposes reset
+  and state as control tools.
 
 ### `local_python` / `local-python-v1`
 
@@ -69,13 +76,17 @@ digest-bound evidence. Missing observations become `probe_missing`; they never b
 
 ### `http_package` / `http-package-v1`
 
-- Maximum total calls: 24.
-- Maximum summed probe timeout: 150 seconds.
-- Per-probe timeout and cleanup timeout: 15 seconds.
-- Cleanup boundary: endpoint session.
+- Maximum total calls: 128 across the same bounded plan the local profile accepts.
+- Maximum summed probe timeout: 600 seconds.
+- Per-probe timeout and cleanup timeout: 60 seconds. A probe here is several episodes,
+  and one episode costs a worker start and a fresh session, so a budget written for two
+  read-only calls would refuse an honest endpoint for being remote. The deadline that
+  still carries meaning is the per-call one the probe runner enforces.
+- Cleanup boundary: endpoint session. A call that passes its deadline has its session
+  deleted before the observation is recorded, so a leaked session is a failed cleanup.
 - Catalog integrity requires the reviewed companion schema; schema inference from
-  names or observed values is never allowed. Actual endpoint execution belongs to
-  UA-803.
+  names or observed values is never allowed. Endpoint execution runs the same probe
+  choreography as the local transport.
 
 ## Conditional applicability
 

@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import CredentialResolver
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import EndpointConfig
 from nemotron.steps.byob.runtime.mcp.authoring.attestation import (
     AttestationFetcher,
     fetch_gateway_attestation,
@@ -34,6 +37,11 @@ from nemotron.steps.byob.runtime.mcp.authoring.intake import (
 from nemotron.steps.byob.runtime.mcp.authoring.pack_artifacts import (
     EmittedArtifact,
     emit_pack_artifacts,
+)
+from nemotron.steps.byob.runtime.mcp.authoring.probes import (
+    discovery_identity_record,
+    reviewed_probe_tools,
+    run_mcp_gateway_probes,
 )
 from nemotron.steps.byob.runtime.mcp.authoring.provenance import (
     IntakeProvenance,
@@ -55,15 +63,20 @@ from nemotron.steps.byob.runtime.mcp.gateway.identity import (
     GatewayIdentity,
     build_gateway_identity,
 )
-from nemotron.steps.byob.runtime.pack_authoring.artifacts import write_canonical_json
+from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
+    sha256_json,
+    write_canonical_json,
+)
 from nemotron.steps.byob.runtime.pack_authoring.authorization import ExposureSubject
 from nemotron.steps.byob.runtime.source_adapters.certification import (
     AdapterCertificationReport,
     AdapterTier,
     CertificationAuthority,
+    ProbeOutcome,
     certification_reference,
     mcp_reference_profile,
     project_mcp_probe_report,
+    project_probe_executions,
 )
 from nemotron.steps.byob.runtime.source_adapters.contract import (
     AdapterCapability,
@@ -96,6 +109,7 @@ from nemotron.steps.byob.runtime.source_adapters.migration import (
     migrate_legacy_mcp_evidence,
     write_migration_record,
 )
+from nemotron.steps.byob.runtime.source_adapters.probe_engine import AdapterProbePlan
 
 PACK_DIRECTORY_NAME = "pack"
 EVIDENCE_FILE_NAME = "evidence_bundle.json"
@@ -146,6 +160,10 @@ async def run_intake(
     executable_policies: TrustedExecutablePolicies | None = None,
     connection_factory: ConnectionFactory | None = None,
     attestation_fetcher: AttestationFetcher | None = None,
+    endpoint_config_factory: Callable[
+        [LoadedMcpIntake, GatewayIdentity], EndpointConfig
+    ] = temporary_endpoint_config,
+    credential_resolver: CredentialResolver | None = None,
     allow_insecure_localhost: bool = False,
     domain_brief_path: Path | None = None,
     domain_brief_language: str = "en",
@@ -153,6 +171,7 @@ async def run_intake(
     held_out_decision: HeldOutDecision | None = None,
     held_out_policy_path: Path | None = None,
     held_out_content_path: Path | None = None,
+    probe_plan: AdapterProbePlan | None = None,
     resolved_authoring_config_digest: str | None = None,
     required_tier: AdapterTier = AdapterTier.A0,
 ) -> IntakeResult:
@@ -202,6 +221,20 @@ async def run_intake(
             "authenticated MCP authoring requires expected principal_digest, "
             "permission_digest, and authorization_context_digest",
         )
+    if probe_plan is not None:
+        if not v2_requested:
+            raise SourceIntakeError(
+                "intake_inputs_incomplete",
+                "a probe plan only has meaning for v2 intake, which issues the "
+                "certification report the observations feed",
+            )
+        if intake.oracle.value.mode != "A":
+            raise SourceIntakeError(
+                "adapter_not_supported",
+                "only mode A can be probed above A0: reset and state are control tools "
+                f"there, and this profile declares mode {intake.oracle.value.mode}",
+            )
+    identity_started = time.monotonic()
     report = await discover_mcp_oracle(
         intake.oracle,
         environ=environ,
@@ -226,7 +259,7 @@ async def run_intake(
                 intake.value.gateway.authorization_context_digest
             ),
         )
-    temporary_endpoint = temporary_endpoint_config(intake, identity)
+    temporary_endpoint = endpoint_config_factory(intake, identity)
     if attestation_fetcher is None:
         raw_attestation = await asyncio.to_thread(
             fetch_gateway_attestation,
@@ -293,23 +326,43 @@ async def run_intake(
             bundle,
             root / LEGACY_EVIDENCE_FILE_NAME,
         )
+        # One probe operation is either a reset or a tool call, and the reviewed profile
+        # already states what each is allowed to take.
+        probe_timeout_s = float(
+            max(config.limits.reset_timeout_s, config.limits.tool_timeout_s)
+        )
         descriptor = AdapterDescriptor(
             contract_version="bfcl-source-adapter-v1",
             kind="mcp_mode_a",
             implementation_name="bfcl.mcp_mode_a",
             implementation_version="1.0.0",
+            # Without a probe plan this run only reads a catalog and pins an identity, so
+            # the descriptor claims only that. Mode A can do more, but a descriptor that
+            # said so would be describing the gateway rather than this intake.
             capabilities=(
-                AdapterCapability.DESCRIBE_TOOLS,
-                AdapterCapability.PIN_IDENTITY,
+                tuple(sorted(AdapterCapability, key=lambda item: item.value))
+                if probe_plan is not None
+                else (
+                    AdapterCapability.DESCRIBE_TOOLS,
+                    AdapterCapability.PIN_IDENTITY,
+                )
             ),
             fixture_access=FixtureAccessPolicy(
                 kind=FixtureAccessKind(config.fixtures.direction),
                 supports_redaction=True,
             ),
-            probe_safety=ProbeSafetyPolicy(
-                kind=ProbeSafetyKind.IDENTITY_ONLY,
-                max_calls=1,
-                timeout_s=float(config.limits.handshake_timeout_s),
+            probe_safety=(
+                ProbeSafetyPolicy(
+                    kind=ProbeSafetyKind.RESET_ISOLATED,
+                    max_calls=32,
+                    timeout_s=probe_timeout_s,
+                )
+                if probe_plan is not None
+                else ProbeSafetyPolicy(
+                    kind=ProbeSafetyKind.IDENTITY_ONLY,
+                    max_calls=1,
+                    timeout_s=float(config.limits.handshake_timeout_s),
+                )
             ),
             cleanup=CleanupSemantics(
                 kind=CleanupKind.SESSION,
@@ -334,17 +387,26 @@ async def run_intake(
                     domain_brief=brief,
                     domain_brief_report=brief_report,
                     held_out=decision,
+                    # The gateway is handed these fixtures at every session open, so once
+                    # probes have run the reviewed snapshot is what the observations were
+                    # made against. Discovery-only intake has no snapshot to name.
+                    fixture_content_digest=(
+                        sha256_json(probe_plan.fixtures)
+                        if probe_plan is not None
+                        else None
+                    ),
                 ),
             )
             normalized_holder["value"] = migrated
             return migrated.evidence
 
-        try:
-            finalized = finalize_source_intake(
-                descriptor=descriptor,
-                identity=source_identity,
-                profile=profile,
-                project_outcomes=lambda input_digest: project_mcp_probe_report(
+        project_outcomes: Callable[[str], tuple[ProbeOutcome, ...]]
+        execution_inputs_digest: str | None
+        if probe_plan is None:
+            execution_inputs_digest = None
+
+            def project_discovery_checks(input_digest: str) -> tuple[ProbeOutcome, ...]:
+                return project_mcp_probe_report(
                     {"probes": list(report.document["checks"])},
                     input_digest=input_digest,
                     structured_error_applicable=False,
@@ -357,8 +419,51 @@ async def run_intake(
                         )
                         for entry in report.document["catalog"]["tools"]
                     ),
-                ),
-                execution_inputs_digest=None,
+                )
+
+            project_outcomes = project_discovery_checks
+        else:
+            try:
+                probe_run = await asyncio.to_thread(
+                    run_mcp_gateway_probes,
+                    endpoint_config=temporary_endpoint,
+                    tools=reviewed_probe_tools(report.document["catalog"]["tools"]),
+                    identity_record=discovery_identity_record(
+                        identity_document=identity.as_dict(),
+                        attestation_digest=sha256_json(attestation),
+                        started=identity_started,
+                    ),
+                    catalog_pinned=all(
+                        check["status"] == "pass"
+                        for check in report.document["checks"]
+                    ),
+                    plan=probe_plan,
+                    environ=environ,
+                    credential_resolver=credential_resolver,
+                    held_out_sensitive_terms=held_out_sensitive_terms,
+                    timeout_s=probe_timeout_s,
+                )
+            except Exception:
+                staging.cleanup()
+                raise
+            execution_inputs_digest = probe_run.plan_digest
+
+            def project_probe_run(input_digest: str) -> tuple[ProbeOutcome, ...]:
+                return project_probe_executions(
+                    profile,
+                    probe_run.records,
+                    input_digest=input_digest,
+                )
+
+            project_outcomes = project_probe_run
+
+        try:
+            finalized = finalize_source_intake(
+                descriptor=descriptor,
+                identity=source_identity,
+                profile=profile,
+                project_outcomes=project_outcomes,
+                execution_inputs_digest=execution_inputs_digest,
                 certification_authority=certification_authority,
                 required_tier=required_tier,
                 domain_brief_path=domain_brief_path,

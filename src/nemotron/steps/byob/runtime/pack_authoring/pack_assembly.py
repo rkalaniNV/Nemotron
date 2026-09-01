@@ -13,6 +13,14 @@ and `assertions.py` from drafts that compiled without a blocker. The semantics a
 cannot supply arrive as one reviewed supplement, and every tool and assertion that
 supplement names is checked back against those artifacts, so it cannot introduce a tool the
 source never published or an assertion nobody compiled.
+
+A source reached over a session — an HTTP endpoint or an MCP Mode A gateway — is bound the
+same way but from different files, because the oracle is not in the tree. `endpoint_config.yaml`
+replaces `backend.py` and is accepted only when it pins the identity the evidence certified,
+`tools.json` is checked tool by tool against the published surface rather than trusted for
+sitting in the right directory, and `fixtures.json` comes from the reviewed probe plan whose
+digest signed evidence already carries, because a session is handed its world at open rather
+than reading it from the pack.
 """
 
 from __future__ import annotations
@@ -24,7 +32,7 @@ import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
@@ -33,17 +41,27 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.assertion_capabilities 
     AssertionCapabilityError,
     read_literal_assertion_capabilities,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+    EndpointConfig,
+    load_endpoint_config,
+)
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_json,
     write_canonical_json,
 )
 from nemotron.steps.byob.runtime.source_adapters.evidence import (
     SourceEvidenceDocument,
+    ToolEvidence,
     load_source_evidence,
 )
 from nemotron.steps.byob.runtime.source_adapters.local_python import (
     LocalPythonError,
     inspect_local_python_package,
+)
+from nemotron.steps.byob.runtime.source_adapters.probe_engine import AdapterProbePlan
+from nemotron.steps.byob.runtime.source_adapters.reviewed_catalog import (
+    ReviewedCatalogError,
+    load_reviewed_tool_catalog,
 )
 
 SUPPLEMENT_VERSION: Literal[
@@ -57,12 +75,24 @@ RECORD_FILE_NAME = "candidate_pack_provenance.json"
 ASSERTIONS_FILE_NAME = "assertions.py"
 DRAFT_PROVENANCE_FILE_NAME = "draft_provenance.json"
 
+ENDPOINT_CONFIG_FILE_NAME = "endpoint_config.yaml"
+FIXTURES_FILE_NAME = "fixtures.json"
+TOOLS_FILE_NAME = "tools.json"
+
+# The oracle for these kinds is reached over a session, so the pack pins an endpoint rather
+# than importing a package, and its world arrives from the reviewed probe plan.
+SESSION_ADAPTER_KINDS: frozenset[str] = frozenset({"http_package", "mcp_mode_a"})
+
 # Copied verbatim from the certified source tree. `fixtures.json` is optional there, so it
 # is the only one that may be absent.
-_SOURCE_FILES: tuple[tuple[str, bool], ...] = (
+_LOCAL_SOURCE_FILES: tuple[tuple[str, bool], ...] = (
     ("backend.py", True),
-    ("tools.json", True),
-    ("fixtures.json", False),
+    (TOOLS_FILE_NAME, True),
+    (FIXTURES_FILE_NAME, False),
+)
+_SESSION_SOURCE_FILES: tuple[tuple[str, bool], ...] = (
+    (ENDPOINT_CONFIG_FILE_NAME, True),
+    (TOOLS_FILE_NAME, True),
 )
 
 
@@ -214,6 +244,127 @@ def _bind_source(
         )
 
 
+def _tool_surface(tool: ToolEvidence) -> dict[str, Any]:
+    """The part of a tool a benchmark publishes, and therefore the part that must match."""
+    return {
+        "published_name": tool.published_name,
+        "description": tool.description.untrusted_text,
+        "parameter_schema": tool.parameter_schema,
+        "mutates": tool.mutates,
+        "requires_confirmation": tool.requires_confirmation,
+    }
+
+
+def _bind_session_catalog(tools_path: Path, evidence: SourceEvidenceDocument) -> None:
+    """Refuse unless the pack's catalog is the surface certification saw."""
+    try:
+        catalog = load_reviewed_tool_catalog(tools_path)
+    except ReviewedCatalogError as exc:
+        raise PackAssemblyError(
+            "source_catalog_invalid",
+            f"reviewed {TOOLS_FILE_NAME} is not loadable: {exc}",
+            recovery=f"assemble from the {TOOLS_FILE_NAME} intake published",
+        ) from exc
+    observed = {tool.published_name: _tool_surface(tool) for tool in catalog.tools}
+    certified = {tool.published_name: _tool_surface(tool) for tool in evidence.tools}
+    if divergent := sorted(
+        name
+        for name in set(observed) | set(certified)
+        if observed.get(name) != certified.get(name)
+    ):
+        raise PackAssemblyError(
+            "source_catalog_mismatch",
+            f"{TOOLS_FILE_NAME} differs from the certified tool surface: "
+            + ", ".join(divergent),
+            recovery=f"assemble the exact {TOOLS_FILE_NAME} intake certified",
+        )
+
+
+def _bind_session_source(
+    source_root: Path,
+    evidence: SourceEvidenceDocument,
+) -> EndpointConfig:
+    """Refuse unless the endpoint declaration pins the identity evidence certified."""
+    endpoint_path = source_root / ENDPOINT_CONFIG_FILE_NAME
+    try:
+        config = load_endpoint_config(endpoint_path, allowed_roots=(source_root,))
+    except (OSError, ValueError) as exc:
+        raise PackAssemblyError(
+            "endpoint_config_invalid",
+            f"cannot load {ENDPOINT_CONFIG_FILE_NAME}: {type(exc).__name__}: {exc}",
+            recovery="assemble from the endpoint declaration intake certified",
+        ) from exc
+    if config.expected.content_digest != evidence.identity.effective_content_digest:
+        raise PackAssemblyError(
+            "source_identity_mismatch",
+            "endpoint declaration pins a different effective content digest "
+            "than the verified evidence",
+            recovery="assemble from the exact endpoint revision intake certified",
+        )
+    attested = next(
+        (
+            artifact.digest
+            for artifact in evidence.identity.artifacts
+            if artifact.role == "attestation"
+        ),
+        None,
+    )
+    if attested is not None and (
+        config.attestation is None or config.attestation.expected_digest != attested
+    ):
+        raise PackAssemblyError(
+            "source_identity_mismatch",
+            "endpoint declaration does not pin the conformance attestation "
+            "certification bound",
+            recovery="assemble from the endpoint declaration intake published",
+        )
+    _bind_session_catalog(source_root / TOOLS_FILE_NAME, evidence)
+    return config
+
+
+def _session_fixtures(
+    probe_plan_path: Path | None,
+    evidence: SourceEvidenceDocument,
+) -> dict[str, Any] | None:
+    """Return the reviewed world a session is handed, bound to signed evidence."""
+    if evidence.fixtures.direction in {"none", "read_only"}:
+        if probe_plan_path is not None:
+            raise PackAssemblyError(
+                "fixtures_not_applicable",
+                "evidence declares no session fixtures, so a probe plan cannot supply them",
+                recovery="certify the source with a reviewed probe plan, then assemble",
+            )
+        return None
+    if probe_plan_path is None:
+        raise PackAssemblyError(
+            "fixtures_missing",
+            "a session-backed pack needs the reviewed probe plan that carries its fixtures",
+            recovery="pass the same probe plan intake certified this source with",
+        )
+    try:
+        document = json.loads(probe_plan_path.resolve().read_text(encoding="utf-8"))
+        plan = AdapterProbePlan.model_validate(document)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise PackAssemblyError(
+            "probe_plan_invalid",
+            f"cannot read the reviewed probe plan: {type(exc).__name__}: {exc}",
+            recovery="pass the probe plan intake certified this source with",
+        ) from exc
+    if plan.fixtures is None:
+        raise PackAssemblyError(
+            "fixtures_missing",
+            "the reviewed probe plan declares no fixtures",
+            recovery="review a probe plan that states the world sessions are handed",
+        )
+    if evidence.fixtures.content_digest != sha256_json(plan.fixtures):
+        raise PackAssemblyError(
+            "fixtures_mismatch",
+            "probe plan fixtures differ from the snapshot the evidence certified",
+            recovery="pass the exact probe plan intake certified this source with",
+        )
+    return plan.fixtures
+
+
 def _compiled_assertion_names(assertions_path: Path) -> frozenset[str]:
     try:
         declared = read_literal_assertion_capabilities(assertions_path)
@@ -340,14 +491,18 @@ def _manifest_document(
     has_fixtures: bool,
 ) -> dict[str, Any]:
     paths: dict[str, str] = {
-        "tools": "tools.json",
-        "backend": "backend.py",
+        "tools": TOOLS_FILE_NAME,
         "templates": "task_templates.yaml",
         "assertions": ASSERTIONS_FILE_NAME,
         "validation_cases": "validation_cases.yaml",
     }
+    # The loader accepts exactly one oracle, so the pack names the one its source is.
+    if evidence.source_adapter.kind in SESSION_ADAPTER_KINDS:
+        paths["endpoint"] = ENDPOINT_CONFIG_FILE_NAME
+    else:
+        paths["backend"] = "backend.py"
     if has_fixtures:
-        paths["fixtures"] = "fixtures.json"
+        paths["fixtures"] = FIXTURES_FILE_NAME
     manifest: dict[str, Any] = {
         "pack_id": evidence.pack.pack_id,
         "version": evidence.pack.version,
@@ -367,8 +522,19 @@ def _manifest_document(
             name: dict(sorted(turns.items()))
             for name, turns in sorted(supplement.assistant_turn_templates.items())
         }
-    if supplement.confirmation is not None:
-        manifest["confirmation"] = dict(sorted(supplement.confirmation.items()))
+    confirmation = supplement.confirmation
+    if confirmation is None:
+        # Certified evidence already states this vocabulary for a session source, and a
+        # pack whose confirmation names differ from the oracle's would gate nothing.
+        declared = {
+            "parameter": evidence.vocabulary.parameter,
+            "status_field": evidence.vocabulary.status_field,
+            "pending_status": evidence.vocabulary.pending_status,
+        }
+        if all(value is not None for value in declared.values()):
+            confirmation = cast(dict[str, str], declared)
+    if confirmation is not None:
+        manifest["confirmation"] = dict(sorted(confirmation.items()))
     if supplement.system_prompt is not None:
         manifest["system_prompt_path"] = supplement.system_prompt
     return manifest
@@ -389,6 +555,7 @@ def assemble_candidate_pack(
     draft_root: Path,
     supplement_path: Path,
     output_root: Path,
+    probe_plan_path: Path | None = None,
 ) -> AssembledCandidatePack:
     """Write one candidate oracle pack, or refuse and name the binding that failed."""
     final_root = output_root.resolve()
@@ -399,14 +566,29 @@ def assemble_candidate_pack(
             recovery="assemble into a fresh directory so no earlier pack is overwritten",
         )
     evidence = _verified_evidence(evidence_path)
-    if evidence.source_adapter.kind != "local_python":
+    kind = evidence.source_adapter.kind
+    session_backed = kind in SESSION_ADAPTER_KINDS
+    if kind != "local_python" and not session_backed:
         raise PackAssemblyError(
             "adapter_not_supported",
-            f"candidate pack assembly covers local_python, not {evidence.source_adapter.kind}",
-            recovery="assemble local Python sources, or compile the pack by hand",
+            f"candidate pack assembly has no binder for adapter kind {kind}",
+            recovery="assemble a built-in adapter, or compile the pack by hand",
         )
     source = source_root.resolve()
-    _bind_source(source, evidence)
+    endpoint: EndpointConfig | None = None
+    fixtures: dict[str, Any] | None = None
+    if session_backed:
+        endpoint = _bind_session_source(source, evidence)
+        fixtures = _session_fixtures(probe_plan_path, evidence)
+    else:
+        if probe_plan_path is not None:
+            raise PackAssemblyError(
+                "fixtures_not_applicable",
+                "a local Python pack carries its own fixtures, so a probe plan "
+                "cannot supply them",
+                recovery="assemble a local source without --probe-plan",
+            )
+        _bind_source(source, evidence)
     assertions_path = _bind_drafts(draft_root.resolve(), evidence)
     assertion_names = _compiled_assertion_names(assertions_path)
     supplement = load_candidate_pack_supplement(supplement_path)
@@ -426,20 +608,31 @@ def assemble_candidate_pack(
         pack_root = root / PACK_DIRECTORY_NAME
         pack_root.mkdir()
         copied: list[str] = []
-        for name, required in _SOURCE_FILES:
+        for name, required in (
+            _SESSION_SOURCE_FILES if session_backed else _LOCAL_SOURCE_FILES
+        ):
             origin = source / name
             if not origin.is_file():
                 if required:
                     raise PackAssemblyError(
                         "source_package_invalid",
                         f"certified source package has no {name}",
-                        recovery="assemble from a complete local Python source package",
+                        recovery="assemble from a complete certified source package",
                     )
                 continue
             # copyfile rather than copy2: a pack containing a symlink is refused later,
             # and metadata from the source tree is not part of the pack contract.
             shutil.copyfile(origin, pack_root / name)
             copied.append(name)
+        if endpoint is not None and endpoint.ca_bundle_path is not None:
+            # The endpoint loader requires the bundle inside the pack tree, so the pack
+            # has to carry it under the relative name its own config already names.
+            bundle_name = Path(endpoint.ca_bundle_path).name
+            shutil.copyfile(endpoint.ca_bundle_path, pack_root / bundle_name)
+            copied.append(bundle_name)
+        if fixtures is not None:
+            write_canonical_json(fixtures, pack_root / FIXTURES_FILE_NAME)
+            copied.append(FIXTURES_FILE_NAME)
         shutil.copyfile(assertions_path, pack_root / ASSERTIONS_FILE_NAME)
         _write_yaml(
             [dict(template) for template in supplement.task_templates],
@@ -453,7 +646,7 @@ def assemble_candidate_pack(
             _manifest_document(
                 supplement,
                 evidence=evidence,
-                has_fixtures="fixtures.json" in copied,
+                has_fixtures=FIXTURES_FILE_NAME in copied,
             ),
             pack_root / "manifest.yaml",
         )
@@ -463,6 +656,9 @@ def assemble_candidate_pack(
             source=source,
             supplement_path=supplement_path.resolve(),
             assertion_names=assertion_names,
+            probe_plan_path=(
+                probe_plan_path.resolve() if probe_plan_path is not None else None
+            ),
         )
         write_canonical_json(record, root / RECORD_FILE_NAME)
         root.replace(final_root)
@@ -485,6 +681,7 @@ def _record_document(
     source: Path,
     supplement_path: Path,
     assertion_names: Sequence[str] | frozenset[str],
+    probe_plan_path: Path | None = None,
 ) -> dict[str, Any]:
     document: dict[str, Any] = {
         "schema_version": RECORD_VERSION,
@@ -496,6 +693,9 @@ def _record_document(
         ),
         "source_root": str(source),
         "supplement_digest": _digest_file(supplement_path),
+        "probe_plan_digest": (
+            _digest_file(probe_plan_path) if probe_plan_path is not None else None
+        ),
         "compiled_assertions": sorted(assertion_names),
         "pack_files": {
             path.relative_to(pack_root).as_posix(): _digest_file(path)

@@ -10,9 +10,13 @@ fail-closed rollout flag. “Unimplemented” is a target, not usable behavior.
 | `local_python` static identity | supported | Reviewed package and import closure | [`test_bfcl_local_authoring_adapter.py`](../../../../../tests/steps/byob/test_bfcl_local_authoring_adapter.py) |
 | `local_python` A1/A2 probes | supported | Least-privilege process worker | [`test_bfcl_source_intake.py`](../../../../../tests/steps/byob/test_bfcl_source_intake.py) |
 | `http_package` reviewed intake | supported | Reviewed schema plus live identity and attestation | [`test_bfcl_http_authoring_adapter.py`](../../../../../tests/steps/byob/test_bfcl_http_authoring_adapter.py) |
+| `http_package` A1/A2 probes | supported | One endpoint session per episode; deadlines delete the session | [`test_bfcl_http_probe_certification.py`](../../../../../tests/steps/byob/test_bfcl_http_probe_certification.py) |
 | MCP Mode A intake and gateway | experimental | `BFCL_ENABLE_MCP_MODE_A=1`; independent probes still required | [`test_bfcl_mcp_gateway.py`](../../../../../tests/steps/byob/test_bfcl_mcp_gateway.py) |
+| MCP Mode A A1/A2 probes | experimental | `BFCL_ENABLE_MCP_MODE_A=1`; a reviewed probe plan is required, and Mode A is the only mode whose reset can be probed | [`test_bfcl_mcp_probe_certification.py`](../../../../../tests/steps/byob/test_bfcl_mcp_probe_certification.py) |
 | MCP Mode B executable shim | unimplemented | Discovery records do not authorize execution | unimplemented |
 | MCP Mode C executable snapshot | unimplemented | Snapshot records do not authorize execution | unimplemented |
+| Candidate pack assembly from a local source | supported | The certified source tree is copied into the pack; every binding is proved against evidence | [`test_bfcl_authoring_pack_assembly.py`](../../../../../tests/steps/byob/test_bfcl_authoring_pack_assembly.py) |
+| Candidate pack assembly from a session-backed source | supported | The pack points at the certified endpoint instead of carrying it; fixtures come from the reviewed probe plan | [`test_bfcl_mcp_pack_assembly.py`](../../../../../tests/steps/byob/test_bfcl_mcp_pack_assembly.py) |
 | Shared evidence schema v2 | supported | Same trust envelope for all built-in adapters | [`test_bfcl_source_intake.py`](../../../../../tests/steps/byob/test_bfcl_source_intake.py) |
 | Guided two-boundary CLI | supported | Model exposure and release approval remain distinct | [`test_bfcl_authoring_cli.py`](../../../../../tests/steps/byob/test_bfcl_authoring_cli.py) |
 | A2 Gold freeze boundary | supported | A0/A1 may draft but cannot freeze as Gold | [`test_bfcl_authoring_release.py`](../../../../../tests/steps/byob/test_bfcl_authoring_release.py) |

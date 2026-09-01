@@ -570,7 +570,7 @@ def test_local_observation_intake_enforces_a1_and_a2_boundaries(
         certification_authority=AUTHORITY,
         held_out_decision=DECISION,
         required_tier=required_tier,
-        local_probe_plan=_probe_plan(include_timeout=include_timeout),
+        probe_plan=_probe_plan(include_timeout=include_timeout),
     )
 
     assert result.finalized.certification.attained_tier is required_tier
@@ -638,7 +638,7 @@ def test_a2_refusal_from_an_a1_run_publishes_nothing(tmp_path: Path) -> None:
             certification_authority=AUTHORITY,
             held_out_decision=DECISION,
             required_tier=AdapterTier.A2,
-            local_probe_plan=_probe_plan(include_timeout=False),
+            probe_plan=_probe_plan(include_timeout=False),
         )
 
     assert refused.value.code == "adapter_under_certified"

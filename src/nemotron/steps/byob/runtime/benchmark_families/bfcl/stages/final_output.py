@@ -310,9 +310,10 @@ def _portable_path(
     # only matches its own root in resolved form: macOS states /tmp while the root is
     # /private/tmp. Without the second form the same logical config hashes one way on
     # macOS and another on Linux, which is the drift this labelling exists to prevent.
+    # A relative path is left alone, because resolving it would fold in the working
+    # directory and make the hash depend on where the run was started from.
     forms = [path]
-    resolved = path.resolve()
-    if resolved != path:
+    if path.is_absolute() and (resolved := path.resolve()) != path:
         forms.append(resolved)
     for label, root in candidates:
         for form in forms:

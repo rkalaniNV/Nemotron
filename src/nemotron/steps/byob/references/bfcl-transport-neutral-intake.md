@@ -28,9 +28,14 @@ sign certification, construct the final evidence digest, or authorize model expo
 
 `run_conventional_intake` accepts an inert source declaration, an explicit source base
 directory and allowed roots, pack identity, domain brief, certification authority, and
-held-out decision. Optional local probe plans can raise local evidence above A0 only
-when the published profile derives that tier. Supplying local-only input to an HTTP
-source fails closed.
+held-out decision. An optional probe plan can raise evidence above A0 only when the
+published profile derives that tier from what the probes observed. The plan is the same
+document for every transport, including the MCP intake entry point, because the questions
+on the ladder do not change when the source is reached over a socket: a local package is
+probed through a child process, an HTTP package through one endpoint session per episode,
+an MCP Mode A source through one gateway session per episode, and a deadline that expires
+deletes that session before the observation is recorded. A session-based plan without
+`fixtures` fails closed, since a session cannot read a reviewed fixture file.
 
 The published envelope contains:
 
@@ -82,8 +87,10 @@ The matrix requires A0 for all three transports and proves that the same A0 repo
 cannot satisfy an A2 boundary. Local process fixtures additionally exercise successful
 A1 and A2 intake and prove that an A1 run requested as A2 publishes no output. A0 and
 A1 unresolved gaps are asserted explicitly. Conventional probe records must carry
-BFCL-measured cleanup evidence; MCP's legacy projection is the only exception and is
-tied to the versioned `mcp-mode-a-v1` profile.
+BFCL-measured cleanup evidence; MCP's discovery-only projection is the one exception and
+is tied to the versioned `mcp-mode-a-v1` profile. That exception applies only when no
+probe plan was supplied: a probed Mode A gateway runs the shared choreography and carries
+the same BFCL-measured cleanup evidence as the conventional transports.
 
 The downstream evidence loader resolves certification by the persisted profile ID
 through the fixed published registry, rather than special-casing MCP. Local, HTTP, and

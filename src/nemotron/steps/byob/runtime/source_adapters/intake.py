@@ -66,12 +66,17 @@ from nemotron.steps.byob.runtime.source_adapters.http_package import (
     HttpClientFactory,
     inspect_http_package,
 )
+from nemotron.steps.byob.runtime.source_adapters.http_package_probes import (
+    run_http_package_probes,
+)
 from nemotron.steps.byob.runtime.source_adapters.local_python import (
     inspect_local_python_package,
 )
 from nemotron.steps.byob.runtime.source_adapters.local_python_probes import (
-    LocalProbePlan,
     run_local_python_probes,
+)
+from nemotron.steps.byob.runtime.source_adapters.probe_engine import (
+    AdapterProbePlan,
 )
 from nemotron.steps.byob.runtime.source_adapters.registry import (
     ResolvedAdapter,
@@ -549,7 +554,7 @@ def run_conventional_intake(
     domain_brief_language: str = "en",
     domain_brief_redactions: Mapping[str, str] | None = None,
     required_tier: AdapterTier = AdapterTier.A0,
-    local_probe_plan: LocalProbePlan | None = None,
+    probe_plan: AdapterProbePlan | None = None,
     http_environ: Mapping[str, str] | None = None,
     credential_resolver: CredentialResolver | None = None,
     http_client_factory: HttpClientFactory | None = None,
@@ -579,14 +584,14 @@ def run_conventional_intake(
             source_path,
             allowed_roots=allowed_roots,
         )
-        if local_probe_plan is None:
+        if probe_plan is None:
             descriptor = local_inspection.descriptor
             records = local_inspection.execution_records
             execution_inputs_digest = None
         else:
             probe_run = run_local_python_probes(
                 local_inspection,
-                local_probe_plan,
+                probe_plan,
                 allowed_roots=allowed_roots,
                 held_out_sensitive_terms=sensitive_terms,
             )
@@ -602,14 +607,14 @@ def run_conventional_intake(
             None,
         )
         fixture_direction: Literal["none", "read_only", "pushed", "snapshot"]
-        if local_probe_plan is not None and local_probe_plan.fixtures is not None:
-            fixture_digest = sha256_json(local_probe_plan.fixtures)
+        if probe_plan is not None and probe_plan.fixtures is not None:
+            fixture_digest = sha256_json(probe_plan.fixtures)
             fixture_direction = "snapshot"
             vocabulary = ConfirmationVocabulary(
-                parameter=local_probe_plan.confirmation_parameter,
-                status_field=local_probe_plan.status_field,
-                pending_status=local_probe_plan.pending_status,
-                error_path=".".join(local_probe_plan.error_path),
+                parameter=probe_plan.confirmation_parameter,
+                status_field=probe_plan.status_field,
+                pending_status=probe_plan.pending_status,
+                error_path=".".join(probe_plan.error_path),
             )
         else:
             fixture_direction = "read_only" if fixture_digest else "none"
@@ -632,11 +637,6 @@ def run_conventional_intake(
             execution_inputs_digest=execution_inputs_digest,
         )
     elif resolved.adapter_id == "http_package":
-        if local_probe_plan is not None:
-            raise SourceIntakeError(
-                "adapter_source_mismatch",
-                "a local probe plan cannot be supplied to an HTTP source",
-            )
         http_inspection = inspect_http_package(
             source_path,
             allowed_roots=allowed_roots,
@@ -644,6 +644,38 @@ def run_conventional_intake(
             credential_resolver=credential_resolver,
             client_factory=http_client_factory,
         )
+        http_fixture_direction: Literal["none", "read_only", "pushed", "snapshot"]
+        if probe_plan is None:
+            records = http_inspection.execution_records
+            execution_inputs_digest = None
+            http_fixture_direction = "none"
+            http_fixture_digest = None
+            vocabulary = ConfirmationVocabulary(
+                parameter="confirm",
+                status_field="status",
+                pending_status="awaiting_confirmation",
+                error_path="error.code",
+            )
+        else:
+            http_probe_run = run_http_package_probes(
+                http_inspection,
+                probe_plan,
+                environ=http_environ,
+                credential_resolver=credential_resolver,
+                held_out_sensitive_terms=sensitive_terms,
+            )
+            records = http_probe_run.records
+            execution_inputs_digest = http_probe_run.plan_digest
+            # The endpoint is handed these fixtures at every session open, so the
+            # reviewed snapshot is what the observations were made against.
+            http_fixture_direction = "snapshot"
+            http_fixture_digest = sha256_json(probe_plan.fixtures)
+            vocabulary = ConfirmationVocabulary(
+                parameter=probe_plan.confirmation_parameter,
+                status_field=probe_plan.status_field,
+                pending_status=probe_plan.pending_status,
+                error_path=".".join(probe_plan.error_path),
+            )
         collection = SourceCollection(
             resolved=resolved,
             descriptor=http_inspection.descriptor,
@@ -651,19 +683,15 @@ def run_conventional_intake(
             identity=http_inspection.identity,
             pack=pack,
             tools=http_inspection.tools,
-            fixture_direction="none",
-            fixture_content_digest=None,
-            vocabulary=ConfirmationVocabulary(
-                parameter="confirm",
-                status_field="status",
-                pending_status="awaiting_confirmation",
-                error_path="error.code",
-            ),
+            fixture_direction=http_fixture_direction,
+            fixture_content_digest=http_fixture_digest,
+            vocabulary=vocabulary,
             project_outcomes=lambda input_digest: project_probe_executions(
                 http_package_reference_profile(),
-                http_inspection.execution_records,
+                records,
                 input_digest=input_digest,
             ),
+            execution_inputs_digest=execution_inputs_digest,
         )
     else:
         raise SourceIntakeError(

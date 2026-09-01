@@ -42,6 +42,7 @@ from nemotron.steps.byob.runtime.source_adapters.held_out import (
     build_not_applicable_decision,
     load_required_held_out_policy,
 )
+from nemotron.steps.byob.runtime.source_adapters.probe_engine import AdapterProbePlan
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -96,6 +97,11 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="Directory for the pack draft, evidence bundle, and provenance",
     )
+    # A1 and A2 are observation tiers, so they are only reachable when the reviewer
+    # supplies the bounded probe plan whose execution the certification report covers.
+    # The plan is the same transport-neutral document a local package or an endpoint is
+    # probed with; only mode A can be probed, because only mode A can be reset.
+    parser.add_argument("--probe-plan", type=Path)
     parser.add_argument("--resolved-authoring-config", type=Path)
     parser.add_argument(
         "--trusted-executables",
@@ -134,6 +140,13 @@ def _flagged_text(result: IntakeResult) -> list[dict[str, str]]:
 async def _run(args: argparse.Namespace) -> IntakeResult:
     if args.held_out_policy is None and args.held_out_content is not None:
         raise ValueError("--held-out-content requires --held-out-policy")
+    probe_plan = (
+        AdapterProbePlan.model_validate(
+            json.loads(args.probe_plan.read_text(encoding="utf-8"))
+        )
+        if args.probe_plan is not None
+        else None
+    )
     policies = (
         load_trusted_executable_policies(args.trusted_executables)
         if args.trusted_executables is not None
@@ -199,6 +212,7 @@ async def _run(args: argparse.Namespace) -> IntakeResult:
         held_out_decision=held_out,
         held_out_policy_path=args.held_out_policy,
         held_out_content_path=args.held_out_content,
+        probe_plan=probe_plan,
         resolved_authoring_config_digest=resolved_config_digest,
         required_tier=required_tier,
     )

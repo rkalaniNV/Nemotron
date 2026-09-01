@@ -120,6 +120,18 @@ class MigrationContext(_StrictModel):
     domain_brief: DomainBriefEvidence
     domain_brief_report: DomainBriefRedactionReport
     held_out: HeldOutDecision
+    # A legacy bundle names a fixture *direction* but never the fixtures themselves,
+    # because discovery has none. Once probes run, the reviewed snapshot they ran against
+    # is a fact about this evidence, so the caller that supplied the plan states its
+    # digest here rather than letting a later phase re-derive it from an unsigned file.
+    fixture_content_digest: StrictStr | None = None
+
+    @field_validator("fixture_content_digest")
+    @classmethod
+    def _fixture_digest(cls, value: str | None) -> str | None:
+        if value is not None and _DIGEST.fullmatch(value) is None:
+            raise ValueError("fixture_content_digest must be sha256:<64 lowercase hex>")
+        return value
 
     @model_validator(mode="after")
     def _descriptor_binding(self) -> MigrationContext:
@@ -569,7 +581,7 @@ def migrate_legacy_mcp_evidence(
         ),
         fixtures=FixtureEvidence(
             direction=direction,
-            content_digest=None,
+            content_digest=context.fixture_content_digest,
             held_out=context.held_out,
         ),
         tools=_tools(document),

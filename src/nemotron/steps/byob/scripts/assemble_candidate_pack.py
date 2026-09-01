@@ -5,6 +5,12 @@ This sits between `draft` and `review`. It authors nothing: the pack identity co
 verified evidence, the oracle files come from the source tree certification fingerprinted,
 `assertions.py` comes from drafts that compiled, and the reviewed supplement supplies only
 the semantics no draft schema can express.
+
+A source reached over a session — an HTTP endpoint or an MCP Mode A gateway — names its
+oracle as `endpoint_config.yaml` instead of `backend.py`, and its `fixtures.json` comes from
+`--probe-plan`, because a session is handed its world at open rather than reading it from
+the pack. That plan must be the one intake certified with; its digest is checked against the
+snapshot signed evidence carries.
 """
 
 from __future__ import annotations
@@ -26,6 +32,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--drafts", type=Path, required=True, help="Draft root directory")
     parser.add_argument("--supplement", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--probe-plan",
+        type=Path,
+        help="Reviewed probe plan carrying the fixtures a session source is handed",
+    )
     return parser
 
 
@@ -42,6 +53,7 @@ def main() -> None:
             draft_root=args.drafts,
             supplement_path=args.supplement,
             output_root=args.output,
+            probe_plan_path=args.probe_plan,
         )
     except (PackAssemblyError, OSError, ValueError) as exc:
         _print(
