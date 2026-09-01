@@ -306,12 +306,21 @@ def _portable_path(
     roots: tuple[tuple[str, Path], ...] | None = None,
 ) -> str:
     candidates = roots or (("<byob>", BYOB_ROOT),)
+    # Roots arrive already resolved, so a config that spells a path through a symlink
+    # only matches its own root in resolved form: macOS states /tmp while the root is
+    # /private/tmp. Without the second form the same logical config hashes one way on
+    # macOS and another on Linux, which is the drift this labelling exists to prevent.
+    forms = [path]
+    resolved = path.resolve()
+    if resolved != path:
+        forms.append(resolved)
     for label, root in candidates:
-        try:
-            relative = path.relative_to(root)
-        except ValueError:
-            continue
-        return label if relative == Path(".") else f"{label}/{relative.as_posix()}"
+        for form in forms:
+            try:
+                relative = form.relative_to(root)
+            except ValueError:
+                continue
+            return label if relative == Path(".") else f"{label}/{relative.as_posix()}"
     return str(path)
 
 
