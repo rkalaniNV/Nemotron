@@ -220,6 +220,7 @@ module = [
     "nemotron.steps.byob.runtime.mcp.config",
     "nemotron.steps.byob.runtime.mcp.gateway.result_mapping",
     "nemotron.steps.byob.runtime.mcp.authoring.pack_artifacts",
+    "nemotron.steps.byob.runtime.pack_authoring.pack_assembly",
     "nemotron.steps.byob.runtime.pack_authoring.runner",
 ]
 disable_error_code = ["import-untyped"]

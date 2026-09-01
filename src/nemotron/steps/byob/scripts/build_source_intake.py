@@ -25,6 +25,7 @@ from nemotron.steps.byob.runtime.source_adapters.held_out import (
     load_required_held_out_policy,
 )
 from nemotron.steps.byob.runtime.source_adapters.intake import run_conventional_intake
+from nemotron.steps.byob.runtime.source_adapters.local_python_probes import LocalProbePlan
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -42,6 +43,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--certification-private-key", type=Path, required=True)
     parser.add_argument("--certification-key-id", required=True)
     parser.add_argument("--required-tier", choices=("A0", "A1", "A2"), default="A0")
+    # A1 and A2 are observation tiers, so they are only reachable when the reviewer
+    # supplies the bounded probe plan whose execution the certification report covers.
+    parser.add_argument("--probe-plan", type=Path)
     held_out = parser.add_mutually_exclusive_group(required=True)
     held_out.add_argument("--held-out-policy", type=Path)
     held_out.add_argument("--held-out-not-applicable-reason")
@@ -92,6 +96,13 @@ def main() -> None:
             require_adapter_rollout(args.adapter)
         if args.held_out_policy is None and args.held_out_content is not None:
             raise ValueError("--held-out-content requires --held-out-policy")
+        probe_plan = None
+        if args.probe_plan is not None:
+            if args.adapter != "local_python":
+                raise ValueError("--probe-plan describes local Python probe execution")
+            probe_plan = LocalProbePlan.model_validate(
+                json.loads(args.probe_plan.read_text(encoding="utf-8"))
+            )
         decision = (
             load_required_held_out_policy(
                 args.held_out_policy,
@@ -122,6 +133,7 @@ def main() -> None:
             held_out_policy_path=args.held_out_policy,
             held_out_content_path=args.held_out_content,
             required_tier=AdapterTier(args.required_tier),
+            local_probe_plan=probe_plan,
             resolved_authoring_config_digest=resolved_config_digest,
         )
     except (OSError, ValueError) as exc:

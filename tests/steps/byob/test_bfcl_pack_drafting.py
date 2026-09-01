@@ -15,6 +15,7 @@ from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     write_canonical_json,
 )
 from nemotron.steps.byob.runtime.pack_authoring.authorization import (
+    AuthorizationError,
     authorize_model_exposure_by_human,
     authorize_model_exposure_by_policy,
     build_exposure_subject,
@@ -54,7 +55,10 @@ from nemotron.steps.byob.runtime.pack_authoring.questions import (
     write_answer_set,
     write_open_questions,
 )
-from nemotron.steps.byob.runtime.pack_authoring.runner import run_drafting
+from nemotron.steps.byob.runtime.pack_authoring.runner import (
+    DraftingResult,
+    run_drafting,
+)
 from nemotron.steps.byob.runtime.pack_authoring.schemas import (
     AssertionSpecPlan,
     CoveragePlan,
@@ -1288,6 +1292,65 @@ def test_v2_accepts_exact_organizational_exposure_policy_in_drafting(
     assert result.provenance.document["model_exposure_authorization"]["mode"] == (
         "organizational_policy"
     )
+
+
+def test_drafting_honours_the_resolved_config_an_authorization_was_bound_to(
+    tmp_path: Path,
+) -> None:
+    """A guided authorization names a configuration, so drafting has to present it.
+
+    Intake binds the resolved configuration digest into the exposure subject. If drafting
+    rebuilt that subject without it, every guided run would be refused, and an
+    authorization granted for one configuration would silently cover a different one.
+    """
+    inputs = _v2_inputs(tmp_path, label="config-bound-authorization")
+    evidence = load_source_evidence(inputs[0])
+    _, brief_report = load_domain_brief(inputs[6], language="en")
+    held_out_report = load_held_out_redaction_report(inputs[8])
+    config_digest = "sha256:" + "4" * 64
+    authorization_path = write_exposure_authorization(
+        authorize_model_exposure_by_human(
+            build_exposure_subject(
+                evidence,
+                domain_brief_report=brief_report,
+                held_out_redaction_report=held_out_report,
+                resolved_authoring_config_digest=config_digest,
+            ),
+            authorized_by="exposure-reviewer@example.test",
+        ),
+        tmp_path / "config-bound-authorization.json",
+    )
+
+    def draft(output: str, digest: str | None) -> DraftingResult:
+        return run_drafting(
+            inputs[0],
+            inputs[1],
+            tmp_path / output,
+            MODEL,
+            caller=_FakeCaller(),
+            certification_report_path=inputs[2],
+            trusted_certification_keys=inputs[5],
+            domain_brief_source_path=inputs[6],
+            domain_brief_report_path=inputs[7],
+            held_out_redaction_report_path=inputs[8],
+            source_bundle_path=inputs[3],
+            migration_record_path=inputs[4],
+            exposure_authorization_path=authorization_path,
+            resolved_authoring_config_digest=digest,
+        )
+
+    result = draft("config-bound-output", config_digest)
+    assert result.provenance.document["resolved_authoring_config_digest"] == (
+        config_digest
+    )
+
+    for label, presented in (
+        ("other-config", "sha256:" + "5" * 64),
+        ("no-config", None),
+    ):
+        with pytest.raises(AuthorizationError, match="does not cover the current input"):
+            draft(f"{label}-output", presented)
+        assert not (tmp_path / f"{label}-output").exists()
 
 
 def test_answered_revision_resumes_only_after_full_digest_replay(
