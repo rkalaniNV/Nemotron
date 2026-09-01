@@ -31,8 +31,10 @@ from nemotron.steps.byob.runtime.source_adapters.certification import (
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True, help="evidence_bundle.json")
-    parser.add_argument("--source-bundle", type=Path, required=True)
-    parser.add_argument("--migration-record", type=Path, required=True)
+    # Only a bundle migrated from legacy v1 has these; native v2 intake produces neither,
+    # and requiring them would put the current lane behind a compatibility artifact.
+    parser.add_argument("--source-bundle", type=Path)
+    parser.add_argument("--migration-record", type=Path)
     parser.add_argument("--certification-report", type=Path, required=True)
     parser.add_argument("--source-observations", type=Path)
     parser.add_argument("--domain-brief-source", type=Path, required=True)

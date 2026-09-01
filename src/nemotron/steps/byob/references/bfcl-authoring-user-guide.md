@@ -22,6 +22,13 @@ python -m nemotron.steps.byob.scripts.bfcl_author --help
 local Python source package, reviewed HTTP package, or MCP Mode A intake. Pack ID and
 version come from policy or explicit confirmation; CI never guesses or prompts.
 
+Two decisions are required at this first command rather than deferred. A held-out
+decision — either `--held-out-policy` or `--held-out-not-applicable-reason`, with
+`--held-out-reviewed-by` — must be stated before any evidence exists, because evidence
+that has already been collected cannot be retroactively declared clean. A local Python
+source reaching A1 or A2 also needs `--probe-plan`, since those tiers are earned from
+observed probe outcomes and nothing else can supply them.
+
 <!-- doc-smoke: bfcl-author-author-help -->
 ```shell
 python -m nemotron.steps.byob.scripts.bfcl_author author --help
@@ -42,11 +49,12 @@ The normal command sequence is:
 3. `authorize` grants model exposure for the exact evidence subject.
 4. `approve --boundary evidence` separately approves that evidence for drafting.
 5. `draft` runs bounded, cached structured model calls.
-6. `review` assembles independently verified certification, fresh validation, answered
+6. `assemble_candidate_pack` binds those drafts into a loadable pack.
+7. `review` assembles independently verified certification, fresh validation, answered
    questions, and the complete candidate pack.
-7. `approve --boundary release` approves the exact review packet.
-8. `freeze` seals the pack and all reviewed sidecars.
-9. `publish` reruns fresh Gold validation and `stage=all`.
+8. `approve --boundary release` approves the exact review packet.
+9. `freeze` seals the pack and all reviewed sidecars.
+10. `publish` reruns fresh Gold validation and `stage=all`.
 
 Pre-model authorization cannot be replaced by final release approval. Session ordering
 and stale-binding refusal are exercised by
@@ -65,6 +73,35 @@ python -m nemotron.steps.byob.scripts.bfcl_author review --help
 ```shell
 python -m nemotron.steps.byob.scripts.bfcl_author publish --help
 ```
+
+## Assembling the candidate pack
+
+Drafting stops at proposals, and it writes them beside a pack rather than into one. The
+assembler turns them into a loadable pack and derives everything mechanical from evidence
+that is already trusted: pack identity and the manifest from the verified bundle,
+`backend.py`, `tools.json`, and `fixtures.json` copied byte for byte from the source tree
+certification fingerprinted, and `assertions.py` from drafts that compiled without a
+blocker.
+
+What remains is what a model that has only read a catalog must not state: slots bound to
+fixture columns, turn policies, per-language user turns, and the validation cases that
+decide the tier. Those arrive in one reviewed `bfcl-candidate-pack-supplement-v1` YAML
+file, and every tool and assertion it names is checked back against the evidence and the
+compiled assertions, so a supplement cannot introduce a tool the source never published
+or an assertion nobody compiled. Assembly writes `candidate_pack_provenance.json`
+recording the digest of every input and every file it produced.
+
+<!-- doc-smoke: guide-assemble-help -->
+```shell
+python -m nemotron.steps.byob.scripts.assemble_candidate_pack --help
+```
+
+One test drives this whole path — source declaration and domain brief through A2 intake,
+both authorization boundaries, drafting, assembly, and unmocked validation — and fails
+unless the result is Gold-eligible
+([`test_bfcl_authoring_gold_e2e.py`](../../../../../tests/steps/byob/test_bfcl_authoring_gold_e2e.py)).
+Each binding the assembler refuses is owned by
+[`test_bfcl_authoring_pack_assembly.py`](../../../../../tests/steps/byob/test_bfcl_authoring_pack_assembly.py).
 
 ## Certification and publication
 
@@ -115,7 +152,12 @@ python -m nemotron.steps.byob.scripts.revoke_authoring_release --help
 - `session_binding_drift`: restore the bound artifact or resume from the last verified
   session.
 - `adapter_under_certified`: collect the missing A2 observations; approval cannot raise
-  certification.
+  certification. A local Python source needs `--probe-plan` at `author`, including a case
+  the tool cannot finish in time, or timeout cleanup stays unobserved.
+- `source_identity_mismatch`: the source tree changed after certification; assemble the
+  exact revision intake certified, or rerun intake.
+- `supplement_assertion_unknown`: the supplement names an assertion drafting never
+  compiled; draft and compile that specification first.
 - `review_approval_stale`: rebuild review and approve its new digest.
 - `release_revoked`: consult the authenticated registry and replacement fingerprint;
   never edit frozen bytes.

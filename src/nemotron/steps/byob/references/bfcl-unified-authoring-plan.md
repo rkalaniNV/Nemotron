@@ -1,6 +1,6 @@
 # BFCL unified authoring plan (Flow 2, Epics 7–12)
 
-Task prefix: `UA`. Status: in progress; Epics 7–11 and UA-1201–UA-1205 are
+Task prefix: `UA`. Status: in progress; Epics 7–11, UA-1201–UA-1205, and UA-1207 are
 completed.
 Continues Epics 0–6 of the MCP integration
 (`bfcl-mcp-architecture-decision.md`, `bfcl-mcp-support-matrix.md`).
@@ -17,11 +17,14 @@ runs `prepare_bfcl → Gold Gate → generate_bfcl → publish` unchanged. Minim
 
 ## Current state
 
-Epics 7–11 and UA-1201–UA-1205 are implemented. Flow 2 now has a static adapter
+Epics 7–11, UA-1201–UA-1205, and UA-1207 are implemented. Flow 2 now has a static adapter
 registry, A0–A2 certification, evidence schema v2, conventional and MCP intake,
 held-out proof and question/answer handling, transactional revisions, a two-boundary
-guided CLI, shared review/freeze/publication contracts, structured events, credential
-lifecycle, cache retention, revocation, and test-linked operator documentation.
+guided CLI, candidate pack assembly, shared review/freeze/publication contracts,
+structured events, credential lifecycle, cache retention, revocation, and test-linked
+operator documentation. A source declaration and a domain brief now reach a Gold-eligible
+pack through the guided CLI, with one reviewed supplement carrying the semantics no model
+may state.
 
 The support source is
 [bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md); the operator entry
@@ -135,6 +138,8 @@ Minimum named test ownership:
 - `test_bfcl_mcp_ablation.py` and `test_bfcl_mcp_ablation_rollout.py` — UA-1206 contract
   and rollout gating. The rollout decision stays descriptive until real multi-domain
   observations exist, so these tests own the gate, not the evidence.
+- `test_bfcl_authoring_pack_assembly.py` and `test_bfcl_authoring_gold_e2e.py` — UA-1207
+  assembly bindings and the whole-path Gold claim.
 - Existing MCP, manual, endpoint, held-out, and publication suites remain regression
   owners for every gate.
 
@@ -737,12 +742,35 @@ Closes: the production robustness invariants and the platform-operations risk co
   `azure/openai/gpt-5.6-sol` pin exists. The implementation therefore refuses causal
   status and UA-1206 remains incomplete pending independent review of the pilot,
   live runs for the two additional domains, and a real target-model pin.
+- **UA-1207 (M) Candidate pack assembly.** Close the gap between drafting, which writes
+  proposals beside a pack, and freezing, which demands a complete one, so the guided flow
+  reaches a loadable pack without hand-assembly. **Acceptance:** the manifest, oracle
+  files, and executable assertions are derived from certified evidence rather than typed
+  by an operator; assembly refuses any binding it cannot prove; and one test drives a
+  source declaration and a domain brief to a Gold-eligible pack under unmocked validation.
+  **Completed 2026-09-01:** `runtime/pack_authoring/pack_assembly.py` and
+  `scripts/assemble_candidate_pack.py` bind verified evidence, the exact certified source
+  tree, compiled drafts, and one reviewed `bfcl-candidate-pack-supplement-v1`, and record
+  every input and output digest in `candidate_pack_provenance.json`. The semantics a model
+  must not state — slots bound to fixture columns, turn policies, per-language user turns —
+  stay in the reviewed supplement, and every tool and assertion it names is checked back
+  against the evidence and the compiled assertions.
+  `test_bfcl_authoring_pack_assembly.py` owns `source_identity_mismatch`,
+  `draft_evidence_mismatch`, `draft_blocked`, `compiled_assertions_missing`,
+  `supplement_tool_unknown`, `supplement_assertion_unknown`, and `pack_output_exists`;
+  `test_bfcl_authoring_gold_e2e.py` owns the whole path. Two CLI gaps that made the guided
+  path unreachable are closed with it: `build_source_intake.py` now accepts `--probe-plan`,
+  so A1 and A2 are attainable from the CLI, and drafting rebuilds the exposure subject with
+  the resolved configuration digest intake bound into it, owned by
+  `test_bfcl_pack_drafting.py::test_drafting_honours_the_resolved_config_an_authorization_was_bound_to`.
 
 ## Definition of done for the whole plan
 
 1. A user creates a Gold-eligible pack from one source declaration and one domain brief,
-   answering only unresolved semantic or safety questions and completing the two
-   explicit authorization boundaries.
+   answering only unresolved semantic or safety questions, authoring one reviewed pack
+   supplement for the semantics no draft may state, and completing the two explicit
+   authorization boundaries. Everything else — the manifest, the oracle files, and the
+   executable assertions — is derived from certified evidence rather than written by hand.
 2. Local Python, BFCL Oracle HTTP v1, and MCP Mode A all satisfy the same adapter
    contract, emit the same evidence schema, and are independently certified on the same
    ladder for Flow 2. Manual packs remain unchanged.
@@ -758,15 +786,22 @@ Closes: the production robustness invariants and the platform-operations risk co
 
 ### Audit status
 
-Conditions 3, 4, 5, 6, 7, and 8 are met. Conditions 1 and 2 are partially met. Nothing
+Conditions 1, 3, 4, 5, 6, 7, and 8 are met. Condition 2 is partially met. Nothing
 in this section may be marked met on the strength of prose; each line names the owning
 test.
 
-- Condition 1. Partially met. No test starts from only a source declaration plus a
-  domain brief and reaches a Gold-eligible pack with unmocked validation. The closest
-  cases either stop at A0 intake or begin from a pre-built frozen session. Held-out
-  selection is also not a first-class argument of `bfcl_author author`, so the minimal
-  two-input claim does not hold at the CLI.
+- Condition 1. Met, with the supplement declared in the condition itself.
+  `test_bfcl_authoring_gold_e2e.py::test_a_source_declaration_and_a_domain_brief_reach_a_gold_eligible_pack`
+  drives the guided CLI from a source declaration and a domain brief through A2 intake,
+  both authorization boundaries, drafting, assembly, and unmocked `prepare_bfcl`, and
+  fails unless the pack is Gold-eligible. Held-out selection is now a first-class
+  argument of `bfcl_author author`, owned by
+  `test_bfcl_authoring_cli.py::test_author_refuses_to_start_without_a_held_out_decision`.
+  Only the authoring model is stubbed: grounding, compilation, certification, and tier
+  derivation all run for real. The bindings assembly refuses — a source tree edited after
+  certification, drafts from another evidence revision, a supplement naming an
+  unpublished tool or an uncompiled assertion — are owned by
+  `test_bfcl_authoring_pack_assembly.py`.
 - Condition 2. Partially met. All three adapters share the contract and the v2 evidence
   schema at A0, but only `local_python` runs A1 and A2 through intake. HTTP and MCP
   production intake certify A0 only, so "independently certified on the same ladder" is

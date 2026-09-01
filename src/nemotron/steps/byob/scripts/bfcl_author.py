@@ -128,6 +128,13 @@ def _parser() -> argparse.ArgumentParser:
     author.add_argument("--confirm-pack-id", action="store_true")
     author.add_argument("--confirm-pack-version", action="store_true")
     author.add_argument("--required-tier", choices=("A0", "A1", "A2"))
+    # Held-out status has to be settled before the first model call, so it is declared
+    # here rather than passed through to whichever intake command runs.
+    held_out = author.add_mutually_exclusive_group(required=True)
+    held_out.add_argument("--held-out-policy", type=Path)
+    held_out.add_argument("--held-out-not-applicable-reason")
+    author.add_argument("--held-out-reviewed-by", required=True)
+    author.add_argument("--held-out-content", type=Path)
 
     resume = subparsers.add_parser("resume", help="Verify a session and permitted next step")
     _add_workspace(resume)
@@ -390,9 +397,31 @@ def _source_path(value: str) -> Path:
     return Path(urllib.parse.unquote(parsed.path)).resolve()
 
 
+def _held_out_arguments(args: argparse.Namespace) -> list[str]:
+    """Render the settled held-out decision for whichever intake command runs."""
+    if args.held_out_content is not None and args.held_out_policy is None:
+        raise GuidedCliError(
+            "held_out_content_unbound",
+            "--held-out-content names reserved content of a held-out policy",
+            recovery="pass --held-out-policy with that content, or drop --held-out-content",
+        )
+    arguments = ["--held-out-reviewed-by", args.held_out_reviewed_by]
+    if args.held_out_policy is not None:
+        arguments += ["--held-out-policy", str(args.held_out_policy.resolve())]
+    else:
+        arguments += [
+            "--held-out-not-applicable-reason",
+            args.held_out_not_applicable_reason,
+        ]
+    if args.held_out_content is not None:
+        arguments += ["--held-out-content", str(args.held_out_content.resolve())]
+    return arguments
+
+
 def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
     source = _source_path(args.source)
     brief = args.brief.resolve()
+    held_out = _held_out_arguments(args)
     adapter = cast(
         AdapterKind,
         _detect_adapter(source) if args.adapter == "auto" else args.adapter,
@@ -454,6 +483,7 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
                     str(output),
                     "--resolved-authoring-config",
                     str(config_path),
+                    *held_out,
                     *remainder,
                 ],
             )
@@ -477,6 +507,7 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
                     resolved.semantic_payload.required_certification_tier.value,
                     "--resolved-authoring-config",
                     str(config_path),
+                    *held_out,
                     *remainder,
                 ],
             )

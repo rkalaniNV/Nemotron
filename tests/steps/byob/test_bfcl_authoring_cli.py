@@ -129,6 +129,10 @@ def test_author_detects_conventional_adapter_and_delegates(
             "inventory",
             "--pack-version",
             "1.0.0",
+            "--held-out-not-applicable-reason",
+            "The catalog is public.",
+            "--held-out-reviewed-by",
+            "reviewer@example.test",
         ],
     )
     bfcl_author.main()
@@ -137,6 +141,14 @@ def test_author_detects_conventional_adapter_and_delegates(
     arguments = observed["arguments"]
     assert arguments[arguments.index("--adapter") + 1] == expected_adapter
     assert arguments[arguments.index("--pack-id") + 1] == "inventory"
+    assert (
+        arguments[arguments.index("--held-out-not-applicable-reason") + 1]
+        == "The catalog is public."
+    )
+    assert (
+        arguments[arguments.index("--held-out-reviewed-by") + 1]
+        == "reviewer@example.test"
+    )
     assert "--resolved-authoring-config" in arguments
     assert (tmp_path / "workspace" / "resolved_authoring_config.json").is_file()
     assert not (tmp_path / "workspace" / ".locks" / "default" / "authoring.lock").read_text(
@@ -180,6 +192,10 @@ def test_author_detects_mcp_and_delegates_existing_intake(
             "mcp-tools",
             "--pack-version",
             "1.0.0",
+            "--held-out-not-applicable-reason",
+            "No reserved content in this catalog.",
+            "--held-out-reviewed-by",
+            "reviewer@example.test",
         ],
     )
     bfcl_author.main()
@@ -187,6 +203,93 @@ def test_author_detects_mcp_and_delegates_existing_intake(
     assert observed["module"] == "nemotron.steps.byob.scripts.build_mcp_intake"
     assert "--intake" in observed["arguments"]
     assert "--domain-brief" in observed["arguments"]
+    assert "--held-out-not-applicable-reason" in observed["arguments"]
+    assert "--held-out-reviewed-by" in observed["arguments"]
+
+
+def _author_argv(tmp_path: Path, source: Path, brief: Path) -> list[str]:
+    return [
+        "--ci",
+        "author",
+        "--workspace",
+        str(tmp_path / "workspace"),
+        "--source",
+        str(source),
+        "--brief",
+        str(brief),
+        "--pack-id",
+        "inventory",
+        "--pack-version",
+        "1.0.0",
+    ]
+
+
+def test_author_refuses_to_start_without_a_held_out_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Held-out status is settled before intake, so it cannot be an unnamed passthrough."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "backend.py").write_text("# reviewed\n", encoding="utf-8")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("Evaluate tools.", encoding="utf-8")
+    monkeypatch.setattr(
+        bfcl_author,
+        "_delegate",
+        lambda *_args: pytest.fail("intake ran without a held-out decision"),
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        _run_cli(monkeypatch, _author_argv(tmp_path, source, brief))
+    assert exited.value.code == 2
+
+    with pytest.raises(SystemExit) as reviewer_missing:
+        _run_cli(
+            monkeypatch,
+            [
+                *_author_argv(tmp_path, source, brief),
+                "--held-out-not-applicable-reason",
+                "The catalog is public.",
+            ],
+        )
+    assert reviewer_missing.value.code == 2
+
+
+def test_author_refuses_held_out_content_without_its_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "backend.py").write_text("# reviewed\n", encoding="utf-8")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("Evaluate tools.", encoding="utf-8")
+    content = tmp_path / "reserved.yaml"
+    content.write_text("terms: [secret]\n", encoding="utf-8")
+    monkeypatch.setattr(
+        bfcl_author,
+        "_delegate",
+        lambda *_args: pytest.fail("intake ran with unbound held-out content"),
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        _run_cli(
+            monkeypatch,
+            [
+                *_author_argv(tmp_path, source, brief),
+                "--held-out-not-applicable-reason",
+                "The catalog is public.",
+                "--held-out-reviewed-by",
+                "reviewer@example.test",
+                "--held-out-content",
+                str(content),
+            ],
+        )
+
+    assert exited.value.code == 1
+    assert json.loads(capsys.readouterr().out)["code"] == "held_out_content_unbound"
 
 
 def test_evidence_approval_is_distinct_and_digest_bound(
@@ -597,6 +700,10 @@ def test_author_fails_before_adapter_when_rollout_is_omitted(
             "tools",
             "--pack-version",
             "1.0.0",
+            "--held-out-not-applicable-reason",
+            "No reserved content.",
+            "--held-out-reviewed-by",
+            "reviewer@example.test",
         ],
     )
 

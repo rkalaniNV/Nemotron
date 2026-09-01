@@ -169,6 +169,7 @@ def run_drafting(
                 evidence.source_evidence,
                 domain_brief_report=evidence.domain_brief_report,
                 held_out_redaction_report=evidence.held_out_redaction_report,
+                resolved_authoring_config_digest=resolved_authoring_config_digest,
             ),
             expected_organizational_policy_digest=organizational_policy_digest,
         )
