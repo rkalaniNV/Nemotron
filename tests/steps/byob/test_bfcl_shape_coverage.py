@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
+
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
+    TURN_POLICIES,
+)
 
 PACK_ROOT = (
     Path(__file__).resolve().parents[3]
@@ -51,17 +56,9 @@ def test_banking_declares_a_template_for_every_supported_policy() -> None:
     for template in _banking_templates():
         by_policy.setdefault(template["turn_policy"], []).append(template)
 
-    assert set(by_policy) == {
-        "single_turn",
-        "missing_slot",
-        "confirmation",
-        "correction",
-        "multi_tool",
-        "dependent_call",
-        "negative_path",
-        "clarify_only",
-        "irrelevant",
-    }
+    # Bound to the pipeline's own vocabulary rather than a copy of it, so a policy the
+    # pipeline gains later cannot leave this pack silently short of the edge it claims.
+    assert set(by_policy) == set(TURN_POLICIES)
 
     chain = by_policy["dependent_call"][0]
     producer, consumer = (
@@ -142,17 +139,34 @@ def test_banking_declares_a_template_for_every_supported_policy() -> None:
         ]
 
 
+def test_banking_rows_choose_from_the_whole_tool_catalog() -> None:
+    # Omitting tools_present is what exposes the full catalog, so narrowing it anywhere
+    # would quietly make the row an easier retrieval problem than the pack advertises.
+    assert not [
+        template["template_id"]
+        for template in _banking_templates()
+        if "tools_present" in template
+    ]
+    catalog = json.loads((BANKING_PACK_ROOT / "tools.json").read_text(encoding="utf-8"))
+    assert len(catalog) == 9
+
+
 def test_banking_negative_paths_expect_documented_failures() -> None:
     negatives = [
         template for template in _banking_templates() if template["turn_policy"] == "negative_path"
     ]
-    assert {template["template_id"] for template in negatives} == {
-        "bn_txn_status_unknown_id",
-        "bn_transfer_short_of_funds",
-    }
+    # Pairing each path with its own assertion is what makes the failure documented: a
+    # closed set of names would still pass if a path were scored by another path's check.
     assert {
-        assertion for template in negatives for assertion in template["success_assertions"]
-    } == {"assert_transaction_not_found", "assert_transfer_rejected_for_funds"}
+        template["template_id"]: template["success_assertions"] for template in negatives
+    } == {
+        "bn_balance_unknown_account": ["assert_account_not_found"],
+        "bn_txn_status_unknown_id": ["assert_transaction_not_found"],
+        "bn_transfer_short_of_funds": ["assert_transfer_rejected_for_funds"],
+        "bn_vietqr_status_unknown_ref": ["assert_vietqr_payment_not_found"],
+        "bn_dispute_status_unknown_id": ["assert_dispute_not_found"],
+        "bn_create_dispute_not_disputable": ["assert_dispute_refused_without_state_change"],
+    }
 
 
 def test_banking_mutations_require_explicit_confirmation_turns() -> None:

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import CredentialResolver
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.conformance import (
     ConformanceAttestation,
     attestation_digest,
@@ -106,6 +107,18 @@ def _sha256_file(path: Path) -> str:
     return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
 
 
+def _redact_header_values(message: str, headers: Mapping[str, str]) -> str:
+    redacted = message
+    values = set(headers.values())
+    authorization = headers.get("Authorization")
+    if authorization and authorization.startswith("Bearer "):
+        values.add(authorization.removeprefix("Bearer "))
+    for value in sorted(values, key=len, reverse=True):
+        if value:
+            redacted = redacted.replace(value, "<redacted>")
+    return redacted
+
+
 def _regular_reviewed_file(
     package_root: Path,
     relative_name: str,
@@ -167,7 +180,18 @@ def _config_identity_document(
         "auth": {
             "bearer_token_env": config.bearer_token_env,
             "headers": list(config.header_env),
+            "credential_references": [
+                reference.model_dump(mode="json")
+                for reference in (
+                    *((config.bearer_token_ref,) if config.bearer_token_ref else ()),
+                    *(reference for _, reference in config.header_refs),
+                )
+            ],
             "principal_digest": config.expected.principal_digest,
+            "permission_digest": config.expected.permission_digest,
+            "authorization_context_digest": (
+                config.expected.authorization_context_digest
+            ),
         },
         "tls": {"ca_bundle_digest": ca_bundle_digest},
         "max_request_bytes": config.max_request_bytes,
@@ -180,6 +204,7 @@ def inspect_http_package(
     *,
     allowed_roots: tuple[Path, ...],
     environ: Mapping[str, str] | None = None,
+    credential_resolver: CredentialResolver | None = None,
     timeout_s: float = 15.0,
     client_factory: HttpClientFactory | None = None,
 ) -> HttpPackageInspection:
@@ -210,12 +235,18 @@ def inspect_http_package(
     )
     try:
         config = load_endpoint_config(endpoint_path, allowed_roots=(package_root,))
-        headers = resolve_endpoint_headers(config, environ)
+        headers = resolve_endpoint_headers(
+            config,
+            environ,
+            credential_resolver=credential_resolver,
+        )
     except (OSError, ValueError) as exc:
         detail = str(exc)
         code = (
             "unsupported_auth"
-            if "auth" in detail or "environment variable" in detail
+            if "auth" in detail
+            or "credential" in detail
+            or "environment variable" in detail
             else "source_package_invalid"
         )
         raise HttpPackageError(
@@ -227,12 +258,15 @@ def inspect_http_package(
             "attestation_mismatch",
             "HTTP authoring packages require a pinned conformance attestation",
         )
-    if (
-        config.bearer_token_env is not None or config.header_env
-    ) and config.expected.principal_digest is None:
+    if (config.bearer_token_ref is not None or config.header_refs) and (
+        config.expected.principal_digest is None
+        or config.expected.permission_digest is None
+        or config.expected.authorization_context_digest is None
+    ):
         raise HttpPackageError(
             "unsupported_auth",
-            "authenticated HTTP packages require expected.principal_digest",
+            "authenticated HTTP authoring packages require expected principal_digest, "
+            "permission_digest, and authorization_context_digest",
         )
     try:
         reviewed_catalog = load_reviewed_tool_catalog(tools_path)
@@ -251,7 +285,7 @@ def inspect_http_package(
     except TimeoutError as exc:
         raise HttpPackageError("probe_timeout", "HTTP A0 inspection timed out") from exc
     except Exception as exc:
-        message = str(exc)
+        message = _redact_header_values(str(exc), headers)
         if "identity" in message or "metadata does not match" in message:
             code = "identity_drift"
         elif "HTTP 30" in message:
@@ -263,7 +297,7 @@ def inspect_http_package(
         raise HttpPackageError(
             code,
             f"HTTP A0 inspection failed: {type(exc).__name__}: {message}",
-        ) from exc
+        ) from None
     finally:
         try:
             client.close(suppress_errors=True)
@@ -301,6 +335,9 @@ def inspect_http_package(
         or parsed_attestation.effective_content_digest != metadata["content_digest"]
         or parsed_attestation.tool_catalog_digest != catalog_digest
         or metadata.get("principal_digest") != config.expected.principal_digest
+        or metadata.get("permission_digest") != config.expected.permission_digest
+        or metadata.get("authorization_context_digest")
+        != config.expected.authorization_context_digest
     ):
         raise HttpPackageError(
             "attestation_mismatch",
@@ -325,6 +362,13 @@ def inspect_http_package(
     ]
     if ca_digest is not None:
         artifacts.append(IdentityArtifact(role="ca_bundle", digest=ca_digest))
+    if config.expected.authorization_context_digest is not None:
+        artifacts.append(
+            IdentityArtifact(
+                role="authorization_context",
+                digest=config.expected.authorization_context_digest,
+            )
+        )
     identity = SourceIdentity(
         subject=f"http:{config.expected.oracle_id}@{config.expected.oracle_version}",
         effective_content_digest=config.expected.content_digest,

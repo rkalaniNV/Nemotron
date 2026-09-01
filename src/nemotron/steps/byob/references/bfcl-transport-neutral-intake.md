@@ -95,10 +95,12 @@ from being verified against a different probe plan—during drafting.
 The Gold freeze boundary invokes this loader with A2 required; A0 or A1 evidence can
 be drafted and reviewed but cannot be frozen as Gold.
 
-Authenticated HTTP packages must pin `expected.principal_digest`, a SHA-256 commitment
-to a stable reviewed principal identifier rather than to a secret token. Live metadata
-must report the same digest. Rotating a token for the same principal is harmless, while
-changing principal changes source identity and makes the old certification stale.
+Authenticated HTTP packages and MCP authoring sources must pin `principal_digest`,
+`permission_digest`, and `authorization_context_digest`. The final digest binds the
+first two to canonical environment or secret-manager references, never secret bytes.
+Live metadata/control output must report the same values. Rotating a token behind the
+same reference is harmless; changing the reference, principal, or effective permissions
+changes source identity and makes prior observations and certification stale.
 
 The refusal-taxonomy guard requires every `CertificationRefusalCode` to remain listed
 in the published profile reference, and every profile failure reason to resolve to a

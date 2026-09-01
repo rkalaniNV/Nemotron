@@ -372,6 +372,7 @@ def _identity(document: dict[str, Any]) -> SourceIdentity:
         ("shim_artifact_digest", "shim_artifact"),
         ("snapshot_digest", "snapshot"),
         ("tool_catalog_digest", "tool_catalog"),
+        ("authorization_context_digest", "authorization_context"),
     ):
         digest = identity.get(legacy_name)
         if digest is not None:

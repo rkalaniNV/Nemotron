@@ -37,14 +37,19 @@ executable-case lineage. Model roles are routed by Data Designer, so the
 The config records the route identity; it does not create the provider.
 
 For any pack, `tasks_per_category` is the default Stage-4 category budget and
-the Stage-11 publication cap over unique bindings. When Stage 11 is enabled, an
-optional, larger `candidate_tasks_per_category` ceiling lets Stage 4 provide
-inventory from which balancing can satisfy declared targets. Neither setting
-authorizes row copying or treats paraphrases as new task semantics. Difficulty,
+the Stage-11 publication cap over unique bindings. It may not fall below the
+number of templates in the widest category, or a template would lose its only
+instance; validation refuses gold for that pack rather than letting generation
+publish a silently narrower set. When Stage 11 is enabled, an optional, larger
+`candidate_tasks_per_category` ceiling lets Stage 4 provide inventory from which
+balancing can satisfy declared targets. Neither setting authorizes row copying or
+treats paraphrases as new task semantics. Difficulty,
 conversation turns, and tool-call depth are independent dimensions: for
 example, a dependent two-call chain can still contain only one user turn.
 
-Use `stage=prepare` to validate a pack without generating benchmark rows:
+Use `stage=prepare` to validate a pack without generating benchmark rows. The
+same report is available outside the step, which is the quicker way to iterate on
+a pack that is not yet gold-eligible:
 
 ```bash
 python -m nemotron.steps.byob.scripts.validate_oracle_pack --config <CONFIG>
@@ -190,8 +195,12 @@ Start from `config/default.yaml` for a new pack. The main settings are:
   count; an unmet target is reported and follows the Stage-11 release policy
 - `task_generation.max_turns` and `task_generation.max_tool_calls`: publication
   hard limits
-- `task_generation.difficulty_mix`, `task_generation.turn_mix`, and
-  `task_generation.tool_call_count_mix`: normalized Stage-11 balancing targets
+- `task_generation.difficulty_mix`, `task_generation.turn_mix`,
+  `task_generation.tool_call_count_mix`, and `task_generation.policy_mix`:
+  normalized Stage-11 balancing targets. `policy_mix` keys are `turn_policy`
+  values, so it is the knob that states how much of a release must exercise
+  clarification, correction, confirmation, and documented-failure behaviour
+  instead of plain lookups.
 - `surface_generation.language`
 - `lineage.policy`
 - `exports.bfcl_json` and `exports.nemo_evaluator_bundle`
@@ -366,14 +375,15 @@ Balancing then projects every candidate onto the eight locked dimensions:
 and `max_tool_calls` are hard filters; removing the final survivor of a coverage
 bucket aborts instead of weakening the lock. One representative per complete
 coverage bucket is selected before quotas. Category caps and configured
-`difficulty_mix`, `turn_mix`, and `tool_call_count_mix` targets are then applied
-without cloning rows. Fractional targets use deterministic largest-remainder
-allocation. Selection is a deterministic binary optimization: coverage and
-representative lineage are hard constraints, while total category-cap and
-cross-dimension target deviation is minimized globally before stable rank breaks
-equivalent optima. That priority is exact rather than weighted — deviation is
-minimized, pinned at its optimum, and the stable order is minimized against it —
-so no solver tolerance can trade a real deviation for a cheaper row order. This
+`difficulty_mix`, `turn_mix`, `tool_call_count_mix`, and `policy_mix` targets are
+then applied without cloning rows. Fractional targets use deterministic
+largest-remainder allocation. Selection is a deterministic binary optimization:
+coverage, representative lineage, and the repetition caps below are hard
+constraints, while category-cap overflow, then cross-dimension target deviation,
+then stable rank order are minimized in that order. The priority is exact rather
+than weighted: each objective is minimized, pinned at its optimum, and the next
+one is minimized against it, so no solver tolerance can trade a real category
+overflow for a cheaper mix or a real deviation for a cheaper row order. This
 avoids both greedy local optima and the former cubic exchange pass, so a feasible
 mix is not reported unmet merely because of the order rows were picked in. Minimal environments use an exact bounded fallback;
 production BYOB environments use PuLP/CBC. Targets that inventory or a locked
@@ -427,8 +437,22 @@ semantic_deduplication_config:
   remove_duplicates: true
   max_exact_surface_reuse: 8       # optional exact masked-text cap
   min_exact_surface_ratio: 0.15    # optional selected-set diversity floor
+  max_execution_case_reuse: 1      # optional cap on rows per executable case
+  max_rows_per_intent: 120         # optional cap on rows per intent
   representative_source_preference: [template, model]
 ```
+
+The three `max_*_reuse`/`max_rows_*` keys are one mechanism applied to three
+different projections of a row: its masked wording, its executable case, and its
+intent. Each is an optional hard cap on how many published rows may share that
+value, each shrinks the feasible publication budget by
+`sum(min(group_size, cap))`, and each has its own shortfall reason so a report
+says which kind of repetition ran out. `max_execution_case_reuse: 1` is the
+strongest statement a release can make: no two published rows call the same
+tools with the same arguments against the same state, so a candidate cannot earn
+credit twice for one behaviour. `max_rows_per_intent` is what stops one broad
+intent — typically a refusal or out-of-scope intent with cheap inventory — from
+owning a disproportionate share of the benchmark.
 
 Stage 11 reports three separate signals: exact masked-surface diversity,
 embedding-based surface similarity, and executable-case diversity. A model
@@ -443,9 +467,9 @@ Because those constraints count masked surfaces, wording inventory — not bindi
 count — is what limits how many rows a pack can publish. A template renders one
 canonical wording per language, so a thousand fixture bindings of it still
 contribute a single masked surface. The paraphrase stage therefore assigns each
-binding one structural style axis from `SURFACE_STYLE_AXES`, chosen from the task
-seed, so repeated bindings are asked for different sentence forms instead of the
-same rewrite. The axes are register- and structure-level only: an axis that asked
+binding one structural style axis from the framework catalog
+(`SURFACE_STYLE_AXES`), chosen from the task seed, so repeated bindings are asked
+for different sentence forms instead of the same rewrite. The axes are register- and structure-level only: an axis that asked
 for shortened numbers or abbreviated identifiers would rewrite protected values
 and the `must_preserve` guard would reject the variant. A pack whose domain or
 language needs different registers declares its own list in
@@ -1367,9 +1391,9 @@ ignored.
 | Capability | Availability | Responsibility |
 | --- | --- | --- |
 | Reference profiling | **Implemented** | Normalize content-addressed style samples and create a cached profile without exposing oracle truth. |
-| Model paraphrasing | **Implemented** | Produce cached surface variants; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, and deterministic lineage. |
+| Model paraphrasing | **Implemented** | Request one surface style per binding so wording scales with the axis catalog rather than the model's preferred phrasing; Python guards preserve values, hidden slots, tool-name boundaries, turn shape, variant distinctness, and deterministic cached lineage. |
 | Surface quality judging | **Implemented** | Map Python guards onto six checks, optionally score surface-only language quality, enforce advisory/drop policy, write the Stage-10 parquet, and filter publication rows with manifest lineage. |
-| Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives, publish in selection-rank order, and retain complete artifact and manifest lineage. |
+| Semantic deduplication | **Integrated** | Run after surface-quality validation, project masked user text, cluster through Curator, choose and balance coverage-safe representatives under optional exact-surface limits and a declared publication target, name the bound behind any unmet target, publish in selection-rank order, and retain complete artifact and manifest lineage. |
 | Evaluation and scoring | **Implemented** | Config, source verification, contamination gating, native function-calling transport (`candidate client` `1.0`), deterministic trace driving/scoring, source-bound executable task projection (`1.2`), process-isolated Python/endpoint oracle sessions, live dependent-call and scripted multiturn driving, pack-assertion execution, executable evidence/scoring (`1.3`), run-level executable metric aggregation (`1.1`), run-level trace metric aggregation (`1.0`), append-only tool-trace persistence/replay (`1.0`), immutable scope-stamped artifacts (`1.5`), bounded executable and trace-only batch orchestration, NeMo Evaluator native framework/result bridge (`1.2`), Nemotron CLI orchestration (`1.0`), and error taxonomy (`1.2`) are available. `nemotron steps run byob/bfcl -c eval.cli` runs direct evaluation; `eval.launcher` materializes and optionally submits the native task through `eval/model_eval`. |
 | Held-out enforcement | **Integrated** | Refuse reserved templates and fixture rows at binding time, optionally remove them from Oracle runtime state, re-scan every row before publication, stamp `held_out_hit`, and record policy, counters, and artifact hashes in run lineage. |
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |

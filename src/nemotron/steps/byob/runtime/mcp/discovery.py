@@ -164,7 +164,19 @@ def _verify_described_identity(
     # build id. Only the three pinned fields decide identity, and the whole declaration
     # is recorded in the report, so an added field is reviewable and drifts the report
     # digest rather than being silently dropped or hard-failing a conformant server.
-    required = ("oracle_id", "oracle_version", "content_digest")
+    required = ["oracle_id", "oracle_version", "content_digest"]
+    if (
+        isinstance(config.transport, StreamableHttpTransportConfig)
+        and config.transport.auth.credential_references()
+        and config.expected.authorization_context_digest is not None
+    ):
+        required.extend(
+            [
+                "principal_digest",
+                "permission_digest",
+                "authorization_context_digest",
+            ]
+        )
     absent = [name for name in required if name not in described]
     if absent:
         raise McpProtocolError(
@@ -185,6 +197,20 @@ def _verify_described_identity(
         "oracle_version": config.expected.oracle_version,
         "content_digest": config.expected.server_content_digest,
     }
+    for name in (
+        "principal_digest",
+        "permission_digest",
+        "authorization_context_digest",
+    ):
+        expected_value = getattr(config.expected, name)
+        if expected_value is not None:
+            observed_value = described.get(name)
+            observed[name] = (
+                observed_value.strip().lower()
+                if isinstance(observed_value, str)
+                else observed_value
+            )
+            expected[name] = expected_value
     if observed != expected:
         raise McpIdentityMismatchError(
             f"describe_oracle identity mismatch: expected {canonical_json(expected)}, "

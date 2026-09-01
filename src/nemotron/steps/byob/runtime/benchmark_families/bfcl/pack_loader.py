@@ -13,6 +13,9 @@ from typing import Any
 import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig, OraclePackRef
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
+    TURN_POLICIES,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
     EndpointConfig,
     load_endpoint_config,
@@ -323,19 +326,52 @@ def project_model_facing_tools(tools: list[dict[str, Any]]) -> list[dict[str, An
     return projected
 
 
-TURN_POLICIES = frozenset(
-    {
-        "single_turn",
-        "missing_slot",
-        "confirmation",
-        "correction",
-        "multi_tool",
-        "dependent_call",
-        "negative_path",
-        "clarify_only",
-        "irrelevant",
-    }
-)
+def resolve_tool_exposure(
+    templates: list[dict[str, Any]],
+    tools: Sequence[Any],
+) -> list[dict[str, Any]]:
+    """Resolve and check which tools each template offers the candidate.
+
+    A template that omits ``tools_present`` offers the whole declared catalog, which is
+    what a deployed assistant sees and what makes tool selection a real decision.
+    Declaring a narrower list stays available for a shape a pack wants to isolate, and
+    is checked here so a mistyped exposure fails at load instead of at scoring time.
+    """
+    catalog = [str(tool["function"]["name"]) for tool in tools]
+    known = set(catalog)
+    resolved: list[dict[str, Any]] = []
+    for template in templates:
+        item = dict(template)
+        template_id = item.get("template_id")
+        declared = item.get("tools_present")
+        if declared is None:
+            item["tools_present"] = list(catalog)
+        else:
+            if not isinstance(declared, list) or any(
+                not isinstance(name, str) or not name.strip() for name in declared
+            ):
+                raise ValueError(
+                    f"template {template_id!r} tools_present must be a list of tool names"
+                )
+            normalized = [name.strip() for name in declared]
+            if len(set(normalized)) != len(normalized):
+                raise ValueError(f"template {template_id!r} repeats a tool in tools_present")
+            if unknown := sorted(set(normalized) - known):
+                raise ValueError(
+                    f"template {template_id!r} exposes tools missing from tools.json: "
+                    + ", ".join(unknown)
+                )
+            item["tools_present"] = normalized
+        required = [str(name) for name in item.get("required_tools") or []]
+        # A gold call to a tool the candidate never saw is rejected downstream, so an
+        # exposure that omits a required tool describes an unsatisfiable task.
+        if missing := sorted(set(required) - set(item["tools_present"])):
+            raise ValueError(
+                f"template {template_id!r} requires tools it does not expose: "
+                + ", ".join(missing)
+            )
+        resolved.append(item)
+    return resolved
 
 
 def normalize_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -709,6 +745,23 @@ def _validate_generation_targets(
             + ", ".join(unavailable)
         )
 
+    policy_inventory = {
+        str(template.get("turn_policy"))
+        for template in templates
+        if template.get("turn_policy") is not None
+    }
+    policy_mix = targets.get("policy_mix") or {}
+    unavailable = sorted(
+        name
+        for name, weight in policy_mix.items()
+        if float(weight) > 0 and name not in policy_inventory
+    )
+    if unavailable:
+        raise ValueError(
+            "task_generation.policy_mix targets unavailable conversation policies: "
+            + ", ".join(unavailable)
+        )
+
 
 def load_pack(config: BfclConfig) -> LoadedPack:
     paths = resolve_pack_paths(config)
@@ -731,7 +784,7 @@ def load_pack(config: BfclConfig) -> LoadedPack:
     templates_raw = yaml.safe_load(paths.templates_path.read_text(encoding="utf-8")) or []
     if not isinstance(templates_raw, list):
         raise ValueError("task_templates.yaml must be a list")
-    templates = normalize_templates(templates_raw)
+    templates = resolve_tool_exposure(normalize_templates(templates_raw), tools)
     _require_unique_string_ids(templates, "template_id", "task_templates.yaml")
     _validate_generation_targets(config, templates)
 

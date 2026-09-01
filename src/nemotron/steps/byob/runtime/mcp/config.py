@@ -24,6 +24,10 @@ from pydantic import (
 )
 from yaml.constructor import ConstructorError
 
+from nemotron.steps.byob.runtime.authoring_workflow.credentials import (
+    CredentialReference,
+    build_authorization_context,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 from nemotron.steps.byob.runtime.mcp.errors import McpConfigError
 
@@ -108,7 +112,11 @@ def load_unique_yaml_mapping(source: Path, label: str) -> dict[str, Any]:
 class _StrictModel(BaseModel):
     # Container conversion is intentional: YAML arrays become immutable tuples.
     # Scalar fields use Strict* annotations, so strings never become numbers/bools.
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+    )
 
 
 def _nonempty(value: str, label: str) -> str:
@@ -176,13 +184,24 @@ class StdioTransportConfig(_StrictModel):
 
 class HttpAuthConfig(_StrictModel):
     bearer_token_env: StrictStr | None = None
+    bearer_token_ref: CredentialReference | None = None
     headers: dict[StrictStr, StrictStr] = Field(default_factory=dict)
+    header_refs: dict[StrictStr, CredentialReference] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_auth(self) -> HttpAuthConfig:
+        if self.bearer_token_env is not None and self.bearer_token_ref is not None:
+            raise ValueError(
+                "transport.auth cannot set bearer_token_env and bearer_token_ref"
+            )
         if self.bearer_token_env is not None and _ENV_NAME.fullmatch(self.bearer_token_env) is None:
             raise ValueError("transport.auth.bearer_token_env must be an environment variable name")
         folded_headers: dict[str, str] = {}
+        overlap = set(self.headers) & set(self.header_refs)
+        if overlap:
+            raise ValueError(
+                f"transport.auth header is declared twice: {sorted(overlap)}"
+            )
         for header, env_name in self.headers.items():
             if _HEADER_NAME.fullmatch(header) is None:
                 raise ValueError(f"transport.auth.headers contains invalid HTTP field name {header!r}")
@@ -200,7 +219,36 @@ class HttpAuthConfig(_StrictModel):
                 raise ValueError(
                     f"transport.auth.headers.{header} must name an environment variable, not contain a value"
                 )
+        for header in self.header_refs:
+            if _HEADER_NAME.fullmatch(header) is None:
+                raise ValueError(
+                    f"transport.auth.header_refs contains invalid HTTP field name {header!r}"
+                )
+            if header.casefold() in _RESERVED_HEADERS:
+                raise ValueError(
+                    f"transport.auth.header_refs may not set reserved field {header!r}"
+                )
+            folded = header.casefold()
+            previous = folded_headers.get(folded)
+            if previous is not None:
+                raise ValueError(
+                    "transport.auth contains case-insensitive duplicate fields "
+                    f"{previous!r} and {header!r}"
+                )
+            folded_headers[folded] = header
         return self
+
+    def credential_references(self) -> tuple[CredentialReference, ...]:
+        references = []
+        if self.bearer_token_env is not None:
+            references.append(CredentialReference.environment(self.bearer_token_env))
+        elif self.bearer_token_ref is not None:
+            references.append(self.bearer_token_ref)
+        references.extend(
+            CredentialReference.environment(name) for name in self.headers.values()
+        )
+        references.extend(self.header_refs.values())
+        return tuple(references)
 
 
 class HttpTlsConfig(_StrictModel):
@@ -243,9 +291,19 @@ class ExpectedIdentityConfig(_StrictModel):
     oracle_id: StrictStr
     oracle_version: StrictStr
     server_content_digest: StrictStr | None = None
+    principal_digest: StrictStr | None = None
+    permission_digest: StrictStr | None = None
+    authorization_context_digest: StrictStr | None = None
 
     # Digests are normalized once here so no downstream comparison needs to re-case them.
-    @field_validator("tool_catalog_digest", "server_content_digest", mode="after")
+    @field_validator(
+        "tool_catalog_digest",
+        "server_content_digest",
+        "principal_digest",
+        "permission_digest",
+        "authorization_context_digest",
+        mode="after",
+    )
     @classmethod
     def _normalize_digest(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is None:
@@ -467,6 +525,36 @@ class McpOracleConfig(_StrictModel):
         _unique(self.mcp_protocol_versions, "mcp_protocol_versions")
         for version in self.mcp_protocol_versions:
             _nonempty(version, "mcp_protocol_versions[]")
+        if isinstance(self.transport, StreamableHttpTransportConfig):
+            references = self.transport.auth.credential_references()
+            context_fields = (
+                self.expected.principal_digest,
+                self.expected.permission_digest,
+                self.expected.authorization_context_digest,
+            )
+            if references and any(value is not None for value in context_fields):
+                if (
+                    self.expected.principal_digest is None
+                    or self.expected.permission_digest is None
+                    or self.expected.authorization_context_digest is None
+                ):
+                    raise ValueError(
+                        "MCP authorization context requires expected principal_digest, "
+                        "permission_digest, and authorization_context_digest"
+                    )
+                context = build_authorization_context(
+                    references,
+                    principal_digest=self.expected.principal_digest,
+                    permission_digest=self.expected.permission_digest,
+                )
+                if (
+                    context.authorization_context_digest
+                    != self.expected.authorization_context_digest
+                ):
+                    raise ValueError(
+                        "expected.authorization_context_digest does not match credential "
+                        "references, principal, and permissions"
+                    )
         if self.control.reserved_tool_names & set(self.tools.include):
             raise ValueError("tools.include must not expose a control tool")
         if self.control.episode_argument == self.results.confirmation_parameter:

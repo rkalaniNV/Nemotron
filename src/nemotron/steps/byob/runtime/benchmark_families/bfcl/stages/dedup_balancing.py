@@ -254,6 +254,21 @@ def project_dedup_texts(
     return projected
 
 
+# How often one selected group may repeat, and which bound to name when a cap keeps a
+# run away from its declared publication target. Each entry pairs a balancing feature
+# with the setting that bounds it, so a pack limits repeated wording, repeated requests,
+# and repeated executable meaning through one mechanism instead of three.
+GROUP_REUSE_CAPS: tuple[tuple[str, str, str], ...] = (
+    ("surface_text_hash", "max_exact_surface_reuse", "insufficient_surface_diversity"),
+    ("intent", "max_rows_per_intent", "intent_cap_limits_inventory"),
+    (
+        "execution_case_hash",
+        "max_execution_case_reuse",
+        "execution_case_cap_limits_inventory",
+    ),
+)
+
+
 @dataclass(frozen=True)
 class DedupSettings:
     """The embedding and clustering settings one run is pinned to."""
@@ -264,6 +279,8 @@ class DedupSettings:
     remove_duplicates: bool
     max_exact_surface_reuse: int | None
     min_exact_surface_ratio: float | None
+    max_rows_per_intent: int | None
+    max_execution_case_reuse: int | None
     representative_source_preference: tuple[str, ...]
     unmet_target_policy: str
 
@@ -276,8 +293,19 @@ class DedupSettings:
             "remove_duplicates": self.remove_duplicates,
             "max_exact_surface_reuse": self.max_exact_surface_reuse,
             "min_exact_surface_ratio": self.min_exact_surface_ratio,
+            "max_rows_per_intent": self.max_rows_per_intent,
+            "max_execution_case_reuse": self.max_execution_case_reuse,
             "representative_source_preference": list(self.representative_source_preference),
             "unmet_target_policy": self.unmet_target_policy,
+        }
+
+    @property
+    def group_caps(self) -> dict[str, int]:
+        """Return the declared per-group ceilings keyed by balancing feature."""
+        return {
+            feature: cap
+            for feature, attribute, _ in GROUP_REUSE_CAPS
+            if (cap := getattr(self, attribute)) is not None
         }
 
     @property
@@ -309,6 +337,16 @@ def resolve_dedup_settings(config: BfclConfig) -> DedupSettings:
         min_exact_surface_ratio=(
             float(dedup["min_exact_surface_ratio"])
             if dedup.get("min_exact_surface_ratio") is not None
+            else None
+        ),
+        max_rows_per_intent=(
+            int(dedup["max_rows_per_intent"])
+            if dedup.get("max_rows_per_intent") is not None
+            else None
+        ),
+        max_execution_case_reuse=(
+            int(dedup["max_execution_case_reuse"])
+            if dedup.get("max_execution_case_reuse") is not None
             else None
         ),
         representative_source_preference=tuple(
@@ -991,6 +1029,7 @@ def balancing_features(
     num_turns = _user_turn_count(task_id, surface)
     raw_calls = _tool_call_count(task_id, task)
     call_bucket = "3+" if raw_calls >= 3 else str(raw_calls)
+    projection = project_dedup_text(task, surface)
     return {
         "intent": required_text("intent"),
         "category": required_text("category"),
@@ -1000,7 +1039,8 @@ def balancing_features(
         "turn_class": "multi_turn" if num_turns > 1 else "single_turn",
         "tool_call_count": call_bucket,
         "turn_policy": required_text("turn_policy"),
-        "surface_text_hash": project_dedup_text(task, surface)["text_hash"],
+        "surface_text_hash": projection["text_hash"],
+        "execution_case_hash": projection["execution_case_hash"],
         "num_turns": num_turns,
         "num_tool_calls": raw_calls,
     }
@@ -1040,6 +1080,7 @@ def _target_mix_by_dimension(config: BfclConfig) -> dict[str, dict[str, float]]:
             ("difficulty", "difficulty_mix"),
             ("turn_class", "turn_mix"),
             ("tool_call_count", "tool_call_count_mix"),
+            ("turn_policy", "policy_mix"),
         )
         if generation.get(config_key)
     }
@@ -1086,15 +1127,22 @@ def _solve_balanced_selection(
     budget: int,
     category_cap: int,
     target_counts: Mapping[str, Mapping[str, int]],
-    max_exact_surface_reuse: int | None,
+    group_caps: Mapping[str, int],
     min_unique_surface_count: int,
     stable_key: Callable[[str], tuple[Any, ...]],
 ) -> set[str]:
     """Globally minimize declared mix and category deviations."""
     ordered = sorted(candidates, key=stable_key)
 
-    def deviation(selected: Sequence[str]) -> int:
-        total = sum(
+    def groups(feature: str) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for task_id in ordered:
+            grouped.setdefault(str(features[task_id][feature]), []).append(task_id)
+        return grouped
+
+    def cost(selected: Sequence[str]) -> tuple[int, int]:
+        """Rank a selection the same way the solver does: overflow, then mix."""
+        overflow = sum(
             max(
                 0,
                 sum(features[task_id]["category"] == category for task_id in selected)
@@ -1102,11 +1150,12 @@ def _solve_balanced_selection(
             )
             for category in {features[task_id]["category"] for task_id in ordered}
         )
+        deviation = 0
         for dimension, quotas in target_counts.items():
             counts = Counter(features[task_id][dimension] for task_id in selected)
             for bucket in set(quotas) | set(counts):
-                total += abs(counts[bucket] - quotas.get(bucket, 0))
-        return total
+                deviation += abs(counts[bucket] - quotas.get(bucket, 0))
+        return overflow, deviation
 
     try:
         import pulp
@@ -1121,24 +1170,24 @@ def _solve_balanced_selection(
                 "exact Stage 11 balancing requires the BYOB dependency 'pulp' "
                 "when more than 24 candidates survive"
             ) from None
-        best: tuple[tuple[int, int], tuple[str, ...]] | None = None
+        best: tuple[tuple[int, int, int], tuple[str, ...]] | None = None
         rank = {task_id: index + 1 for index, task_id in enumerate(ordered)}
         for chosen_tuple in combinations(ordered, budget):
             chosen = set(chosen_tuple)
             if any(not chosen.intersection(members) for members in candidates_by_bucket.values()):
                 continue
+            if any(
+                count > cap
+                for feature, cap in group_caps.items()
+                for count in Counter(
+                    str(features[task_id][feature]) for task_id in chosen_tuple
+                ).values()
+            ):
+                continue
             surface_counts = Counter(
                 str(features[task_id]["surface_text_hash"])
                 for task_id in chosen_tuple
             )
-            if (
-                max_exact_surface_reuse is not None
-                and any(
-                    count > max_exact_surface_reuse
-                    for count in surface_counts.values()
-                )
-            ):
-                continue
             if len(surface_counts) < min_unique_surface_count:
                 continue
             if any(
@@ -1150,7 +1199,7 @@ def _solve_balanced_selection(
                 for decision in (by_decision[task_id],)
             ):
                 continue
-            score = (deviation(chosen_tuple), sum(rank[task_id] for task_id in chosen_tuple))
+            score = (*cost(chosen_tuple), sum(rank[task_id] for task_id in chosen_tuple))
             candidate = (score, chosen_tuple)
             if best is None or candidate < best:
                 best = candidate
@@ -1175,30 +1224,24 @@ def _solve_balanced_selection(
         ):
             problem += variables[task_id] <= variables[representative_id]
 
-    if max_exact_surface_reuse is not None or min_unique_surface_count:
-        surface_groups: dict[str, list[str]] = {}
-        for task_id in ordered:
-            surface_groups.setdefault(
-                str(features[task_id]["surface_text_hash"]),
-                [],
-            ).append(task_id)
-        surface_used: dict[str, Any] = {}
-        for index, (surface_hash, members) in enumerate(
-            sorted(surface_groups.items())
-        ):
+    for feature, cap in sorted(group_caps.items()):
+        for _, members in sorted(groups(feature).items()):
+            # A group that cannot reach the cap needs no constraint, which keeps the
+            # model small when a feature is nearly unique across candidates.
+            if len(members) > cap:
+                problem += pulp.lpSum(variables[task_id] for task_id in members) <= cap
+
+    if min_unique_surface_count:
+        surface_used: list[Any] = []
+        for index, (_, members) in enumerate(sorted(groups("surface_text_hash").items())):
             count = pulp.lpSum(variables[task_id] for task_id in members)
-            if max_exact_surface_reuse is not None:
-                problem += count <= max_exact_surface_reuse
             used = pulp.LpVariable(f"surface_used_{index}", cat=pulp.LpBinary)
-            surface_used[surface_hash] = used
+            surface_used.append(used)
             problem += count >= used
             problem += count <= len(members) * used
-        if min_unique_surface_count:
-            problem += (
-                pulp.lpSum(surface_used.values()) >= min_unique_surface_count
-            )
+        problem += pulp.lpSum(surface_used) >= min_unique_surface_count
 
-    deviation_terms: list[Any] = []
+    overflow_terms: list[Any] = []
     categories = sorted({str(features[task_id]["category"]) for task_id in ordered})
     for category in categories:
         count = pulp.lpSum(
@@ -1207,12 +1250,14 @@ def _solve_balanced_selection(
             if features[task_id]["category"] == category
         )
         overflow = pulp.LpVariable(
-            f"category_overflow_{len(deviation_terms)}",
+            f"category_overflow_{len(overflow_terms)}",
             lowBound=0,
             cat=pulp.LpInteger,
         )
         problem += count - category_cap <= overflow
-        deviation_terms.append(overflow)
+        overflow_terms.append(overflow)
+
+    deviation_terms: list[Any] = []
     for dimension, quotas in sorted(target_counts.items()):
         buckets = sorted(
             set(quotas) | {str(features[task_id][dimension]) for task_id in ordered}
@@ -1236,11 +1281,14 @@ def _solve_balanced_selection(
             problem += count + under - over == quotas.get(bucket, 0)
             deviation_terms.extend((under, over))
 
-    # Declared mixes come first and the stable order only breaks ties. Expressing that
-    # as one weighted objective needs a tie-break weight of O(n^2) — millions of units
-    # at publication scale — and the solver's tolerances then decide whether a small
-    # deviation really outranks the tie-break. Two exact solves keep the priority
-    # exact: minimize deviation, pin it, then minimize the order cost.
+    # The three objectives are ranked, not weighted. The category budget is a
+    # publication invariant that only coverage may break, declared mixes are targets
+    # under it, and the stable order merely breaks ties. Folding that into one weighted
+    # objective needs a tie-break weight of O(n^2) — millions of units at publication
+    # scale — and the solver's tolerances would then decide whether a small mix
+    # deviation really outranks a category overflow. Solving in order and pinning each
+    # result keeps the ranking exact.
+    total_overflow = pulp.lpSum(overflow_terms)
     total_deviation = pulp.lpSum(deviation_terms)
     tie_break_cost = pulp.lpSum(
         (index + 1) * variables[task_id] for index, task_id in enumerate(ordered)
@@ -1255,9 +1303,14 @@ def _solve_balanced_selection(
                 f"(phase={phase}, solver_status={pulp.LpStatus[status]!r})"
             )
 
-    solve(total_deviation, "deviation")
-    problem += total_deviation <= round(float(pulp.value(total_deviation) or 0.0))
-    solve(tie_break_cost, "stable_order")
+    for objective, phase in (
+        (total_overflow, "category_budget"),
+        (total_deviation, "declared_mix"),
+        (tie_break_cost, "stable_order"),
+    ):
+        solve(objective, phase)
+        if phase != "stable_order":
+            problem += objective <= round(float(pulp.value(objective) or 0.0))
     return {
         task_id
         for task_id in ordered
@@ -1352,20 +1405,20 @@ def balance_publication_set(
     category_cap = int(generation.get("tasks_per_category") or len(candidates))
     inventory_by_category = Counter(features[task_id]["category"] for task_id in candidates)
     category_budget = sum(min(count, category_cap) for count in inventory_by_category.values())
-    surface_inventory = Counter(
-        str(features[task_id]["surface_text_hash"]) for task_id in candidates
-    )
-    surface_budget = len(candidates)
-    if settings.max_exact_surface_reuse is not None:
-        surface_budget = sum(
-            min(count, settings.max_exact_surface_reuse)
-            for count in surface_inventory.values()
-        )
+    group_caps = settings.group_caps
+    group_inventory = {
+        feature: Counter(str(features[task_id][feature]) for task_id in candidates)
+        for feature, _, _ in GROUP_REUSE_CAPS
+    }
+    group_budgets = {
+        feature: sum(min(count, cap) for count in group_inventory[feature].values())
+        for feature, cap in group_caps.items()
+    }
     if settings.min_exact_surface_ratio is not None:
-        surface_budget = min(
-            surface_budget,
+        group_budgets["surface_text_hash"] = min(
+            group_budgets.get("surface_text_hash", len(candidates)),
             math.floor(
-                len(surface_inventory) / settings.min_exact_surface_ratio
+                len(group_inventory["surface_text_hash"]) / settings.min_exact_surface_ratio
             ),
         )
     target_mixes = _target_mix_by_dimension(config)
@@ -1385,7 +1438,7 @@ def balance_publication_set(
                 return False
         return True
 
-    feasible_budget = min(len(candidates), category_budget, surface_budget)
+    feasible_budget = min([len(candidates), category_budget, *group_budgets.values()])
     declared_target = generation.get("target_published_tasks")
     budget = (
         min(feasible_budget, int(declared_target))
@@ -1397,7 +1450,11 @@ def balance_publication_set(
     shortfall_bounds = {
         "insufficient_candidate_inventory": len(candidates),
         "category_cap_limits_inventory": category_budget,
-        "insufficient_surface_diversity": surface_budget,
+        **{
+            reason: group_budgets[feature]
+            for feature, _, reason in GROUP_REUSE_CAPS
+            if feature in group_budgets
+        },
     }
     mix_exceeds_inventory = False
     while budget > len(mandatory) and not quotas_fit(budget):
@@ -1422,7 +1479,7 @@ def balance_publication_set(
         budget=budget,
         category_cap=category_cap,
         target_counts=target_counts,
-        max_exact_surface_reuse=settings.max_exact_surface_reuse,
+        group_caps=group_caps,
         min_unique_surface_count=min_unique_surface_count,
         stable_key=stable_key,
     )
@@ -1430,6 +1487,10 @@ def balance_publication_set(
     selected_counts = {
         dimension: Counter(features[task_id][dimension] for task_id in selected)
         for dimension in BALANCING_DIMENSIONS
+    }
+    selected_group_counts = {
+        feature: Counter(str(features[task_id][feature]) for task_id in selected_order)
+        for feature, _, _ in GROUP_REUSE_CAPS
     }
     category_counts = selected_counts["category"]
     selected_by_bucket = Counter(bucket_key[task_id] for task_id in selected)
@@ -1469,6 +1530,15 @@ def balance_publication_set(
             category = features[task_id]["category"]
             if category_counts[category] >= category_cap:
                 primary_dimension = "category"
+            elif any(
+                selected_group_counts[feature][str(features[task_id][feature])] >= cap
+                # Whatever displaced this row shares its intent: directly for the intent
+                # cap, and by construction for the executable-case cap, because intent is
+                # part of the case identity. The intent dimension names that bound exactly.
+                for feature, cap in group_caps.items()
+                if feature in ("intent", "execution_case_hash")
+            ):
+                primary_dimension = "intent"
             else:
                 over_target = [
                     dimension
@@ -1558,10 +1628,7 @@ def balance_publication_set(
                         ),
                     }
                 )
-    selected_surface_counts = Counter(
-        str(features[task_id]["surface_text_hash"])
-        for task_id in selected_order
-    )
+    selected_surface_counts = selected_group_counts["surface_text_hash"]
     summary = {
         "input_count": len(task_ids),
         "candidate_count": len(candidates),
@@ -1581,6 +1648,17 @@ def balance_publication_set(
             "max_reuse": max(selected_surface_counts.values(), default=0),
             "max_exact_surface_reuse": settings.max_exact_surface_reuse,
             "min_exact_surface_ratio": settings.min_exact_surface_ratio,
+        },
+        # Repetition is reported for every capped feature whether or not the pack
+        # declared a ceiling, so a run can be judged on how often it repeats a request
+        # or an executable case before a cap is chosen.
+        "group_diversity": {
+            feature: {
+                "unique": len(counts),
+                "max_reuse": max(counts.values(), default=0),
+                "cap": group_caps.get(feature),
+            }
+            for feature, counts in sorted(selected_group_counts.items())
         },
         "unmet_targets": unmet,
     }

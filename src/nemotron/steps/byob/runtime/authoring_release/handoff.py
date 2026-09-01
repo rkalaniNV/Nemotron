@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +38,7 @@ def handoff_frozen_release(
     config_path: Path,
     *,
     adapter: PublicationAdapter,
+    revocation_check: Callable[[str], object] | None = None,
 ) -> PublicationHandoffV2:
     loaded = load_frozen_release(release_root)
     if not isinstance(loaded, FrozenReleaseV2):
@@ -47,6 +48,8 @@ def handoff_frozen_release(
             recovery="use the MCP compatibility handoff for v1",
         )
     release = loaded
+    if revocation_check is not None:
+        revocation_check(release.pack_fingerprint)
     if adapter.kind != release.adapter_kind:
         raise AuthoringHandoffError(
             "release_adapter_mismatch",
@@ -69,9 +72,13 @@ def handoff_frozen_release(
     report = adapter.load_validation_report(report_path)
     adapter.require_fresh_gold(report, release.pack_fingerprint)
     load_frozen_release(release_root)
+    if revocation_check is not None:
+        revocation_check(release.pack_fingerprint)
 
     benchmark_path = adapter.generate(config_path)
     load_frozen_release(release_root)
+    if revocation_check is not None:
+        revocation_check(release.pack_fingerprint)
     publication_root = benchmark_path.parent
     raw_path = publication_root / "benchmark_raw.parquet"
     manifest_path = publication_root / "run_manifest.json"

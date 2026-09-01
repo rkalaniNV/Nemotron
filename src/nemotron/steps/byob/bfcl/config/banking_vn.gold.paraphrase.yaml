@@ -62,11 +62,26 @@ surface_quality_validation:
   drop_authority: false
 
 task_generation:
-  candidate_tasks_per_category: 320
+  candidate_tasks_per_category: 480
   tasks_per_category: 232
   target_published_tasks: 1392
-  difficulty_mix: {easy: 0.45, medium: 0.20, hard: 0.35}
-  turn_mix: {single_turn: 0.764, multi_turn: 0.236}
+  difficulty_mix: {easy: 0.25, medium: 0.30, hard: 0.45}
+  turn_mix: {single_turn: 0.70, multi_turn: 0.30}
+  # Conversation policy is the axis a candidate is most likely to fail on, so the
+  # release declares it rather than letting inventory decide. Every weight below is
+  # jointly reachable with the category budget, difficulty and turn mixes at this
+  # scale; `irrelevant` is pinned at one sixth because the out_of_scope category owes
+  # 232 rows and declares no other policy.
+  policy_mix:
+    single_turn: 0.19
+    missing_slot: 0.10
+    dependent_call: 0.15
+    multi_tool: 0.07
+    confirmation: 0.07
+    correction: 0.08
+    negative_path: 0.07
+    clarify_only: 0.1033
+    irrelevant: 0.1667
 
 semantic_deduplication_config:
   contract_version: "1.0"
@@ -79,6 +94,11 @@ semantic_deduplication_config:
   # similarity remains evidence; it is not confused with executable identity.
   max_exact_surface_reuse: 8
   min_exact_surface_ratio: 0.15
+  # Two rows that call the same tools with the same arguments score the same model
+  # twice, so the release admits each executable case once and stops any single
+  # intent from owning more than ~8.6% of the benchmark.
+  max_execution_case_reuse: 1
+  max_rows_per_intent: 120
   representative_source_preference: [model, template]
   unmet_target_policy: abort
 

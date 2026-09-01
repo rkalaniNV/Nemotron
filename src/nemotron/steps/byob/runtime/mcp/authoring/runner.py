@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +40,10 @@ from nemotron.steps.byob.runtime.mcp.authoring.provenance import (
     build_intake_provenance,
     write_intake_provenance,
 )
-from nemotron.steps.byob.runtime.mcp.config import TrustedExecutablePolicies
+from nemotron.steps.byob.runtime.mcp.config import (
+    StreamableHttpTransportConfig,
+    TrustedExecutablePolicies,
+)
 from nemotron.steps.byob.runtime.mcp.discovery import (
     ConnectionFactory,
     DiscoveryReport,
@@ -188,6 +191,17 @@ async def run_intake(
         intake_path,
         allow_insecure_localhost=allow_insecure_localhost,
     )
+    source_transport = intake.oracle.value.transport
+    if (
+        isinstance(source_transport, StreamableHttpTransportConfig)
+        and source_transport.auth.credential_references()
+        and intake.oracle.value.expected.authorization_context_digest is None
+    ):
+        raise SourceIntakeError(
+            "unsupported_auth",
+            "authenticated MCP authoring requires expected principal_digest, "
+            "permission_digest, and authorization_context_digest",
+        )
     report = await discover_mcp_oracle(
         intake.oracle,
         environ=environ,
@@ -203,6 +217,15 @@ async def run_intake(
             snapshot_digest=intake.value.gateway.snapshot_digest,
         ),
     )
+    if intake.value.gateway.authorization_context_digest is not None:
+        identity = replace(
+            identity,
+            principal_digest=intake.value.gateway.principal_digest,
+            permission_digest=intake.value.gateway.permission_digest,
+            authorization_context_digest=(
+                intake.value.gateway.authorization_context_digest
+            ),
+        )
     temporary_endpoint = temporary_endpoint_config(intake, identity)
     if attestation_fetcher is None:
         raw_attestation = await asyncio.to_thread(

@@ -43,7 +43,7 @@ surface_quality_validation:
 task_generation:
   # Shared by every template in a category, so it may not fall below the number of
   # templates in the widest category or a template would lose its only instance.
-  tasks_per_category: 7
+  tasks_per_category: 10
 
 semantic_deduplication_config:
   enabled: false

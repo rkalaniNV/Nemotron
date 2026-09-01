@@ -171,11 +171,12 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         for category_tasks in selected_by_category.values()
         for task in category_tasks
     ]
+    # Out-of-scope templates do not share a slot vocabulary, so uniqueness is checked on
+    # the whole binding rather than on the slots one template happens to declare.
     out_of_scope_cases = {
         (
             str(task["template_id"]),
-            str(task["slots"]["service"]),
-            str(task["slots"]["topic"]),
+            tuple(sorted((key, str(value)) for key, value in task["slots"].items())),
         )
         for task in selected_by_category["out_of_scope"]
     }
@@ -210,25 +211,51 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
     }
     assert len(selected) == requested_samples
     assert len({str(task["task_id"]) for task in selected}) == requested_samples
-    assert len(candidates) == 1_896
+    assert len(candidates) == 2_824
     assert all(len(tasks) >= budget for tasks in candidate_by_category.values())
     candidate_difficulty = {
         difficulty: sum(task["difficulty"] == difficulty for task in candidates)
         for difficulty in ("easy", "medium", "hard")
     }
-    assert candidate_difficulty == {"easy": 750, "medium": 585, "hard": 561}
-    assert candidate_difficulty["hard"] >= 487
+    assert candidate_difficulty == {"easy": 753, "medium": 1_013, "hard": 1_058}
+    assert candidate_difficulty["hard"] >= 626
     assert challenge_summary["selected_count"] == requested_samples
     assert challenge_summary["actual_counts"]["difficulty"] == {
-        "easy": 626,
-        "hard": 487,
-        "medium": 279,
+        "easy": 348,
+        "hard": 626,
+        "medium": 418,
     }
     assert challenge_summary["actual_counts"]["turn_class"] == {
-        "multi_turn": 329,
-        "single_turn": 1_063,
+        "multi_turn": 418,
+        "single_turn": 974,
     }
+    # The declared policy mix is the release's claim about what it actually tests, so
+    # the shapes a candidate is most likely to fail are pinned rather than left to
+    # whatever expansion inventory happened to produce.
+    assert challenge_summary["actual_counts"]["turn_policy"] == {
+        "clarify_only": 144,
+        "confirmation": 98,
+        "correction": 111,
+        "dependent_call": 209,
+        "irrelevant": 232,
+        "missing_slot": 139,
+        "multi_tool": 97,
+        "negative_path": 97,
+        "single_turn": 265,
+    }
+    # No two published rows call the same tools with the same arguments against the
+    # same state, so 1,392 rows are 1,392 distinct behaviours rather than repeats.
+    assert challenge_summary["group_diversity"]["execution_case_hash"] == {
+        "unique": requested_samples,
+        "max_reuse": 1,
+        "cap": 1,
+    }
+    assert challenge_summary["group_diversity"]["intent"]["max_reuse"] <= 120
     assert challenge_summary["unmet_targets"] == []
+    # Every row offers the whole catalog, so tool selection is a nine-way choice.
+    assert {
+        len(set(task["tools_present"] or [])) for task in candidates
+    } == {len(pack.tools)}
     assert len(out_of_scope_cases) == 232
     assert len(create_dispute_tasks) == 72
     assert len(create_dispute_ids) == 18
@@ -285,7 +312,14 @@ def test_banking_gold_paraphrase_profile_is_guarded_and_fail_closed() -> None:
     assert config.task_generation["target_published_tasks"] == 1_392
     assert config.semantic_deduplication_config["max_exact_surface_reuse"] == 8
     assert config.semantic_deduplication_config["min_exact_surface_ratio"] == 0.15
+    assert config.semantic_deduplication_config["max_execution_case_reuse"] == 1
+    assert config.semantic_deduplication_config["max_rows_per_intent"] == 120
     assert config.semantic_deduplication_config["unmet_target_policy"] == "abort"
+    # A paraphrase run rewords the same executable cases, so the release states which
+    # conversation shapes it buys with that scale rather than inheriting the mix.
+    assert sum(config.task_generation["policy_mix"].values()) == pytest.approx(1.0)
+    assert config.task_generation["policy_mix"]["clarify_only"] > 0.1
+    assert config.task_generation["difficulty_mix"]["hard"] == 0.45
 
 
 def test_candidate_category_budget_cannot_be_smaller_than_publication_budget(
@@ -670,6 +704,10 @@ def test_week4_distribution_and_dedup_contracts_parse_strictly(
             {"tool_call_count_mix": {"1": 1.1, "2": -0.1}},
             "must be between 0 and 1",
         ),
+        (
+            {"policy_mix": {"single_turn": 0.5, "not_a_policy": 0.5}},
+            r"policy_mix has unknown keys: not_a_policy",
+        ),
     ],
 )
 def test_week4_mix_contract_rejects_invalid_probabilities(
@@ -683,6 +721,39 @@ def test_week4_mix_contract_rejects_invalid_probabilities(
                 tmp_path,
                 "invalid-week4-mix.yaml",
                 task_generation=task_generation,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("max_rows_per_intent", 0),
+        ("max_execution_case_reuse", 0),
+        ("max_rows_per_intent", 1.5),
+        ("max_execution_case_reuse", "one"),
+    ],
+)
+def test_repetition_caps_must_be_positive_integers(
+    tmp_path: Path,
+    key: str,
+    value: Any,
+) -> None:
+    # A cap of zero or a non-integer would silently make the constraint meaningless
+    # rather than bounding repetition, so it is rejected at config load.
+    with pytest.raises(ValueError, match=f"semantic_deduplication_config.{key}"):
+        BfclConfig.from_yaml(
+            _write_tiny_config(
+                tmp_path,
+                f"invalid-{key}-{value}.yaml",
+                semantic_deduplication_config={
+                    "enabled": False,
+                    "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+                    "n_clusters": 20,
+                    "eps": 0.08,
+                    "remove_duplicates": True,
+                    key: value,
+                },
             )
         )
 

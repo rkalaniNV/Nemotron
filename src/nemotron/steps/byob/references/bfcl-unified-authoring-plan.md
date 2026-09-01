@@ -1,7 +1,7 @@
 # BFCL unified authoring plan (Flow 2, Epics 7–12)
 
-Task prefix: `UA`. Status: in progress; Epic 7 (UA-701–UA-707) completed on
-2026-08-27.
+Task prefix: `UA`. Status: in progress; Epics 7–11 and UA-1201–UA-1205 are
+completed.
 Continues Epics 0–6 of the MCP integration
 (`bfcl-mcp-architecture-decision.md`, `bfcl-mcp-support-matrix.md`).
 
@@ -17,35 +17,17 @@ runs `prepare_bfcl → Gold Gate → generate_bfcl → publish` unchanged. Minim
 
 ## Current state
 
-Implemented today:
+Epics 7–11 and UA-1201–UA-1205 are implemented. Flow 2 now has a static adapter
+registry, A0–A2 certification, evidence schema v2, conventional and MCP intake,
+held-out proof and question/answer handling, transactional revisions, a two-boundary
+guided CLI, shared review/freeze/publication contracts, structured events, credential
+lifecycle, cache retention, revocation, and test-linked operator documentation.
 
-- `runtime/pack_authoring/` — transport-neutral structured drafting: strict evidence
-  loading, approval gate, four ordered cached model calls, grounding, declarative
-  assertion compilation, draft provenance, atomic per-file writes.
-- `runtime/mcp/authoring/` — MCP Mode A intake, discovery-backed evidence bundle,
-  attestation, intake provenance.
-- `runtime/mcp/gateway/` — MCP → BFCL Oracle HTTP v1 projection plus `P1–P11`/`L2`
-  conformance evidence.
-- `runtime/mcp/release/` — digest-bound review packet, checklist approval,
-  content-addressed freeze, publication handoff.
-- `scripts/build_mcp_intake.py`, `draft_mcp_pack.py`, `build_mcp_review.py`,
-  `approve_mcp_review.py`, `freeze_mcp_pack.py`, `publish_mcp_release.py`.
-
-Gaps that block the documented architecture:
-
-| Gap | Evidence in code |
-| --- | --- |
-| Shared drafting reads an MCP-named schema | `pack_authoring/bundle.py`: `EVIDENCE_BUNDLE_VERSION = "bfcl-mcp-evidence-v1"` |
-| Trust is expressed as an MCP level, not an adapter tier | `EvidenceView.attained_level` returns `L0`/`L1`/`L2` |
-| No adapter contract or registry | no `runtime/source_adapters/` |
-| No guided workflow or entry point | no `runtime/authoring_workflow/`, no `scripts/bfcl_author.py` |
-| Held-out status may be absent | `McpIntakeConfig` has no held-out field; `release/review.py` accepts `not_declared` |
-| Rollout flag is MCP-specific | `runtime/mcp/rollout.py`: single `BFCL_ENABLE_EXPERIMENTAL_MCP` gate |
-| Revisions are per-file atomic writes, not transactional directories | `pack_authoring/runner.py` writes drafts in place |
-| Domain brief is not implemented | no runtime schema, hashing, sanitization, prompt field, or cache-key input for a domain brief |
-| Endpoint discovery returns names, not schemas | Oracle HTTP v1 `GET /v1/tools` returns `list[str]`; authoring still needs a reviewed schema artifact |
-| Conformance and lineage remain MCP-specific | `benchmark_families/bfcl/conformance.py` and `origin_provenance.py` require MCP-shaped records |
-| Authoring has two authorization boundaries | evidence approval occurs before drafting; release approval occurs after semantic review |
+The support source is
+[bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md); the operator entry
+point is [bfcl-authoring-user-guide.md](bfcl-authoring-user-guide.md). MCP Mode B,
+MCP Mode C, dynamically installed third-party adapters, and the UA-1206 multi-domain
+rollout evidence are explicitly **unimplemented**.
 
 ## Cross-cutting constraints
 
@@ -135,13 +117,13 @@ Minimum named test ownership:
   UA-706 compatibility and recorded-output regression.
 - `test_bfcl_local_authoring_adapter.py` — UA-801, UA-802.
 - `test_bfcl_http_authoring_adapter.py` — UA-803, UA-804.
-- `test_bfcl_conventional_authoring_intake.py` — UA-805.
-- `test_bfcl_provider_neutral_conformance.py` — UA-807.
+- `test_bfcl_source_intake.py` — UA-805.
+- `test_bfcl_endpoint_conformance.py` — UA-807.
 - `test_bfcl_authoring_held_out.py` — UA-901, UA-902.
 - `test_bfcl_authoring_questions.py` — UA-903, UA-904, UA-905.
 - `test_bfcl_authoring_authorization.py` — UA-906.
 - `test_bfcl_authoring_revisions.py` — UA-1001, UA-1003, UA-1004, UA-1006.
-- `test_bfcl_authoring_workspace.py` — UA-1002.
+- `test_bfcl_authoring_workspace_lock.py` — UA-1002.
 - `test_bfcl_authoring_quotas.py` — UA-1005.
 - `test_bfcl_authoring_cli.py` — UA-1101, UA-1102, UA-1105.
 - `test_bfcl_authoring_release.py` — UA-1103, UA-1104.
@@ -149,8 +131,10 @@ Minimum named test ownership:
 - `test_bfcl_authoring_events.py`, `test_bfcl_authoring_credentials.py`,
   `test_bfcl_authoring_retention.py`, and `test_bfcl_release_revocation.py` —
   UA-1201 through UA-1204 respectively.
-- Documentation smoke tests — UA-1205. Existing ablation tests plus the new
-  multi-domain protocol fixture — UA-1206.
+- `test_bfcl_authoring_documentation.py` — UA-1205.
+- `test_bfcl_mcp_ablation.py` and `test_bfcl_mcp_ablation_rollout.py` — UA-1206 contract
+  and rollout gating. The rollout decision stays descriptive until real multi-domain
+  observations exist, so these tests own the gate, not the evidence.
 - Existing MCP, manual, endpoint, held-out, and publication suites remain regression
   owners for every gate.
 
@@ -665,30 +649,94 @@ Closes: the production robustness invariants and the platform-operations risk co
   selected from an allowlisted schema rather than redacted after arbitrary serialization.
   **Acceptance:** event payload tests prove source prose, fixture values, credentials,
   and model responses are absent.
+  **Status (2026-08-29): completed.** `runtime/authoring_workflow/events.py` defines
+  strict per-event payloads, digest-bound envelopes, and a locked/fsynced JSONL sink.
+  Guided intake, review, freeze, publication validation, CLI refusals, persisted Stage F
+  refusals, and revision authorizations emit only selected digests, enums, booleans, and
+  stable codes. `test_bfcl_authoring_events.py` owns schema, tamper, persistence, and
+  sensitive-corpus absence coverage; `bfcl-authoring-events.md` documents operation and
+  failure semantics.
 - **UA-1202 (M) Credential lifecycle.** Reference credentials by name only, resolve from
   environment or a secret manager, and support rotation without recording the secret.
   Record a non-secret authorization-context/principal digest; rotation or permission
   changes invalidate observations and require revalidation. **Acceptance:** secrets do
   not enter config, cache, events, provenance, exceptions, or release bytes.
+  **Status (2026-08-29): completed.** `runtime/authoring_workflow/credentials.py`
+  provides strict environment/secret-manager references, ephemeral redacted values,
+  injectable providers, and digest-bound principal/permission authorization contexts.
+  HTTP and MCP transports share resolution, authenticated authoring binds the context
+  into live identity, evidence, release configuration, and allowlisted events, and
+  reflected HTTP/provider failures cannot retain secret text. Token value rotation keeps
+  the context stable; reference, principal, or permission drift requires fresh intake.
+  `test_bfcl_authoring_credentials.py` owns lifecycle, rotation, secret-manager,
+  exception, endpoint, MCP, and event absence coverage.
 - **UA-1203 (S) Cache retention.** Enforce retention and access policy for the model I/O
   cache and provide a purge tool. **Acceptance:** dry-run and execute modes enumerate
   the same eligible records; active/referenced revisions are retained; purge produces
   a digest-bound audit record without response content.
+  **Status (2026-08-29): completed.**
+  `runtime/authoring_workflow/cache_retention.py` verifies immutable sessions and bound
+  draft provenance, protects active/uncommitted heads, and builds content-bound purge
+  plans for `authoring_io_cache.jsonl` only. Guided `purge-cache` defaults to dry-run;
+  execute requires the reviewed plan digest, rewrites under workspace/cache locks with
+  fsync and atomic replacement, and appends a private digest-bound audit containing no
+  model response. `test_bfcl_authoring_retention.py` owns dry-run/execute parity,
+  references, active sessions, stale plans, lock/access/path failures, audit privacy,
+  and CLI coverage.
 - **UA-1204 (M) Revoke and supersede.** Define a revocation record for a published
   release, signed or stored in an authenticated registry. Publication prevents new use
   of revoked identities; consumer verification rejects or warns according to policy.
   Document that downstream copies cannot be physically recalled. **Acceptance:** stale,
   unsigned, wrong-issuer, and conflicting revocation records fail closed.
+  **Status (2026-08-29): completed.** `runtime/authoring_release/revocation.py`
+  defines signed records, signed freshness-bounded registry snapshots, monotonic
+  generations, strict supersession chains, and reject/warn consumer verdicts.
+  Publication handoff rechecks a supplied registry verifier at each commit boundary,
+  eval source verification accepts the same policy callback, and
+  `revoke_authoring_release.py` issues locked atomic registry updates. Stale,
+  unsigned, wrong-issuer/key, rollback, and conflicting-chain cases are owned by
+  `test_bfcl_release_revocation.py`; `bfcl-authoring-revocation.md` documents that
+  downstream copies cannot be physically recalled.
 - **UA-1205 (M) Documentation.** Update the user guide, support matrix, and contract
   references, and add a guide for authoring and certifying a new adapter. **Acceptance:**
   every supported/experimental/target statement links to a named test or is explicitly
   labeled unimplemented; all CLI examples run in documentation smoke tests.
+  **Completed 2026-08-29:** `bfcl-authoring-user-guide.md` is the operator and contract
+  index; `bfcl-authoring-support-matrix.md` and the MCP matrix bind support claims to
+  named tests or `unimplemented`; `bfcl-adapter-authoring-certification-guide.md`
+  defines the extension checklist; `test_bfcl_authoring_documentation.py` executes every
+  registered authoring shell example and rejects unsupported matrix claims or broken
+  test/contract links.
 - **UA-1206 (L) Broader evaluation.** Repeat the ablation on two additional domains with
   an independent reviewer, and run pinned target-model evaluation before any causal or
   default-UX claim. **Acceptance:** protocol, exclusions, raw observations, artifact
   digests, reviewer identity, and missing runs are published; no synthetic observations
   are substituted; the rollout decision states whether the evidence is descriptive or
   causal.
+  **In progress 2026-08-30:** `bfcl-onboarding-ablation-rollout-v2` and
+  `assemble_bfcl_ablation_rollout.py` bind three domain slots, raw
+  observation/state/run digests, explicit exclusions, independent identities, evaluator
+  pins, missing runs, and a digest-bound descriptive/causal decision.
+  Reviewer identity and the model pin are now verifiable rather than declared.
+  `bfcl-onboarding-domain-review-v1` (`runtime/mcp/ablation_review.py`) makes an
+  independent review an Ed25519 attestation over the exact reviewed bundle —
+  protocol, input, report, evaluator pin, exclusions, and all nine observation and
+  run-tree digests — which publication recomputes from the raw files; the trusted
+  reviewer key is supplied by the publishing authority, never by the operator's
+  bundle manifest. `bfcl-onboarding-evaluator-pin-v1`
+  (`runtime/mcp/ablation_evaluator_pin.py`) validates a pin through the existing
+  `CandidateModelIdentity` contract instead of a local regex, so moving pointers
+  are refused, credential-shaped values cannot enter evidence, and an absent pin is
+  recorded as `target_evaluation_not_run` or `immutable_pin_unavailable`.
+  `bfcl-onboarding-domain-bundle-v1` declares the raw files once so the reviewer and
+  the publisher verify the same tree, and `review_bfcl_domain_evidence.py` plus
+  `record_bfcl_evaluator_pin.py` are the reviewer and operator entry points.
+  The published decision is `mcp610-rollout/rollout.json`: the tiny_library pilot
+  bundle re-verifies from `mcp610-tiny-library.bundle.json` but has no signed
+  reviewer attestation, inventory and banking_vn have no live runs, and no immutable
+  `azure/openai/gpt-5.6-sol` pin exists. The implementation therefore refuses causal
+  status and UA-1206 remains incomplete pending independent review of the pilot,
+  live runs for the two additional domains, and a real target-model pin.
 
 ## Definition of done for the whole plan
 
@@ -707,3 +755,46 @@ Closes: the production robustness invariants and the platform-operations risk co
 7. The HTTP adapter requires reviewed schemas and never invents them from tool names.
 8. Adapter declarations cannot self-certify, and Flow 2 certification cannot change the
    manual Gold contract.
+
+### Audit status
+
+Conditions 3, 4, 5, 6, 7, and 8 are met. Conditions 1 and 2 are partially met. Nothing
+in this section may be marked met on the strength of prose; each line names the owning
+test.
+
+- Condition 1. Partially met. No test starts from only a source declaration plus a
+  domain brief and reaches a Gold-eligible pack with unmocked validation. The closest
+  cases either stop at A0 intake or begin from a pre-built frozen session. Held-out
+  selection is also not a first-class argument of `bfcl_author author`, so the minimal
+  two-input claim does not hold at the CLI.
+- Condition 2. Partially met. All three adapters share the contract and the v2 evidence
+  schema at A0, but only `local_python` runs A1 and A2 through intake. HTTP and MCP
+  production intake certify A0 only, so "independently certified on the same ladder" is
+  unproven for two of the three adapters.
+- Condition 4. Met. `test_bfcl_authoring_revisions.py` owns the resume refusals,
+  including `artifact_missing` and `session_invalid`, and
+  `test_bfcl_authoring_cli.py::test_answer_commits_a_revision_that_must_be_reauthorized_and_reapproved`
+  carries one correction through `answer`, the withdrawn right to draft, re-authorization,
+  and re-approval.
+- Condition 5. Met, with one declared boundary.
+  `test_bfcl_authoring_release.py` owns the shared envelope, v1 compatibility, and
+  `fresh_validation_stale`;
+  `test_bfcl_authoring_generalized_review.py::test_review_refuses_a_validation_report_the_bound_config_did_not_write`
+  owns `validation_report_path_mismatch`; and `test_bfcl_release_revocation.py` drives
+  `publish_authoring_release` with revocation-registry flags. HTTP publication remains
+  refused by design and is labelled unimplemented in the support matrix.
+- Condition 6. Met. The workflow document's section 13 acceptance criteria are
+  transcribed into [bfcl-workflow-acceptance-matrix.md](bfcl-workflow-acceptance-matrix.md)
+  with the source digest recorded, and
+  `test_bfcl_authoring_documentation.py::test_workflow_acceptance_criteria_are_backed_by_named_tests`
+  fails when a criterion names no test or names a test function that does not exist.
+  Task-to-test ownership for this plan is machine-checked separately by
+  `test_bfcl_authoring_documentation.py::test_every_plan_task_is_owned_by_an_existing_named_test`.
+  The document itself lives outside this repository, so no test can detect that it
+  changed; re-transcribe the matrix when its digest moves.
+- Condition 8. Met. Self-certification is closed by signature and issuer checks in
+  `test_bfcl_source_adapter_certification.py`, and
+  `test_bfcl_stages.py::test_manual_oracle_packs_require_no_flow_two_adapter_metadata`
+  plus `test_bfcl_stages.py::test_manual_gold_tier_ignores_adapter_and_certification_fields`
+  assert that manual packs need no adapter metadata and that Flow 2 records cannot move
+  the manual Gold verdict.

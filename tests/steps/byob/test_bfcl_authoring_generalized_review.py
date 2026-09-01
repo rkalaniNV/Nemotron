@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 import yaml
 
+from nemotron.steps.byob.runtime.authoring_release import assembly
 from nemotron.steps.byob.runtime.authoring_release.assembly import (
+    ReviewAssemblyError,
     ReviewContext,
     assemble_review,
 )
@@ -54,19 +58,18 @@ def _candidate_pack(tmp_path: Path, adapter: str, pack_id: str, version: str) ->
     return pack
 
 
-@pytest.mark.parametrize(
-    "adapter_kind",
-    ["local_python", "http_package", "mcp_mode_a"],
-)
-def test_generalized_review_verifies_common_trust_records_for_every_adapter(
-    tmp_path: Path,
-    adapter_kind: str,
-) -> None:
-    case = _contract_case(tmp_path, adapter_kind)
-    evidence = load_source_evidence(case.evidence_path)
+class _ReviewCase(NamedTuple):
+    context: ReviewContext
+    pack: Path
+    authorization_digest: str
+
+
+def _review_case(tmp_path: Path, adapter_kind: str) -> _ReviewCase:
+    intake = _contract_case(tmp_path, adapter_kind)
+    evidence = load_source_evidence(intake.evidence_path)
     source = tmp_path / f"{adapter_kind}-source"
     source.write_text("reviewed source descriptor\n", encoding="utf-8")
-    brief = case.domain_brief_source_path
+    brief = intake.domain_brief_source_path
     resolved = resolve_authoring_config(
         adapter_kind=adapter_kind,
         source=source,
@@ -82,18 +85,20 @@ def test_generalized_review_verifies_common_trust_records_for_every_adapter(
         resolved,
         tmp_path / "resolved_authoring_config.json",
     )
-    source_bundle = case.output_root / "evidence_bundle.v1.json"
-    migration = case.output_root / "evidence_migration.json"
+    source_bundle = intake.output_root / "evidence_bundle.v1.json"
+    migration = intake.output_root / "evidence_migration.json"
     view = load_evidence_bundle(
-        case.evidence_path,
-        certification_report_path=case.certification_path,
-        trusted_certification_keys={case.authority.key_id: case.authority.public_key},
-        domain_brief_source_path=case.domain_brief_source_path,
-        domain_brief_report_path=case.domain_brief_report_path,
-        held_out_redaction_report_path=case.held_out_redaction_path,
+        intake.evidence_path,
+        certification_report_path=intake.certification_path,
+        trusted_certification_keys={
+            intake.authority.key_id: intake.authority.public_key
+        },
+        domain_brief_source_path=intake.domain_brief_source_path,
+        domain_brief_report_path=intake.domain_brief_report_path,
+        held_out_redaction_report_path=intake.held_out_redaction_path,
         source_bundle_path=source_bundle if source_bundle.exists() else None,
         migration_record_path=migration if migration.exists() else None,
-        source_observations_path=case.observations_path,
+        source_observations_path=intake.observations_path,
     )
     assert view.source_evidence is not None
     assert view.domain_brief_report is not None
@@ -143,16 +148,16 @@ def test_generalized_review_verifies_common_trust_records_for_every_adapter(
         tmp_path / "validation.json",
     )
     context = ReviewContext(
-        evidence_path=case.evidence_path,
-        certification_report_path=case.certification_path,
+        evidence_path=intake.evidence_path,
+        certification_report_path=intake.certification_path,
         trusted_certification_keys={
-            case.authority.key_id: case.authority.public_key
+            intake.authority.key_id: intake.authority.public_key
         },
-        domain_brief_source_path=case.domain_brief_source_path,
-        domain_brief_report_path=case.domain_brief_report_path,
-        held_out_redaction_report_path=case.held_out_redaction_path,
-        source_observations_path=case.observations_path,
-        intake_provenance_path=case.output_root / "intake_provenance.json",
+        domain_brief_source_path=intake.domain_brief_source_path,
+        domain_brief_report_path=intake.domain_brief_report_path,
+        held_out_redaction_report_path=intake.held_out_redaction_path,
+        source_observations_path=intake.observations_path,
+        intake_provenance_path=intake.output_root / "intake_provenance.json",
         draft_provenance_path=draft_path,
         validation_report_path=validation_path,
         resolved_authoring_config_path=resolved_path,
@@ -160,18 +165,34 @@ def test_generalized_review_verifies_common_trust_records_for_every_adapter(
         source_bundle_path=source_bundle if source_bundle.exists() else None,
         migration_record_path=migration if migration.exists() else None,
     )
+    return _ReviewCase(
+        context=context,
+        pack=pack,
+        authorization_digest=authorization.authorization_digest,
+    )
+
+
+@pytest.mark.parametrize(
+    "adapter_kind",
+    ["local_python", "http_package", "mcp_mode_a"],
+)
+def test_generalized_review_verifies_common_trust_records_for_every_adapter(
+    tmp_path: Path,
+    adapter_kind: str,
+) -> None:
+    case = _review_case(tmp_path, adapter_kind)
 
     assembled = assemble_review(
         adapter_kind=adapter_kind,
-        pack_root=pack,
-        context=context,
+        pack_root=case.pack,
+        context=case.context,
     )
 
     packet = assembled.packet.document
     assert packet["adapter_kind"] == adapter_kind
     assert packet["adapter_review"]["authoring"][
         "model_exposure_authorization_digest"
-    ] == authorization.authorization_digest
+    ] == case.authorization_digest
     assert packet["adapter_review"]["authoring"]["questions_status"] == "not_required"
     assert "certification_report" in packet["source_digests"]
     assert "model_exposure_authorization" in packet["source_digests"]
@@ -180,6 +201,39 @@ def test_generalized_review_verifies_common_trust_records_for_every_adapter(
         "validation_authority_missing",
         "validation_pack_mismatch",
     }
+
+
+def test_review_refuses_a_validation_report_the_bound_config_did_not_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = _review_case(tmp_path, "local_python")
+    validation_config = tmp_path / "bfcl-validation.yaml"
+    validation_config.write_text("reviewed: true\n", encoding="utf-8")
+    elsewhere = tmp_path / "unreviewed" / "validation.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text("{}\n", encoding="utf-8")
+    observed: list[bool] = []
+
+    def fresh_prepare(_config: Path, *, force_validation: bool = False) -> Path:
+        observed.append(force_validation)
+        return elsewhere
+
+    monkeypatch.setattr(assembly, "prepare_bfcl", fresh_prepare)
+
+    with pytest.raises(ReviewAssemblyError) as refused:
+        assemble_review(
+            adapter_kind="local_python",
+            pack_root=case.pack,
+            context=replace(
+                case.context,
+                validation_config_path=validation_config,
+            ),
+        )
+
+    assert refused.value.code == "validation_report_path_mismatch"
+    assert refused.value.recovery
+    assert observed == [True]
 
 
 def test_final_approval_cannot_replace_pre_model_authorization(

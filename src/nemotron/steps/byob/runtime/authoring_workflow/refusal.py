@@ -11,6 +11,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
 
+from nemotron.steps.byob.runtime.authoring_workflow.events import (
+    AuthoringEventSink,
+    RefusalPayload,
+    RevisionAuthorizationPayload,
+    emit_authoring_event,
+)
 from nemotron.steps.byob.runtime.authoring_workflow.revision_store import (
     RevisionStore,
     RevisionStoreError,
@@ -343,6 +349,7 @@ def persist_refusal_record(
     root: Path,
     *,
     lease: WorkspaceLease,
+    event_sink: AuthoringEventSink | None = None,
 ) -> Path:
     _require_active_lease(
         lease,
@@ -350,12 +357,31 @@ def persist_refusal_record(
         run_id=record.run_id,
     )
     try:
-        return RevisionStore(root).put_json(
+        path = RevisionStore(root).put_json(
             record.refusal_digest,
             {REFUSAL_FILE_NAME: record.model_dump(mode="json")},
         )
     except RevisionStoreError as exc:
         raise RefusalRecordError(exc.code, exc.detail) from exc
+    if event_sink is not None:
+        emit_authoring_event(
+            event_sink,
+            "refusal_recorded",
+            RefusalPayload(
+                refusal_digest=record.refusal_digest,
+                primary_classification=record.primary_classification.value,
+                finding_codes=tuple(
+                    sorted(finding.finding_code for finding in record.findings)
+                ),
+                reason_codes=tuple(
+                    sorted({finding.reason_code for finding in record.findings})
+                ),
+            ),
+            tenant_id=record.tenant_id,
+            run_id=record.run_id,
+            session_digest=record.session_digest,
+        )
+    return path
 
 
 def persist_revision_authorization(
@@ -364,6 +390,7 @@ def persist_revision_authorization(
     root: Path,
     *,
     lease: WorkspaceLease,
+    event_sink: AuthoringEventSink | None = None,
 ) -> Path:
     _require_active_lease(
         lease,
@@ -376,12 +403,28 @@ def persist_revision_authorization(
         parent_session_digest=record.session_digest,
     )
     try:
-        return RevisionStore(root).put_json(
+        path = RevisionStore(root).put_json(
             authorization.authorization_digest,
             {AUTHORIZATION_FILE_NAME: authorization.model_dump(mode="json")},
         )
     except RevisionStoreError as exc:
         raise RefusalRecordError(exc.code, exc.detail) from exc
+    if event_sink is not None:
+        emit_authoring_event(
+            event_sink,
+            "revision_authorized",
+            RevisionAuthorizationPayload(
+                authorization_digest=authorization.authorization_digest,
+                refusal_digest=authorization.refusal_digest,
+                parent_session_digest=authorization.parent_session_digest,
+                action=authorization.action.value,
+                authorization_code=authorization.authorization_code,
+            ),
+            tenant_id=record.tenant_id,
+            run_id=record.run_id,
+            session_digest=record.session_digest,
+        )
+    return path
 
 
 def _unique_mapping(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

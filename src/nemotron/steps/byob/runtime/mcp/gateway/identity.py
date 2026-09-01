@@ -68,14 +68,25 @@ class GatewayIdentity:
     oracle_id: str
     oracle_version: str
     content_digest: str
+    principal_digest: str | None = None
+    permission_digest: str | None = None
+    authorization_context_digest: str | None = None
 
     def as_dict(self) -> dict[str, str]:
-        return {
+        result = {
             "protocol_version": self.protocol_version,
             "oracle_id": self.oracle_id,
             "oracle_version": self.oracle_version,
             "content_digest": self.content_digest,
         }
+        for name, value in (
+            ("principal_digest", self.principal_digest),
+            ("permission_digest", self.permission_digest),
+            ("authorization_context_digest", self.authorization_context_digest),
+        ):
+            if value is not None:
+                result[name] = value
+        return result
 
 
 def effective_content_document(
@@ -124,4 +135,7 @@ def build_gateway_identity(
         oracle_id=config.expected.oracle_id,
         oracle_version=config.expected.oracle_version,
         content_digest=digest,
+        principal_digest=config.expected.principal_digest,
+        permission_digest=config.expected.permission_digest,
+        authorization_context_digest=config.expected.authorization_context_digest,
     )

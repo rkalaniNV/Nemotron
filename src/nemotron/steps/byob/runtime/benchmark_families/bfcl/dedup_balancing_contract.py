@@ -40,6 +40,22 @@ BalancingDimensionName = Literal[
     "tool_call_count",
     "turn_policy",
 ]
+# The closed conversation-policy vocabulary. It lives with the balancing contract
+# because coverage buckets and declared policy mixes are both keyed on these names, so
+# a pack, a target mix, and a coverage report cannot drift apart.
+TURN_POLICIES = frozenset(
+    {
+        "single_turn",
+        "missing_slot",
+        "confirmation",
+        "correction",
+        "multi_tool",
+        "dependent_call",
+        "negative_path",
+        "clarify_only",
+        "irrelevant",
+    }
+)
 Stage11DropReason = Literal[
     "semantic_duplicate",
     "balance_quota",

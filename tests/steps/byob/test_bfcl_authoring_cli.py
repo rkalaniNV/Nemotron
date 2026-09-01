@@ -7,10 +7,19 @@ from typing import Any
 
 import pytest
 
+from nemotron.steps.byob.runtime.authoring_workflow.resume import AuthoringResumeError
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import write_canonical_json
 from nemotron.steps.byob.runtime.pack_authoring.authorization import ExposureSubject
+from nemotron.steps.byob.runtime.pack_authoring.questions import (
+    AnswerSubmission,
+    build_answer_set,
+    build_open_questions,
+    write_answer_set,
+    write_open_questions,
+)
 from nemotron.steps.byob.runtime.source_adapters.evidence import load_source_evidence
 from nemotron.steps.byob.scripts import bfcl_author
+from tests.steps.byob.test_bfcl_authoring_questions import _candidate
 from tests.steps.byob.test_bfcl_authoring_revisions import _committed_session
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -53,6 +62,7 @@ def test_help_lists_commands_and_separate_approval_boundaries() -> None:
         "review",
         "freeze",
         "publish",
+        "purge-cache",
     ):
         assert command in help_text
     assert "Pre-model authorization" in help_text
@@ -255,6 +265,134 @@ def test_evidence_approval_is_distinct_and_digest_bound(
     assert approval["normalized_bundle_digest"] == evidence_digest
     assert result["status"] == "evidence_approved"
     assert "cannot substitute for final release approval" in result["note"]
+
+
+def _run_cli(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+    monkeypatch.setattr(sys, "argv", ["bfcl_author.py", *argv])
+    bfcl_author.main()
+
+
+def test_answer_commits_a_revision_that_must_be_reauthorized_and_reapproved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One correction must travel the guided CLI as a new content-addressed revision."""
+    workspace, gate, parent_digest, paths = _committed_session(
+        tmp_path,
+        phase="intake_complete",
+        with_approval=False,
+    )
+    _write_head(workspace, parent_digest, "intake_complete")
+    parent_evidence = load_source_evidence(paths["evidence"])
+    questions = build_open_questions(
+        evidence_digest=parent_evidence.bundle_digest,
+        candidates=(_candidate(),),
+    )
+    answers = build_answer_set(
+        evidence_digest=parent_evidence.bundle_digest,
+        question_artifact_digest=questions.artifact_digest,
+        answers=(
+            AnswerSubmission(
+                question_id=questions.questions[0].question_id,
+                value=5,
+            ),
+        ),
+    )
+    questions_path = write_open_questions(questions, workspace / "open_questions.json")
+    answers_path = write_answer_set(answers, workspace / "answer_set.json")
+    workspace_argv = [
+        "--workspace",
+        str(workspace),
+        "--tenant-id",
+        "tenant-a",
+        "--run-id",
+        "run-a",
+    ]
+
+    _run_cli(
+        monkeypatch,
+        [
+            "answer",
+            *workspace_argv,
+            "--evidence",
+            str(paths["evidence"]),
+            "--questions",
+            str(questions_path),
+            "--answers",
+            str(answers_path),
+        ],
+    )
+    revised = json.loads(capsys.readouterr().out)
+
+    assert revised["status"] == "evidence_revised"
+    revised_digest = revised["evidence_digest"]
+    assert revised_digest != parent_evidence.bundle_digest
+    revision_root = Path(revised["revision"])
+    assert revision_root.parent == (workspace / "revisions").resolve()
+    assert revision_root.name == revised_digest.removeprefix("sha256:")
+    assert (revision_root / "revision_record.json").is_file()
+
+    head = json.loads((workspace / "authoring_head.json").read_text(encoding="utf-8"))
+    assert head["phase"] == "evidence_revised"
+    revised_session = head["session_digest"]
+    assert revised_session != parent_digest
+
+    # The correction withdraws the right to draft until the boundaries are redone.
+    with pytest.raises(AuthoringResumeError) as blocked:
+        gate.open(revised_session, command="draft")
+    assert blocked.value.code == "resume_command_not_permitted"
+
+    subject = write_canonical_json(
+        ExposureSubject(
+            evidence_digest=revised_digest,
+            domain_brief_content_digest=DIGEST_A,
+            domain_brief_source_digest=DIGEST_A,
+            domain_brief_redaction_report_digest=DIGEST_A,
+            held_out_decision_digest=DIGEST_A,
+            held_out_policy_digest=None,
+            held_out_redaction_report_digest=DIGEST_A,
+        ).model_dump(mode="json"),
+        workspace / "revised_subject.json",
+    )
+    _run_cli(
+        monkeypatch,
+        [
+            "authorize",
+            *workspace_argv,
+            "--subject",
+            str(subject),
+            "--authorized-by",
+            "reviewer@example.test",
+        ],
+    )
+    capsys.readouterr()
+    _run_cli(
+        monkeypatch,
+        [
+            "approve",
+            *workspace_argv,
+            "--boundary",
+            "evidence",
+            "--approved-by",
+            "reviewer@example.test",
+            "--source-bundle-digest",
+            DIGEST_A,
+            "--normalized-bundle-digest",
+            revised_digest,
+            "--output",
+            str(workspace / "revised_approval.json"),
+        ],
+    )
+    capsys.readouterr()
+
+    head = json.loads((workspace / "authoring_head.json").read_text(encoding="utf-8"))
+    assert head["phase"] == "evidence_approved"
+    resumed = gate.open(head["session_digest"], command="draft")
+    try:
+        assert resumed.verdict.permitted_commands == ("draft",)
+    finally:
+        resumed.lease.release()
 
 
 def test_pre_model_authorization_is_a_separate_command(
