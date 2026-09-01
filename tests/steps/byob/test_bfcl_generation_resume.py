@@ -123,6 +123,35 @@ def test_resume_rejects_config_drift_and_disabled_or_unknown_stages(tmp_path: Pa
         generate_bfcl(config, skip_until="not-a-stage")
 
 
+def test_config_identity_ignores_symlinks_in_the_spelling_of_a_root(tmp_path: Path) -> None:
+    """A host that reaches output_dir through a symlink must not fork the identity.
+
+    macOS states /tmp for a directory it resolves to /private/tmp, so a run generated
+    there and resumed on Linux would otherwise be rejected as a different config.
+    """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.final_output import (
+        generation_config_hash,
+    )
+
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+
+    hashes = set()
+    for name, root in (("direct", real), ("through-link", link)):
+        value = yaml.safe_load(
+            (BYOB_ROOT / "bfcl" / "config" / "tiny.yaml").read_text(encoding="utf-8")
+        )
+        value["output_dir"] = str(root / "output")
+        path = tmp_path / f"{name}.yaml"
+        path.write_text(yaml.safe_dump(value), encoding="utf-8")
+        hashes.add(generation_config_hash(BfclConfig.from_yaml(path)))
+
+    assert len(hashes) == 1
+
+
 def test_resume_rejects_pack_and_pipeline_identity_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
