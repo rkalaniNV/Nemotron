@@ -958,6 +958,7 @@ class ProcessWorker:
         *,
         backend_path: Path | str | None = None,
         endpoint_config: Any = None,
+        endpoint_headers_override: Mapping[str, str] | None = None,
         fixtures: dict[str, Any] | None,
         clock_iso: str,
         seed: int,
@@ -1014,11 +1015,16 @@ class ProcessWorker:
             raise ValueError("run_episode requires exactly one of backend_path or endpoint_config")
         endpoint_headers: dict[str, str] | None = None
         if endpoint_config is not None:
-            from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
-                resolve_endpoint_headers,
-            )
+            if endpoint_headers_override is not None:
+                # Intake resolves credentials against a reviewed environment mapping, not
+                # the ambient one this process happens to have.
+                endpoint_headers = dict(endpoint_headers_override)
+            else:
+                from nemotron.steps.byob.runtime.benchmark_families.bfcl.endpoint import (
+                    resolve_endpoint_headers,
+                )
 
-            endpoint_headers = resolve_endpoint_headers(endpoint_config)
+                endpoint_headers = resolve_endpoint_headers(endpoint_config)
 
         if self.worker == "thread":
             return run_with_timeout(

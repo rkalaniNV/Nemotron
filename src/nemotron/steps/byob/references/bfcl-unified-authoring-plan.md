@@ -1,7 +1,7 @@
 # BFCL unified authoring plan (Flow 2, Epics 7–12)
 
-Task prefix: `UA`. Status: in progress; Epics 7–11, UA-1201–UA-1205, and UA-1207 are
-completed.
+Task prefix: `UA`. Status: in progress; Epics 7–11, UA-1201–UA-1205, and UA-1207–UA-1209
+are completed.
 Continues Epics 0–6 of the MCP integration
 (`bfcl-mcp-architecture-decision.md`, `bfcl-mcp-support-matrix.md`).
 
@@ -17,14 +17,16 @@ runs `prepare_bfcl → Gold Gate → generate_bfcl → publish` unchanged. Minim
 
 ## Current state
 
-Epics 7–11, UA-1201–UA-1205, and UA-1207 are implemented. Flow 2 now has a static adapter
-registry, A0–A2 certification, evidence schema v2, conventional and MCP intake,
+Epics 7–11, UA-1201–UA-1205, and UA-1207–UA-1209 are implemented. Flow 2 now has a static
+adapter registry, A0–A2 certification, evidence schema v2, conventional and MCP intake,
 held-out proof and question/answer handling, transactional revisions, a two-boundary
 guided CLI, candidate pack assembly, shared review/freeze/publication contracts,
 structured events, credential lifecycle, cache retention, revocation, and test-linked
 operator documentation. A source declaration and a domain brief now reach a Gold-eligible
 pack through the guided CLI, with one reviewed supplement carrying the semantics no model
-may state.
+may state. The observation probes are written once and run over every transport that can
+be reset, so a local package, an HTTP endpoint, and an MCP Mode A gateway all reach A2
+through the same choreography and earn the same refusals.
 
 The support source is
 [bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md); the operator entry
@@ -140,6 +142,14 @@ Minimum named test ownership:
   observations exist, so these tests own the gate, not the evidence.
 - `test_bfcl_authoring_pack_assembly.py` and `test_bfcl_authoring_gold_e2e.py` — UA-1207
   assembly bindings and the whole-path Gold claim.
+- `test_bfcl_http_probe_certification.py` — UA-1208. The A2 claim is made against a real
+  TLS oracle served by `http_oracle_fixture_server.py`, which shares no code with the
+  adapter under test, so a stub cannot make the ladder look climbed.
+- `test_bfcl_mcp_probe_certification.py` — UA-1209. The A2 claim is made against the
+  production gateway served over TLS by `mcp_gateway_fixture.py`, backed by a fixture
+  oracle client the adapter shares no code with.
+- `test_bfcl_mcp_pack_assembly.py` and `test_bfcl_authoring_revisions.py` — UA-1210
+  session-backed pack bindings and the guided phase that binds them.
 - Existing MCP, manual, endpoint, held-out, and publication suites remain regression
   owners for every gate.
 
@@ -763,6 +773,69 @@ Closes: the production robustness invariants and the platform-operations risk co
   so A1 and A2 are attainable from the CLI, and drafting rebuilds the exposure subject with
   the resolved configuration digest intake bound into it, owned by
   `test_bfcl_pack_drafting.py::test_drafting_honours_the_resolved_config_an_authorization_was_bound_to`.
+- **UA-1208 (M) HTTP endpoints on the observation ladder.** A reviewed HTTP package could
+  be pinned and its catalog checked, which is A0, and then nothing, because intake never
+  called a tool. That left the shared ladder unproven for a transport the plan claims it
+  covers. **Acceptance:** the probe choreography is written once and executed over every
+  transport that can be reset; an HTTP source reaches A2 from intake against a live
+  endpoint; and the refusals are the same refusals a local source would earn.
+  **Completed 2026-09-01:** `runtime/source_adapters/probe_engine.py` now owns the
+  questions on the ladder — executable observation, structured errors, reset determinism,
+  episode isolation, confirmation safety, deadline cleanup, mutation declaration, and
+  result-shape coverage — and `local_python_probes.py` and the new `http_package_probes.py`
+  supply only what their transport means: how one episode runs, what the catalog is, and
+  what identity is worth. `--probe-plan` is transport-neutral (`bfcl-adapter-probe-plan-v1`,
+  with the local name still accepted), and the HTTP certification profile's per-probe call
+  and wall-time budgets were raised from the two-call shape that capped this transport at
+  A0 by arithmetic. `test_bfcl_http_probe_certification.py` owns the claim against a real
+  TLS oracle it shares no code with: A2 over live sessions with no session left behind
+  after a deadline, A1 without a deadline case, `result_shape_incomplete`,
+  `probe_evidence_invalid`, observed catalog and identity drift, an A2 evidence bundle that
+  loads at A2, and `adapter_under_certified` publishing nothing.
+- **UA-1209 (M) MCP Mode A on the observation ladder.** MCP intake pinned an
+  identity-only descriptor and fed discovery checks into certification, so every
+  execution question projected as `probe_missing` and the tier held at A0 no matter what
+  the gateway could actually do. The third adapter the plan claims parity for was the one
+  adapter that had never been called. **Acceptance:** MCP Mode A reaches A2 from intake
+  against a live gateway using the same probe engine as the other transports, and every
+  refusal is the refusal a local or HTTP source would earn.
+  **Completed 2026-09-01:** the gateway already speaks BFCL Oracle HTTP v1, so
+  `runtime/mcp/authoring/probes.py` supplies only the MCP-shaped answers — what a
+  reviewed tool is, what discovery plus the gateway attestation make identity worth, and
+  what the catalog is over `/v1/tools` — and delegates the ladder to
+  `probe_engine.py`. `runner.py` upgrades the descriptor to full execution capability and
+  `RESET_ISOLATED` only when a reviewed probe plan is supplied, refusing a probe plan for
+  any mode whose reset is not a control tool, and `build_mcp_intake.py` accepts
+  `--probe-plan`. The `mcp-mode-a-v1` per-probe budgets were raised to the HTTP shape for
+  the same arithmetic reason. `test_bfcl_mcp_probe_certification.py` owns the claim
+  against a real TLS gateway served by `uvicorn` over a fixture oracle it shares no code
+  with: A0 without a plan, A2 over live gateway sessions, A1 without a deadline case,
+  `result_shape_incomplete`, a plan naming no session fixtures, and mode C refused before
+  a session opens.
+- **UA-1210 (M) Session-backed candidate packs and one runnable lane.** Assembly could
+  only bind a source it could copy, so an HTTP or MCP domain reached certified evidence and
+  compiled drafts and then stopped: the lane the plan claims for three adapters was
+  reachable end to end by one. **Acceptance:** a candidate pack assembled from a
+  session-backed source names the certified endpoint instead of carrying it, takes its
+  fixtures from the reviewed probe plan, and refuses every binding it cannot prove; the
+  guided CLI reaches a candidate pack without a second entry point; and one script walks
+  the whole lane from a reviewed source to a scored evaluation.
+  **Completed 2026-09-01:** `pack_assembly.py` separates a local source, whose oracle is a
+  tree to copy, from a session-backed one, whose oracle is an endpoint to point at, and
+  `assemble_candidate_pack.py` accepts the `--probe-plan` its fixtures come from.
+  `bfcl_author assemble` binds the resulting pack into the session, so `pack_assembled`
+  sits between drafting and review in the resumability matrix rather than being a step an
+  operator performs outside the flow. MCP intake now carries the probe plan's fixture
+  digest into the evidence it migrates, which is what lets assembly prove the fixtures a
+  pack claims are the fixtures the source was certified against.
+  `test_bfcl_mcp_pack_assembly.py` owns the claim over a live TLS gateway — endpoint,
+  catalog, and fixture bindings, plus refusals for a tampered endpoint, a drifted catalog,
+  fixtures the plan does not name, and a missing probe plan — and
+  `test_bfcl_authoring_revisions.py` owns the extended matrix.
+  `scripts/bfcl_llm_generated_demo.py` walks the local Python lane in one command, with the
+  four human review points simulated and labelled, and scores the published benchmark
+  against a candidate served on loopback; it is a demonstration, not evidence, and the
+  claims above stay owned by the tests.
 
 ## Definition of done for the whole plan
 
@@ -786,9 +859,8 @@ Closes: the production robustness invariants and the platform-operations risk co
 
 ### Audit status
 
-Conditions 1, 3, 4, 5, 6, 7, and 8 are met. Condition 2 is partially met. Nothing
-in this section may be marked met on the strength of prose; each line names the owning
-test.
+All eight conditions are met. Nothing in this section may be marked met on the strength
+of prose; each line names the owning test.
 
 - Condition 1. Met, with the supplement declared in the condition itself.
   `test_bfcl_authoring_gold_e2e.py::test_a_source_declaration_and_a_domain_brief_reach_a_gold_eligible_pack`
@@ -802,10 +874,26 @@ test.
   certification, drafts from another evidence revision, a supplement naming an
   unpublished tool or an uncompiled assertion — are owned by
   `test_bfcl_authoring_pack_assembly.py`.
-- Condition 2. Partially met. All three adapters share the contract and the v2 evidence
-  schema at A0, but only `local_python` runs A1 and A2 through intake. HTTP and MCP
-  production intake certify A0 only, so "independently certified on the same ladder" is
-  unproven for two of the three adapters.
+- Condition 2. Met. All three adapters run one probe choreography through intake and
+  reach A2 on live sources, owned by
+  `test_bfcl_local_authoring_adapter.py::test_local_process_probes_derive_a2_without_adapter_assigned_tier`,
+  `test_bfcl_http_probe_certification.py::test_http_endpoint_probes_reach_a2_over_live_sessions`,
+  and
+  `test_bfcl_mcp_probe_certification.py::test_mcp_probes_reach_a2_over_live_gateway_sessions`,
+  with the intake boundaries owned by
+  `test_bfcl_source_intake.py::test_local_observation_intake_enforces_a1_and_a2_boundaries`,
+  `test_bfcl_http_probe_certification.py::test_http_intake_publishes_an_a2_bundle_that_loads_at_a2`,
+  and
+  `test_bfcl_mcp_probe_certification.py::test_mcp_a2_needs_a_deadline_the_gateway_was_actually_held_to`.
+  Mode A is the only MCP mode that can be probed, because it is the only one whose reset
+  and state are control tools; a mode C profile is refused with `adapter_not_supported`
+  before any session opens, owned by
+  `test_bfcl_mcp_probe_certification.py::test_mode_c_cannot_be_probed_because_it_cannot_be_reset`.
+  Without a reviewed probe plan every adapter still certifies A0, which is the same
+  behaviour on all three rather than a transport-specific ceiling. Parity now continues
+  past intake: a session-backed source reaches a candidate pack through the same guided
+  `assemble` step as a local one, owned by
+  `test_bfcl_mcp_pack_assembly.py::test_assembly_binds_an_mcp_pack_to_its_endpoint_catalog_and_probe_plan`.
 - Condition 4. Met. `test_bfcl_authoring_revisions.py` owns the resume refusals,
   including `artifact_missing` and `session_invalid`, and
   `test_bfcl_authoring_cli.py::test_answer_commits_a_revision_that_must_be_reauthorized_and_reapproved`

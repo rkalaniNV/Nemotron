@@ -64,6 +64,9 @@ from nemotron.steps.byob.runtime.pack_authoring.authorization import (
     authorize_model_exposure_by_policy,
     write_exposure_authorization,
 )
+from nemotron.steps.byob.runtime.pack_authoring.pack_assembly import (
+    RECORD_FILE_NAME as CANDIDATE_PACK_RECORD_FILE_NAME,
+)
 from nemotron.steps.byob.runtime.pack_authoring.questions import (
     apply_answers,
     load_answer_set,
@@ -79,10 +82,15 @@ from nemotron.steps.byob.runtime.source_adapters.migration import (
 
 _DELEGATES = {
     "draft": "nemotron.steps.byob.scripts.draft_mcp_pack",
+    "assemble": "nemotron.steps.byob.scripts.assemble_candidate_pack",
     "review": "nemotron.steps.byob.scripts.build_authoring_review",
     "freeze": "nemotron.steps.byob.scripts.freeze_authoring_pack",
     "publish": "nemotron.steps.byob.scripts.publish_authoring_release",
 }
+# MCP intake writes the mechanical half of its pack — catalog, endpoint, CA bundle — beside
+# the evidence, so for that adapter the certified source tree assembly binds is that
+# directory rather than the intake declaration the operator named.
+_MCP_INTAKE_PACK = ("intake", "pack")
 
 
 class GuidedCliError(ValueError):
@@ -149,6 +157,7 @@ def _parser() -> argparse.ArgumentParser:
             "authorize_exposure",
             "approve_evidence",
             "draft",
+            "assemble",
             "review",
             "approve_release",
             "freeze",
@@ -201,6 +210,7 @@ def _parser() -> argparse.ArgumentParser:
 
     for command, help_text in (
         ("draft", "Delegate approved evidence to shared drafting"),
+        ("assemble", "Bind drafts and reviewed semantics into a candidate pack"),
         ("review", "Build an adapter-neutral review packet"),
         ("freeze", "Freeze an approved adapter-neutral release"),
         ("publish", "Publish a freshly validated authoring release"),
@@ -622,6 +632,64 @@ def _commit_intake_session(
     )
 
 
+def _declared_source(workspace: Path, declaration_path: Path, adapter_kind: str) -> Path:
+    """Return the certified source tree assembly should bind, per adapter shape."""
+    if adapter_kind == "mcp_mode_a":
+        return workspace.joinpath(*_MCP_INTAKE_PACK)
+    try:
+        document = json.loads(declaration_path.read_text(encoding="utf-8"))
+        return Path(document[adapter_kind]["path"]).resolve()
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise GuidedCliError(
+            "source_declaration_invalid",
+            f"cannot read the declared {adapter_kind} source: {exc}",
+            recovery="rerun intake, or pass --source to assemble explicitly",
+        ) from exc
+
+
+def _assemble_arguments(
+    args: argparse.Namespace,
+    gate: AuthoringResumeGate,
+    resumed: ResumedAuthoringSession,
+    remainder: list[str],
+) -> list[str]:
+    """Fill assembly's session-owned inputs so only reviewed semantics stay operator-supplied."""
+    for forbidden in ("--evidence", "--drafts"):
+        if forbidden in remainder:
+            raise GuidedCliError(
+                "assemble_input_override_forbidden",
+                f"guided assembly binds {forbidden} from the verified session",
+                recovery=f"drop {forbidden} and assemble from the current session",
+            )
+    workspace = args.workspace.resolve()
+    bindings = gate.load_state(resumed.verdict.session_digest).bindings
+    if bindings.draft_root is None:
+        raise GuidedCliError(
+            "draft_required",
+            "assembly needs the drafts a completed drafting run wrote",
+            recovery="run bfcl_author.py draft before assembling",
+        )
+    evidence_path = workspace / bindings.evidence.path
+    arguments = [
+        "--evidence",
+        str(evidence_path),
+        "--drafts",
+        str(workspace / bindings.draft_root),
+    ]
+    if "--source" not in remainder:
+        arguments += [
+            "--source",
+            str(
+                _declared_source(
+                    workspace,
+                    workspace / bindings.source.path,
+                    load_source_evidence(evidence_path).source_adapter.kind,
+                )
+            ),
+        ]
+    return [*arguments, *remainder]
+
+
 def _run_resume(args: argparse.Namespace) -> None:
     session_digest = args.session_digest
     if session_digest is None:
@@ -1008,6 +1076,25 @@ def main() -> None:
                             output / "draft_provenance.json",
                             digest_kind="canonical_json",
                         ),
+                    },
+                )
+        elif args.command == "assemble":
+            gate, resumed = _current_session(args, "assemble")
+            with resumed:
+                delegated = _assemble_arguments(args, gate, resumed, remainder)
+                _delegate(_DELEGATES["assemble"], delegated)
+                output = _required_path_argument(delegated, "--output")
+                _commit_transition(
+                    args,
+                    gate,
+                    resumed,
+                    phase="pack_assembled",
+                    updates={
+                        "candidate_pack": bind_artifact(
+                            args.workspace,
+                            output / CANDIDATE_PACK_RECORD_FILE_NAME,
+                            digest_kind="canonical_json",
+                        )
                     },
                 )
         elif args.command == "review":

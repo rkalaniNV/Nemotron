@@ -106,6 +106,10 @@ from nemotron.steps.byob.runtime.source_adapters.http_package import (
     HttpPackageInspection,
     inspect_http_package,
 )
+from nemotron.steps.byob.runtime.source_adapters.http_package_probes import (
+    HttpProbeRun,
+    run_http_package_probes,
+)
 from nemotron.steps.byob.runtime.source_adapters.local_python import (
     LOCAL_PYTHON_LOCK_VERSION,
     LocalPythonError,
@@ -115,7 +119,6 @@ from nemotron.steps.byob.runtime.source_adapters.local_python import (
     inspect_local_python_package,
 )
 from nemotron.steps.byob.runtime.source_adapters.local_python_probes import (
-    LOCAL_PROBE_PLAN_VERSION,
     LocalProbeCase,
     LocalProbeError,
     LocalProbePlan,
@@ -144,6 +147,15 @@ from nemotron.steps.byob.runtime.source_adapters.migration import (
     verified_source_digest,
     write_migration_record,
 )
+from nemotron.steps.byob.runtime.source_adapters.probe_engine import (
+    ADAPTER_PROBE_PLAN_VERSION,
+    LOCAL_PROBE_PLAN_VERSION,
+    AdapterProbeCase,
+    AdapterProbePlan,
+    ProbeError,
+    run_probe_suite,
+    validate_probe_plan,
+)
 from nemotron.steps.byob.runtime.source_adapters.registry import (
     BUILTIN_ADAPTER_REGISTRY,
     SOURCE_DECLARATION_VERSION,
@@ -158,6 +170,7 @@ from nemotron.steps.byob.runtime.source_adapters.registry import (
 
 __all__ = [
     "ADAPTER_CONTRACT_VERSION",
+    "ADAPTER_PROBE_PLAN_VERSION",
     "BUILTIN_ADAPTER_REGISTRY",
     "CERTIFICATION_REFERENCE_VERSION",
     "CERTIFICATION_ISSUER",
@@ -182,7 +195,9 @@ __all__ = [
     "TRANSFORMER_ID",
     "TRANSFORMER_VERSION",
     "AdapterCapability",
+    "AdapterProbeCase",
     "AdapterProbeObservation",
+    "AdapterProbePlan",
     "AdapterCertificationReport",
     "AdapterContractError",
     "AdapterDescriptor",
@@ -219,6 +234,7 @@ __all__ = [
     "HttpInspectionClient",
     "HttpPackageError",
     "HttpPackageInspection",
+    "HttpProbeRun",
     "IdentityArtifact",
     "LocalPythonError",
     "LocalPythonInspection",
@@ -234,6 +250,7 @@ __all__ = [
     "MigrationWarning",
     "NormalizedEvidenceApproval",
     "NormalizedSourceEvidence",
+    "ProbeError",
     "ProbeOutcome",
     "ProbeExecutionPolicy",
     "ProbeExecutionRecord",
@@ -282,8 +299,11 @@ __all__ = [
     "mcp_reference_profile",
     "migrate_legacy_mcp_evidence",
     "normalize_source_evidence",
+    "run_http_package_probes",
     "run_local_python_probes",
+    "run_probe_suite",
     "scan_held_out_terms",
+    "validate_probe_plan",
     "project_mcp_probe_report",
     "project_probe_executions",
     "resolve_source_adapter",

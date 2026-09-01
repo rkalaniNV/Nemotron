@@ -501,7 +501,8 @@ def test_resume_command_matrix_is_closed_for_every_phase() -> None:
         ),
         "exposure_authorized": ("approve_evidence",),
         "evidence_approved": ("draft",),
-        "draft_complete": ("review",),
+        "draft_complete": ("assemble", "review"),
+        "pack_assembled": ("review",),
         "review_ready": ("approve_release",),
         "release_approved": ("freeze",),
         "frozen": ("publish",),
@@ -515,6 +516,7 @@ def test_legacy_session_digest_remains_verifiable(tmp_path: Path) -> None:
     current = gate.load_state(digest).model_dump(mode="json")
     current["schema_version"] = "bfcl-authoring-session-v1"
     for field in (
+        "candidate_pack",
         "exposure_authorization",
         "review_packet",
         "release_approval",

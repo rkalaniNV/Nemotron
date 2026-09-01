@@ -46,6 +46,7 @@ AuthoringPhase = Literal[
     "exposure_authorized",
     "evidence_approved",
     "draft_complete",
+    "pack_assembled",
     "review_ready",
     "release_approved",
     "frozen",
@@ -58,6 +59,7 @@ AuthoringCommand = Literal[
     "authorize_exposure",
     "approve_evidence",
     "draft",
+    "assemble",
     "review",
     "approve_release",
     "freeze",
@@ -75,7 +77,11 @@ RESUMABILITY_MATRIX: Mapping[AuthoringPhase, tuple[AuthoringCommand, ...]] = {
     ),
     "exposure_authorized": ("approve_evidence",),
     "evidence_approved": ("draft",),
-    "draft_complete": ("review",),
+    # Assembly is where drafts become a loadable pack. A pack assembled outside the guided
+    # workspace stays legal — review binds the pack it is handed either way — so `review`
+    # remains reachable directly rather than making one command the only way in.
+    "draft_complete": ("assemble", "review"),
+    "pack_assembled": ("review",),
     "review_ready": ("approve_release",),
     "release_approved": ("freeze",),
     "frozen": ("publish",),
@@ -130,6 +136,7 @@ class SessionBindings(_StrictModel):
     approval: ApprovalBinding | None = None
     draft_root: StrictStr | None = None
     draft_provenance: ArtifactBinding | None = None
+    candidate_pack: ArtifactBinding | None = None
     exposure_authorization: ArtifactBinding | None = None
     review_packet: ArtifactBinding | None = None
     release_approval: ArtifactBinding | None = None
@@ -174,6 +181,7 @@ class AuthoringSessionState(_StrictModel):
         unsigned = self.model_dump(mode="json", exclude={"session_digest"})
         if self.schema_version == LEGACY_SESSION_VERSION:
             for field in (
+                "candidate_pack",
                 "exposure_authorization",
                 "review_packet",
                 "release_approval",
@@ -188,6 +196,7 @@ class AuthoringSessionState(_StrictModel):
         approval_phases = {
             "evidence_approved",
             "draft_complete",
+            "pack_assembled",
             "review_ready",
             "release_approved",
             "frozen",
@@ -211,6 +220,12 @@ class AuthoringSessionState(_StrictModel):
             and self.bindings.draft_provenance is None
         ):
             raise ValueError(f"phase {self.phase!r} requires draft provenance")
+        if (
+            self.schema_version == SESSION_VERSION
+            and self.phase == "pack_assembled"
+            and self.bindings.candidate_pack is None
+        ):
+            raise ValueError("pack_assembled phase requires a candidate pack record")
         if self.schema_version == SESSION_VERSION and self.phase in {
             "review_ready",
             "release_approved",
@@ -642,6 +657,7 @@ class AuthoringResumeGate:
                     recovery="obtain a new approval for the current evidence",
                 )
         for artifact in (
+            bindings.candidate_pack,
             bindings.exposure_authorization,
             bindings.review_packet,
             bindings.release_approval,
@@ -699,6 +715,7 @@ class AuthoringResumeGate:
             return
         if state.phase in {
             "draft_complete",
+            "pack_assembled",
             "review_ready",
             "release_approved",
             "frozen",
