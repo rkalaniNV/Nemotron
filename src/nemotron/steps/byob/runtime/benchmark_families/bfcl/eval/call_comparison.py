@@ -274,8 +274,28 @@ def compare_arguments(
     gold = thaw_json(gold_arguments)
     if scoring.argument_matching == "schema_then_canonical" and scoring.insert_declared_defaults:
         schema = parameter_schema(tools, function_name)
-        predicted = apply_declared_defaults(predicted, schema)
-        gold = apply_declared_defaults(gold, schema)
+        # A declared default settles an omission: whichever side left the argument
+        # out meant the value the tool would have used, so spelling it out is
+        # neither an advantage nor a penalty.
+        #
+        # An argument the gold call never states is a different case. The recorded
+        # conversation put no requirement on it, so filling it from the schema
+        # would promote the tool's default to a constraint nobody wrote down, and
+        # any other value the candidate chose would read as the wrong arguments.
+        # Such an argument is left out of the comparison instead; what the choice
+        # should have been, where it matters, is what the pack's own success
+        # assertions decide.
+        unconstrained = set(apply_declared_defaults({}, schema)) - set(gold)
+        predicted = {
+            name: value
+            for name, value in apply_declared_defaults(predicted, schema).items()
+            if name not in unconstrained
+        }
+        gold = {
+            name: value
+            for name, value in apply_declared_defaults(gold, schema).items()
+            if name not in unconstrained
+        }
     if json_equal(predicted, gold):
         return ArgumentDiff()
     return ArgumentDiff(
@@ -452,14 +472,22 @@ def compare_text_turn(
     turn: ScriptedTurn,
     assistant_content: Any,
     predicted_call_names: Sequence[str | None],
+    *,
+    scoring: EvalScoringConfig,
 ) -> TextComparison:
     """Decide whether a text-only assistant turn is the recorded one.
 
-    An intermediate turn must reproduce the recorded text exactly. The comparison
-    is deliberately strict and fails closed: anything looser would let arbitrary
-    prose unlock the next scripted user request, which is material the candidate
-    has not earned. A terminal turn carries the conversation's free-form answer,
-    so it is held only to having answered in words rather than with a call.
+    Every text turn is held to what it did: answered in words rather than with a
+    call, and said something. What the next scripted user request depends on is
+    that the candidate reached this point in the conversation without calling a
+    tool it had not earned, and both of those checks establish it.
+
+    The gold sentence is one translation of one phrasing of that behavior, so
+    ``structural`` matching does not ask for it back. A pack states its
+    intermediate turns as milestone classes — ask for a slot, ask to confirm —
+    and its own success assertions are what hold the turn to the domain meaning.
+    ``verbatim`` restores the character-for-character demand, which measures
+    wording rather than tool use and exists to reproduce runs scored that way.
     """
     if predicted_call_names:
         names = ", ".join(sorted({name or "<unnamed>" for name in predicted_call_names}))
@@ -469,12 +497,17 @@ def compare_text_turn(
         )
     if assistant_content is None:
         return TextComparison(matched=False, detail="the candidate returned neither content nor a tool call")
-    if turn.is_terminal and not _has_meaningful_text(assistant_content):
+    if not _has_meaningful_text(assistant_content):
+        placement = "terminal answer" if turn.is_terminal else "intermediate turn"
         return TextComparison(
             matched=False,
-            detail="the candidate returned no non-empty textual content for the terminal answer",
+            detail=f"the candidate returned no non-empty textual content for the {placement}",
         )
-    if not turn.is_terminal and assistant_content != turn.expected_assistant_content:
+    if (
+        not turn.is_terminal
+        and scoring.intermediate_text_matching == "verbatim"
+        and assistant_content != turn.expected_assistant_content
+    ):
         return TextComparison(
             matched=False,
             detail="the candidate did not produce the scripted intermediate assistant text",

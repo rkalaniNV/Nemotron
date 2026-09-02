@@ -1382,6 +1382,45 @@ def test_all_dictionary_reads_preserve_unresolved_slot_evidence() -> None:
         assert "slots.missing" in verdict["detail"]
 
 
+def test_testing_a_populated_slots_object_is_not_reading_every_slot() -> None:
+    # `task.get("slots") or {}` is the pack idiom, and on a mapping that still
+    # holds something its answer does not depend on the slot that went unbound.
+    # Charging the idiom itself as a read of every slot turned correct pack
+    # behavior into evaluator evidence and lost the verdict the assertion reached.
+    def reads_one_bound_slot(*, state: dict, trace: list, task: dict, ctx: Any) -> None:
+        slots = task.get("slots") or {}
+        if slots.get("account_id") != "ACC-002":
+            raise AssertionError("candidate reported another account")
+
+    task = {"slots": {"account_id": "ACC-002"}, "unresolved_slots": ["service"]}
+
+    assert _assertion_verdict(
+        reads_one_bound_slot,
+        name="reads_one_bound_slot",
+        state={},
+        trace=[],
+        task=task,
+        ctx=None,
+    )["status"] == "passed"
+
+    def reads_the_unbound_slot(*, state: dict, trace: list, task: dict, ctx: Any) -> None:
+        slots = task.get("slots") or {}
+        if slots.get("service") is None:
+            raise AssertionError("candidate never named the service")
+
+    verdict = _assertion_verdict(
+        reads_the_unbound_slot,
+        name="reads_the_unbound_slot",
+        state={},
+        trace=[],
+        task=task,
+        ctx=None,
+    )
+
+    assert verdict["status"] == "infrastructure_error"
+    assert "slots.service" in verdict["detail"]
+
+
 def test_reading_an_unresolved_slot_update_is_infrastructure() -> None:
     def needs_update(*, state: dict, trace: list, task: dict, ctx: Any) -> None:
         values = task["slot_updates"][0].get("values") or {}
@@ -3183,6 +3222,16 @@ def test_assertion_verdicts_keep_candidate_and_infrastructure_failures_separate(
     assert score.gate("assertions").failure_class == failure_class
     assert score.non_candidate_stop is (failure_class == "infrastructure")
     assert not score.task_success
+    metric = score.metric("assertion_success_rate")
+    if failure_class == "infrastructure":
+        # A broken assertion produced no evidence about the answer, so it cannot
+        # be a denominator the candidate is measured against. The gate already
+        # records the stop.
+        assert metric.value is None
+        assert metric.not_applicable_reason == "metric.assertion_evidence_incomplete"
+    else:
+        assert metric.value == 0.0
+        assert metric.denominator == 1
 
 
 def test_not_applicable_assertion_does_not_fail_the_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

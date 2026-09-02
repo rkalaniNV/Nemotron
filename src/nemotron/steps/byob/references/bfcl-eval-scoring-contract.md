@@ -332,11 +332,23 @@ next user request is released only after the turn that would have prompted it, s
 a model that calls a tool where the trace asked a clarifying question never
 receives the answer to the question it did not ask.
 
-For an intermediate text-only turn, producing arbitrary text is not enough to
-unlock the next user message: the text must equal the assistant text the published
-trace recorded. This intentionally strict transport guard is separate from the
-tool-call score and fails closed until the benchmark contract carries a generic,
-deterministic semantic milestone richer than raw text.
+For an intermediate text-only turn, `intermediate_text_matching: structural`
+(*pinned*) asks what the turn did rather than how it read: the candidate answered
+in words instead of calling a tool, and those words say something. Both halves
+are load-bearing. A turn that called a tool where the trace asked a question has
+taken material it did not earn, and a turn that returned nothing asked the user
+nothing, so neither releases the next request.
+
+The recorded sentence is one translation of one phrasing of that behavior, and a
+pack states its intermediate turns as milestone classes — ask for a slot, ask to
+confirm — rather than as sentences. Requiring the sentence back would score
+wording rather than tool use, and would fail a model that asked the right
+question in its own words. What holds the turn to its domain meaning is the
+pack's own success assertions, which read the trace and the final state.
+
+`verbatim` restores the character-for-character demand. It measures a different
+thing, so a run using it is not comparable to a publication run; it is kept for
+reproducing runs that were scored that way.
 
 The tool-result release decision uses the same call comparison this document
 defines for scoring. That agreement matters in one direction in particular: a
@@ -376,6 +388,19 @@ the model.
    objects and arrays and follows validated local `$ref` and `allOf` schemas.
    Pack validation rejects external, missing, or cyclic references and rejects a
    declared default that does not satisfy the schema it would be inserted under.
+
+   A defaulted parameter the *gold* call never states is the one case this step
+   does not settle, because there is no omission to settle: the recorded
+   conversation put no requirement on that argument at all. Filling it would
+   promote the tool's default to an answer key nobody wrote down, so that a
+   candidate asked for "the most recent transaction" and calling with `limit: 1`
+   would be scored as passing the wrong arguments against a gold call that
+   mentions no limit. Such an argument is left out of the comparison instead.
+   This narrows only arguments the schema itself declares and defaults: an
+   argument the schema does not declare is still a mismatch, and a required one
+   is still missing. Where the value does matter, it is the pack's success
+   assertions that say so — the transaction whose status was checked must be one
+   the listing actually returned.
 3. **Canonical step.** Both sides are then compared as canonical JSON, by type as
    well as by value. `1`, `1.0`, `"1"`, and `true` are four distinct values: a
    scorer that treated them as equal would accept a limit of `"1"` where the gold
@@ -458,10 +483,12 @@ early is not additionally penalized for turns it never saw.
   else entirely fails selection only. Attributing a permutation to both gates
   would report that the model got the order wrong when it never got as far as
   having an order to get wrong.
-- `text_turn` — each asked turn the trace answers in words was answered in words,
-  an intermediate one reproduced the recorded text, and a terminal one contained
-  non-empty plain or structured textual content. `null`, whitespace, empty
-  containers, and metadata-only content are not final answers.
+- `text_turn` — each asked turn the trace answers in words was answered in words
+  rather than with a call, and contained non-empty plain or structured textual
+  content. `null`, whitespace, empty containers, and metadata-only content are
+  neither final answers nor intermediate turns. Under debug-only
+  `intermediate_text_matching: verbatim`, an intermediate turn must additionally
+  reproduce the recorded sentence.
 
 One gate stands apart and always applies:
 

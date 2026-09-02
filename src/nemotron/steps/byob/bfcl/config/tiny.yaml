@@ -7,8 +7,9 @@ stage: all
 random_seed: 7
 config_status: resolved
 
-# Paths are resolved relative to the BYOB skill root when not absolute.
-output_dir: /tmp/bfcl/tiny_out
+# Paths are resolved relative to the BYOB root when not absolute. This lands at
+# <repository>/outputs/bfcl/tiny_out.
+output_dir: ../../../../outputs/bfcl/tiny_out
 
 oracle_pack:
   manifest_path: data/tiny_oracle_pack/manifest.yaml

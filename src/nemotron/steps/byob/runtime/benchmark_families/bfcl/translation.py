@@ -17,6 +17,7 @@ from typing import Any, Final, Literal, cast
 import pandas as pd  # type: ignore[import-untyped]
 import yaml  # type: ignore[import-untyped]
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BYOB_ROOT
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract import (
     BFCL_TRANSLATION_CONTRACT_VERSION,
     SOURCE_VERIFICATION_CONTRACT_VERSION,
@@ -202,6 +203,13 @@ def _localization_policy(
     )
 
 
+def _resolve_config_path(raw: str) -> Path:
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = BYOB_ROOT / path
+    return path.resolve()
+
+
 def _load_config(path: str | Path) -> _TranslationConfig:
     config_path = Path(path).resolve()
     try:
@@ -220,8 +228,8 @@ def _load_config(path: str | Path) -> _TranslationConfig:
         raise BFCLTranslationError(
             "BFCL translation refuses dataset_path; name the published source_run_manifest instead"
         )
-    source_manifest = (
-        Path(_plain_text(document.get("source_run_manifest"), "source_run_manifest")).expanduser().resolve()
+    source_manifest = _resolve_config_path(
+        _plain_text(document.get("source_run_manifest"), "source_run_manifest")
     )
     source_language = _plain_text(document.get("source_language"), "source_language")
     target_language = _plain_text(document.get("target_language"), "target_language")
@@ -285,7 +293,7 @@ def _load_config(path: str | Path) -> _TranslationConfig:
     translate_tool_descriptions = document.get("translate_tool_descriptions", False)
     if type(translate_tool_descriptions) is not bool:
         raise BFCLTranslationError("translate_tool_descriptions must be true or false")
-    output_root = Path(_plain_text(document.get("output_dir"), "output_dir")).expanduser().resolve()
+    output_root = _resolve_config_path(_plain_text(document.get("output_dir"), "output_dir"))
     expt_name = _plain_text(document.get("expt_name"), "expt_name")
     if Path(expt_name).name != expt_name:
         raise BFCLTranslationError("expt_name must be a single path component")

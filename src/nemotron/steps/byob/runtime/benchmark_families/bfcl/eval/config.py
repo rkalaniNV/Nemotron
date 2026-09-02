@@ -110,8 +110,13 @@ _SCORING_KEYS: Final = frozenset(
         "respect_call_group",
         "allow_llm_repair",
         "task_success",
+        "intermediate_text_matching",
     }
 )
+# A config written before intermediate text had a policy meant the one policy
+# there was, so its absence resolves to the publication value rather than
+# refusing the file.
+_SCORING_OPTIONAL: Final = frozenset({"intermediate_text_matching"})
 _LIMITS_KEYS: Final = frozenset(
     {
         "max_turns",
@@ -685,7 +690,7 @@ def _resolve_oracle_resource(
 
 
 def _resolve_scoring(data: Mapping[str, Any], base_dir: Path) -> EvalScoringConfig:
-    section = _section(data, "scoring", _SCORING_KEYS)
+    section = _section(data, "scoring", _SCORING_KEYS, optional=_SCORING_OPTIONAL)
     contract_path = _existing_file(
         _resolve(section["contract"], "scoring.contract", base_dir),
         "scoring.contract",

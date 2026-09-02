@@ -6,8 +6,9 @@ expt_name: bfcl_translation
 stage: translate
 config_status: template
 
-source_run_manifest: /tmp/bfcl/default_out/bfcl_default_gold_v0/run_manifest.json
-output_dir: /tmp/bfcl/translate_out
+# Relative paths resolve from src/nemotron/steps/byob.
+source_run_manifest: ../../../../outputs/bfcl/default_out/bfcl_default_gold_v0/run_manifest.json
+output_dir: ../../../../outputs/bfcl/translate_out
 source_language: en
 target_language: vi
 translate_tool_descriptions: false

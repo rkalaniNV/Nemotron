@@ -15,7 +15,9 @@ expt_name: bfcl_default_gold_v0
 stage: all
 random_seed: 42
 
-output_dir: /tmp/bfcl/default_out
+# Relative paths resolve from src/nemotron/steps/byob; this lands at
+# <repository>/outputs/bfcl/default_out.
+output_dir: ../../../../outputs/bfcl/default_out
 
 oracle_pack:
   # Point at an allowlisted pack under data/ (or extend allowed_roots). Left as a

@@ -755,6 +755,27 @@ def test_a_declared_default_spelled_out_is_neither_rewarded_nor_punished(
     assert score.gate("arguments").outcome == "passed"
 
 
+def test_an_argument_the_gold_call_leaves_open_is_not_a_constraint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The gold call states only account_id, so the trace put no requirement on
+    # currency. Filling it from the schema would make the tool's own default the
+    # answer key and score any other choice as the wrong arguments, which is a
+    # constraint the recorded conversation never expressed.
+    score, _ = _score(
+        _single_turn_row(),
+        [
+            _calls([("c1", "get_balance", '{"account_id":"1","currency":"USD"}')]),
+            _says("Account 1 holds 500."),
+        ],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert score.gate("arguments").outcome == "passed"
+    assert score.task_success
+
+
 def test_a_multi_turn_trace_scores_the_text_turn_that_earned_the_next_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -825,6 +846,7 @@ def test_a_gold_call_the_episode_never_reached_fails_coverage(tmp_path: Path, mo
         [_says("Which account, exactly?")],
         tmp_path,
         monkeypatch=monkeypatch,
+        scoring=_scoring(intermediate_text_matching="verbatim"),
     )
 
     assert episode.status == "candidate_mismatch"
@@ -1109,7 +1131,7 @@ def test_calling_a_tool_where_the_trace_speaks_is_a_selection_and_text_failure(
     assert score.gate("schema_valid").outcome == "passed"
 
 
-def test_an_intermediate_turn_must_reproduce_the_recorded_text(
+def test_verbatim_matching_holds_an_intermediate_turn_to_the_recorded_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     score, _ = _score(
@@ -1117,12 +1139,50 @@ def test_an_intermediate_turn_must_reproduce_the_recorded_text(
         [_says("Sure, which one?")],
         tmp_path,
         monkeypatch=monkeypatch,
+        scoring=_scoring(intermediate_text_matching="verbatim"),
     )
 
     text = score.gate("text_turn")
     assert text.outcome == "failed"
     assert text.turn_index == 0
     assert "scripted intermediate assistant text" in text.detail
+
+
+def test_structural_matching_credits_an_intermediate_turn_worded_differently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The trace asks "Which account should I check?". Asking the same thing in
+    # other words is the behavior the trace recorded; the recorded sentence is
+    # one phrasing of it, and holding a model to the phrasing scores translation.
+    score, _ = _score(
+        _missing_slot_row(),
+        [
+            _says("Sure, which one?"),
+            _calls([("c1", "get_balance", '{"account_id":"1"}')]),
+            _says("Account 1 holds 500."),
+        ],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert score.gate("text_turn").outcome == "passed"
+    assert score.task_success
+
+
+def test_structural_matching_still_refuses_an_empty_intermediate_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    score, _ = _score(
+        _missing_slot_row(),
+        [_says("   ")],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    text = score.gate("text_turn")
+    assert text.outcome == "failed"
+    assert text.turn_index == 0
+    assert "no non-empty textual content" in text.detail
 
 
 def test_a_terminal_turn_may_word_its_answer_freely(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1303,17 +1363,19 @@ def test_an_infrastructure_stop_preserves_a_model_failure_on_an_answered_turn(
 ) -> None:
     """Attribution is per gate; one score can contain both responsible parties."""
     script = _script(_missing_slot_row())
+    verbatim = _scoring(intermediate_text_matching="verbatim")
     episode = _episode(
         script,
         [_says("I will not ask which account.")],
         tmp_path,
         monkeypatch=monkeypatch,
+        scoring=verbatim,
     )
     score = score_trace_episode(
         episode=episode.model_copy(update={"status": "max_turns_exceeded"}),
         script=script,
-        scoring=_scoring(),
-        plan=_plan(),
+        scoring=verbatim,
+        plan=_plan(scoring=verbatim),
     )
 
     # The model answered the first text turn incorrectly.
@@ -1895,7 +1957,16 @@ def test_a_constraint_named_detail_stays_part_of_the_score_identity(
                 _says("Account 1 holds 500."),
             ],
         ),
-        (_missing_slot_row, [_says("Which one?")]),
+        (
+            # A paraphrase of the recorded question: the driver releases the next
+            # request, so the scorer must credit the turn it was released on.
+            _missing_slot_row,
+            [
+                _says("Which one?"),
+                _calls([("c1", "get_balance", '{"account_id":"1"}')]),
+                _says("Account 1 holds 500."),
+            ],
+        ),
         (_irrelevant_row, [_says("Banking only, sorry.")]),
     ],
 )

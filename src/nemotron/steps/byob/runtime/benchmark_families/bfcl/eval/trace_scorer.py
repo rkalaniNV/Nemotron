@@ -257,6 +257,7 @@ def _score_turn(
             scripted,
             parsed.assistant_content,
             [call.function_name for call in parsed.calls],
+            scoring=scoring,
         )
         return ScoredTurn(
             turn_index=parsed.turn_index,

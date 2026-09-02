@@ -232,8 +232,14 @@ def _assertion_metric(
     # A declared assertion with no verdict was never run, which only happens when
     # an infrastructure stop cut the episode short. Counting it as a candidate
     # failure would charge a broken oracle to the model, so the metric reports no
-    # denominator at all rather than a number the evidence cannot support.
-    if any(declared not in by_name for declared in declared_names):
+    # denominator at all rather than a number the evidence cannot support. An
+    # assertion that ran and raised is the same missing evidence: the verdict
+    # names a broken assertion, not a wrong answer, so it cannot be a denominator
+    # the candidate is measured against either.
+    if any(
+        declared not in by_name or by_name[declared].status == "infrastructure_error"
+        for declared in declared_names
+    ):
         return _metric(name, 0, 0, na_reason="metric.assertion_evidence_incomplete")
     applicable = [
         by_name[declared]

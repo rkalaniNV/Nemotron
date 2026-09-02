@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.bfcl import translation as translation_module
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract import (
     translation_preserved_projection,
 )
@@ -61,6 +62,28 @@ def _translation_config(tmp_path: Path, manifest: Path) -> Path:
     path = tmp_path / "translate.yaml"
     path.write_text(yaml.safe_dump(value), encoding="utf-8")
     return path
+
+
+def test_relative_config_paths_resolve_from_byob_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _translation_config(tmp_path, tmp_path / "unused.json")
+    document = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    document["source_run_manifest"] = "publications/source/run_manifest.json"
+    document["output_dir"] = "runs/translations"
+    config_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    byob_root = tmp_path / "byob"
+    unrelated_cwd = tmp_path / "other"
+    unrelated_cwd.mkdir()
+    monkeypatch.setattr(translation_module, "BYOB_ROOT", byob_root)
+    monkeypatch.chdir(unrelated_cwd)
+
+    loaded = translation_module._load_config(config_path)
+
+    assert loaded.source_manifest == byob_root / "publications/source/run_manifest.json"
+    assert loaded.output_dir == byob_root / "runs/translations/localized_vi"
 
 
 class _FakeTranslationPipeline:

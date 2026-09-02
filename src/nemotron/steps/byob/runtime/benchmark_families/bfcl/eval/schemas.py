@@ -111,6 +111,9 @@ _IMMUTABLE_REVISION_PATTERN: Final = re.compile(r"^[0-9a-fA-F]{40,64}$")
 # The scoring settings a publishable run must use. These are the correctness
 # gates: an operator who relaxes one gets a higher number for the same model, so
 # relaxing any of them makes the run debug-only rather than publishable.
+# ``intermediate_text_matching`` is pinned for the opposite reason: demanding the
+# gold wording measures how a reply was phrased rather than what the candidate
+# did, so a verbatim run is not comparable to a publication run either.
 LOCKED_PUBLICATION_SCORING: Final = FrozenDict(
     {
         "argument_matching": "schema_then_canonical",
@@ -118,6 +121,7 @@ LOCKED_PUBLICATION_SCORING: Final = FrozenDict(
         "respect_call_group": True,
         "allow_llm_repair": False,
         "task_success": "all_applicable_gates",
+        "intermediate_text_matching": "structural",
     }
 )
 
@@ -337,6 +341,12 @@ class EvalScoringConfig(_Strict):
     respect_call_group: StrictBool
     allow_llm_repair: StrictBool
     task_success: Literal["all_applicable_gates", "assertions_only"]
+    # What an intermediate text-only assistant turn must reproduce. ``structural``
+    # asks what the turn did — words rather than a call, and words that say
+    # something — which is the behavior a pack declares its milestones in.
+    # ``verbatim`` additionally demands the recorded sentence, so it scores one
+    # translation of one phrasing and is kept only for reproducing older runs.
+    intermediate_text_matching: Literal["structural", "verbatim"] = "structural"
 
     def publication_deviations(self) -> tuple[str, ...]:
         """Name the locked gates this scoring config relaxes, if any."""
@@ -355,6 +365,7 @@ class EvalScoringConfig(_Strict):
             "respect_call_group": self.respect_call_group,
             "allow_llm_repair": self.allow_llm_repair,
             "task_success": self.task_success,
+            "intermediate_text_matching": self.intermediate_text_matching,
         }
 
     @property

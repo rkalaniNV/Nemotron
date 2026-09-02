@@ -9,8 +9,14 @@ crosses is owned by a test named in
 [bfcl-unified-authoring-plan.md](bfcl-unified-authoring-plan.md), and the demo is evidence
 of nothing on its own.
 
+For setup, live-model configuration, per-stage artifacts, an intentionally
+failing scorer run, and evaluation against an independent candidate endpoint,
+see the
+[detailed LLM-generated Oracle Pack flow](bfcl-llm-generated-oracle-pack-flow.md).
+
 ```shell
-uv run python scripts/bfcl_llm_generated_demo.py --workdir /tmp/bfcl-demo
+uv run python scripts/bfcl_llm_generated_demo.py \
+  --workdir outputs/bfcl/llm-generated-demo
 ```
 
 The run takes a few minutes, most of it real probe sessions and two unmocked validation
@@ -69,7 +75,8 @@ can be re-scored with one task sabotaged — the candidate answers it with text 
 was expected:
 
 ```shell
-uv run python scripts/bfcl_llm_generated_demo.py --workdir /tmp/bfcl-demo \
+uv run python scripts/bfcl_llm_generated_demo.py \
+    --workdir outputs/bfcl/llm-generated-demo \
     --stage eval --wrong-answer-task <task_id>
 ```
 

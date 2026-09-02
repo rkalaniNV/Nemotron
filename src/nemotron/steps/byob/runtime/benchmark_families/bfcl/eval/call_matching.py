@@ -101,6 +101,7 @@ class CanonicalCallMatchGate:
                 turn,
                 response.assistant_content,
                 [call.function_name for call in predicted],
+                scoring=self._scoring,
             )
             return TurnMatch(advanced=text.matched, detail=text.detail)
 
