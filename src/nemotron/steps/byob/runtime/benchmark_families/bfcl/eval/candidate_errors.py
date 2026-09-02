@@ -51,6 +51,12 @@ class CandidateCredentialMissingError(CandidateClientError):
     code = "eval_candidate_credentials_missing"
 
 
+class CandidateAuthenticationError(CandidateClientError):
+    """The endpoint rejected the credential every task in the run shares."""
+
+    code = "eval_candidate_authentication_failed"
+
+
 class CandidateRequestError(CandidateClientError):
     code = "eval_candidate_request_invalid"
 
@@ -79,6 +85,7 @@ def describe_candidate_client_error(exc: Exception) -> str:
 
 
 __all__ = [
+    "CandidateAuthenticationError",
     "CandidateCacheConflictError",
     "CandidateCacheError",
     "CandidateClientError",

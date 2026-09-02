@@ -237,7 +237,12 @@ authorized tasks run in publication order with at most
 The first raised setup, authorization, cache, or scoring exception cancels
 sibling tasks and closes every opened oracle and candidate client; an
 infrastructure terminal represented by a completed `ExecutableEpisode` remains
-scored evidence and does not abort the batch.
+scored evidence and does not abort the batch. A candidate endpoint that rejects
+the credential is raised rather than recorded, because every task presents the
+same key: a per-task record would spend the whole task set on a configuration
+fault and aggregate the refusals into metrics indistinguishable from a score.
+No completion is written for the refused call, so a rerun re-contacts the
+endpoint instead of replaying the refusal.
 
 A caller-supplied `eval_run_id` is reused exactly. Otherwise a fresh output tree
 gets a timestamp-plus-UUID identity; replay in a completed output tree reuses

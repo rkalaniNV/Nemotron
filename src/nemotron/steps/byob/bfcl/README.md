@@ -890,7 +890,9 @@ distinguish case. Two candidates may not share an alias or resolve to the same
 canonical weight identity. Credentials never appear: `api.api_key_env` names an
 environment variable, a literal key anywhere in the file is refused, validation
 diagnostics never echo string values, and a missing variable is an execution
-failure rather than a config error.
+failure rather than a config error. A variable the endpoint rejects is the same
+kind of failure and stops the run on the first refusal rather than scoring the
+task set against a key that cannot work.
 
 `scoring.contract` points at
 [`../references/bfcl-eval-scoring-contract.md`](../references/bfcl-eval-scoring-contract.md)
@@ -1094,7 +1096,14 @@ attempt, and a completion marker. A completion replays without network access;
 an interrupted sequence is preserved as crash evidence and fails closed rather
 than silently calling the model again. Cancelling a run records the abandoned
 attempt but never a completion, so a resumed run cannot read an interruption as
-the model's answer. Each record is verified once, when it first appears, and a
+the model's answer. A rejected credential — `401` or `403` — is recorded the same
+way and then stops the whole run as
+`eval_candidate_authentication_failed`. Every task presents the same key, so a
+refusal describes the configuration rather than the task, and no later task could
+do better; recording one refusal per task would instead spend the entire task set
+and publish a report whose zeroes read like a measurement of the model. Writing
+no completion is what keeps the call open, so a rerun with a working key contacts
+the endpoint rather than replaying the refusal. Each record is verified once, when it first appears, and a
 completion cites its attempts by hash, so one response body is stored once
 however many records refer to it.
 

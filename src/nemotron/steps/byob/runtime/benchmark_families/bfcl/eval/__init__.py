@@ -78,6 +78,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_contract
     parse_function_arguments,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_errors import (
+    CandidateAuthenticationError,
     CandidateCacheConflictError,
     CandidateCacheError,
     CandidateClientError,
@@ -538,6 +539,7 @@ __all__ = [
     "BfclLauncherCliConfig",
     "CandidateApi",
     "CandidateAttempt",
+    "CandidateAuthenticationError",
     "CandidateCacheConflictError",
     "CandidateCacheError",
     "CandidateCallOutcome",

@@ -267,6 +267,7 @@ _EXIT_CODE_GROUPS: Final[tuple[tuple[int, tuple[str, ...]], ...]] = (
         (
             "eval_candidate_client_invalid",
             "eval_candidate_credentials_missing",
+            "eval_candidate_authentication_failed",
             "eval_candidate_request_invalid",
             "eval_candidate_provider_extension_invalid",
             "eval_candidate_response_invalid",
