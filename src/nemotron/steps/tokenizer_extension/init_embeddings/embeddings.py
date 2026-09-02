@@ -45,19 +45,32 @@ def _flag(name: str, value: bool) -> str:
     return f"--{name}" if value else f"--no-{name}"
 
 
+def _pick(d: dict, new: str, old: str, default):
+    """Prefer the language-neutral key, fall back to the historical Hindi one."""
+    if new in d:
+        return d[new]
+    return d.get(old, default)
+
+
 def _common_argv(cfg: dict) -> list[str]:
-    return [
+    argv = [
         "--base-model", str(cfg["base_model"]),
         "--extended-tokenizer", str(cfg["extended_tokenizer"]),
         "--output-dir", str(cfg["output_dir"]),
         "--dtype", str(cfg.get("dtype", "bfloat16")),
     ]
+    # Every engine accepts --language; it selects the target script used to find
+    # the base model's existing target-language rows, and supplies the auxiliary
+    # encoder / fastText defaults. Omitted -> the historical Hindi behaviour.
+    if cfg.get("language"):
+        argv += ["--language", str(cfg["language"])]
+    return argv
 
 
 def _baseline_argv(cfg: dict) -> list[str]:
     b = cfg.get("baseline", {}) or {}
     argv = _common_argv(cfg)
-    argv += ["--mode", str(b.get("mode", "mean_hindi"))]
+    argv += ["--mode", str(b.get("mode", "mean_target"))]
     argv += [_flag("norm-correction", bool(b.get("norm_correction", True)))]
     argv += ["--num-samples", str(int(b.get("num_samples", 10)))]
     return argv
@@ -70,10 +83,11 @@ def _subword_argv(cfg: dict) -> list[str]:
     argv += ["--output-averaging", str(s.get("output_averaging", "uniform"))]
     argv += [_flag("input-norm-correction", bool(s.get("input_norm_correction", True)))]
     argv += [_flag("output-norm-correction", bool(s.get("output_norm_correction", False)))]
-    argv += [_flag("input-hindi-norm", bool(s.get("input_hindi_norm", True)))]
-    argv += [_flag("output-hindi-norm", bool(s.get("output_hindi_norm", False)))]
+    argv += [_flag("input-hindi-norm", bool(_pick(s, "input_target_norm", "input_hindi_norm", True)))]
+    argv += [_flag("output-hindi-norm", bool(_pick(s, "output_target_norm", "output_hindi_norm", False)))]
     argv += ["--temperature", str(float(s.get("temperature", 0.1)))]
-    argv += ["--bert-model", str(s.get("bert_model", "google/muril-base-cased"))]
+    if s.get("bert_model"):
+        argv += ["--bert-model", str(s["bert_model"])]
     argv += ["--gemma-model", str(s.get("gemma_model", "google/gemma-2-27b"))]
     argv += ["--num-samples", str(int(s.get("num_samples", 10)))]
     return argv
@@ -81,13 +95,16 @@ def _subword_argv(cfg: dict) -> list[str]:
 
 def _focus_argv(cfg: dict) -> list[str]:
     f = cfg.get("focus", {}) or {}
-    if not f.get("fasttext_model"):
-        raise ValueError("method=focus requires focus.fasttext_model (a fastText .bin).")
+    if not f.get("fasttext_model") and not cfg.get("language"):
+        raise ValueError("method=focus needs focus.fasttext_model (a fastText .bin), "
+                         "or a top-level `language:` so the cc.<code>.300 vectors "
+                         "can be resolved and fetched automatically.")
     argv = _common_argv(cfg)
-    argv += ["--fasttext-model", str(f["fasttext_model"])]
+    if f.get("fasttext_model"):
+        argv += ["--fasttext-model", str(f["fasttext_model"])]
     if f.get("fasttext_url"):
         argv += ["--fasttext-url", str(f["fasttext_url"])]
-    argv += ["--candidate-pool", str(f.get("candidate_pool", "hindi"))]
+    argv += ["--candidate-pool", str(f.get("candidate_pool", "target"))]
     argv += ["--sparsemax-temperature", str(float(f.get("sparsemax_temperature", 0.05)))]
     argv += ["--num-samples", str(int(f.get("num_samples", 10)))]
     argv += ["--top-contributors", str(int(f.get("top_contributors", 5)))]
@@ -107,30 +124,63 @@ def _replace_argv(cfg: dict) -> list[str]:
     if method == "baseline":
         mode = str((cfg.get("baseline") or {}).get("mode", "mean_all"))
         if mode not in ("hf_default", "mean_all"):
-            raise ValueError(f"arm=replace baseline supports mode hf_default|mean_all, got {mode!r}")
+            # replace_init has no target-script-mean engine, so mean_target /
+            # mean_hindi cannot be honoured here. Do NOT quietly substitute
+            # mean_all: that would report a different init than was configured.
+            extra = (" 'mean_target'/'mean_hindi' average the base model's target-script "
+                     "rows, which replace_init does not implement — use arm=add for that, "
+                     "or method=subword with input_averaging=uniform (mean of constituents)."
+                     if mode in ("mean_target", "mean_hindi") else "")
+            raise ValueError(
+                f"arm=replace baseline supports mode hf_default|mean_all, got {mode!r}.{extra}")
         argv += ["--method", mode]
     elif method == "focus":
         f = cfg.get("focus") or {}
-        if not f.get("fasttext_model"):
-            raise ValueError("arm=replace method=focus requires focus.fasttext_model")
-        argv += ["--method", "focus", "--fasttext-model", str(f["fasttext_model"]),
-                 "--candidate-pool", str(f.get("candidate_pool", "hindi")),
+        if not f.get("fasttext_model") and not cfg.get("language"):
+            raise ValueError("arm=replace method=focus needs focus.fasttext_model, "
+                             "or a top-level `language:` to resolve cc.<code>.300")
+        argv += ["--method", "focus",
+                 "--candidate-pool", str(f.get("candidate_pool", "target")),
                  "--sparsemax-temperature", str(float(f.get("sparsemax_temperature", 0.05)))]
+        if f.get("fasttext_model"):
+            argv += ["--fasttext-model", str(f["fasttext_model"])]
         if f.get("fasttext_url"):
             argv += ["--fasttext-url", str(f["fasttext_url"])]
     else:  # subword family
         s = cfg.get("subword") or {}
         ia = str(s.get("input_averaging", "uniform"))
-        if ia in ("bert_weighted", "gemma_weighted"):
-            argv += ["--method", "bert", "--bert-model", str(s.get("bert_model", "google/muril-base-cased")),
-                     "--temperature", str(float(s.get("temperature", 0.1)))]
+        if ia == "gemma_weighted":
+            # replace_init declares --gemma-model for parity but never uses it, and
+            # its METHODS has no gemma entry. Silently routing this to --method bert
+            # ran a DIFFERENT encoder than the config asked for, so fail instead.
+            raise ValueError(
+                "arm=replace does not support subword.input_averaging=gemma_weighted "
+                "(replace_init has no gemma path). Use bert_weighted, or a length-based "
+                "averaging (uniform | char_weighted | max_char), or run arm=add.")
+        oa = str(s.get("output_averaging", "uniform"))
+        if oa == "gemma_weighted":
+            raise ValueError(
+                "arm=replace does not support subword.output_averaging=gemma_weighted "
+                "(replace_init has no gemma path). Use bert_weighted, or a length-based "
+                "averaging (uniform | char_weighted | max_char), or run arm=add.")
+        # The bert engine is required whenever EITHER side is encoder-weighted; the
+        # length-based engine rejects semantic methods. Both sides are always
+        # forwarded so input and output are weighted independently, as in arm=add.
+        if "bert_weighted" in (ia, oa):
+            # Do NOT default --bert-model here. Passing it explicitly overrides the
+            # language profile, which is how a Vietnamese run silently ended up
+            # weighting with MuRIL (Indic-only, no Vietnamese). Omit it and let
+            # --language resolve the encoder; only forward an explicit override.
+            argv += ["--method", "bert", "--temperature", str(float(s.get("temperature", 0.1)))]
+            if s.get("bert_model"):
+                argv += ["--bert-model", str(s["bert_model"])]
         else:
-            argv += ["--method", "subword", "--input-averaging", ia,
-                     "--output-averaging", str(s.get("output_averaging", "uniform"))]
+            argv += ["--method", "subword"]
+        argv += ["--input-averaging", ia, "--output-averaging", oa]
         argv += [_flag("input-norm-correction", bool(s.get("input_norm_correction", True)))]
         argv += [_flag("output-norm-correction", bool(s.get("output_norm_correction", False)))]
-        argv += [_flag("input-hindi-norm", bool(s.get("input_hindi_norm", True)))]
-        argv += [_flag("output-hindi-norm", bool(s.get("output_hindi_norm", False)))]
+        argv += [_flag("input-hindi-norm", bool(_pick(s, "input_target_norm", "input_hindi_norm", True)))]
+        argv += [_flag("output-hindi-norm", bool(_pick(s, "output_target_norm", "output_hindi_norm", False)))]
     return argv
 
 

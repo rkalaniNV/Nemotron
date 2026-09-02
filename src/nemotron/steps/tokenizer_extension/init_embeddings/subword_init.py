@@ -95,7 +95,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                        help="Take the target output norm over Devanagari tokens only.")
 
     semantic = parser.add_argument_group("semantic weighting")
-    semantic.add_argument("--bert-model", default=DEFAULT_BERT_MODEL)
+    semantic.add_argument("--bert-model", default=None,
+                          help="Auxiliary encoder for *_weighted averaging. "
+                               "Default: from --language, else MuRIL (Indic-only).")
     semantic.add_argument("--gemma-model", default=DEFAULT_GEMMA_MODEL)
     semantic.add_argument("--temperature", type=float, default=0.1,
                           help="Softmax temperature; lower is sharper (0.05 is near-argmax).")
@@ -106,7 +108,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=10,
                         help="Multi-subword tokens to report weights for.")
 
+    parser.add_argument("--language", default=None,
+                        help="Target language (see languages.py). Selects the script used to find "
+                             "the base model's existing target-language rows, and supplies defaults "
+                             "for the auxiliary encoder / fastText vectors. Omit for legacy Hindi.")
+
     args = parser.parse_args(argv)
+
+    # Apply the language profile before anything reads the target script.
+    if getattr(args, "language", None):
+        from languages import profile as _lp, fasttext_url as _fu
+        from script_ranges import set_target_script
+        _prof = _lp(args.language)
+        set_target_script(_prof.script)
+        if getattr(args, "bert_model", None) is None:
+            args.bert_model = _prof.encoder
+        if hasattr(args, "fasttext_url") and args.fasttext_url is None:
+            args.fasttext_url = _fu(args.language)
+    if args.bert_model is None:
+        args.bert_model = DEFAULT_BERT_MODEL
     if args.temperature <= 0:
         parser.error("--temperature must be positive")
     if args.num_samples < 0:
@@ -270,13 +290,16 @@ def free_cuda() -> None:
 # ---------------------------------------------------------------------------
 
 def is_devanagari(text: str) -> bool:
-    lo, hi = DEVANAGARI_RANGE
-    return any(lo <= ord(char) <= hi for char in text)
+    """Deprecated name. Delegates to the active target script (default
+    Devanagari), so this is unchanged for Hindi and correct for any language
+    selected via --language / set_target_script()."""
+    from script_ranges import is_target
+    return is_target(text)
 
 
 def find_devanagari_tokens(tokenizer, vocab_size: int) -> List[Tuple[int, str]]:
     found = []
-    for token_id in tqdm(range(vocab_size), desc="Scanning vocabulary for Hindi tokens"):
+    for token_id in tqdm(range(vocab_size), desc="Scanning vocabulary for target-language tokens"):
         try:
             text = tokenizer.decode([token_id])
         except Exception:

@@ -33,6 +33,8 @@ import yaml
 
 # self-contained step: import the sibling modules that live next to this executor
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# package root too: languages.py / script_ranges.py are shared across steps
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from extension import run_extension  # noqa: E402
 
 

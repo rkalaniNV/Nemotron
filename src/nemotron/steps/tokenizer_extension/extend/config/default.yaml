@@ -5,7 +5,16 @@ trust_remote_code: true
 
 method: replace                  # add | replace  (run the two as separate jobs)
 extension_size: 30000
-remove_script: devanagari        # for Replace: script(s) whose residual tokens are pruned
+
+# `language:` selects the corpus normalizer AND the Replace prune script from
+# the profile table in ../../languages.py (hindi, vietnamese, malayalam, ...).
+# Set it to match your corpus. Left unset, the legacy Devanagari defaults apply.
+language: hindi
+# Both are optional overrides; leave unset (or null) to use the profile above.
+# Setting remove_script here OVERRIDES `language:` -- that is how a Vietnamese
+# run can silently end up pruning Devanagari rows.
+# remove_script: devanagari      # for Replace: script(s) whose residual tokens are pruned
+# script_normalizer: devanagari
 
 # Corpus for TRAINING the BPE. Provide EITHER an HF dataset OR a local path.
 # HF subset model: hf_dataset (path) -> hf_name (config/subset) -> hf_split,

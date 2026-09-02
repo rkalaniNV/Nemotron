@@ -27,9 +27,14 @@ min_gpus = 0
 
 [[parameters]]
 name = "method"
-description = "'add' keeps base residual tokens; 'replace' prunes+refills them. Build ONE arm per job — run add and replace as separate jobs."
+description = "'add' keeps base residual tokens and appends new ones; 'replace' prunes the target script's residual tokens then refills; 'expand' adds the decoded surfaces atomically via add_tokens() with no merge rules (the naive baseline). Build ONE arm per job."
 default = "replace"
-choices = ["add", "replace"]
+choices = ["add", "replace", "expand"]
+
+[[parameters]]
+name = "language"
+description = "Target language; selects the corpus normalizer and the Replace prune script from the profile table in languages.py (hindi, vietnamese, malayalam, punjabi, ...). Overridden by an explicit remove_script / script_normalizer. Unset = legacy Devanagari defaults."
+default = "hindi"
 
 [[parameters]]
 name = "extension_size"
@@ -38,8 +43,7 @@ default = 30000
 
 [[parameters]]
 name = "remove_script"
-description = "For Replace: comma-separated script(s) whose residual tokens are pruned"
-default = "devanagari"
+description = "For Replace: comma-separated script(s) whose residual tokens are pruned. LEAVE UNSET unless you are deliberately overriding `language:` — an explicit value here silently wins over the language profile (e.g. language=vietnamese + remove_script=devanagari prunes the wrong rows)."
 
 [[parameters]]
 name = "corpus.hf_dataset"

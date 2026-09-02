@@ -7,7 +7,9 @@ Three initialization modes for the new token rows:
                  fitted to the mean and covariance of the existing embeddings
                  (see https://nlp.stanford.edu/~johnhew/vocab-expansion.html)
     mean_all     the mean of every existing embedding
-    mean_hindi   the mean of the existing Devanagari token embeddings only
+    mean_target  the mean of the base model's existing target-language token
+                 embeddings only (Devanagari unless --language says otherwise).
+                 "mean_hindi" is the old name and still accepted.
 
 With --norm-correction the new input embeddings are rescaled so their L2 norm
 matches the median norm of the original input embeddings.  Output (LM head)
@@ -62,16 +64,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                        help="Precision to load the base model in.")
 
     init = parser.add_argument_group("initialization")
-    init.add_argument("--mode", choices=("hf_default", "mean_all", "mean_hindi"),
+    init.add_argument("--language", default=None,
+                      help="Target language (see languages.py); selects the script "
+                           "used to find the base model's existing target-language "
+                           "rows. Omit for legacy Hindi/Devanagari.")
+    init.add_argument("--mode", choices=("hf_default", "mean_all", "mean_target", "mean_hindi"),
                       default="hf_default",
                       help="How to initialize the new token embeddings.")
     init.add_argument("--norm-correction", action=argparse.BooleanOptionalAction, default=False,
                       help="Rescale the new input embeddings to the median original norm; "
                            "output embeddings are never rescaled.")
     init.add_argument("--num-samples", type=int, default=10,
-                      help="Devanagari tokens to list in mean_hindi mode.")
+                      help="Target-language tokens to list in mean_target mode.")
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # Apply the language profile before anything reads the target script.
+    if args.language:
+        from languages import profile as _lp
+        from script_ranges import set_target_script
+        set_target_script(_lp(args.language).script)
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +115,11 @@ def describe_tensor(norms: torch.Tensor, extremes: bool = True) -> str:
 # ---------------------------------------------------------------------------
 
 def is_devanagari(text: str) -> bool:
-    lo, hi = DEVANAGARI_RANGE
-    return any(lo <= ord(char) <= hi for char in text)
-
+    """Deprecated name. Delegates to the active target script (default
+    Devanagari), so this is unchanged for Hindi and correct for any language
+    selected via --language / set_target_script()."""
+    from script_ranges import is_target
+    return is_target(text)
 
 def find_devanagari_token_ids(tokenizer, vocab_size: int) -> List[int]:
     token_ids = []

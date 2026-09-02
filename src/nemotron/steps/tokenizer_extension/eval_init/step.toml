@@ -38,9 +38,14 @@ name = "data_file"
 description = "Local validation corpus (.jsonl/.json with text_field, or .txt one doc per line)."
 
 [[parameters]]
+name = "max_docs"
+description = "Cap the number of documents scored. Tokenizer-independent, so this is the CORRECT budget when comparing BPB across tokenizers with different fertility. -1 = whole corpus."
+default = -1
+
+[[parameters]]
 name = "max_tokens"
-description = "Stop after scoring this many tokens (-1 for all). ~500k gives a stable BPB fast."
-default = 500000
+description = "Stop after scoring this many tokens (-1 for all). NOT comparable across tokenizers — each one reaches the budget after a different amount of text — so scoring >1 model this way is refused unless max_docs is also set. Prefer max_docs."
+default = -1
 
 [[parameters]]
 name = "max_length"

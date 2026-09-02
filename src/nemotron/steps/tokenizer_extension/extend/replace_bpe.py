@@ -373,30 +373,7 @@ def find_rank_dead_tokens(
 # Unicode ranges per script. A token is "residual" for a script if any character
 # of its *decoded* surface string falls in one of these ranges. Names are the
 # keys accepted by --remove-script (comma-separated).
-SCRIPT_UNICODE_RANGES: dict[str, list[tuple[int, int]]] = {
-    "devanagari": [(0x0900, 0x097F)],   # Hindi, Marathi, Sanskrit, Nepali, ...
-    "bengali":    [(0x0980, 0x09FF)],   # Bengali, Assamese
-    "gurmukhi":   [(0x0A00, 0x0A7F)],   # Punjabi
-    "gujarati":   [(0x0A80, 0x0AFF)],
-    "oriya":      [(0x0B00, 0x0B7F)],
-    "tamil":      [(0x0B80, 0x0BFF)],
-    "telugu":     [(0x0C00, 0x0C7F)],
-    "kannada":    [(0x0C80, 0x0CFF)],
-    "malayalam":  [(0x0D00, 0x0D7F)],
-    "arabic":     [(0x0600, 0x06FF)],   # Urdu, Sindhi, Kashmiri
-}
-
-
-def resolve_ranges(names: list[str]) -> list[tuple[int, int]]:
-    ranges: list[tuple[int, int]] = []
-    for name in names:
-        key = name.strip().lower()
-        if key not in SCRIPT_UNICODE_RANGES:
-            raise ValueError(
-                f"Unknown script {name!r}. Choose from: {sorted(SCRIPT_UNICODE_RANGES)}"
-            )
-        ranges.extend(SCRIPT_UNICODE_RANGES[key])
-    return ranges
+from script_ranges import SCRIPT_UNICODE_RANGES, resolve_ranges  # noqa: F401
 
 
 def identify_script_tokens(

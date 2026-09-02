@@ -29,8 +29,8 @@ from continued_bpe import (
     compute_continued_bpe_artifacts,
     extend_tokenizer,
     find_rank_dead_tokens,
-    get_devanagari_normalizer,
 )
+from languages import get_normalizer, resolve as resolve_language
 from replace_bpe import (
     identify_script_tokens,
     prune_backend,
@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 # Corpus reader (HF dataset name OR local parquet dir OR local jsonl)
 # --------------------------------------------------------------------------- #
-def corpus_stream(corpus: dict, devanagari_norm: Any) -> Iterator[str]:
+def corpus_stream(corpus: dict, normalizer: Any) -> Iterator[str]:
     text_field = corpus.get("text_field", "text")
     fields = (text_field, "text", "content", "response", "prompt", "tgt")
     max_samples = int(corpus.get("samples", 1_000_000))
@@ -53,7 +53,7 @@ def corpus_stream(corpus: dict, devanagari_norm: Any) -> Iterator[str]:
     def emit(raw: str) -> str | None:
         if not isinstance(raw, str) or not raw.strip():
             return None
-        cleaned = clean_text(raw, devanagari_norm)
+        cleaned = clean_text(raw, normalizer)
         if max_doc_chars > 0:
             cleaned = cleaned[:max_doc_chars]
         return cleaned if len(cleaned) > 50 else None
@@ -208,7 +208,12 @@ def run_extension(cfg: dict) -> dict:
     ext_size = int(cfg.get("extension_size", 30000))
     corpus = cfg["corpus"]
     min_freq = int(corpus.get("min_frequency", 0))
-    devanagari_norm = get_devanagari_normalizer()
+    # `language:` resolves the normalizer and the prune script together;
+    # `script_normalizer:` / `remove_script:` still override either one.
+    script_norm, remove_script = resolve_language(cfg)
+    normalizer = get_normalizer(script_norm)
+    log.info("language=%s -> script_normalizer=%s remove_script=%s",
+             cfg.get("language", "(legacy devanagari default)"), script_norm, remove_script)
 
     log.info("MILESTONE: loading base tokenizer %s ...", cfg.get("model_id"))
     base_tok = _load_base(cfg.get("model_id"), cfg.get("trust_remote_code", True))
@@ -221,7 +226,7 @@ def run_extension(cfg: dict) -> dict:
     train_kwargs = {"vocab_size": base_size + ext_size}
     if min_freq > 0:
         train_kwargs["min_frequency"] = min_freq
-    stream = corpus_stream(corpus, devanagari_norm)
+    stream = corpus_stream(corpus, normalizer)
     trained_tok = base_tok.train_new_from_iterator(
         batch_iterator(stream, int(cfg.get("batch_size", 1000))), **train_kwargs
     )
@@ -243,18 +248,49 @@ def run_extension(cfg: dict) -> dict:
         # add_tokens() them ATOMICALLY (no merge rules) — the gnani "Strategy B" baseline.
         base_keys = set(base_tok.get_vocab().keys())
         tvocab = trained_tok.get_vocab()
-        new_keys = sorted((t for t in tvocab if t not in base_keys), key=lambda t: tvocab[t])[:ext_size]
-        new_unicode, seen = [], set()
-        for bt in new_keys:
-            s = trained_tok.convert_tokens_to_string([bt])
-            if s.strip() and s not in seen:
-                seen.add(s); new_unicode.append(s)
+        # Rank order over ALL novel tokens, not a pre-truncated slice: the strip()
+        # below collapses `Ġfoo` and `foo` onto one surface, so slicing to ext_size
+        # first silently delivered FEWER than the requested rows. Take candidates in
+        # rank order until ext_size distinct surfaces are collected.
+        new_keys = sorted((t for t in tvocab if t not in base_keys), key=lambda t: tvocab[t])
+        # NB: byte-level BPE encodes a leading space into word-initial tokens. Adding the
+        # bare decoded surface orphans that space (stray `Ġ`), inflating fertility ~+0.24.
+        # Add with lstrip=True + stripped surface so the token absorbs the preceding space.
+        from tokenizers import AddedToken
+        # add_tokens() silently drops surfaces already present in the base vocab, so
+        # a single pass can splice fewer than ext_size rows. Keep pulling candidates
+        # in rank order until ext_size are actually spliced (or we run out).
+        def _mk(surface: str) -> AddedToken:
+            return AddedToken(surface, lstrip=True, rstrip=False,
+                              normalized=False, single_word=False)
+
+        seen: set[str] = set()
+        pending = iter(new_keys)
+        new_unicode: list[str] = []
+        spliced = 0
+        while spliced < ext_size:
+            batch: list[str] = []
+            for bt in pending:
+                surface = trained_tok.convert_tokens_to_string([bt]).strip()
+                if surface and surface not in seen:
+                    seen.add(surface); batch.append(surface)
+                    if len(batch) >= ext_size - spliced:
+                        break
+            if not batch:
+                break  # candidates exhausted
+            added = int(base_tok.add_tokens([_mk(x) for x in batch]))
+            new_unicode.extend(batch)
+            spliced += added
         cand = len(new_unicode)
-        spliced = int(base_tok.add_tokens(new_unicode))
+        if spliced < ext_size:
+            log.warning("expand: spliced %d of the requested %d tokens from %d novel "
+                        "candidates (%d distinct surfaces tried; the rest collided with "
+                        "the base vocab). Widen the corpus or lower extension_size.",
+                        spliced, ext_size, len(new_keys), cand)
         arm_tok = base_tok
         arm_tok.save_pretrained(out_dir)
     else:  # replace
-        ranges = resolve_ranges([s for s in cfg.get("remove_script", "devanagari").split(",") if s.strip()])
+        ranges = resolve_ranges([s for s in remove_script.split(",") if s.strip()])
         remove_tokens = identify_script_tokens(base_tok, ranges)
         pruned_backend, old2new, removed_ids, removed_list = prune_backend(base_tok.backend_tokenizer, remove_tokens)
         pruned_base = wrap_fast(pruned_backend, base_tok)

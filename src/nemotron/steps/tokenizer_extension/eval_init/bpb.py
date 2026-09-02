@@ -91,6 +91,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                       help="Skip this many leading docs (held-out slice offset) when streaming HF.")
     data.add_argument("--text-field", default="text",
                       help="JSONL / HF field holding the document text.")
+    data.add_argument("--allow-token-cap-comparison", action="store_true",
+                      help="Score several models under --max-tokens anyway. The BPB "
+                           "values will NOT be comparable across tokenizers; only use "
+                           "this for within-tokenizer perplexity or to reproduce a "
+                           "historical run.")
     data.add_argument("--max-docs", type=int, default=-1,
                       help="Stop after this many documents (-1 for all).")
     data.add_argument("--max-tokens", type=int, default=-1,
@@ -257,7 +262,6 @@ def evaluate_perplexity(model, tokenizer, make_stream, total: Optional[int] = No
     progress = tqdm(make_stream(), desc=desc, unit="doc", total=total)
 
     for text in progress:
-        total_bytes += len(text.encode("utf-8"))
         input_ids = tokenizer(text, return_tensors="pt", truncation=False,
                               add_special_tokens=False).input_ids[0]
         sequence_length = input_ids.size(0)
@@ -265,7 +269,6 @@ def evaluate_perplexity(model, tokenizer, make_stream, total: Optional[int] = No
             continue
 
         previous_end = 0
-        budget_reached = False
         for begin in range(0, sequence_length, stride):
             end = min(begin + max_length, sequence_length)
             window = input_ids[begin:end].unsqueeze(0).to(device)
@@ -296,14 +299,20 @@ def evaluate_perplexity(model, tokenizer, make_stream, total: Optional[int] = No
                     tokens=f"{total_tokens:,}",
                 )
 
-            if max_tokens > 0 and total_tokens >= max_tokens:
-                budget_reached = True
-                break
             if end == sequence_length:
                 break
 
+        # Count this document's bytes only now that its loss is fully
+        # accumulated. Counting them up-front while breaking mid-document
+        # inflated the BPB denominator against a partial numerator.
+        total_bytes += len(text.encode("utf-8"))
         docs_processed += 1
-        if budget_reached:
+
+        # Stop only on document boundaries, so bytes and loss always describe
+        # the same text. Note `--max-docs` (which caps the input stream) is
+        # tokenizer-independent and is the correct budget for cross-tokenizer
+        # BPB; `--max-tokens` is not.
+        if max_tokens > 0 and total_tokens >= max_tokens:
             break
 
     progress.close()
@@ -436,6 +445,34 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print(f"  max-docs: {args.max_docs:,}")
     if args.max_tokens > 0:
         print(f"  max-tokens: {args.max_tokens:,}")
+        if args.max_docs <= 0:
+            # Comparing >1 model under a token budget is invalid by construction:
+            # each tokenizer reaches the budget after a different amount of text,
+            # so the BPB denominators describe different corpora. Refuse rather
+            # than emit numbers that look comparable and are not.
+            # base_model is scored alongside --models, so one extended model plus
+            # the base is already a two-tokenizer comparison.
+            n_scored = len(args.models) + (1 if args.base_model else 0)
+            if n_scored > 1 and not args.allow_token_cap_comparison:
+                raise SystemExit(
+                    "REFUSING to score multiple models under --max-tokens with no "
+                    "--max-docs: a token budget stops each tokenizer after a "
+                    f"DIFFERENT amount of source text, so the {n_scored} resulting "
+                    "BPB values are not comparable. Set --max-docs "
+                    "(tokenizer-independent), or --max-tokens -1 to score the whole "
+                    "corpus, or run one model per job if you truly want a token cap. "
+                    "Pass --allow-token-cap-comparison to override deliberately.")
+            print("  WARNING: a token budget stops each tokenizer after a "
+                  "DIFFERENT amount of source text, so this BPB is NOT comparable "
+                  "with any other tokenizer's. Use --max-docs (or score the whole "
+                  "corpus) for cross-tokenizer comparison.")
+        elif len(args.models) + (1 if args.base_model else 0) > 1:
+            # Both caps set: whichever binds first decides. If max_tokens binds, the
+            # models still see different document counts, so say so up front.
+            print("  NOTE: both --max-tokens and --max-docs are set. If the token "
+                  "budget binds first, each tokenizer will have scored a different "
+                  "number of documents and the BPB values are again not comparable; "
+                  "the per-model 'documents' count below tells you which bound.")
 
     queue: List[Tuple[str, str]] = []
     if args.base_model:

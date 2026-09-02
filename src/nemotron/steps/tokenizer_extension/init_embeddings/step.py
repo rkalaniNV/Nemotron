@@ -20,9 +20,16 @@
 """Attach an extended tokenizer to the base model, initialize the new embedding
 rows, and save a resized HF checkpoint ready for CPT (pretrain/megatron_bridge).
 
-The init strategy is a registry in embeddings.py (`INIT_STRATEGIES`) — add a new
-technique there and select it via `init_method`. Single process, HF
-device_map='auto' across the node's GPUs.
+The init strategy is chosen by `method:` (baseline | subword | focus) and the
+arm by `arm:` (add | replace); embeddings.py dispatches to a per-technique
+engine script. Single process.
+
+GPU use: the base model is embedding surgery only (no forward pass), so every
+engine loads it WITHOUT device_map -- it is host-resident (~60 GB bf16 for a
+30B model). GPUs are used only by the auxiliary encoders: MuRIL-class models
+for subword.input/output_averaging=bert_weighted, and Gemma (sharded with
+device_map='auto') for gemma_weighted. The 8-GPU request therefore only pays
+for itself on the gemma path; other methods leave them idle.
 """
 from __future__ import annotations
 
@@ -34,6 +41,8 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# package root too: languages.py / script_ranges.py are shared across steps
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from embeddings import run_init  # noqa: E402
 
 

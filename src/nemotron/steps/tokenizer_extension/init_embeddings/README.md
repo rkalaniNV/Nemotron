@@ -1,31 +1,48 @@
 # tokenizer_extension/init_embeddings
 
 Attach an extended tokenizer to the base model, initialize the new embedding (and
-LM-head) rows, and save a **resized HF checkpoint** for CPT. Needs a GPU node.
+LM-head) rows, and save a **resized HF checkpoint** for CPT.
+
+The base model is embedding surgery only (no forward pass) and is loaded
+**host-resident**, not on GPU. GPUs are used only by the auxiliary encoders:
+`bert_weighted` (MuRIL-class) and `gemma_weighted` (Gemma, sharded via
+`device_map='auto'`). The step requests 8 GPUs, which only the gemma path uses.
 
 ## Files
 - `step.py` — executor (loads YAML, calls `embeddings.run_init`)
-- `embeddings.py` — the init **strategy registry** + Add/Replace embedding surgery
+- `embeddings.py` — the `method:` dispatcher + Add/Replace argv construction
 
 ## Adding a new init technique (the whole point)
-Register a function; both the Add and Replace paths pick it up automatically:
-```python
-@register("random")
-def _init_random(surface: str, ctx: InitContext):
-    std = ctx.old_in.std().item()
-    vout = torch.randn_like(ctx.global_mean_out) * std if ctx.global_mean_out is not None else None
-    return torch.randn_like(ctx.global_mean_in) * std, vout
-```
-`InitContext` gives you the base tokenizer, the original input/output embedding
-snapshots, the global means, and `old_n`. Select with `init_method: random`.
+`embeddings.py` does not hold the strategies itself; it selects an **engine
+script** from `METHODS = ("baseline", "subword", "focus")` and builds its argv.
+The Replace arm routes through `replace_init.py`, which additionally copies
+survivor rows via `id_remap.json`.
 
-Shipped strategies: `mean`, `mean_of_constituents`. Planned: `focus`, `wechsel`,
-`random` (stubs shown in `embeddings.py`).
+To add a technique:
+1. write `<name>_init.py` next to the others, taking `--base-model`,
+   `--extended-tokenizer`, `--output-dir`, `--dtype` and `--language`;
+2. add `"<name>"` to `METHODS`;
+3. add a `_<name>_argv(cfg)` builder and a dispatch branch in `embeddings.py`
+   (and in `_replace_argv` if it should support the Replace arm).
+
+Select it with `method: <name>`.
+
+Shipped: `baseline` (`hf_default` | `mean_all` | `mean_target`), `subword`
+(`input_averaging`: `uniform` = mean-of-constituents, `char_weighted`,
+`max_char`, `bert_weighted`, `gemma_weighted`), and `focus` (fastText +
+sparsemax). Set `language:` so the auxiliary encoder and fastText vectors are
+chosen for your target — passing `subword.bert_model` explicitly overrides it.
 
 ## Add vs Replace surgery
 - **add** → resize, keep base rows, init appended rows `[old_n, new_n)`.
 - **replace** → resize, permute survivor rows via `id_remap.json`, init new rows
   `[pruned_size, final_n)`. (`tokenizer_path` must be extend's `replace/` output.)
+
+## Dependencies
+`method: focus` needs `fasttext-wheel`
+(`uv pip install -e '.[tokenizer-extension]'`, or add it to the profile's
+`pip_extras`). The import is lazy, so the other methods run without it.
+See `../guide.md`.
 
 ## Run
 ```bash

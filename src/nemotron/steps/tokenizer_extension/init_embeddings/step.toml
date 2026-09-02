@@ -13,7 +13,7 @@ tags = ["tokenizer", "embeddings", "initialization", "cpt"]
 
 [[consumes]]
 type = "tokenizer"
-description = "Extended (append-style / add) tokenizer directory from tokenizer_extension/extend"
+description = "Extended tokenizer directory from tokenizer_extension/extend. Both arms are supported: an add/ tokenizer for arm=add, or a replace/ tokenizer (with its id_remap.json) for arm=replace."
 required = true
 
 [[consumes]]
@@ -33,9 +33,13 @@ min_gpus = 8
 
 [[parameters]]
 name = "arm"
-description = "'add' (append-style: base rows unchanged, any method) or 'replace' (survivor rows copied via id_remap.json + fresh tokens by mean-of-constituents; method must be subword)."
+description = "'add' (append-style: base rows unchanged) or 'replace' (survivor rows copied via id_remap.json, fresh rows initialised by the chosen method). Both arms support baseline, subword and focus; on replace, baseline is limited to hf_default|mean_all and gemma_weighted is unavailable."
 default = "add"
 choices = ["add", "replace"]
+
+[[parameters]]
+name = "language"
+description = "Target language. Selects the target script used to locate the base model's existing rows, and supplies the auxiliary-encoder / fastText defaults (e.g. MuRIL for Indic, XLM-R for Vietnamese). Set this rather than bert_model, which overrides it."
 
 [[parameters]]
 name = "method"
@@ -57,9 +61,15 @@ choices = ["uniform", "char_weighted", "max_char", "bert_weighted", "gemma_weigh
 
 [[parameters]]
 name = "baseline.mode"
-description = "baseline: hf_default (multivariate-normal) | mean_all | mean_hindi."
-default = "mean_hindi"
-choices = ["hf_default", "mean_all", "mean_hindi"]
+description = "baseline: hf_default (multivariate-normal) | mean_all | mean_target (mean of the base model's existing target-script rows). 'mean_hindi' is the legacy alias for 'mean_target'. NOTE: arm=replace supports only hf_default and mean_all — replace_init has no target-script-mean engine."
+default = "mean_target"
+choices = ["hf_default", "mean_all", "mean_target", "mean_hindi"]
+
+[[parameters]]
+name = "focus.candidate_pool"
+description = "Base rows eligible to contribute to a FOCUS init: 'target' (the base model's target-script rows) or 'all'. 'hindi' is the legacy alias for 'target'."
+default = "target"
+choices = ["target", "all", "hindi"]
 
 [[parameters]]
 name = "focus.fasttext_model"
@@ -91,7 +101,7 @@ recovery = "method must be one of baseline | subword | focus"
 
 [[errors]]
 name = "replace_tokenizer_rejected"
-recovery = "extended_tokenizer contains id_remap.json (replace arm). Use an add tokenizer, or add the remap wrapper before init"
+recovery = "id_remap.json means this is a replace-arm tokenizer: set arm=replace so replace_init.py re-indexes survivor rows through the remap. Set arm=add only for an add/ tokenizer."
 
 [[errors]]
 name = "row_count_mismatch"

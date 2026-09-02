@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, List, Optional, Sequence, Tuple
 
-import fasttext
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -107,18 +106,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                        help="Tokenizer containing the base vocabulary plus the new tokens.")
     paths.add_argument("--output-dir", required=True,
                        help="Directory to save the extended model and tokenizer to.")
-    paths.add_argument("--fasttext-model", required=True,
+    # Both default to None so --language can supply them below. --fasttext-model
+    # used to be required=True, which made argparse reject any language-driven
+    # config before the profile was ever applied; --fasttext-url used to default
+    # to the *Hindi* cc.hi.300 URL, which meant the `args.fasttext_url is None`
+    # override never fired and a Vietnamese run would have silently trained on
+    # Hindi vectors. Same failure shape as the MuRIL-for-Vietnamese bug.
+    paths.add_argument("--fasttext-model", default=None,
                        help="fastText binary model (.bin) used as the auxiliary space. "
-                            "If absent and --fasttext-url is set, it is downloaded here (on the Lepton node).")
-    paths.add_argument("--fasttext-url",
-                       default="https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.hi.300.bin.gz",
+                            "If absent and --fasttext-url is set, it is downloaded here (on the "
+                            "Lepton node). Defaults to $FASTTEXT_CACHE_DIR/cc.<code>.300.bin "
+                            "resolved from --language.")
+    paths.add_argument("--fasttext-url", default=None,
                        help="Source to fetch the fastText .bin from if --fasttext-model is missing. "
-                            ".gz is auto-decompressed. Set empty to require the file to already exist.")
+                            ".gz is auto-decompressed. Defaults to the cc.<code>.300 URL for "
+                            "--language, or Hindi when neither is given (legacy).")
     paths.add_argument("--dtype", choices=sorted(DTYPES), default="bfloat16",
                        help="Precision to load the base model in.")
 
     focus = parser.add_argument_group("FOCUS")
-    focus.add_argument("--candidate-pool", choices=("hindi", "all"), default="hindi",
+    focus.add_argument("--candidate-pool", choices=("hindi", "target", "all"), default="target",
                        help="Base tokens eligible to contribute: Devanagari only, or all.")
     focus.add_argument("--sparsemax-temperature", type=float, default=0.05,
                        help="Similarities are divided by this before Sparsemax; "
@@ -130,7 +137,37 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     report.add_argument("--top-contributors", type=int, default=5,
                         help="Contributing base tokens listed per reported sample.")
 
+    parser.add_argument("--language", default=None,
+                        help="Target language (see languages.py). Selects the script used to find "
+                             "the base model's existing target-language rows, and supplies defaults "
+                             "for the auxiliary encoder / fastText vectors. Omit for legacy Hindi.")
+
     args = parser.parse_args(argv)
+
+    # Apply the language profile before anything reads the target script.
+    if getattr(args, "language", None):
+        from languages import profile as _lp, fasttext_url as _fu
+        from script_ranges import set_target_script
+        _prof = _lp(args.language)
+        set_target_script(_prof.script)
+        if getattr(args, "bert_model", None) is None:
+            args.bert_model = _prof.encoder
+        if args.fasttext_url is None:
+            args.fasttext_url = _fu(args.language)
+        if args.fasttext_model is None:
+            # Cache under FASTTEXT_CACHE_DIR so a second focus cell reuses the
+            # ~7 GB download instead of re-fetching it (ensure_fasttext is
+            # idempotent and writes atomically).
+            import os
+            cache = os.environ.get("FASTTEXT_CACHE_DIR") or "/tmp/fasttext"
+            os.makedirs(cache, exist_ok=True)
+            args.fasttext_model = str(Path(cache) / f"cc.{_prof.fasttext}.300.bin")
+    # Legacy path: no --language at all keeps the original Hindi default, so
+    # every pre-existing Hindi config behaves exactly as before.
+    if args.fasttext_url is None:
+        args.fasttext_url = "https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.hi.300.bin.gz"
+    if args.fasttext_model is None:
+        parser.error("--fasttext-model is required when --language is not given")
     if args.sparsemax_temperature <= 0:
         parser.error("--sparsemax-temperature must be positive")
     if args.num_samples < 0 or args.top_contributors < 1:
@@ -232,9 +269,11 @@ def sparsemax(scores: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def is_devanagari(text: str) -> bool:
-    lo, hi = DEVANAGARI_RANGE
-    return any(lo <= ord(char) <= hi for char in text)
-
+    """Deprecated name. Delegates to the active target script (default
+    Devanagari), so this is unchanged for Hindi and correct for any language
+    selected via --language / set_target_script()."""
+    from script_ranges import is_target
+    return is_target(text)
 
 def decode_vocabulary(tokenizer, vocab_size: int, desc: str) -> List[str]:
     texts = []
@@ -277,7 +316,7 @@ def unit_normalize(vectors: np.ndarray) -> np.ndarray:
 
 
 def build_candidate_pool(pool: str, base_texts: Sequence[str], ft_model) -> CandidatePool:
-    if pool == "hindi":
+    if pool in ("hindi", "target"):
         token_ids = np.array([i for i, text in enumerate(base_texts) if is_devanagari(text)],
                              dtype=np.int64)
         if token_ids.size == 0:
@@ -574,6 +613,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     with phase(f"Phase 2: Building the candidate pool from {args.fasttext_model}"):
         ensure_fasttext(args.fasttext_model, args.fasttext_url)
+        try:
+            import fasttext  # lazy: only method=focus needs it (see replace_init)
+        except ImportError as exc:
+            raise SystemExit(
+                "method=focus requires fastText. Install it with:  "
+                "pip install 'nemotron[tokenizer-extension]'  (or pip install "
+                "fasttext-wheel). Other init methods do not need it.") from exc
         ft_model = fasttext.load_model(args.fasttext_model)
         print(f"  fastText dimension: {ft_model.get_dimension()}")
         base_texts = decode_vocabulary(original_tokenizer, original_vocab_size,

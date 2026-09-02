@@ -40,8 +40,21 @@ def _raw_stream(corpus: dict) -> Iterator[str]:
     if corpus.get("hf_dataset"):
         from datasets import load_dataset
 
-        ds = load_dataset(corpus["hf_dataset"], corpus.get("hf_config"),
-                          split=corpus.get("hf_split", "train"), streaming=True)
+        ld = {"path": corpus["hf_dataset"],
+              "name": corpus.get("hf_config", corpus.get("hf_name")),
+              "split": corpus.get("hf_split", "train"),
+              "streaming": bool(corpus.get("streaming", True))}
+        # Pinning explicit shards keeps the eval slice byte-identical across arms
+        # and lets it be held out from the extend corpus.
+        for key, val in (("data_dir", corpus.get("hf_data_dir")),
+                         ("data_files", corpus.get("hf_data_files")),
+                         ("revision", corpus.get("hf_revision"))):
+            if val is not None:
+                ld[key] = val
+        if not ld["streaming"]:
+            ld["verification_mode"] = "no_checks"
+        log.info("loading HF dataset: %s", ld)
+        ds = load_dataset(**ld)
         for ex in ds:
             v = next((ex[f] for f in fields if isinstance(ex.get(f), str) and ex[f].strip()), "")
             g = gate(v)

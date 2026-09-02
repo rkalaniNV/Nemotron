@@ -24,10 +24,16 @@ corpus:
   min_frequency: 3
 ```
 
-## Add vs Replace
-`method: add | replace | both`. Add keeps the base residual script tokens; Replace
-prunes them (`remove_script`) and refills with corpus-optimal tokens. See the
-category `guide.md`.
+## Add vs Replace vs Expand
+`method: add | replace | expand` — one arm per job.
+- **add** keeps the base residual script tokens and appends new ones.
+- **replace** prunes them (script chosen by `language:`, or `remove_script:`) and
+  refills with corpus-optimal tokens spliced into the merge table.
+- **expand** adds the decoded surfaces atomically via `add_tokens()` with **no
+  merge rules** — the naive baseline. Cheaper to build, worse fertility.
+
+Set `language:` (hindi, vietnamese, malayalam, ...) to pick the normalizer and the
+Replace prune script; see `../LANGUAGES.md`. See also the category `guide.md`.
 
 ## Why the splice is safe
 Naively appending trained merges below the base merges can leave tokens in the
@@ -37,6 +43,12 @@ still passes. `continued_bpe._apply_bpe_extension_backend` instead builds each n
 token from the pieces the *current* merge table yields, so the appended rule is the
 one that fires. `find_rank_dead_tokens` asserts zero unemittable tokens; the build
 **hard-fails** otherwise.
+
+## Dependencies
+`language:` hindi/marathi/nepali/sanskrit needs `indic-nlp-library`
+(`uv pip install -e '.[tokenizer-extension]'`, or add it to the profile's
+`pip_extras`). Missing, the run fails rather than silently using NFKC-only
+normalization, which trains a different tokenizer. See `../guide.md`.
 
 ## Run
 ```bash

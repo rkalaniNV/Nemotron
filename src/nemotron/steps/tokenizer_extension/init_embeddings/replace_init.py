@@ -22,6 +22,7 @@ math matches the ADD arm exactly. Mirrors the vendored engines' argparse main(ar
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import time
 from pathlib import Path
@@ -32,6 +33,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from subword_init import (
+    SEMANTIC_METHODS,
     build_bert_semantics,
     collect_semantic_inputs,
     decompose_new_tokens,
@@ -43,6 +45,8 @@ from subword_init import (
 
 DTYPES = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
 LENGTH_METHODS = ("uniform", "char_weighted", "max_char")
+# bert_weighted is available on either side; gemma_weighted has no engine here.
+AVERAGING_METHODS = LENGTH_METHODS + ("bert_weighted",)
 METHODS = ("subword", "mean_all", "hf_default", "focus", "bert")
 RULE = "=" * 60
 
@@ -55,11 +59,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--dtype", choices=sorted(DTYPES), default="bfloat16")
     p.add_argument("--id-remap", default=None,
                    help="id_remap.json (old_id->new_id). Default: <extended-tokenizer>/id_remap.json")
+    p.add_argument("--language", default=None,
+                   help="Target language (see languages.py). Sets the target script used to "
+                        "find the base model's existing rows, and the defaults for "
+                        "--bert-model and --fasttext-url. Omit for the legacy Hindi behaviour.")
     p.add_argument("--method", choices=METHODS, default="subword",
                    help="Fresh-token init: subword | mean_all | hf_default | focus | bert")
     # subword (length-based) options
-    p.add_argument("--input-averaging", choices=LENGTH_METHODS, default="uniform")
-    p.add_argument("--output-averaging", choices=LENGTH_METHODS, default="uniform")
+    p.add_argument("--input-averaging", choices=AVERAGING_METHODS, default="uniform")
+    p.add_argument("--output-averaging", choices=AVERAGING_METHODS, default="uniform")
     p.add_argument("--input-norm-correction", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--output-norm-correction", action=argparse.BooleanOptionalAction, default=False)
     p.add_argument("--input-hindi-norm", action=argparse.BooleanOptionalAction, default=True)
@@ -69,7 +77,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    help="Pad the final row count up to a multiple of this for TP divisibility "
                         "(Megatron VocabParallelEmbedding). Padding rows are never indexed. 0 disables.")
     # bert (semantic) options
-    p.add_argument("--bert-model", default="google/muril-base-cased")
+    p.add_argument("--bert-model", default=None,
+                   help="Auxiliary encoder for --method bert. Default: from --language, else google/muril-base-cased (Indic-only; wrong for non-Indic targets).")
     p.add_argument("--temperature", type=float, default=0.1)
     p.add_argument("--bert-batch-size", type=int, default=128)
     p.add_argument("--gemma-model", default=None)  # parity; unused
@@ -77,18 +86,42 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     # focus options
     p.add_argument("--fasttext-model", default=None,
                    help="fastText .bin (e.g. cc.hi.300.bin); required for --method focus")
-    p.add_argument("--fasttext-url",
-                   default="https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.hi.300.bin.gz",
+    p.add_argument("--fasttext-url", default=None,
                    help="Fetch fastText here (on the Lepton node) if --fasttext-model is missing (.gz auto-decompressed).")
-    p.add_argument("--candidate-pool", choices=("hindi", "all"), default="hindi")
+    p.add_argument("--candidate-pool", choices=("hindi", "target", "all"), default="target",
+                   help="FOCUS candidates: the base model's target-language rows, or all rows. 'hindi' is the old name for 'target'.")
     p.add_argument("--sparsemax-temperature", type=float, default=0.05)
     args = p.parse_args(argv)
+
+    # Resolve language-dependent defaults before validation. Without --language
+    # this leaves the historical Hindi values in place.
+    from languages import profile as _lang_profile, fasttext_url as _ft_url
+    from script_ranges import set_target_script
+    if args.language:
+        prof = _lang_profile(args.language)
+        set_target_script(prof.script)
+        if args.bert_model is None:
+            args.bert_model = prof.encoder
+        if args.fasttext_url is None:
+            args.fasttext_url = _ft_url(args.language)
+    if args.bert_model is None:
+        args.bert_model = "google/muril-base-cased"
+    if args.fasttext_url is None:
+        args.fasttext_url = "https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.hi.300.bin.gz"
+
     if args.method == "subword":
         for side in ("input_averaging", "output_averaging"):
             if getattr(args, side) not in LENGTH_METHODS:
-                p.error(f"--method subword supports only {LENGTH_METHODS}")
+                p.error(f"--method subword supports only {LENGTH_METHODS}; use "
+                        f"--method bert when either side is bert_weighted")
     if args.method == "focus" and not args.fasttext_model:
-        p.error("--method focus requires --fasttext-model")
+        if not args.language:
+            p.error("--method focus requires --fasttext-model, or --language so the "
+                    "cc.<code>.300 vectors can be resolved and fetched")
+        # ensure_fasttext() downloads --fasttext-url here if the file is absent.
+        cache = os.environ.get("FASTTEXT_CACHE_DIR", "/tmp")
+        args.fasttext_model = os.path.join(
+            cache, os.path.basename(args.fasttext_url).replace(".gz", ""))
     return args
 
 
@@ -163,12 +196,16 @@ def _init_subword(fresh_ids, decomp, in_emb, out_emb, base_in, base_out, mean_in
 
 def _init_bert(fresh_ids, decomp, in_emb, out_emb, base_in, base_out, mean_in, mean_out,
                ext_tok, base_tok, args, target_in, target_out):
-    """MuRIL/BERT-weighted mean of base subword rows (reuses subword_init semantics)."""
-    inputs = collect_semantic_inputs(ext_tok, base_tok, decomp)
-    semantic = {"bert_weighted": build_bert_semantics(args, inputs)}
+    """Encoder-weighted mean of base subword rows (reuses subword_init semantics)."""
+    needed = {m for m in (args.input_averaging, args.output_averaging)
+              if m in SEMANTIC_METHODS}
+    semantic = {}
+    if needed:
+        inputs = collect_semantic_inputs(ext_tok, base_tok, decomp)
+        semantic = {m: build_bert_semantics(args, inputs) for m in needed}
     stats = {"copy": 0, "mean": 0, "multi": 0}
     with torch.no_grad():
-        for tid in tqdm(fresh_ids, desc="Init fresh (bert/MuRIL)"):
+        for tid in tqdm(fresh_ids, desc="Init fresh (bert)"):
             plan = decomp.plans[tid]
             if plan.category == "mean":
                 in_emb[tid] = mean_in; out_emb[tid] = mean_out; stats["mean"] += 1
@@ -177,10 +214,20 @@ def _init_bert(fresh_ids, decomp, in_emb, out_emb, base_in, base_out, mean_in, m
                 sid = plan.subword_ids[0]
                 in_emb[tid] = base_in[sid]; out_emb[tid] = base_out[sid]; stats["copy"] += 1
                 continue
-            w_in, _ = subword_weights("bert_weighted", tid, plan.subword_ids, base_tok,
-                                      semantic, args.temperature, in_emb.dtype, in_emb.device)
+            # Input and output are weighted INDEPENDENTLY, matching the Add arm
+            # (subword_init) and _init_subword above. Reusing w_in for the output
+            # matrix silently ignored --output-averaging.
+            def _weights(method, dtype, device):
+                if method in SEMANTIC_METHODS:
+                    w, _ = subword_weights(method, tid, plan.subword_ids, base_tok,
+                                           semantic, args.temperature, dtype, device)
+                    return w
+                return length_based_weights(plan.subword_ids, method, base_tok, dtype, device)
+
+            w_in = _weights(args.input_averaging, in_emb.dtype, in_emb.device)
+            w_out = _weights(args.output_averaging, out_emb.dtype, out_emb.device)
             avg_in = (base_in[plan.subword_ids] * w_in.unsqueeze(1)).sum(dim=0)
-            avg_out = (base_out[plan.subword_ids] * w_in.unsqueeze(1)).sum(dim=0)
+            avg_out = (base_out[plan.subword_ids] * w_out.unsqueeze(1)).sum(dim=0)
             in_emb[tid] = _norm_correct(avg_in, args.input_norm_correction, target_in)
             out_emb[tid] = _norm_correct(avg_out, args.output_norm_correction, target_out)
             stats["multi"] += 1
@@ -252,7 +299,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         mean_in = base_in.mean(dim=0)
         mean_out = base_out.mean(dim=0)
 
-    print("\nLocating base Devanagari rows for norm correction...")
+    print("\nLocating base target-language rows for norm correction...")
     hindi_ids = [tid for tid, _ in find_devanagari_tokens(base_tok, base_vocab)]
     with torch.no_grad():
         h_in = base_in[hindi_ids].norm(dim=1) if hindi_ids else None
@@ -261,7 +308,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                                                 args.input_hindi_norm, args.input_norm_correction, "input")
         target_out, src_out = resolve_target_norm(base_out.norm(dim=1), h_out,
                                                   args.output_hindi_norm, args.output_norm_correction, "output")
-    print(f"  Devanagari base tokens: {len(hindi_ids):,} | target input norm ({src_in}): {target_in.item():.4f}")
+    print(f"  Target-language base tokens: {len(hindi_ids):,} | target input norm ({src_in}): {target_in.item():.4f}")
 
     print("\nResizing (mean_resizing=False; every row is written explicitly)...")
     model.resize_token_embeddings(new_vocab, mean_resizing=False)

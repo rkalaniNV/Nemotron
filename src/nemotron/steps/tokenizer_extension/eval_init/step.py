@@ -34,6 +34,8 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# package root too: languages.py / script_ranges.py are shared across steps
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bpb as engine  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -67,6 +69,8 @@ def _build_argv(cfg: dict) -> list[str]:
     text_field = cfg.get("text_field") or corpus.get("text_field", "text")
     argv += ["--text-field", str(text_field)]
     argv += ["--max-docs", str(int(cfg.get("max_docs", -1)))]
+    if bool(cfg.get("allow_token_cap_comparison", False)):
+        argv += ["--allow-token-cap-comparison"]
     argv += ["--max-tokens", str(int(cfg.get("max_tokens", -1)))]
     argv += ["--max-length", str(int(cfg.get("max_length", 2048)))]
     argv += ["--stride", str(int(cfg.get("stride", 512)))]
