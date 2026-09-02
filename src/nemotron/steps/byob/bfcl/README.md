@@ -247,6 +247,49 @@ evaluated, and `null` when no policy was declared. The manifest's `publication`
 section reports both row counts, both content hashes, which surface gate
 decided, and which ordering applies.
 
+## Reference release
+
+A published run of the above is available as a snapshot rather than only as a
+description, which makes it the fastest way to see what each artifact actually
+contains before committing to a generation run of your own. It sits at
+`BFCL/releases/banking-vn-gold-v1-1392/` alongside this checkout and holds the
+1,392-row banking_vn gold release produced on 2026-09-01 from
+`config/banking_vn.gold.paraphrase.yaml`.
+
+The snapshot keeps the published data and its manifest and nothing else, so its
+layout is flatter than the `output_dir/expt_name/` layout described above:
+
+- `benchmark/`: `benchmark.parquet` (1,392 published rows) and
+  `benchmark_raw.parquet` (5,366 schema-valid, replay-valid rows).
+- `run_manifest.json`: the unmodified generation manifest, kept at the top level
+  because everything else in the snapshot is traceable to it.
+- `exports/`: the `bfcl_json` question/answer JSONL pair and the six-file
+  `nemo_evaluator_bundle`, plus `export_validation_report.json`.
+
+The `stage_cache` tables, the separate stage reports, and the evaluation
+artifacts are all absent by choice — they are working state, and the manifest
+already carries the parts of them a reader needs. `stage_counts` holds the full
+generation funnel and `semantic_deduplication.report.actual_counts` holds the
+realized category, difficulty, turn, and policy mixes, so the numbers a release
+claim rests on survive without the tables that produced them.
+
+What remains is enough to verify the release offline. Both parquets are
+byte-identical to the hashes `run_manifest.json` declares (`sha256:d40ba8d3…`
+published, `sha256:e988c246…` raw), so `shasum -a 256 benchmark/*.parquet` is a
+complete integrity check that needs no network and no pipeline. The manifest
+also records `pack.content_hash`
+(`sha256:f1d6ab3ae97df6c1090cd46031484aa1c4e5c91e87d3f5ccde346e3e7d645718`),
+which is what identifies the oracle pack these rows were replayed against;
+`data/banking_vn_oracle_pack/` still matches it.
+
+The snapshot is a generation artifact, so it demonstrates nothing about scoring
+on its own. If you want a worked example of why `mode: [trace, executable]` is
+not redundant, `gpt-oss-120b` scored 53.4% task success (744 of 1,392) against
+this benchmark while emitting well-formed calls on every attempt — the
+divergence between the two only appears once the backend and the pack's
+assertions are in the loop. Re-run the eval against `benchmark.parquet` to
+reproduce it.
+
 ## Configuration
 
 Start from `config/default.yaml` for a new pack. The main settings are:
