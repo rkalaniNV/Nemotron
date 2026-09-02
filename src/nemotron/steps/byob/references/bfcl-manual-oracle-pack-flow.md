@@ -534,7 +534,7 @@ candidates:
     inference:
       temperature: 0.0
       top_p: 1.0
-      max_tokens: 1024
+      max_tokens: 8192
       seed: 42
       tool_choice: auto
       provider_extensions: {}
