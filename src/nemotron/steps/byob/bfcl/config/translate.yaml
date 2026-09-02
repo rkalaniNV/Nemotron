@@ -1,14 +1,14 @@
 # Resolve every placeholder before running. Translation accepts only the
 # committed run_manifest.json, never a bare benchmark parquet.
+# Relative paths resolve from src/nemotron/steps/byob.
 
 family: bfcl
 expt_name: bfcl_translation
 stage: translate
 config_status: template
 
-# Relative paths resolve from src/nemotron/steps/byob.
-source_run_manifest: ../../../../outputs/bfcl/default_out/bfcl_default_gold_v0/run_manifest.json
-output_dir: ../../../../outputs/bfcl/translate_out
+source_run_manifest: REPLACE_ME_SOURCE_RUN_MANIFEST_JSON
+output_dir: runs/bfcl/translate_out
 source_language: en
 target_language: vi
 translate_tool_descriptions: false

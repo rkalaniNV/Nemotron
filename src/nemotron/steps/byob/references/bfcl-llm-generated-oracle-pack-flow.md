@@ -115,7 +115,7 @@ Without this flag, or an equivalent reviewed rollout policy, intake fails with
 Choose a path that does not exist:
 
 ```bash
-export BFCL_LLM_DEMO_ROOT="$NEMOTRON_ROOT/outputs/bfcl/llm-generated-demo"
+export BFCL_LLM_DEMO_ROOT="${TMPDIR:-/tmp}/bfcl-llm-generated-demo"
 test ! -e "$BFCL_LLM_DEMO_ROOT"
 ```
 
@@ -237,7 +237,7 @@ or cache conflicts fail closed.
 Use a fresh work directory; do not rerun `all` over the scripted workspace:
 
 ```bash
-export BFCL_LIVE_DEMO_ROOT="$NEMOTRON_ROOT/outputs/bfcl/llm-generated-live"
+export BFCL_LIVE_DEMO_ROOT="${TMPDIR:-/tmp}/bfcl-llm-generated-live"
 test ! -e "$BFCL_LIVE_DEMO_ROOT"
 ```
 
