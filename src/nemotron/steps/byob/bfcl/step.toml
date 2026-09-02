@@ -411,6 +411,10 @@ name = "eval_candidate_credentials_missing"
 recovery = "The candidate api_key_env does not resolve to a non-empty credential. Export that environment variable in the eval runner environment. Do not put the key in eval_config.yaml; replay from a completed candidate cache intentionally needs no credential."
 
 [[errors]]
+name = "eval_candidate_authentication_failed"
+recovery = "The endpoint answered HTTP 401/403. Every task presents the same credential, so this is a configuration fault rather than evidence about a task, and the run stops on the first rejection instead of recording one refusal per task. No completion is cached for the rejected call, so the attempt survives as evidence and a later run re-contacts the endpoint. Check that api_key_env holds a key that endpoint accepts, then re-run into a new output directory."
+
+[[errors]]
 name = "eval_candidate_request_invalid"
 recovery = "The native request is empty, belongs to another candidate/endpoint, or contains a provider extension that replaces a pinned standard field. Rebuild it from the same EvalCandidate, authorized task, ordered model-facing messages, and model-facing tools."
 

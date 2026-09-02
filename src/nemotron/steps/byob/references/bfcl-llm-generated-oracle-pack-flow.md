@@ -422,21 +422,23 @@ still does not measure a real model.
 
 For a real model evaluation, reuse the resolved evaluation procedure in
 [Manual Oracle Pack flow](bfcl-manual-oracle-pack-flow.md), with these source
-changes:
+changes. Store `eval.yaml` under
+`$BFCL_LLM_DEMO_ROOT/external-eval-1/`; the paths below are relative to that
+file:
 
 ```yaml
-source_run_manifest: <demo_root>/workspace/generated/bfcl-demo/run_manifest.json
+source_run_manifest: ../workspace/generated/bfcl-demo/run_manifest.json
 
 source_oracle:
   kind: python
-  pack_manifest: <demo_root>/workspace/release/pack/manifest.yaml
-  resource: <demo_root>/workspace/release/pack/backend.py
+  pack_manifest: ../workspace/release/pack/manifest.yaml
+  resource: ../workspace/release/pack/backend.py
 
 eval:
   mode: [trace, executable]
 
 outputs:
-  output_dir: <demo_root>/external-eval-1
+  output_dir: ./artifacts
 ```
 
 Also replace:

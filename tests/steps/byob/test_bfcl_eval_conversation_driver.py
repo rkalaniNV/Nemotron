@@ -14,6 +14,7 @@ import pytest
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval import (
     CandidateApi,
+    CandidateAuthenticationError,
     CandidateEligibility,
     CandidateInference,
     CandidateModelIdentity,
@@ -899,6 +900,22 @@ def test_a_provider_failure_ends_the_episode_as_a_call_failure(
     assert episode.status == "candidate_call_failed"
     assert episode.observed[0].call_status == "provider_rejected"
     assert not episode.observed[0].advanced
+
+
+def test_a_rejected_credential_is_never_an_episode_the_driver_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused key is not a turn the candidate lost.
+
+    A provider that rejects the request (400 above) is evidence about this turn,
+    so the episode ends and carries it. A provider that refuses the credential is
+    evidence about the run's configuration, and every remaining task would meet
+    the same refusal. Returning an episode would spend the whole task set on it
+    and aggregate the refusals into metrics that read like a score, so the driver
+    must let the failure out instead.
+    """
+    with pytest.raises(CandidateAuthenticationError):
+        _drive(_script(_single_turn_row()), [401], tmp_path, monkeypatch=monkeypatch)
 
 
 def test_a_response_that_is_not_a_completion_is_the_models_failure(

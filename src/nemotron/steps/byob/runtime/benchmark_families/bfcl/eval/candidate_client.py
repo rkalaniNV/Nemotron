@@ -27,6 +27,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_contract
     parse_function_arguments,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_errors import (
+    CandidateAuthenticationError,
     CandidateCredentialMissingError,
     CandidateProviderExtensionError,
     CandidateRequestError,
@@ -422,6 +423,24 @@ class NativeFunctionCallingClient:
                 # a resumed run must never read this interruption as the model's
                 # answer for the task.
                 raise asyncio.CancelledError
+            if attempt.status == "authentication_failed":
+                # Every task in the run presents the same credential, so a
+                # rejection is a property of the configuration rather than
+                # evidence about this task, and no later task can do better.
+                # As with a cancellation the attempt stays and no completion is
+                # written: a completion would harden a rejected credential into
+                # this task's immutable answer, and a rerun would then replay
+                # the rejection instead of contacting the endpoint.
+                raise CandidateAuthenticationError(
+                    f"candidates[{self.candidate.alias}].api",
+                    "rejected the credential the runner supplied",
+                    actual=f"HTTP {attempt.http_status}",
+                    expected="a credential the endpoint accepts",
+                    recovery=(
+                        f"check that {self.candidate.api.api_key_env} holds a key for "
+                        f"{self.candidate.api.base_url}, then re-run into a new output directory"
+                    ),
+                )
             if response is not None:
                 outcome = CandidateCallOutcome(
                     request_hash=request.request_hash,

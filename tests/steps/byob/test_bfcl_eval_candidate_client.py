@@ -31,6 +31,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_contract
     CandidateCallOutcome,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.candidate_errors import (
+    CandidateAuthenticationError,
     CandidateCacheError,
     CandidateCredentialMissingError,
     CandidateProviderExtensionError,
@@ -352,9 +353,16 @@ def test_transient_provider_errors_are_retried_and_all_attempts_are_recorded(
     assert "temporarily unavailable" not in cache.path.read_text(encoding="utf-8")
 
 
-def test_authentication_failure_is_not_retried(
+def test_a_rejected_credential_stops_the_run_rather_than_scoring_the_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Every task presents the same key, so one refusal settles all of them.
+
+    Recording the refusal as this task's outcome would let the run continue and
+    publish a report whose zeroes read like a measurement of the model. It would
+    also cache a rejected credential as the task's immutable answer, so a rerun
+    with a working key would replay the refusal instead of asking the endpoint.
+    """
     calls = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -363,18 +371,26 @@ def test_authentication_failure_is_not_retried(
         return httpx.Response(401, text="invalid token secret")
 
     monkeypatch.setenv("CANDIDATE_API_KEY", "secret")
-    outcome = _run(
-        NativeFunctionCallingClient(
-            _candidate(),
-            _limits(),
-            CandidateIOCache(tmp_path / "candidate_io_cache.jsonl"),
-            transport=httpx.MockTransport(handler),
+    cache = CandidateIOCache(tmp_path / "candidate_io_cache.jsonl")
+    with pytest.raises(CandidateAuthenticationError) as raised:
+        _run(
+            NativeFunctionCallingClient(
+                _candidate(),
+                _limits(),
+                cache,
+                transport=httpx.MockTransport(handler),
+            )
         )
-    )
 
     assert calls == 1
-    assert outcome.status == "authentication_failed"
-    assert len(outcome.attempts) == 1
+    assert raised.value.code == "eval_candidate_authentication_failed"
+    assert "CANDIDATE_API_KEY" in raised.value.recovery
+    recorded = cache.path.read_text(encoding="utf-8")
+    documents = [json.loads(line) for line in recorded.splitlines()]
+    # The attempt survives as evidence of what the endpoint said; no completion
+    # follows it, which is what leaves the call open for a later run.
+    assert [document["record_type"] for document in documents] == ["request", "attempt"]
+    assert "invalid token secret" not in recorded
 
 
 def test_malformed_http_200_is_preserved_and_not_retried(
