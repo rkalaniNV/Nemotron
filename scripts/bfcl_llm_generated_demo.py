@@ -16,15 +16,13 @@ reviewer would have been deciding. Nothing else is faked: intake probes a real p
 validation runs unmocked and derives its own tier, and evaluation replays the published
 benchmark through the real scorer.
 
-    uv run python scripts/bfcl_llm_generated_demo.py \
-        --workdir outputs/bfcl/llm-generated-demo
+    uv run python scripts/bfcl_llm_generated_demo.py --workdir /tmp/bfcl-demo
 
 The candidate answers from the benchmark's own recorded turns, so a clean run should score
 1.0 and prove the lane produces a benchmark a model can pass. To watch the scorer fail a
 model instead, re-score the published benchmark with one task sabotaged:
 
-    uv run python scripts/bfcl_llm_generated_demo.py \
-        --workdir outputs/bfcl/llm-generated-demo \
+    uv run python scripts/bfcl_llm_generated_demo.py --workdir /tmp/bfcl-demo \
         --stage eval --wrong-answer-task <task_id>
 """
 

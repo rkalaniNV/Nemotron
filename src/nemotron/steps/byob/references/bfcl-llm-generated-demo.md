@@ -15,8 +15,8 @@ see the
 [detailed LLM-generated Oracle Pack flow](bfcl-llm-generated-oracle-pack-flow.md).
 
 ```shell
-uv run python scripts/bfcl_llm_generated_demo.py \
-  --workdir outputs/bfcl/llm-generated-demo
+export BFCL_LLM_DEMO_ROOT="${TMPDIR:-/tmp}/bfcl-llm-generated-demo"
+uv run python scripts/bfcl_llm_generated_demo.py --workdir "$BFCL_LLM_DEMO_ROOT"
 ```
 
 The run takes a few minutes, most of it real probe sessions and two unmocked validation
@@ -75,8 +75,7 @@ can be re-scored with one task sabotaged — the candidate answers it with text 
 was expected:
 
 ```shell
-uv run python scripts/bfcl_llm_generated_demo.py \
-    --workdir outputs/bfcl/llm-generated-demo \
+uv run python scripts/bfcl_llm_generated_demo.py --workdir "$BFCL_LLM_DEMO_ROOT" \
     --stage eval --wrong-answer-task <task_id>
 ```
 

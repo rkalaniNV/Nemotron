@@ -12,8 +12,7 @@ stage: all
 random_seed: 42
 ndd_batch_size: 32
 
-# Relative to src/nemotron/steps/byob; resolves to the repository output tree.
-output_dir: ../../../../outputs/bfcl/banking_vn_gold_paraphrase_v1
+output_dir: /tmp/bfcl/banking_vn_gold_paraphrase_v1
 
 oracle_pack:
   manifest_path: data/banking_vn_oracle_pack/manifest.yaml

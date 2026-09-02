@@ -10,7 +10,6 @@ import pandas as pd
 import pytest
 import yaml
 
-from nemotron.steps.byob.runtime.benchmark_families.bfcl import translation as translation_module
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.source_contract import (
     translation_preserved_projection,
 )
@@ -64,28 +63,6 @@ def _translation_config(tmp_path: Path, manifest: Path) -> Path:
     return path
 
 
-def test_relative_config_paths_resolve_from_byob_root(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = _translation_config(tmp_path, tmp_path / "unused.json")
-    document = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    document["source_run_manifest"] = "publications/source/run_manifest.json"
-    document["output_dir"] = "runs/translations"
-    config_path.write_text(yaml.safe_dump(document), encoding="utf-8")
-
-    byob_root = tmp_path / "byob"
-    unrelated_cwd = tmp_path / "other"
-    unrelated_cwd.mkdir()
-    monkeypatch.setattr(translation_module, "BYOB_ROOT", byob_root)
-    monkeypatch.chdir(unrelated_cwd)
-
-    loaded = translation_module._load_config(config_path)
-
-    assert loaded.source_manifest == byob_root / "publications/source/run_manifest.json"
-    assert loaded.output_dir == byob_root / "runs/translations/localized_vi"
-
-
 class _FakeTranslationPipeline:
     calls: list[tuple[str, str]] = []
 
@@ -112,6 +89,31 @@ def _fake_quality(
     output["score_chrf_passed"] = True
     output["is_quality_metric_passed"] = True
     return output
+
+
+def test_translation_config_paths_resolve_from_byob_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import translation
+
+    byob_root = tmp_path / "byob"
+    byob_root.mkdir()
+    config = _translation_config(tmp_path, tmp_path / "unused-run-manifest.json")
+    value = yaml.safe_load(config.read_text(encoding="utf-8"))
+    value["source_run_manifest"] = "publications/run_manifest.json"
+    value["output_dir"] = "translations"
+    config.write_text(yaml.safe_dump(value), encoding="utf-8")
+
+    unrelated_cwd = tmp_path / "unrelated"
+    unrelated_cwd.mkdir()
+    monkeypatch.setattr(translation, "BYOB_ROOT", byob_root)
+    monkeypatch.chdir(unrelated_cwd)
+
+    loaded = translation._load_config(config)
+
+    assert loaded.source_manifest == byob_root / "publications" / "run_manifest.json"
+    assert loaded.output_dir == byob_root / "translations" / "localized_vi"
 
 
 def test_translation_preserves_truth_and_writes_content_addressed_manifest(

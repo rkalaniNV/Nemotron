@@ -7,8 +7,7 @@ stage: all
 random_seed: 42
 config_status: resolved
 
-# Relative to src/nemotron/steps/byob; resolves to the repository output tree.
-output_dir: ../../../../outputs/bfcl/banking_vn_validation
+output_dir: /tmp/bfcl/banking_vn_validation
 
 oracle_pack:
   manifest_path: data/banking_vn_oracle_pack/manifest.yaml
