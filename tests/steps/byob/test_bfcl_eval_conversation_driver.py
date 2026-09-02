@@ -724,10 +724,48 @@ def test_arbitrary_text_does_not_unlock_a_hidden_user_answer(
         [_says("I refuse to ask for the account.")],
         tmp_path,
         monkeypatch=monkeypatch,
+        scoring=_scoring(intermediate_text_matching="verbatim"),
     )
 
     assert episode.status == "candidate_mismatch"
     assert "scripted intermediate assistant text" in episode.detail
+    assert episode.released_user_turns == 0
+    assert len(provider.prompts) == 1
+
+
+def test_structural_matching_releases_the_next_request_for_a_paraphrase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    episode, provider = _drive(
+        _script(_missing_slot_row()),
+        [
+            _says("Which one?"),
+            _calls([("c1", "get_balance", '{"account_id":"1"}')]),
+            _says("Account 1 holds 500."),
+        ],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert episode.status == "completed"
+    assert episode.released_user_turns == 1
+    assert len(provider.prompts) == 3
+
+
+def test_an_empty_intermediate_turn_never_unlocks_the_next_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Structural matching asks what the turn did, and a turn that said nothing
+    # did not ask the user anything, so it has earned no further request.
+    episode, provider = _drive(
+        _script(_missing_slot_row()),
+        [_says("")],
+        tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert episode.status == "candidate_mismatch"
+    assert "no non-empty textual content" in episode.detail
     assert episode.released_user_turns == 0
     assert len(provider.prompts) == 1
 

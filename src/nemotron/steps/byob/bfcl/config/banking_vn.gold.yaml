@@ -14,7 +14,8 @@ expt_name: bfcl_banking_vn_gold_v1_1392
 stage: all
 random_seed: 42
 
-output_dir: /tmp/bfcl/banking_vn_gold_v1
+# Relative to src/nemotron/steps/byob; resolves to the repository output tree.
+output_dir: ../../../../outputs/bfcl/banking_vn_gold_v1
 
 oracle_pack:
   manifest_path: data/banking_vn_oracle_pack/manifest.yaml

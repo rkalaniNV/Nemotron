@@ -463,7 +463,9 @@ class _AssertionTaskDict(dict[str, Any]):
         # ``task.get("slots") or {}`` is the ordinary pack idiom, and an empty
         # child is falsy, so every later read would land on an untracked literal.
         # Record the whole child here, while the caller can still be observed.
-        if isinstance(child, _AssertionTaskDict) and not child:
+        # Emptiness goes through ``dict`` rather than ``not child`` so that asking
+        # the question does not itself count as reading every field of the child.
+        if isinstance(child, _AssertionTaskDict) and dict.__len__(child) == 0:
             self._accessed.add((*self._path, name, "*"))
 
     def __getitem__(self, key: Any) -> Any:
@@ -514,8 +516,20 @@ class _AssertionTaskDict(dict[str, Any]):
         return super().popitem()
 
     def __len__(self) -> int:
+        # A count drops with the slot that could not be bound, so counting depends
+        # on every field even though it names none of them.
         self._read_all()
         return super().__len__()
+
+    def __bool__(self) -> bool:
+        # Truthiness is not a count. ``task.get("slots") or {}`` is the ordinary
+        # pack idiom, and on a mapping that still holds anything its answer is the
+        # same whether or not a slot was dropped, so asking cannot be charged as
+        # reading every slot. Emptiness is the case that does depend on the missing
+        # fields, and ``_read`` already records the whole child when it sees one.
+        # Without this, ``__len__`` would answer for truthiness too and every pack
+        # assertion would look like it had read every unresolved slot.
+        return dict.__len__(self) > 0
 
     def __eq__(self, other: object) -> bool:
         self._read_all()

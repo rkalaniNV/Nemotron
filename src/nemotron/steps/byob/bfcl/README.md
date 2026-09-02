@@ -35,6 +35,13 @@ executable-case lineage. Model roles are routed by Data Designer, so the
 `provider` named in a role must exist in `model_providers.yaml` under
 `DATA_DESIGNER_HOME`, and the variable named by `api_key_env` must be exported.
 The config records the route identity; it does not create the provider.
+For a generic manual Oracle Pack walkthrough from user inputs through generation
+and direct trace/executable evaluation, with Banking VN as the reference
+example, see the
+[manual BFCL flow guide](../references/bfcl-manual-oracle-pack-flow.md).
+For the corresponding assisted path from a conventional source through
+LLM-authored pack proposals, review, freeze, publication, and evaluation, see
+the [LLM-generated flow guide](../references/bfcl-llm-generated-oracle-pack-flow.md).
 
 For any pack, `tasks_per_category` is the default Stage-4 category budget and
 the Stage-11 publication cap over unique bindings. It may not fall below the
@@ -68,13 +75,72 @@ BFCL supports five top-level stage values:
 - `all`: run `prepare` followed by `generate`; it does not implicitly translate
   or evaluate.
 
-Generation runs:
+The implemented pipeline has three onboarding flows. They differ only in how a
+reviewed Oracle Pack is produced; all three converge on the same fail-closed
+generation stages and publication contract.
 
-```text
-reference_profile -> expand -> state_machine -> render (including paraphrase)
-                  -> expected_trace -> schema_validation -> executable_replay
-                  -> [surface_quality] -> [dedup_balancing] -> final_output
+```mermaid
+flowchart TB
+  subgraph F1["Flow A — manual (`manual`)"]
+    M0["Domain source + backend or HTTPS endpoint"]
+    M1["Hand-author Oracle Pack"]
+    M0 --> M1
+  end
+
+  subgraph F2["Flow B — LLM + MCP Mode A (`llm_mcp`)"]
+    C0["MCP server + domain brief + probe plan"]
+    C1["Discover tools + start Oracle HTTP gateway"]
+    C2["P4–P11 probes and A0–A2 certification"]
+    C3["Answer questions + authorize evidence"]
+    C4["Approve evidence + bounded model drafting"]
+    C5["Assemble, review, release-approve, and freeze"]
+    C0 --> C1 --> C2 --> C3 --> C4 --> C5
+  end
+
+  subgraph F3["Flow C — LLM + conventional backend (`llm_backend`)"]
+    B0["Source declaration + domain brief + probe plan"]
+    B1["Transport-neutral intake<br/>and A0–A2 certification"]
+    B2["Answer questions + authorize evidence"]
+    B3["Approve evidence + bounded model drafting"]
+    B4["Assemble, review, release-approve, and freeze"]
+    B0 --> B1 --> B2 --> B3 --> B4
+  end
+
+  M1 --> P1
+  B4 --> P1
+  C5 --> P1
+
+  subgraph G["Shared BFCL generation pipeline"]
+    P1["Stage 1 — prepare<br/>load, normalize, and validate the pack"]
+    P2{"Stage 2 — Gold eligibility gate"}
+    P3["Stage 3 — reference_profile"]
+    P4["Stage 4 — expand"]
+    P5["Stage 5 — state_machine"]
+    P6["Stage 6 — render<br/>(optional paraphrase)"]
+    P7["Stage 7 — expected_trace"]
+    P8["Stage 8 — schema_validation"]
+    P9["Stage 9 — executable_replay"]
+    P10["Stage 10 — surface_quality<br/>(optional)"]
+    P11["Stage 11 — dedup_balancing<br/>(optional)"]
+    P12["Stage 12 — final_output<br/>verify and atomically publish"]
+    P1 --> P2
+    P2 -->|eligible| P3 --> P4 --> P5 --> P6 --> P7 --> P8 --> P9
+    P9 --> P10 --> P11 --> P12
+    P9 -. "Stages 10 and 11 disabled" .-> P12
+    P10 -. "Stage 11 disabled" .-> P12
+    P2 -->|not eligible| STOP["Refuse generation"]
+  end
+
+  P12 --> OUT["benchmark_raw.parquet<br/>benchmark.parquet<br/>run_manifest.json<br/>optional validated exports"]
+  OUT -. "separate stage=translate run" .-> TR["Localized benchmark"]
+  OUT -. "separate stage=eval run" .-> EV["Verified evaluation artifacts"]
 ```
+
+Disabled optional stages are bypassed, not run as no-ops. `stage=all` covers
+Stages 1–12; the LLM-assisted authoring steps happen before that command.
+Translation and evaluation are separate post-publication runs. For the detailed
+Flow 2 command sequence and authorization boundaries, see the
+[assisted-authoring user guide](../references/bfcl-authoring-user-guide.md).
 
 `skip_until=<stage>` resumes by running the named stage and every later enabled
 stage. It recursively verifies the named stage's immediate enabled predecessor:
@@ -1055,17 +1121,27 @@ addressed to the id the candidate's own call carried. Matching is an injected
 `ContinuationGate`; `CanonicalCallMatchGate` implements the pinned publication
 comparison, including declared-default insertion, so a model that spells out a
 default — including one in a nested object, array, local `$ref`, or `allOf` —
-is neither rewarded nor punished. Within one assistant turn a
+is neither rewarded nor punished. A defaulted argument the gold call never states
+is left out of the comparison instead of filled, because the recorded
+conversation put no requirement on it and the tool's default is not an answer
+key; an undeclared argument is still a mismatch and a required one still
+missing. Within one assistant turn a
 `call_order: any` row accepts a permutation and each result still goes to the call
 it actually answers; `strict` requires trace positions, while `prefix` orders only
 the configured number of required-tool first appearances and matches the
 remainder as a set. Ordering *across* turns is not negotiable in trace replay,
 because a recorded result is only meaningful at the point the trace reached it.
 
-An intermediate text-only turn advances only when it reproduces the text the
-published trace recorded. This deliberately fail-closed rule prevents arbitrary
-prose from unlocking a hidden slot or confirmation; a terminal turn must contain
-non-empty plain or structured text. Provider finishes that explicitly mean
+Under pinned `intermediate_text_matching: structural`, an intermediate text-only
+turn advances when it answered in words rather than with a call, and those words
+say something. A turn that called a tool never receives the answer to a question
+it did not ask, and an empty turn asked nothing, so neither unlocks a hidden slot
+or confirmation. The recorded sentence itself is not required: a pack declares
+these turns as milestone classes, so demanding the sentence back would score
+phrasing rather than tool use, and the pack's success assertions are what hold
+the turn to its domain meaning. Debug-only `verbatim` restores the exact-text
+demand for reproducing runs scored that way. A terminal turn must likewise
+contain non-empty plain or structured text. Provider finishes that explicitly mean
 truncation or filtering (`length`, `content_filter`, or max-token variants) never
 advance, even if the partial payload otherwise matches. Tool calls must declare type `function` and
 carry unique non-empty ids — missing types are not repaired, and ambiguous ids
