@@ -373,6 +373,64 @@ PY
 
 Do not evaluate a bare parquet or a directory without `run_manifest.json`.
 
+### Evaluate an existing published benchmark
+
+If generation already completed successfully, skip Sections 4–8 and bind the
+evaluation to the existing publication directory. The directory must contain
+the original `run_manifest.json`, `benchmark.parquet`, and
+`benchmark_raw.parquet`; copying only the parquet data is insufficient.
+
+For example, to evaluate the existing Banking VN publication
+`bfcl_banking_vn_gold_v1_1392`:
+
+```bash
+cd /path/to/Nemotron
+export NEMOTRON_ROOT="$PWD"
+
+# Override BFCL_RUN_ROOT when the publication is on another persistent mount.
+export BFCL_RUN_ROOT="${BFCL_RUN_ROOT:-$HOME/bfcl-runs}"
+export BFCL_PUBLICATION_DIR="$BFCL_RUN_ROOT/bfcl_banking_vn_gold_v1_1392"
+export BFCL_RUN_MANIFEST="$BFCL_PUBLICATION_DIR/run_manifest.json"
+
+test -f "$BFCL_RUN_MANIFEST"
+test -f "$BFCL_PUBLICATION_DIR/benchmark.parquet"
+test -f "$BFCL_PUBLICATION_DIR/benchmark_raw.parquet"
+```
+
+Executable evaluation also needs the exact Oracle Pack that produced the
+publication:
+
+```bash
+export BFCL_PACK_ROOT="$NEMOTRON_ROOT/src/nemotron/steps/byob/data/banking_vn_oracle_pack"
+export BFCL_PACK_MANIFEST="$BFCL_PACK_ROOT/manifest.yaml"
+
+test -f "$BFCL_PACK_MANIFEST"
+test -f "$BFCL_PACK_ROOT/backend.py"
+```
+
+Do not edit or regenerate any file inside the existing publication. If it was
+copied from another host, preserve the complete directory and use a checkout
+whose Oracle Pack matches the identity recorded by `run_manifest.json`.
+Source verification will fail closed if the benchmark, manifest, or Oracle
+resource has drifted.
+
+Continue with Section 10 to configure the independent candidate, then set these
+values in Section 11:
+
+```yaml
+source_run_manifest: /absolute/path/to/bfcl_banking_vn_gold_v1_1392/run_manifest.json
+
+source_oracle:
+  kind: python
+  pack_manifest: /absolute/path/to/banking_vn_oracle_pack/manifest.yaml
+  resource: /absolute/path/to/banking_vn_oracle_pack/backend.py
+```
+
+Keep the evaluation output outside
+`$BFCL_PUBLICATION_DIR`, for example
+`$BFCL_RUN_ROOT/eval/banking-vn-candidate-v1/artifacts`. Run the preflight in
+Section 12 before enabling live candidate traffic.
+
 ## 10. Prepare an independent candidate endpoint
 
 The endpoint must support OpenAI-compatible chat completions and function/tool

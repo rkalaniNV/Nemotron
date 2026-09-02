@@ -340,6 +340,71 @@ test -f "$BFCL_LLM_MANIFEST"
 For a live-authoring run, replace `BFCL_LLM_DEMO_ROOT` above with
 `BFCL_LIVE_DEMO_ROOT`.
 
+### Evaluate an existing publication without rerunning authoring
+
+If a benchmark was already generated and published, skip Sections 5–10. The
+evaluation path is the same regardless of whether its Oracle Pack was authored
+manually or through the LLM-generated lane. A usable publication must include
+the original `run_manifest.json`, `benchmark.parquet`, and
+`benchmark_raw.parquet`; a standalone parquet file is not an evaluation source.
+
+For example, bind to the existing Banking VN publication
+`bfcl_banking_vn_gold_v1_1392`:
+
+```bash
+cd /path/to/Nemotron
+export NEMOTRON_ROOT="$PWD"
+
+# Override this root when the publication is on another persistent mount.
+export BFCL_RUN_ROOT="${BFCL_RUN_ROOT:-$HOME/bfcl-runs}"
+export BFCL_LLM_PUBLICATION="$BFCL_RUN_ROOT/bfcl_banking_vn_gold_v1_1392"
+export BFCL_LLM_MANIFEST="$BFCL_LLM_PUBLICATION/run_manifest.json"
+
+test -f "$BFCL_LLM_MANIFEST"
+test -f "$BFCL_LLM_PUBLICATION/benchmark.parquet"
+test -f "$BFCL_LLM_PUBLICATION/benchmark_raw.parquet"
+```
+
+Executable evaluation requires the exact Oracle Pack recorded by that
+publication. For the Banking VN example:
+
+```bash
+export BFCL_EXISTING_PACK="$NEMOTRON_ROOT/src/nemotron/steps/byob/data/banking_vn_oracle_pack"
+
+test -f "$BFCL_EXISTING_PACK/manifest.yaml"
+test -f "$BFCL_EXISTING_PACK/backend.py"
+```
+
+For an existing benchmark produced by this LLM-generated demo, point
+`BFCL_EXISTING_PACK` at the preserved frozen pack instead:
+
+```bash
+export BFCL_EXISTING_PACK="/absolute/path/to/preserved-workspace/release/pack"
+```
+
+Do not use `scripts/bfcl_llm_generated_demo.py --stage eval` with only a copied
+publication directory. That command expects the complete demo workspace,
+including its release pack and loopback-candidate state. For a standalone
+existing publication, continue at Section 13 and create an independent
+evaluation config with:
+
+```yaml
+source_run_manifest: /absolute/path/to/bfcl_banking_vn_gold_v1_1392/run_manifest.json
+
+source_oracle:
+  kind: python
+  pack_manifest: /absolute/path/to/exact-oracle-pack/manifest.yaml
+  resource: /absolute/path/to/exact-oracle-pack/backend.py
+
+outputs:
+  output_dir: /absolute/path/outside-the-publication/eval/artifacts
+```
+
+Run the preflight from the
+[Manual Oracle Pack flow](bfcl-manual-oracle-pack-flow.md#12-run-evaluation-preflight)
+before enabling live candidate traffic. Source verification fails closed if the
+publication or Oracle Pack has drifted.
+
 ### Optional post-freeze paraphrase generation
 
 The generated tiny-library pack does not ship with a validated paraphrase
