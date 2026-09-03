@@ -333,7 +333,7 @@ def load_policy_pack(langpack_spec: dict, needed_by: list[str]) -> Any:
             "plausible numbers for the wrong corpus."
         )
 
-    pack = langpack.load(tag, langpack_spec.get("langpack_dir") or langpack.BUNDLED)
+    pack = langpack.load(tag, langpack_spec.get("langpack_dir"))
     declared = langpack_spec.get("content_hash")
     if not declared:
         # Required, not merely compared when present. A policy that does not say

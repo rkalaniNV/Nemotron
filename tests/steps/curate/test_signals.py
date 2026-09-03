@@ -29,6 +29,10 @@ HI = "यह एक परीक्षण वाक्य है। भारत
 CURATOR_DEFAULT = 0.25
 
 
+def load_fixture(language: str) -> langpack.LanguagePack:
+    return langpack.load(f"x-test-{language}", FIXTURES)
+
+
 def strip_marks(text: str) -> str:
     text = text.replace("đ", "d").replace("Đ", "D")
     return "".join(c for c in ud.normalize("NFD", text) if not ud.combining(c))
@@ -109,7 +113,7 @@ def test_devanagari_marks_are_mostly_spacing_combining() -> None:
 
 def test_d_bar_does_not_decompose_and_needs_the_pack(unicode_filter) -> None:
     assert ud.normalize("NFD", "đ") == "đ", "đ has no decomposition; NFD cannot remove it"
-    assert langpack.load("vi").fold("đ") == "d"
+    assert load_fixture("vi").fold("đ") == "d"
 
 
 @pytest.mark.parametrize("joiner", ["‌", "‍"])
@@ -170,12 +174,12 @@ def test_an_empty_document_is_all_non_alphanumeric(unicode_filter) -> None:
 
 @pytest.fixture(scope="module")
 def vi():
-    return langpack.load("vi")
+    return load_fixture("vi")
 
 
 @pytest.fixture(scope="module")
 def hi():
-    return langpack.load("hi")
+    return load_fixture("hi")
 
 
 def test_script_ratio_is_continuous_not_binary(vi) -> None:
@@ -293,9 +297,9 @@ def test_every_pack_signal_runs_against_an_invented_language() -> None:
 
 
 def test_every_pack_signal_has_its_own_stage_name() -> None:
-    from nemotron.steps.curate.runtime import langpack, registry
+    from nemotron.steps.curate.runtime import registry
 
-    pack = langpack.load("vi")
+    pack = load_fixture("vi")
     names: dict[str, list[str]] = {}
     for name, signal in registry.SIGNALS.items():
         if name not in registry.PACK_SIGNALS:
@@ -310,9 +314,9 @@ def test_every_pack_signal_has_its_own_stage_name() -> None:
 
 def test_the_stage_name_is_the_registry_key() -> None:
     """A policy names `latin_ratio`; the column and the ledger entry must agree."""
-    from nemotron.steps.curate.runtime import langpack, registry
+    from nemotron.steps.curate.runtime import registry
 
-    pack = langpack.load("vi")
+    pack = load_fixture("vi")
     for name, signal in registry.SIGNALS.items():
         if name not in registry.PACK_SIGNALS:
             continue
@@ -325,9 +329,9 @@ def test_the_stage_name_is_the_registry_key() -> None:
 
 def test_signals_sharing_a_capability_are_still_distinct() -> None:
     """The three script signals are the case that made this fail."""
-    from nemotron.steps.curate.runtime import langpack, registry
+    from nemotron.steps.curate.runtime import registry
 
-    pack = langpack.load("vi")
+    pack = load_fixture("vi")
     trio = ("script_ratio", "latin_ratio", "foreign_script_ratio")
 
     assert len({registry.SIGNALS[n].factory(pack=pack)._name for n in trio}) == len(trio)
@@ -347,9 +351,9 @@ def test_the_same_text_scores_the_same_in_nfc_and_nfd() -> None:
     """
     import unicodedata
 
-    from nemotron.steps.curate.runtime import langpack, registry
+    from nemotron.steps.curate.runtime import registry
 
-    pack = langpack.load("vi")
+    pack = load_fixture("vi")
     sentence = "Việt Nam là một quốc gia nằm ở phía đông bán đảo Đông Dương."
     nfc = unicodedata.normalize("NFC", sentence)
     nfd = unicodedata.normalize("NFD", sentence)
@@ -376,9 +380,9 @@ def test_measurement_normalisation_does_not_touch_the_document() -> None:
     """
     import unicodedata
 
-    from nemotron.steps.curate.runtime import langpack, registry
+    from nemotron.steps.curate.runtime import registry
 
-    pack = langpack.load("vi")
+    pack = load_fixture("vi")
     nfd = unicodedata.normalize("NFD", "Tiếng Việt")
     before = nfd
 

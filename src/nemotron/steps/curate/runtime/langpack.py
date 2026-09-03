@@ -44,11 +44,6 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 
-BUNDLED = "bundled"
-
-#: Directory holding the packs that ship with this step.
-BUNDLED_DIR = Path(__file__).resolve().parents[1] / "data" / "langpacks"
-
 #: Every capability a pack may declare. A pack naming something outside this set
 #: is rejected: a typo would otherwise read as "this language cannot do that".
 KNOWN_CAPABILITIES = frozenset(
@@ -288,13 +283,21 @@ def _assert_capabilities_are_backed(pack: LanguagePack, manifest_path: Path) -> 
 
 
 def resolve_dir(langpack_dir: str | Path | None) -> Path:
-    """Where to look for packs. ``'bundled'`` means the ones that ship here."""
-    if langpack_dir is None or langpack_dir == "" or langpack_dir == BUNDLED:
-        return BUNDLED_DIR
+    """Resolve an explicitly supplied pack root.
+
+    Language data is corpus-specific and is not a supported product default.
+    Requiring the directory keeps private validation fixtures from becoming an
+    implicit runtime dependency merely because they exist in a source checkout.
+    """
+    if langpack_dir is None or str(langpack_dir).strip() in {"", "bundled"}:
+        raise LanguagePackNotFoundError(
+            "langpack_dir is required: Nemotron does not bundle production language packs. "
+            "Supply the directory containing your reviewed BCP-47 pack."
+        )
     return Path(langpack_dir)
 
 
-def load(language_tag: str, langpack_dir: str | Path | None = BUNDLED) -> LanguagePack:
+def load(language_tag: str, langpack_dir: str | Path | None) -> LanguagePack:
     """Load the pack for a BCP-47 tag.
 
     There is deliberately no default language. A wrong default silently produces
@@ -318,7 +321,7 @@ def load(language_tag: str, langpack_dir: str | Path | None = BUNDLED) -> Langua
     )
 
 
-def available(langpack_dir: str | Path | None = BUNDLED) -> list[str]:
+def available(langpack_dir: str | Path | None) -> list[str]:
     """Tags with a pack in the given directory."""
     root = resolve_dir(langpack_dir)
     if not root.is_dir():

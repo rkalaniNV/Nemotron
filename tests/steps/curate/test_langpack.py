@@ -23,31 +23,38 @@ from nemotron.steps.curate.runtime import registry as r
 
 FIXTURES = Path(__file__).parent / "fixtures" / "langpacks"
 RUNTIME = Path(langpack.__file__).parent
+PACKAGE_PACKS = RUNTIME.parent / "data" / "langpacks"
+FIXTURE_LANGUAGES = ("en", "hi", "ja", "th", "vi")
 
 
-# -- shipped packs ------------------------------------------------------------
+def load_fixture(language: str) -> langpack.LanguagePack:
+    return langpack.load(f"x-test-{language}", FIXTURES)
 
 
-def test_the_bundled_packs_load() -> None:
-    assert set(langpack.available()) >= {"vi", "hi", "en", "ja", "th"}
+# -- private validation fixtures ----------------------------------------------
 
 
-@pytest.mark.parametrize("tag", ["en", "hi", "ja", "th", "vi"])
-def test_a_bundled_pack_reports_what_it_carries(tag) -> None:
-    pack = langpack.load(tag)
+def test_no_production_language_packs_are_bundled() -> None:
+    assert not list(PACKAGE_PACKS.glob("*/pack.toml"))
+
+
+@pytest.mark.parametrize("language", FIXTURE_LANGUAGES)
+def test_a_validation_fixture_reports_what_it_carries(language) -> None:
+    pack = load_fixture(language)
     described = pack.describe()
 
-    assert described["language_tag"] == tag
+    assert described["language_tag"] == f"x-test-{language}"
     assert described["content_hash"].startswith("sha256:")
     assert described["stopwords"] > 0
     assert described["charset"] > 0
     assert described["capabilities"]
 
 
-def test_the_synthetic_fixture_is_not_shipped() -> None:
-    """x-test is a test fixture; shipping it would offer users a fake language."""
-    assert "x-test" not in langpack.available()
-    assert (FIXTURES / "x-test" / "pack.toml").is_file()
+def test_all_language_fixtures_use_private_bcp47_tags() -> None:
+    tags = langpack.available(FIXTURES)
+
+    assert set(tags) == {"x-test", *(f"x-test-{language}" for language in FIXTURE_LANGUAGES)}
+    assert all(tag.startswith("x-") for tag in tags)
 
 
 # -- the capability mechanism -------------------------------------------------
@@ -61,8 +68,8 @@ def test_hindi_declares_fewer_capabilities_than_vietnamese() -> None:
     them yields nonsense, so the capability is absent rather than measured on a
     false premise.
     """
-    vi = langpack.load("vi")
-    hi = langpack.load("hi")
+    vi = load_fixture("vi")
+    hi = load_fixture("hi")
 
     assert "diacritic_ratio" in vi.capabilities
     assert "diacritic_ratio" not in hi.capabilities
@@ -74,7 +81,7 @@ def test_hindi_declares_fewer_capabilities_than_vietnamese() -> None:
 def test_en_ja_th_omit_diacritic_ratio(tag) -> None:
     """English loanword accents, Japanese dakuten and Thai tone marks are not
     removable orthography. Measuring their density would be the Hindi trap."""
-    pack = langpack.load(tag)
+    pack = load_fixture(tag)
     assert "diacritic_ratio" not in pack.capabilities
     assert "stopword_ratio_folded" not in pack.capabilities
 
@@ -88,13 +95,13 @@ def test_en_ja_th_omit_diacritic_ratio(tag) -> None:
     ],
 )
 def test_a_correct_sentence_is_own_script(tag, text) -> None:
-    pack = langpack.load(tag)
+    pack = load_fixture(tag)
     score = signals.ScriptRatio(pack).score_document(text)
     assert score == 1.0
 
 
 def test_an_unsupported_capability_removes_its_signals_from_the_run() -> None:
-    hi = langpack.load("hi")
+    hi = load_fixture("hi")
 
     chosen, warnings = r.resolve(None, hi.capabilities)
 
@@ -105,7 +112,7 @@ def test_an_unsupported_capability_removes_its_signals_from_the_run() -> None:
 
 
 def test_naming_a_signal_the_pack_cannot_support_fails() -> None:
-    hi = langpack.load("hi")
+    hi = load_fixture("hi")
 
     with pytest.raises(r.SignalRequirementsUnmetError, match="diacritic_ratio"):
         r.resolve(["diacritic_ratio"], hi.capabilities)
@@ -145,12 +152,17 @@ def test_an_unknown_capability_is_rejected(tmp_path) -> None:
 def test_there_is_no_default_language() -> None:
     """A wrong default produces plausible numbers for the wrong language."""
     with pytest.raises(langpack.LanguagePackNotFoundError, match="no default"):
-        langpack.load("")
+        langpack.load("", FIXTURES)
 
 
 def test_an_unknown_tag_names_what_is_available() -> None:
     with pytest.raises(langpack.LanguagePackNotFoundError, match="Available"):
-        langpack.load("xx-nonexistent")
+        langpack.load("xx-nonexistent", FIXTURES)
+
+
+def test_a_pack_directory_is_required() -> None:
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="does not bundle"):
+        langpack.load("vi", None)
 
 
 # -- structural evidence of genericity ---------------------------------------
@@ -232,36 +244,45 @@ def _probe(signal):
     return (signal.grid.values()[-1],)
 
 
-# -- packaging ----------------------------------------------------------------
+# -- package boundary ----------------------------------------------------------
 
 
-def test_packs_live_inside_the_package_so_an_install_carries_them() -> None:
-    """A wheel that drops the packs leaves profile naming a language it cannot load."""
-    assert langpack.BUNDLED_DIR.is_dir()
-    assert "src/nemotron/steps/curate" in langpack.BUNDLED_DIR.as_posix()
+def test_language_fixtures_live_outside_the_package() -> None:
+    assert FIXTURES.is_dir()
+    assert PACKAGE_PACKS not in FIXTURES.parents
 
 
-def test_the_wheel_declares_the_pack_files() -> None:
+def test_the_wheel_does_not_declare_language_pack_artifacts() -> None:
     root = Path(__file__).resolve().parents[3]
     with (root / "pyproject.toml").open("rb") as fh:
         config = tomllib.load(fh)
 
     artifacts = config["tool"]["hatch"]["build"]["targets"]["wheel"].get("artifacts", [])
-    assert any("langpacks" in entry for entry in artifacts)
+    assert not any("langpacks" in entry for entry in artifacts)
 
 
-def test_every_shipped_pack_records_where_its_word_list_came_from() -> None:
+def test_the_wheel_excludes_local_curate_workspaces() -> None:
+    """Downloaded corpora, models, and run outputs must never enter a release wheel."""
+    root = Path(__file__).resolve().parents[3]
+    with (root / "pyproject.toml").open("rb") as fh:
+        config = tomllib.load(fh)
+
+    excluded = config["tool"]["hatch"]["build"]["targets"]["wheel"].get("exclude", [])
+    assert "/src/nemotron/steps/curate/__local__/**" in excluded
+
+
+def test_every_language_fixture_records_where_its_word_list_came_from() -> None:
     """A word list with no provenance cannot be relicensed, corrected, or trusted."""
-    for tag in langpack.available():
-        pack = langpack.load(tag)
+    for tag in langpack.available(FIXTURES):
+        pack = langpack.load(tag, FIXTURES)
         stopwords = pack.sources.get("stopwords", {})
         assert stopwords.get("origin"), f"{tag}: stopwords declare no origin"
         assert stopwords.get("license"), f"{tag}: stopwords declare no license"
 
 
-def test_every_shipped_asset_records_origin_and_license() -> None:
-    for tag in langpack.available():
-        for name, source in langpack.load(tag).sources.items():
+def test_every_fixture_asset_records_origin_and_license() -> None:
+    for tag in langpack.available(FIXTURES):
+        for name, source in langpack.load(tag, FIXTURES).sources.items():
             assert source.get("origin"), f"{tag}/{name}: source declares no origin"
             assert source.get("license"), f"{tag}/{name}: source declares no license"
 
@@ -303,7 +324,7 @@ def test_text_resources_are_normalized_to_nfc(tmp_path) -> None:
 
 def test_the_fold_map_lives_in_the_pack_not_the_code() -> None:
     """Vietnamese đ does not decompose under NFD, so it must be declared."""
-    vi = langpack.load("vi")
+    vi = load_fixture("vi")
 
     assert vi.fold_map.get("đ") == "d"
     assert vi.fold("đường") == "duong"
@@ -312,7 +333,7 @@ def test_the_fold_map_lives_in_the_pack_not_the_code() -> None:
 
 def test_folding_collapses_distinct_stopwords_and_the_count_is_knowable() -> None:
     """The collision count is a property of the language, not a defect."""
-    vi = langpack.load("vi")
+    vi = load_fixture("vi")
 
     folded = vi.folded_stopwords()
 
@@ -320,7 +341,7 @@ def test_folding_collapses_distinct_stopwords_and_the_count_is_knowable() -> Non
 
 
 def test_a_pack_without_a_fold_map_folds_only_combining_marks() -> None:
-    hi = langpack.load("hi")
+    hi = load_fixture("hi")
 
     assert hi.fold_map == {}
     assert hi.fold("भारत") == "भारत" or len(hi.fold("भारत")) <= len("भारत")
@@ -362,18 +383,18 @@ def test_the_content_hash_follows_the_contents_not_the_path(tmp_path) -> None:
     """A policy is tied to the pack that produced it; moving the pack must not break that."""
     import shutil
 
-    source = langpack.BUNDLED_DIR / "hi"
-    copy = tmp_path / "hi"
+    source = FIXTURES / "x-test-hi"
+    copy = tmp_path / "x-test-hi"
     shutil.copytree(source, copy)
 
-    assert langpack.load_pack(copy).content_hash == langpack.load("hi").content_hash
+    assert langpack.load_pack(copy).content_hash == load_fixture("hi").content_hash
 
 
 def test_editing_a_word_list_changes_the_hash(tmp_path) -> None:
     import shutil
 
-    copy = tmp_path / "hi"
-    shutil.copytree(langpack.BUNDLED_DIR / "hi", copy)
+    copy = tmp_path / "x-test-hi"
+    shutil.copytree(FIXTURES / "x-test-hi", copy)
     before = langpack.load_pack(copy).content_hash
     (copy / "stopwords.txt").write_text("\n".join(["एक", "दो"]) + "\n", encoding="utf-8")
 
@@ -395,7 +416,7 @@ UNSEGMENTED_SCRIPTS = ("ja", "th")
 
 @pytest.mark.parametrize("tag", UNSEGMENTED_SCRIPTS)
 def test_an_unsegmented_script_does_not_declare_stopword_ratio(tag) -> None:
-    pack = langpack.load(tag)
+    pack = load_fixture(tag)
 
     assert not pack.supports("stopword_ratio"), (
         f"{tag} tokenises on whitespace it does not use; declaring the capability "
@@ -406,14 +427,14 @@ def test_an_unsegmented_script_does_not_declare_stopword_ratio(tag) -> None:
 @pytest.mark.parametrize("tag", UNSEGMENTED_SCRIPTS)
 def test_the_reason_is_recorded_in_the_pack(tag) -> None:
     """A capability removed without a recorded measurement invites re-adding it."""
-    pack = langpack.load(tag)
+    pack = load_fixture(tag)
 
     assert "stopword_ratio_not_declared" in pack.notes
 
 
 @pytest.mark.parametrize("tag", ("vi", "en", "hi"))
 def test_a_space_separated_script_keeps_stopword_ratio(tag) -> None:
-    assert langpack.load(tag).supports("stopword_ratio")
+    assert load_fixture(tag).supports("stopword_ratio")
 
 
 def test_pack_notes_reach_the_report() -> None:
@@ -423,7 +444,7 @@ def test_pack_notes_reach_the_report() -> None:
     dropped it, so every report showed a stopword distribution that was 93.7%
     exact zeros with nothing saying why.
     """
-    described = langpack.load("ja").describe()
+    described = load_fixture("ja").describe()
 
     assert "notes" in described
     assert described["notes"], "the ja pack has notes and they must be carried"

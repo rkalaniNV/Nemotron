@@ -21,12 +21,14 @@ import inspect
 import sys
 import types
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 import yaml
 
+from nemotron.steps.curate.runtime import langpack
 from nemotron.steps.curate.runtime import policy as policy_module
 from nemotron.steps.curate.runtime import registry as signal_registry
 
@@ -46,6 +48,11 @@ SCORE_COLUMN = f"__{SIGNAL}"
 BASE_COLUMNS = {"id", "text"}
 POLICY_CORPUS_FINGERPRINT = "sha256:" + "d" * 64
 PROFILE_DIGEST = "sha256:" + "e" * 64
+LANGPACK_FIXTURES = Path(__file__).parent / "fixtures" / "langpacks"
+
+
+def vietnamese_fixture() -> langpack.LanguagePack:
+    return langpack.load("x-test-vi", LANGPACK_FIXTURES)
 
 
 # -- executable stubs ---------------------------------------------------------
@@ -410,12 +417,13 @@ PACK_SIGNAL = "stopword_ratio"
 
 
 def pack_policy(**overrides):
-    from nemotron.steps.curate.runtime import langpack
+    pack = vietnamese_fixture()
 
     document = approved_policy(
         langpack={
-            "language_tag": "vi",
-            "content_hash": langpack.load("vi").content_hash,
+            "language_tag": pack.language_tag,
+            "content_hash": pack.content_hash,
+            "langpack_dir": str(LANGPACK_FIXTURES),
         },
         thresholds=[{"signal": PACK_SIGNAL, "min": 0.05}],
     )
@@ -435,11 +443,14 @@ def test_a_policy_naming_a_pack_signal_can_actually_be_executed(step) -> None:
 
 def test_every_pack_backed_signal_in_the_registry_can_be_built(step) -> None:
     """A signal profile can propose but the filter cannot construct is unusable."""
-    from nemotron.steps.curate.runtime import langpack
     from nemotron.steps.curate.runtime import registry as signal_registry
 
-    pack = langpack.load("vi")
-    spec = {"language_tag": "vi", "content_hash": pack.content_hash}
+    pack = vietnamese_fixture()
+    spec = {
+        "language_tag": pack.language_tag,
+        "content_hash": pack.content_hash,
+        "langpack_dir": str(LANGPACK_FIXTURES),
+    }
     supported = [n for n in sorted(signal_registry.PACK_SIGNALS) if n in signal_registry.SIGNALS]
     buildable = [n for n in supported if set(signal_registry.SIGNALS[n].requires) <= set(pack.capabilities)]
 
@@ -461,9 +472,21 @@ def test_a_pack_signal_without_a_declared_language_is_refused(step) -> None:
         step.policy_stages([{"signal": PACK_SIGNAL, "min": 0.05}], "text", "filter", {})
 
 
+def test_a_pack_signal_without_an_explicit_pack_directory_is_refused(step) -> None:
+    pack = vietnamese_fixture()
+    spec = {"language_tag": pack.language_tag, "content_hash": pack.content_hash}
+
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="does not bundle"):
+        step.policy_stages([{"signal": PACK_SIGNAL, "min": 0.05}], "text", "filter", spec)
+
+
 def test_a_pack_that_hashes_differently_than_declared_is_refused(step) -> None:
     """Checked against the pack actually loaded, not another string in the config."""
-    spec = {"language_tag": "vi", "content_hash": "sha256:notthepackonthismachine"}
+    spec = {
+        "language_tag": "x-test-vi",
+        "content_hash": "sha256:notthepackonthismachine",
+        "langpack_dir": str(LANGPACK_FIXTURES),
+    }
 
     with pytest.raises(ValueError, match="hashes to"):
         step.policy_stages([{"signal": PACK_SIGNAL, "min": 0.05}], "text", "filter", spec)
@@ -487,7 +510,7 @@ def test_resolve_policy_hands_the_pack_spec_to_the_caller(step, tmp_path) -> Non
     thresholds, spec, _ = step.resolve_policy({"heuristic_filters": {"approved_policy": str(path)}})
 
     assert thresholds[0]["signal"] == PACK_SIGNAL
-    assert spec["language_tag"] == "vi"
+    assert spec["language_tag"] == "x-test-vi"
 
 
 # -- bound direction ----------------------------------------------------------
@@ -499,9 +522,12 @@ def test_resolve_policy_hands_the_pack_spec_to_the_caller(step, tmp_path) -> Non
 
 def test_a_max_bound_on_a_min_direction_signal_is_refused(step) -> None:
     """The silent gate inversion: 'drop above 0.9' becoming 'drop below 0.9'."""
-    from nemotron.steps.curate.runtime import langpack
-
-    spec = {"language_tag": "vi", "content_hash": langpack.load("vi").content_hash}
+    pack = vietnamese_fixture()
+    spec = {
+        "language_tag": pack.language_tag,
+        "content_hash": pack.content_hash,
+        "langpack_dir": str(LANGPACK_FIXTURES),
+    }
 
     with pytest.raises(ValueError, match="invert the gate"):
         step.policy_stages([{"signal": "stopword_ratio", "max": 0.9}], "text", "filter", spec)
@@ -626,7 +652,12 @@ def test_a_policy_omitting_the_pack_hash_is_refused(step) -> None:
     declares no hash used to sail past both checks.
     """
     with pytest.raises(ValueError, match="declares no langpack.content_hash"):
-        step.policy_stages([{"signal": "stopword_ratio", "min": 0.1}], "text", "filter", {"language_tag": "vi"})
+        step.policy_stages(
+            [{"signal": "stopword_ratio", "min": 0.1}],
+            "text",
+            "filter",
+            {"language_tag": "x-test-vi", "langpack_dir": str(LANGPACK_FIXTURES)},
+        )
 
 
 def test_resolve_policy_carries_the_config_tokenizer_and_pack_dir(step, tmp_path) -> None:

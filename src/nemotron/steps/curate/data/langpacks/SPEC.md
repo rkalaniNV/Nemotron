@@ -4,10 +4,16 @@ A language pack is **data**. Nothing in `runtime/` knows any language exists —
 character sets, word lists, patterns and fold maps all arrive from here. Adding
 a language means adding a directory, not editing code.
 
+Nemotron deliberately ships no production language packs. A pack is a reviewed,
+versioned input owned by the corpus workflow using it; point `langpack_dir` at
+that external directory. The language-specific packs in
+`tests/steps/curate/fixtures/langpacks/` are private-use validation fixtures,
+not defaults or claims of supported languages.
+
 ## Layout
 
 ```
-data/langpacks/<bcp47-tag>/
+<your-langpack-dir>/<bcp47-tag>/
 ├── pack.toml        the manifest
 ├── stopwords.txt    one function word per line
 ├── charset.txt      one character per line

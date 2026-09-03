@@ -1,11 +1,12 @@
-# Vietnamese language pack.
+# Vietnamese validation fixture. It is test data, not a bundled language pack
+# or a claim that Nemotron provides a Vietnamese curation default.
 #
 # Data only. Nothing here is code, and nothing in runtime/ knows this language
 # exists — adding a language means adding a directory like this one.
 
 [pack]
-pack_id      = "vi-generic"
-language_tag = "vi"
+pack_id      = "x-test-vi"
+language_tag = "x-test-vi"
 version      = "2.1"
 schema       = 1
 

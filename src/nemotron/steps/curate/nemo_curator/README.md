@@ -54,9 +54,13 @@ machines, so it can never name an import path.
 Use `annotate` when you want to re-threshold later without re-reading the
 corpus, and `filter` to keep the historical column set exactly.
 
-Set `heuristic_filters.langpack_content_hash` when the policy was derived
-against a language pack. Thresholds are calibrated against that pack's word
-lists and character set and do not transfer; a mismatch stops the run.
+Nemotron does not bundle production language packs. When a policy uses
+pack-backed signals, set `heuristic_filters.langpack_dir` to the reviewed pack
+root used by this run. The policy carries its content hash; the loaded word
+lists and character set must match that hash or the run stops.
+
+`heuristic_filters.langpack_content_hash` may additionally pin the expected
+hash in the run config, but it does not replace `langpack_dir`.
 
 ## CLI And Overlay Knobs
 

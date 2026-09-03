@@ -1,12 +1,13 @@
-# Thai language pack.
+# Thai validation fixture. It is test data, not a bundled language pack or a
+# claim that Nemotron provides a Thai curation default.
 #
 # An abugida like Devanagari: tone marks and vowel signs are obligatory, not
 # removable. They occupy Unicode categories Mn and Mc. Sentences may end with
 # ฯ (paiyannoi) as well as .!?. Digits exist in both ASCII and Thai scripts.
 
 [pack]
-pack_id      = "th-generic"
-language_tag = "th"
+pack_id      = "x-test-th"
+language_tag = "x-test-th"
 version      = "1.1"
 schema       = 1
 
