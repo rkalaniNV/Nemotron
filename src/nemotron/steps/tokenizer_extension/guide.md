@@ -4,6 +4,10 @@ Extend a base tokenizer with target-language subwords, initialize the model
 embeddings for the new vocab, and (optionally) measure fertility — producing a
 resized HF checkpoint ready for continued pretraining.
 
+> **Choosing a recipe?** See the customer-facing
+> [Tokenizer Extension Guidebook](guidebook/README.md) for measured vocabulary
+> knees, initialization guidance, BPB comparisons, and serving results.
+
 ## Steps (typed-artifact pipeline)
 
 | Step | Compute | Consumes → Produces |
