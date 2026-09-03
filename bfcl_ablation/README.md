@@ -2,8 +2,8 @@
 
 How much of an Oracle Pack can be removed without weakening the benchmark?
 
-This directory implements the first two rungs of the ablation ladder. Both run the
-**unmodified** production pipeline (`runtime/benchmark_families/bfcl`). An arm is
+This directory implements seven rungs of the ablation ladder plus one control. Every one
+runs the **unmodified** production pipeline (`runtime/benchmark_families/bfcl`). An arm is
 defined by the pack and config it feeds in, never by a patch to the generator — a
 patched generator would measure the patch instead of the pack.
 
@@ -17,14 +17,19 @@ A5  target-model evaluation       does a conclusion survive A2?     gpt-oss-120b
 A6  backend mutation gate         is the oracle falsifiable?        no model
 ```
 
-A0–A4 measure the benchmark. **A5 is the only arm that measures a model on it**, and it is
-the one that closes the loop: A2 showed wording can change without ground truth moving, and
-A5 asks whether the *score* moves anyway.
+A0–A4 measure the benchmark's *content*. **A5 is the only arm that measures a model on it**,
+and it closes a loop: A2 showed wording can change without ground truth moving, and A5 asks
+whether the *score* moves anyway. **A6 turns the question on the oracle itself** — it corrupts
+`backend.py` and asks whether anything in the pack notices.
+
+`results/A2_rerun/` is a **control**, not a rung: A2 re-executed to show it reproduces, and to
+show that every one of its known defects reproduces with it. See
+[experiments/a2_rerun.md](experiments/a2_rerun.md).
 
 **Per-arm findings live in [experiments/](experiments/)** — one document per rung, insights
 first. This file is the methodology and the how-to-run.
 
-A2, A3 and A4 call a local vLLM server (`openai/gpt-oss-120b` at
+A2, A3, A4 and A5 call a local vLLM server (`openai/gpt-oss-120b` at
 `http://127.0.0.1:8000/v1`, overridable via `BFCL_ABLATION_LLM_URL` and
 `BFCL_ABLATION_LLM_MODEL`). Every call is disk-cached under `_generated/llm_cache`, so a
 re-run reproduces the same benchmark and the cache doubles as the record of what the model was
@@ -39,11 +44,18 @@ and `rich` alone.
 cd <repo root>
 PYTHONPATH=src python3 bfcl_ablation/run_a0.py     # baseline, ~1 min
 PYTHONPATH=src python3 bfcl_ablation/run_a1.py     # simplify + verify, ~3 min
+PYTHONPATH=src python3 bfcl_ablation/sweep_budget.py 6 12 24   # REQUIRED before run_a2.py
+PYTHONPATH=src python3 bfcl_ablation/run_a2.py     # paraphrase ladder, 40 pipeline runs, ~25 min
 PYTHONPATH=src python3 bfcl_ablation/run_a3.py     # sampled cells + LLM task proposals, ~20 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a4.py     # mutation gate + LLM assertions, ~8 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a5.py     # target model on A0 vs A2 wording, ~5 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a6.py     # 151 backend mutants through every check, ~35 min
 ```
+
+`run_a2.py` has a hard dependency on `sweep_budget.py`: it needs the budget-24 baseline at
+`_generated/runs/sweep24/`, and it does not check for it until after generating every paraphrase
+pool and completing 40 pipeline runs. The reproduction control found this the expensive way —
+see [experiments/a2_rerun.md](experiments/a2_rerun.md).
 
 `run_a5.py` needs A0 *and* an A2 variant run on disk; `--a2-run a2_b6_v1` selects a different
 paraphrase. Its tool calls go through `/v1/responses`, because `/chat/completions` on a vLLM

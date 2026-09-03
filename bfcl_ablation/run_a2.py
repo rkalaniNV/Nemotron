@@ -364,6 +364,12 @@ def main() -> int:
 
     payload = {
         "arm": args.arm,
+        # A2 emits a bespoke schema rather than the shared measurement one, but its
+        # diversity and coverage figures are compared against A0's, so it carries the
+        # same contract stamp. It was the last arm without one; METRICS.md has required
+        # it since version 1.0 and nothing enforced it, which is exactly how a
+        # definition change would have been read as a benchmark change.
+        "metrics_version": metrics.METRIC_CONTRACT_VERSION,
         "env": common.env_note(),
         "llm": {**probe, "stats": client.stats()},
         "design": {

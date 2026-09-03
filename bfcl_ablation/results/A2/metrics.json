@@ -9099,5 +9099,6 @@
       "cache_hits": 426,
       "calls_made": 0
     }
-  }
+  },
+  "metrics_version": "1.0"
 }

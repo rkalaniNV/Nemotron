@@ -13,8 +13,13 @@ the artifacts live.
 | [a4.md](a4.md) | Are the assertions actually checking anything? | measured |
 | [a5.md](a5.md) | Does rewording the request change the benchmark's verdict on a model? | measured |
 | [a6.md](a6.md) | Is the oracle itself falsifiable — does anything check the backend? | measured |
+| [a2_rerun.md](a2_rerun.md) | Does A2 reproduce — and what does a passing run hide? | control |
 
-[findings.md](findings.md) collects every insight across the five arms in one place.
+[findings.md](findings.md) collects every insight across the arms in one place.
+
+`a2_rerun` is a **control**, not a rung: it opens no degree of freedom. It is filed here because
+the inference it rules out — "the numbers reproduce, therefore the numbers are right" — is the
+most natural wrong reading of this study.
 
 Metric definitions are fixed and versioned in [`../results/METRICS.md`](../results/METRICS.md).
 Every `metrics.json` records the `metrics_version` it was computed under; arms recorded under

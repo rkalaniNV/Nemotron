@@ -44,6 +44,7 @@ ARMS = {
     "a4": ("A4", "LLM assertions and the mutation gate", "Are the assertions checking anything"),
     "a5": ("A5", "Target-model evaluation across wordings", "Does a benchmark conclusion survive a paraphrase"),
     "a6": ("A6", "Backend mutation gate", "Is the oracle itself falsifiable"),
+    "a2_rerun": ("A2_rerun", "The reproduction run", "Does A2 reproduce, and what does a passing run hide"),
     "findings": ("ALL", "Findings across the ladder", "Cross-arm synthesis"),
 }
 
@@ -951,6 +952,12 @@ def appendix_generic(document: Document, metrics: dict[str, Any]) -> None:
     )
 
 
+# A2_rerun shares A2's bespoke schema, so the generic summary appendix is the right one.
+# Registered here rather than in the literal above because `appendix_generic` is defined
+# after it.
+APPENDIX["a2_rerun"] = appendix_generic
+
+
 # --------------------------------------------------------------------------------
 # document assembly
 # --------------------------------------------------------------------------------
@@ -978,7 +985,9 @@ def cover(document: Document, arm: str, metrics: dict[str, Any] | None) -> None:
         ["Pipeline", "runtime/benchmark_families/bfcl, unmodified"],
         ["Metric contract", (metrics or {}).get("metrics_version", "1.0")],
     ]
-    if arm == "a6":
+    if arm == "a2_rerun":
+        facts.append(["Model", "openai/gpt-oss-120b — but 0 calls made; the run is served entirely from cache"])
+    elif arm == "a6":
         facts.append(["Model", "none — this arm is fully deterministic"])
     elif arm == "a5":
         # A5 is the one arm where the model is the subject rather than an authoring tool,
@@ -1074,6 +1083,7 @@ def reproduction(document: Document, arm: str) -> None:
         "a4": "PYTHONPATH=src python3 bfcl_ablation/run_a4.py",
         "a5": "PYTHONPATH=src python3 bfcl_ablation/run_a5.py",
         "a6": "PYTHONPATH=src python3 bfcl_ablation/run_a6.py",
+        "a2_rerun": "PYTHONPATH=src python3 bfcl_ablation/results/A2_rerun/driver.py\nPYTHONPATH=src python3 bfcl_ablation/results/A2_rerun/driver2.py",
         "findings": "PYTHONPATH=src python3 bfcl_ablation/run_a0.py   # then a1, a2, a3, a4, a5, a6",
     }
     document.add_paragraph("Run from the repository root:")

@@ -1,16 +1,18 @@
 # Findings across the ladder
 
-Five arms, one pack (`banking_vn`), one model (`gpt-oss-120b`). Every arm ran the unmodified
-production pipeline; an arm is defined by the pack and config it feeds in.
+Seven arms plus one control, on one pack (`banking_vn`) with one model (`gpt-oss-120b`). Every
+arm ran the unmodified production pipeline; an arm is defined by the pack and config it feeds in.
+A0, A1 and A6 use no model at all.
 
 ---
 
 ## The one sentence
 
 **Every quality gate the pipeline has is about mechanism — did it replay deterministically, is
-the fingerprint intact, did the schema match — and none is about content.** Three arms show this
+the fingerprint intact, did the schema match — and none is about content.** Four arms show this
 independently and by different mechanisms: A0 finds the gates never fire, A4 finds the assertions
-do not check returned values, A3 finds a badly skewed benchmark passes anyway.
+do not check returned values, A3 finds a badly skewed benchmark passes anyway, and A6 finds that
+46% of observable corruptions of the backend itself pass every check the pack ships.
 
 They are **not a causal chain**, and an earlier draft wrongly presented them as one. A3 did not
 exploit A4's gap — it leans on `assert_no_tool_called` for 14 of its 20 templates, which A4
@@ -132,6 +134,29 @@ A6 also found that **41 of 48 survivors are simply unreachable**: whole validati
 is a coverage finding worth as much as the checking one — lines an author paid to write that the
 benchmark never touches.
 
+### A2R — a green reproduction is not a green light
+
+A2 was re-executed against the same A0 baseline. **4,852 metric fields compared, 2 differ, and
+neither is a measurement** (`arm`, and a cache-hit count explained exactly by `--skip-generate`).
+That is the study's reproducibility claim demonstrated for the first time, on the arm with the
+weakest determinism story — A2 is the one that calls a model 375 times.
+
+And every open defect in A2 reproduced perfectly along with the numbers. The sharpest:
+**`FROZEN` came back 12 of 12, which is exactly what a verdict incapable of failing would do.**
+`run_a2.py:325-329` gates on `task_ids` and `expected_tool_calls` only; `task_id` does not cover
+the surface and A2 changes only the surface, so neither gated check is structurally capable of
+failing under this intervention. The check that would carry signal, `conversation_plans.equal`, is
+computed, stored, `True` at every rung — and excluded from the verdict.
+
+The re-run also found two defects invisible to a passing run: A2 has an **undeclared hard
+dependency on `sweep_budget.py`** (the first attempt died after 40 pipeline runs), and `--arm`
+**does not isolate a run**, so A2 cannot be run twice side by side without patching
+`common.RESULTS`.
+
+*So what:* reproducibility and validity are independent axes. A re-run says the pipeline is
+deterministic given the same code and cache. It says nothing about whether the numbers it
+reproduces are the right ones to publish.
+
 ### A1 and A2 — the parts that worked
 
 **A1**: 256 of 1642 authored lines (15.6%) come off with no model involved, verified
@@ -210,6 +235,7 @@ moved **zero** at all twelve configurations tested.
 | A4 | [a4.md](a4.md) | `results/A4/` |
 | A5 | [a5.md](a5.md) | `results/A5/` |
 | A6 | [a6.md](a6.md) | `results/A6/` |
+| A2R | [a2_rerun.md](a2_rerun.md) | `results/A2_rerun/` |
 
 Metric definitions are fixed and versioned in [`results/METRICS.md`](../results/METRICS.md);
 every `metrics.json` records the `metrics_version` it was computed under. Arms recorded under

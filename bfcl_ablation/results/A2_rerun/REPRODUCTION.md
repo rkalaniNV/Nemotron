@@ -68,7 +68,9 @@ Reproducibility is not fitness. Every open issue with A2 reproduced too, exactly
   cover the surface, so neither gated check can fail under an intervention that only rewords the
   opening turn.
 - **Variant assignment is still `seed % N`**: budget 6 / N=3 scores 22, below N=2's 23.
-- **`metrics_version` is still absent** from the payload.
+- **`metrics_version` is still absent** from the payload. *(Fixed after this run: `run_a2.py`
+  now stamps it, so a future reproduction will differ from this artifact by exactly that field.
+  The finding is left as written — this file records what the run found, not what is true now.)*
 
 A reproduction says the pipeline is deterministic given the same code and cache. It says nothing
 about whether the numbers it reproduces are the right ones to publish.

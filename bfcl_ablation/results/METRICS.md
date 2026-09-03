@@ -5,6 +5,11 @@ Every arm records the version it was computed under, as `metrics_version` in its
 ablation compares its distribution against A0's, so a silent change to how a metric is
 computed would present a definition change as a benchmark change.
 
+**This is recorded, not enforced.** Every arm now stamps the field — A0, A1 and A3 through the
+shared measurement schema, and A2, A4, A5 and A6 explicitly, since those emit bespoke schemas.
+No code reads the stamps back or compares them, so a comparison across two different contracts
+would still run and still look fine. Closing that is a next step, not a solved problem.
+
 Bump the version on any behavioural edit to `measurement/metrics.py` and add a row to
 the changelog at the bottom. Adding a *new* metric does not require a bump; changing
 how an existing one is computed does.
@@ -161,6 +166,27 @@ tracked separately from a detection.
 validates the harness; a null control below 1.000 means mutations are not reaching the
 assertion.
 
+## Backend falsifiability (A6)
+
+**`blind_rate`** — of the mutants of `backend.py` whose effect is *observable* on an input the
+pack supplies, the share that every check the pack ships accepted. This is the arm's headline.
+
+**Observable** is decided by a differential replay against the unmutated backend: if a mutant
+changes any per-call result or the final state on A0's replayed traces, it is observable. That
+comparison is a **reference this arm adds, not a check the pack ships** — nothing in the pack
+states what a tool should return — so a mutant caught only by it counts toward `blind_rate`.
+
+**Do not report the raw survival count as the headline.** A mutant that survives every layer is
+usually one no task and no validation case executes, which measures *coverage*, not *checking*.
+Survivors must be triaged into `equivalent` (no input could observe the edit), `unreachable`
+(observable in principle, but not on any input the pack supplies) and `real_gap` (observable on a
+supplied input, and every shipped check passed) before any rate is quoted. The triage is recorded
+in `results/A6/triage.json`.
+
+**`first_killing_layer`** — the cheapest layer that rejected the mutant, over the fixed ladder
+import → validation cases → traces → assertions → oracle validation → full pipeline. Reported as
+a histogram, and always alongside which layers ship with the pack and which do not.
+
 ## Solve accuracy across wordings (A5)
 
 Every metric above describes the benchmark. These describe a **target model measured on
@@ -203,4 +229,4 @@ the ~25 the approximation needs. A non-significant p at this n means *not detect
 
 | version | change |
 | --- | --- |
-| 1.0 | Initial contract. Covers A0 baseline; A1–A4 compare against it. A5 solve-accuracy metrics added under the same version: they are new metrics, not changes to existing ones, so no arm's numbers move. |
+| 1.0 | Initial contract. Covers A0 baseline; A1–A4 compare against it. A5 solve-accuracy and A6 backend-falsifiability metrics added under the same version: they are new metrics, not changes to existing ones, so no arm's numbers move. |

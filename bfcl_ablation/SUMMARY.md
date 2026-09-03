@@ -80,10 +80,10 @@ is unambiguous.
   same benchmark, and the cache is the record of what was asked. Model: `openai/gpt-oss-120b`,
   local vLLM.
 - **Metric definitions are pinned in `METRICS.md` and stamped `metrics_version: 1.0`** into the
-  result files of A0, A1 and A3 (shared measurement schema) and of A4 (bespoke schema, stamped
-  explicitly). **A2 emits a bespoke schema and still carries no version stamp**, and **no code
-  compares versions across arms**. Version comparability is a convention enforced by reading the
-  contract, not a mechanism. That is a gap, listed under next steps.
+  result files of **every arm** — A0, A1 and A3 via the shared measurement schema, and A2, A4, A5
+  and A6 explicitly, since those emit bespoke schemas. **No code compares versions across arms**,
+  so comparability is still a convention enforced by reading the contract rather than a mechanism.
+  Every artifact now at least carries the version it was computed under.
 
 ### The proof obligation
 
@@ -434,6 +434,7 @@ causal chain, and an earlier draft of this document wrongly presented them as on
 | A3 | a skewed benchmark passes anyway | 70% of its templates are unfalsifiable by the oracle |
 | A5 | and it happens on real model output | a reworded request changed the model's call set; assertion agreement 1.000, ground-truth agreement 0.939 |
 | A6 | and the oracle itself is barely checked | 45.8% of observable `backend.py` corruptions pass every shipped check; oracle validation and a full pipeline run catch none of them |
+| A2R *(control)* | and none of this is visible from a passing run | A2 reproduces to 2 non-measurement fields in 4,852, and every one of its known defects reproduces with it |
 
 **A4 did not explain A0 — until A5.** A0's replay stage passed 33/33 on *uncorrupted* traces;
 nothing ever reached the assertions in a failing condition, so A0's 100% was consistent with
@@ -495,7 +496,8 @@ checking it.
   `confirmation` on 3 proposals; A2's false-alarm floor on 17 sentences.
 - **Three milestone-compiler rules are untested** because the pack contains no such case.
 - **The funnel's drop-reason breakdown has never fired**, so it is implemented but unverified.
-- **`metrics_version` is not enforced** by any code. A4 now stamps it; A2 still does not.
+- **`metrics_version` is recorded but not enforced.** Every arm stamps it; no code compares
+  stamps across arms, so a mismatched pair would still be silently compared.
 - **A2 and A3 do not compose.** They are independent arms.
 
 ---
@@ -524,7 +526,8 @@ checking it.
 6. **Power analysis** from a target effect size; if N per cell exceeds budget, drop rungs not N.
 7. Test whether round-robin variant assignment closes the 3–27% ceiling shortfall — currently a
    hypothesis, not a measured recovery.
-8. Enforce `metrics_version` across arms, or drop the claim.
+8. **Compare** `metrics_version` across arms in code. Every arm now records it, so the remaining
+   gap is that nothing reads it — a comparison against an arm on a different contract still passes.
 9. Run the **lexical-shortcut probe**, now that several phrasings per intent exist.
 
 **Then the open research question**
