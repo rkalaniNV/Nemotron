@@ -28,7 +28,10 @@ For a larger example covering every supported conversation policy, replace
 `config/banking_vn.gold.yaml` is the bundled publication-scale example. Its
 domain-specific inventory, scale, and current mix are documented with the
 [banking oracle pack](../data/banking_vn_oracle_pack/README.md); they are not
-framework defaults.
+framework defaults. That pack's file map, commands, and release record are in
+[banking_vn pack operations](../references/bfcl-banking-vn-pack-operations.md),
+held outside the pack directory so they stay editable: a published benchmark
+freezes every byte of the pack it was generated from.
 `config/banking_vn.gold.paraphrase.yaml` is the opt-in model-surface profile; it
 applies fail-closed exact-surface diversity constraints while retaining
 executable-case lineage. Model roles are routed by Data Designer, so the
