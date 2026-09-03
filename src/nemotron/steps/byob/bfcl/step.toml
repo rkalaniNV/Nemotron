@@ -109,6 +109,11 @@ then = "Use family=bfcl: stage=prepare normalizes the pack and writes oracle_val
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
+when = "You need a new runnable Oracle-pack skeleton"
+then = "Run `python -m nemotron.steps.byob.scripts.scaffold_oracle_pack --domain <NAME> --target <EMPTY_PATH> --transport python|endpoint`. It atomically writes the complete pack file set, runnable local examples or a pinned endpoint placeholder, validation config, and README; it never overwrites an existing target."
+skill = "src/nemotron/steps/byob/patterns/create-bfcl-from-oracle-pack.md"
+
+[[strategies]]
 when = "You need to validate an oracle pack without producing a publishable benchmark"
 then = "Run stage=prepare or `python -m nemotron.steps.byob.scripts.validate_oracle_pack --config <CONFIG>`. Configs that pin lineage.policy=smoke_no_publication record generation_mode=smoke_no_publication and are never publication-eligible."
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"

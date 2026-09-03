@@ -10,6 +10,61 @@ Tools (9): `get_account_balance`, `get_card_limit`, `get_transaction_status`,
 
 Currency: VND. Rails: `napas` / `internal`. QR: VietQR only.
 
+## File map
+
+- `manifest.yaml`: identity, Vietnamese prompts, frozen clock, primary keys,
+  absent IDs, and authoritative paths.
+- `tools.json`: nine strict schemas, including mutation and confirmation flags.
+- `fixtures.json`: deterministic account, card, transaction, transfer, VietQR,
+  and dispute state plus template slot inventory.
+- `backend.py`: isolated reset/state, deterministic IDs/results, business errors,
+  confirmation, and mutation semantics.
+- `task_templates.yaml`: 42 templates spanning every supported turn policy.
+- `assertions.py`: result, state, dependency, confirmation, error, and no-tool checks.
+- `validation_cases.yaml`: direct success, invalid, not-found, safe confirmation,
+  and committed-mutation probes for the tools.
+- `README.md`: scale, release evidence, file map, and runnable commands.
+
+## Validate, smoke, and generate
+
+From the repository root:
+
+```bash
+SMOKE="$(pwd)/src/nemotron/steps/byob/bfcl/config/banking_vn.yaml"
+python -m nemotron.steps.byob.scripts.validate_oracle_pack \
+  --config "$SMOKE" \
+  --output-dir /tmp/bfcl-banking-vn-validation
+python -m nemotron.steps.byob.scripts.run \
+  --config "$SMOKE" \
+  --stage prepare
+python -m nemotron.steps.byob.scripts.run \
+  --config "$SMOKE" \
+  --stage generate
+```
+
+Validation exits zero only after schema, direct probes, deterministic replay,
+assertions, reset, and confirmation safety pass. Inspect
+`oracle_validation_report.json`, stage reports, both Parquet files, and
+`run_manifest.json` beneath `/tmp/bfcl/banking_vn_validation/`.
+
+The deterministic Gold profile targets 232 tasks in each of six categories:
+
+```bash
+python -m nemotron.steps.byob.scripts.run \
+  --config "$(pwd)/src/nemotron/steps/byob/bfcl/config/banking_vn.gold.yaml" \
+  --stage all
+```
+
+The paraphrased profile is separate because it requires model credentials and
+records model-exposure provenance:
+
+```bash
+export NGC_API_KEY=REPLACE_ME
+python -m nemotron.steps.byob.scripts.run \
+  --config "$(pwd)/src/nemotron/steps/byob/bfcl/config/banking_vn.gold.paraphrase.yaml" \
+  --stage all
+```
+
 Absent ids (documented, never inserted). Each one is slot inventory for a
 `negative_path` template, so the count per collection bounds how many distinct
 not-found cases that collection can publish:

@@ -978,9 +978,9 @@ An eval config may also be referenced from the generation config through
 `eval_config_path`, or inlined as a legacy `eval` block; both go through the same
 validator, and carrying both is refused as ambiguous. Either way the eval input is
 excluded from `generation_config_hash` and `resolved_config_hash`: evaluating a new
-candidate must not change the identity of the benchmark it was scored on. Until the
-eval runner lands, `stage=generate` refuses both keys rather than accepting a
-setting no stage of that run applies.
+candidate must not change the identity of the benchmark it was scored on.
+`stage=generate` refuses both keys because evaluation runs separately through
+`stage=eval`; generation must not accept settings that no publication stage applies.
 
 ## Source Verification
 

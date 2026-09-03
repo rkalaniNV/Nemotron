@@ -613,14 +613,24 @@ of a `confirmation` task has `turn_index: 1`, after the `ask_confirm` message.
 ## Run It
 
 ```bash
+# Create a runnable local-Python starter
+python -m nemotron.steps.byob.scripts.scaffold_oracle_pack \
+  --domain "inventory service" \
+  --target /tmp/inventory_oracle_pack \
+  --transport python
+
 # Validate a pack and print its report
 python -m nemotron.steps.byob.scripts.validate_oracle_pack \
-  --config src/nemotron/steps/byob/bfcl/config/tiny.yaml
+  --config src/nemotron/steps/byob/bfcl/config/tiny.yaml \
+  --output-dir /tmp/bfcl-tiny-validation
 
-# Full slice: prepare, validate, then generate the benchmark
-uv run nemotron steps run byob/bfcl \
-  -c src/nemotron/steps/byob/bfcl/config/tiny.yaml \
-  stage=all family=bfcl
+# Normal family lifecycle
+python -m nemotron.steps.byob.scripts.run \
+  --config src/nemotron/steps/byob/bfcl/config/tiny.yaml \
+  --stage prepare
+python -m nemotron.steps.byob.scripts.run \
+  --config src/nemotron/steps/byob/bfcl/config/tiny.yaml \
+  --stage all
 ```
 
 `config/tiny.yaml` (`tiny_library`) and `config/banking_vn.yaml` pin
@@ -638,6 +648,11 @@ as-is, because its optional profile, paraphrase, and surface-judge roles are dis
 Disabled roles are recorded with null identity and set
 `generation_mode: template_only`, which does not affect gold eligibility. The
 remaining `REPLACE_ME_*` entries only matter once the corresponding role is enabled.
+
+The generated pack README is the shortest transport-specific quick start.
+The complete manual lifecycle, including endpoint identity pins and evaluation,
+is in
+[`create-bfcl-from-oracle-pack.md`](../patterns/create-bfcl-from-oracle-pack.md).
 
 Generation supports reference profiling, controlled paraphrasing, Stage 10
 surface-quality validation, and optional Stage 11 semantic deduplication and
