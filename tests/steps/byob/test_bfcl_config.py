@@ -10,7 +10,9 @@ import pytest
 import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import EXPORT_FORMATS
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
+    EXPORT_FORMATS,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
 from nemotron.steps.byob.runtime.benchmark_families.registry import list_families
 
@@ -20,7 +22,11 @@ BYOB_DIR = BFCL_CONFIG_DIR.parents[1]
 
 def _copy_tiny_pack(tmp_path: Path) -> Path:
     pack = tmp_path / "pack"
-    shutil.copytree(BYOB_DIR / "data" / "tiny_oracle_pack", pack, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        BYOB_DIR / "data" / "tiny_oracle_pack",
+        pack,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     return pack
 
 
@@ -86,9 +92,7 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
     path = BFCL_CONFIG_DIR / "banking_vn.gold.yaml"
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     templates = yaml.safe_load(
-        (BYOB_DIR / "data" / "banking_vn_oracle_pack" / "task_templates.yaml").read_text(
-            encoding="utf-8"
-        )
+        (BYOB_DIR / "data" / "banking_vn_oracle_pack" / "task_templates.yaml").read_text(encoding="utf-8")
     )
     category_count = len({str(template["category"]) for template in templates})
     requested_samples = category_count * int(raw["task_generation"]["tasks_per_category"])
@@ -112,14 +116,8 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         )
         for category, grouped in group_by_category(pack.templates).items()
     }
-    candidates = [
-        task
-        for category_tasks in candidate_by_category.values()
-        for task in category_tasks
-    ]
-    templates_by_id = {
-        str(template["template_id"]): template for template in pack.templates
-    }
+    candidates = [task for category_tasks in candidate_by_category.values() for task in category_tasks]
+    templates_by_id = {str(template["template_id"]): template for template in pack.templates}
     render_contract = resolve_render_contract(config, pack, templates_by_id)
     candidate_surfaces = {}
     for task in candidates:
@@ -166,11 +164,7 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         )
         for category, grouped in group_by_category(pack.templates).items()
     }
-    selected = [
-        task
-        for category_tasks in selected_by_category.values()
-        for task in category_tasks
-    ]
+    selected = [task for category_tasks in selected_by_category.values() for task in category_tasks]
     # Out-of-scope templates do not share a slot vocabulary, so uniqueness is checked on
     # the whole binding rather than on the slots one template happens to declare.
     out_of_scope_cases = {
@@ -186,12 +180,8 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         budget,
         int(config.random_seed or 0),
     )
-    create_dispute_ids = {
-        str(task["slots"]["transaction_id"]) for task in create_dispute_tasks
-    }
-    transactions = {
-        str(row["transaction_id"]): row for row in pack.fixtures["transactions"]
-    }
+    create_dispute_ids = {str(task["slots"]["transaction_id"]) for task in create_dispute_tasks}
+    transactions = {str(row["transaction_id"]): row for row in pack.fixtures["transactions"]}
     open_dispute_transaction_ids = {
         str(row["transaction_id"])
         for row in pack.fixtures["disputes"]
@@ -229,6 +219,16 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         "multi_turn": 418,
         "single_turn": 974,
     }
+    assert challenge_summary["actual_counts"]["tool_call_count"] == {
+        "0": 376,
+        "1": 613,
+        "2": 302,
+        "3+": 101,
+    }
+    positive_call_total = 613 + 302 + 101
+    assert 613 / positive_call_total == pytest.approx(0.60, abs=0.05)
+    assert 302 / positive_call_total == pytest.approx(0.30, abs=0.05)
+    assert 101 / positive_call_total == pytest.approx(0.10, abs=0.05)
     # The declared policy mix is the release's claim about what it actually tests, so
     # the shapes a candidate is most likely to fail are pinned rather than left to
     # whatever expansion inventory happened to produce.
@@ -253,9 +253,7 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
     assert challenge_summary["group_diversity"]["intent"]["max_reuse"] <= 120
     assert challenge_summary["unmet_targets"] == []
     # Every row offers the whole catalog, so tool selection is a nine-way choice.
-    assert {
-        len(set(task["tools_present"] or [])) for task in candidates
-    } == {len(pack.tools)}
+    assert {len(set(task["tools_present"] or [])) for task in candidates} == {len(pack.tools)}
     assert len(out_of_scope_cases) == 232
     assert len(create_dispute_tasks) == 72
     assert len(create_dispute_ids) == 18
@@ -281,34 +279,22 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
 
 
 def test_banking_gold_paraphrase_profile_is_guarded_and_fail_closed() -> None:
-    config = BfclConfig.from_yaml(
-        BFCL_CONFIG_DIR / "banking_vn.gold.paraphrase.yaml"
-    )
+    config = BfclConfig.from_yaml(BFCL_CONFIG_DIR / "banking_vn.gold.paraphrase.yaml")
     pack = load_pack(config)
     role = config.lineage.roles["paraphrase"]
-    eligible = [
-        template
-        for template in pack.templates
-        if (template.get("paraphrase") or {}).get("allowed") is True
-    ]
+    eligible = [template for template in pack.templates if (template.get("paraphrase") or {}).get("allowed") is True]
 
     assert config.lineage.policy == "strict_separation"
     assert role.enabled is True
     assert role.model_config["provider"] == "nvidia_inference_api"
-    assert (
-        role.model_config["canonical_id"]
-        == "nvidia-inference-api/azure/openai/gpt-5.6-sol"
-    )
+    assert role.model_config["canonical_id"] == "nvidia-inference-api/azure/openai/gpt-5.6-sol"
     assert role.model_config["api_key_env"] == "NGC_API_KEY"
     # This route rejects top_p, so the profile must not declare it.
     assert "top_p" not in role.model_config["inference_parameters"]
     assert config.surface_generation["model_paraphrase_enabled"] is True
     assert config.surface_generation["paraphrases_per_template"] == 1
     assert len(eligible) >= 17
-    assert all(
-        template["paraphrase"]["max_variants"] == 1
-        for template in eligible
-    )
+    assert all(template["paraphrase"]["max_variants"] == 1 for template in eligible)
     assert config.task_generation["target_published_tasks"] == 1_392
     assert config.semantic_deduplication_config["max_exact_surface_reuse"] == 8
     assert config.semantic_deduplication_config["min_exact_surface_ratio"] == 0.15
@@ -940,7 +926,9 @@ def test_held_out_pack_contract_validates_ids_and_enters_fingerprint(
 
 
 def test_held_out_policy_version_rejects_boolean_yaml_scalars(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
 
     pack_root = _copy_tiny_pack(tmp_path)
     manifest_path = pack_root / "manifest.yaml"
@@ -972,7 +960,9 @@ def test_held_out_policy_version_rejects_boolean_yaml_scalars(tmp_path: Path) ->
 def test_held_out_rejects_primary_ids_that_collapse_after_normalization(
     tmp_path: Path,
 ) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
 
     pack_root = _copy_tiny_pack(tmp_path)
     manifest_path = pack_root / "manifest.yaml"
@@ -1201,7 +1191,9 @@ def test_profile_language_is_not_gated_when_no_template_consumes_it(
     from dataclasses import replace
 
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import LineageRole
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import load_pack
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        load_pack,
+    )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.expand import (
         run_expand,
     )
@@ -1610,12 +1602,12 @@ def test_paraphrase_asks_each_binding_for_its_own_surface_style(tmp_path: Path) 
     requested_styles = [tuple(contract["surface_styles"]) for contract in contracts]
     assert all(len(styles) == 2 and len(set(styles)) == 2 for styles in requested_styles)
     assert all(set(styles) <= set(SURFACE_STYLE_AXES) for styles in requested_styles)
-    assert sorted(requested_styles) == sorted(
-        tuple(style_plan(task, 2)) for task in by_task.values()
-    )
+    assert sorted(requested_styles) == sorted(tuple(style_plan(task, 2)) for task in by_task.values())
 
 
-def test_paraphrase_rejects_a_variant_that_repeats_another_variant(tmp_path: Path) -> None:
+def test_paraphrase_rejects_a_variant_that_repeats_another_variant(
+    tmp_path: Path,
+) -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
         load_pack,
     )
@@ -1673,12 +1665,7 @@ def test_paraphrase_rejects_a_variant_that_repeats_another_variant(tmp_path: Pat
         responses = {}
         for request in kwargs["requests"]:
             contract = json.loads(request["model_input"])
-            repeated = {
-                "user_turns": [
-                    f"cùng một cách diễn đạt: {text}"
-                    for text in contract["canonical_user_turns"]
-                ]
-            }
+            repeated = {"user_turns": [f"cùng một cách diễn đạt: {text}" for text in contract["canonical_user_turns"]]}
             responses[request["request_id"]] = {"variants": [repeated, dict(repeated)]}
         return responses
 
@@ -1706,7 +1693,9 @@ def test_paraphrase_rejects_a_variant_that_repeats_another_variant(tmp_path: Pat
     )
 
 
-def test_one_failing_paraphrase_request_does_not_discard_its_batch(tmp_path: Path) -> None:
+def test_one_failing_paraphrase_request_does_not_discard_its_batch(
+    tmp_path: Path,
+) -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
         load_pack,
     )
@@ -1778,14 +1767,7 @@ def test_one_failing_paraphrase_request_does_not_discard_its_batch(tmp_path: Pat
         for request in requests:
             contract = json.loads(request["model_input"])
             responses[request["request_id"]] = {
-                "variants": [
-                    {
-                        "user_turns": [
-                            f"diễn đạt khác: {text}"
-                            for text in contract["canonical_user_turns"]
-                        ]
-                    }
-                ]
+                "variants": [{"user_turns": [f"diễn đạt khác: {text}" for text in contract["canonical_user_turns"]]}]
             }
         return responses
 
@@ -1985,9 +1967,7 @@ def test_config_rejects_an_expt_name_that_is_not_one_directory(tmp_path: Path, e
         BfclConfig.from_yaml(config)
 
 
-def test_manifest_reports_replay_apart_from_surface_rejections(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_manifest_reports_replay_apart_from_surface_rejections(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A guard-rejected row still replayed, and the counts must let a reader see that."""
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
         generate_bfcl,
@@ -2023,7 +2003,9 @@ def test_manifest_reports_replay_apart_from_surface_rejections(
 
 
 def test_tiny_prepare_is_gold_eligible(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.oracle_validation import (
         derive_pack_tier,
     )
@@ -2048,7 +2030,9 @@ def test_tiny_prepare_is_gold_eligible(tmp_path: Path) -> None:
 def test_prepare_rejects_a_template_whose_bound_call_breaks_schema(
     tmp_path: Path,
 ) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     _edit_pack_yaml(
@@ -2069,9 +2053,13 @@ def test_prepare_rejects_a_template_whose_bound_call_breaks_schema(
     assert report["gold_eligible"] is False
 
 
-def test_prepare_rejects_a_budget_that_cannot_keep_every_template(tmp_path: Path) -> None:
+def test_prepare_rejects_a_budget_that_cannot_keep_every_template(
+    tmp_path: Path,
+) -> None:
     """A category budget below its template count fails generation, so gold must see it."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     config = _write_tiny_config(
@@ -2090,9 +2078,13 @@ def test_prepare_rejects_a_budget_that_cannot_keep_every_template(tmp_path: Path
     assert report["gold_eligible"] is False
 
 
-def test_prepare_rejects_a_pack_that_cannot_render_its_own_templates(tmp_path: Path) -> None:
+def test_prepare_rejects_a_pack_that_cannot_render_its_own_templates(
+    tmp_path: Path,
+) -> None:
     """Render is a hard contract, so a missing text block must not survive to generation."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     _edit_pack_yaml(
@@ -2114,9 +2106,13 @@ def test_prepare_rejects_a_pack_that_cannot_render_its_own_templates(tmp_path: P
     assert report["gold_eligible"] is False
 
 
-def test_prepare_rejects_a_template_whose_surface_always_breaks_a_guard(tmp_path: Path) -> None:
+def test_prepare_rejects_a_template_whose_surface_always_breaks_a_guard(
+    tmp_path: Path,
+) -> None:
     """A template that can publish no row is a defect, not an instance-level rejection."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2141,7 +2137,9 @@ def test_prepare_rejects_a_template_whose_surface_always_breaks_a_guard(tmp_path
 
 def test_prepare_runs_a_representative_templates_assertions(tmp_path: Path) -> None:
     """An importable assertion that always fails must not receive a gold report."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     with (pack / "assertions.py").open("a", encoding="utf-8") as handle:
@@ -2165,7 +2163,9 @@ def test_prepare_runs_a_representative_templates_assertions(tmp_path: Path) -> N
 
 
 def test_prepare_rejects_a_non_function_tool_envelope(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     tools_path = pack / "tools.json"
@@ -2187,7 +2187,9 @@ def test_prepare_rejects_a_non_function_tool_envelope(tmp_path: Path) -> None:
 
 def test_success_coverage_requires_schema_valid_arguments(tmp_path: Path) -> None:
     """A backend accepting hidden arguments must not let those calls prove success."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2210,9 +2212,13 @@ def test_success_coverage_requires_schema_valid_arguments(tmp_path: Path) -> Non
     assert "incomplete_validation_coverage" in reasons
 
 
-def test_validation_rejects_pack_inputs_that_change_during_import(tmp_path: Path) -> None:
+def test_validation_rejects_pack_inputs_that_change_during_import(
+    tmp_path: Path,
+) -> None:
     """The fingerprint must describe one immutable set of inputs throughout validation."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     backend = pack / "backend.py"
@@ -2241,7 +2247,9 @@ def test_validation_rejects_pack_inputs_that_change_during_import(tmp_path: Path
 
 def test_failed_rerun_does_not_leave_a_completed_manifest(tmp_path: Path) -> None:
     """A failed invocation must not leave a previous run looking current."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        generate_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     config = _write_tiny_config(
@@ -2268,8 +2276,12 @@ def test_failed_rerun_does_not_leave_a_completed_manifest(tmp_path: Path) -> Non
     assert not (output / "benchmark_raw.parquet").exists()
 
 
-def test_prepare_rejects_bad_plans_and_missing_fixture_primary_keys(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+def test_prepare_rejects_bad_plans_and_missing_fixture_primary_keys(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     plan_root = tmp_path / "bad-plan"
     plan_root.mkdir()
@@ -2293,9 +2305,7 @@ def test_prepare_rejects_bad_plans_and_missing_fixture_primary_keys(tmp_path: Pa
         oracle_runtime={"allowed_roots": [str(tmp_path)]},
     )
     plan_report = json.loads(prepare_bfcl(plan_config).read_text(encoding="utf-8"))
-    assert any(
-        failure.get("reason") == "invalid_conversation_plan" for failure in plan_report["checks"][0]["failures"]
-    )
+    assert any(failure.get("reason") == "invalid_conversation_plan" for failure in plan_report["checks"][0]["failures"])
 
     key_root = tmp_path / "missing-key"
     key_root.mkdir()
@@ -2325,7 +2335,9 @@ def test_prepare_rejects_bad_plans_and_missing_fixture_primary_keys(tmp_path: Pa
 
 
 def test_thread_worker_cannot_claim_gold(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     config_data = yaml.safe_load((BFCL_CONFIG_DIR / "tiny.yaml").read_text(encoding="utf-8"))
     config_data["output_dir"] = str(tmp_path / "output")
@@ -2345,7 +2357,9 @@ def test_thread_worker_cannot_claim_gold(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("worker", ["process", "thread"])
 def test_validation_checks_expected_result_fields(tmp_path: Path, worker: str) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2370,7 +2384,9 @@ def test_validation_checks_expected_result_fields(tmp_path: Path, worker: str) -
 
 @pytest.mark.parametrize("worker", ["process", "thread"])
 def test_validation_cases_can_share_state_without_reset(tmp_path: Path, worker: str) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2434,7 +2450,11 @@ def test_rejects_a_schema_version_this_build_cannot_write(tmp_path: Path) -> Non
         BfclConfig.from_yaml(_write_tiny_config(tmp_path, "future-schema.yaml", schema_version="9.9"))
 
     config = BfclConfig.from_yaml(
-        _write_tiny_config(tmp_path, "known-schema.yaml", schema_version=DEFAULT_BENCHMARK_SCHEMA_VERSION)
+        _write_tiny_config(
+            tmp_path,
+            "known-schema.yaml",
+            schema_version=DEFAULT_BENCHMARK_SCHEMA_VERSION,
+        )
     )
     assert config.schema_version == DEFAULT_BENCHMARK_SCHEMA_VERSION
 
@@ -2447,7 +2467,9 @@ def test_rejects_non_positive_timeout(tmp_path: Path) -> None:
 
 
 def test_unevaluable_slot_filter_is_reported_not_raised(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2476,7 +2498,9 @@ def test_unevaluable_slot_filter_is_reported_not_raised(tmp_path: Path) -> None:
 
 
 def test_malformed_range_source_fails_prepare_check(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2500,7 +2524,9 @@ def test_generate_rejects_noncanonical_resume_stage(tmp_path: Path) -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.checkpoint import (
         CheckpointError,
     )
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        generate_bfcl,
+    )
 
     temp_config = _write_tiny_config(tmp_path, "resume.yaml")
 
@@ -2509,7 +2535,9 @@ def test_generate_rejects_noncanonical_resume_stage(tmp_path: Path) -> None:
 
 
 def test_unrunnable_validation_cases_are_skipped_not_passed(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     tools_path = pack / "tools.json"
@@ -2545,7 +2573,9 @@ def test_unrunnable_validation_cases_are_skipped_not_passed(tmp_path: Path) -> N
 
 def test_gold_requires_a_mutating_tool_to_say_so(tmp_path: Path) -> None:
     """A grader treats a read-only tool differently, so the claim must match reality."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     tools_path = pack / "tools.json"
@@ -2568,8 +2598,12 @@ def test_gold_requires_a_mutating_tool_to_say_so(tmp_path: Path) -> None:
     assert report["gold_eligible"] is False
 
 
-def test_gold_rejects_a_declared_mutation_that_no_success_probe_observes(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+def test_gold_rejects_a_declared_mutation_that_no_success_probe_observes(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     tools_path = pack / "tools.json"
@@ -2594,8 +2628,12 @@ def test_gold_rejects_a_declared_mutation_that_no_success_probe_observes(tmp_pat
     )
 
 
-def test_determinism_uses_observed_success_not_only_the_expect_label(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+def test_determinism_uses_observed_success_not_only_the_expect_label(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2618,7 +2656,9 @@ def test_determinism_uses_observed_success_not_only_the_expect_label(tmp_path: P
 
 
 def test_determinism_compares_state_even_when_result_is_stable(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     backend = pack / "backend.py"
@@ -2649,7 +2689,9 @@ def test_determinism_compares_state_even_when_result_is_stable(tmp_path: Path) -
 
 def test_pack_load_checks_what_the_guards_depend_on(tmp_path: Path) -> None:
     """A slot with no visibility flag lands in neither the preserve nor the omit set."""
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import normalize_templates
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        normalize_templates,
+    )
 
     template = {
         "template_id": "tpl",
@@ -2659,14 +2701,13 @@ def test_pack_load_checks_what_the_guards_depend_on(tmp_path: Path) -> None:
 
     # The paraphrase block is optional; the run-wide guards still apply without it.
     assert normalize_templates([template])[0]["paraphrase"] == {}
-    assert normalize_templates(
-        [{**template, "edge_signatures": [" rare_b ", "rare_a"]}]
-    )[0]["edge_signatures"] == ["rare_a", "rare_b"]
+    assert normalize_templates([{**template, "edge_signatures": [" rare_b ", "rare_a"]}])[0]["edge_signatures"] == [
+        "rare_a",
+        "rare_b",
+    ]
 
     with pytest.raises(ValueError, match="edge_signatures must be unique"):
-        normalize_templates(
-            [{**template, "edge_signatures": ["rare", " rare "]}]
-        )
+        normalize_templates([{**template, "edge_signatures": ["rare", " rare "]}])
     with pytest.raises(ValueError, match="edge_signatures must be a list"):
         normalize_templates([{**template, "edge_signatures": "rare"}])
 
@@ -2750,7 +2791,9 @@ def test_pack_fingerprint_covers_files_the_backend_reads(tmp_path: Path) -> None
     assert pack_fingerprint(paths) == edited
 
 
-def test_pack_file_hashes_cover_exactly_what_the_fingerprint_hashes(tmp_path: Path) -> None:
+def test_pack_file_hashes_cover_exactly_what_the_fingerprint_hashes(
+    tmp_path: Path,
+) -> None:
     """The map and the aggregate must agree on the hashed set, or drift reports lie.
 
     A file the fingerprint covers but the map omits produces drift nobody can
@@ -2789,7 +2832,9 @@ def test_pack_file_hashes_cover_exactly_what_the_fingerprint_hashes(tmp_path: Pa
     }
 
 
-def test_declared_pack_inputs_name_only_what_the_manifest_declares(tmp_path: Path) -> None:
+def test_declared_pack_inputs_name_only_what_the_manifest_declares(
+    tmp_path: Path,
+) -> None:
     """An undeclared file is hashed but is not an oracle input, and the two differ."""
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
@@ -2847,7 +2892,9 @@ def test_pack_fingerprint_refuses_symbolic_links_in_the_pack_tree(
         pack_fingerprint(resolve_pack_paths(config))
 
 
-def test_pack_fingerprint_uses_semantic_names_for_external_files(tmp_path: Path) -> None:
+def test_pack_fingerprint_uses_semantic_names_for_external_files(
+    tmp_path: Path,
+) -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
         ResolvedPackPaths,
         pack_fingerprint,
@@ -2880,8 +2927,12 @@ def test_pack_fingerprint_uses_semantic_names_for_external_files(tmp_path: Path)
     assert pack_fingerprint(paths_for("host-a")) == pack_fingerprint(paths_for("host-b"))
 
 
-def test_gold_requires_every_template_to_state_what_success_means(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+def test_gold_requires_every_template_to_state_what_success_means(
+    tmp_path: Path,
+) -> None:
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2909,7 +2960,10 @@ def test_gold_requires_every_template_to_state_what_success_means(tmp_path: Path
 
 
 def test_generate_revalidates_when_worker_changes(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl, prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        generate_bfcl,
+        prepare_bfcl,
+    )
 
     process_config = _write_tiny_config(tmp_path, "process.yaml")
     process_report = json.loads(prepare_bfcl(process_config).read_text(encoding="utf-8"))
@@ -2923,9 +2977,7 @@ def test_generate_revalidates_when_worker_changes(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="non-gold pack"):
         generate_bfcl(thread_config)
 
-    report_path = (
-        tmp_path / "output" / "bfcl_tiny_library_validation" / "stage_cache" / "oracle_validation_report.json"
-    )
+    report_path = tmp_path / "output" / "bfcl_tiny_library_validation" / "stage_cache" / "oracle_validation_report.json"
     thread_report = json.loads(report_path.read_text(encoding="utf-8"))
     assert thread_report["validation_config_fingerprint"] != process_report["validation_config_fingerprint"]
     isolation = next(check for check in thread_report["extra_checks"] if check["id"] == "I1")
@@ -2933,7 +2985,9 @@ def test_generate_revalidates_when_worker_changes(tmp_path: Path) -> None:
 
 
 def test_duplicate_template_ids_are_rejected(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
 
@@ -2952,8 +3006,12 @@ def test_duplicate_template_ids_are_rejected(tmp_path: Path) -> None:
 
 
 def test_system_prompt_cannot_escape_pack_allowlist(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import PackTrustError
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import (
+        PackTrustError,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     (tmp_path / "secret.txt").write_text("not a pack artifact", encoding="utf-8")
@@ -2973,7 +3031,9 @@ def test_system_prompt_cannot_escape_pack_allowlist(tmp_path: Path) -> None:
 
 
 def test_default_config_requests_only_supported_features() -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import _unsupported_requests
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        _unsupported_requests,
+    )
 
     config = BfclConfig.from_yaml(BFCL_CONFIG_DIR / "default.yaml")
 
@@ -2989,7 +3049,9 @@ def test_the_publication_template_names_no_example_pack() -> None:
 
 
 def test_generate_refuses_settings_it_would_otherwise_ignore(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import _unsupported_requests
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        _unsupported_requests,
+    )
 
     baseline = BfclConfig.from_yaml(_write_tiny_config(tmp_path, "baseline.yaml"))
     assert _unsupported_requests(baseline) == []
@@ -3020,7 +3082,9 @@ def test_generate_refuses_settings_it_would_otherwise_ignore(tmp_path: Path) -> 
 
 
 def test_every_declared_export_format_is_supported(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import _unsupported_requests
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        _unsupported_requests,
+    )
 
     for index, name in enumerate(EXPORT_FORMATS):
         config = BfclConfig.from_yaml(_write_tiny_config(tmp_path, f"export-{index}.yaml", exports={name: True}))
@@ -3034,9 +3098,7 @@ def test_every_declared_export_format_is_supported(tmp_path: Path) -> None:
 
 def test_an_unknown_export_name_is_never_silently_ignored(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="exports has unknown keys: bfcl_jsno"):
-        BfclConfig.from_yaml(
-            _write_tiny_config(tmp_path, "export-typo.yaml", exports={"bfcl_jsno": True})
-        )
+        BfclConfig.from_yaml(_write_tiny_config(tmp_path, "export-typo.yaml", exports={"bfcl_jsno": True}))
 
 
 def test_generate_revalidates_a_hand_edited_gold_report(tmp_path: Path) -> None:
@@ -3048,9 +3110,7 @@ def test_generate_revalidates_a_hand_edited_gold_report(tmp_path: Path) -> None:
 
     config = _write_tiny_config(tmp_path, "tampered.yaml")
     prepare_bfcl(config)
-    report_path = (
-        tmp_path / "output" / "bfcl_tiny_library_validation" / "stage_cache" / "oracle_validation_report.json"
-    )
+    report_path = tmp_path / "output" / "bfcl_tiny_library_validation" / "stage_cache" / "oracle_validation_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["gold_eligible"] is True
     # Manufacture a passing payload while retaining public fingerprints. Generate
@@ -3064,7 +3124,13 @@ def test_generate_revalidates_a_hand_edited_gold_report(tmp_path: Path) -> None:
     assert generate_bfcl(config).exists()
     repaired = json.loads(report_path.read_text(encoding="utf-8"))
     assert len(repaired["checks"]) == 7
-    assert {check["id"] for check in repaired["extra_checks"]} == {"M1", "D1", "D2", "T1", "I1"}
+    assert {check["id"] for check in repaired["extra_checks"]} == {
+        "M1",
+        "D1",
+        "D2",
+        "T1",
+        "I1",
+    }
 
 
 def test_stage_all_validates_once_but_a_new_run_revalidates(tmp_path: Path) -> None:
@@ -3073,7 +3139,9 @@ def test_stage_all_validates_once_but_a_new_run_revalidates(tmp_path: Path) -> N
         generate_bfcl,
         prepare_bfcl,
     )
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import oracle_validation
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import (
+        oracle_validation,
+    )
 
     config = _write_tiny_config(tmp_path, "revalidate.yaml")
     calls: list[str] = []
@@ -3099,7 +3167,9 @@ def test_stage_all_validates_once_but_a_new_run_revalidates(tmp_path: Path) -> N
         oracle_validation.run_oracle_validation = real_run
 
 
-def test_resolved_config_hash_input_is_portable_for_external_packs(tmp_path: Path) -> None:
+def test_resolved_config_hash_input_is_portable_for_external_packs(
+    tmp_path: Path,
+) -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.final_output import (
         _resolved_config,
     )
@@ -3158,7 +3228,9 @@ def test_surface_quality_settings_are_supported_by_generation(tmp_path: Path) ->
 
 
 def test_generate_refuses_ignored_task_generation_controls(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        generate_bfcl,
+    )
 
     temp_config = _write_tiny_config(
         tmp_path,
@@ -3200,7 +3272,10 @@ def test_stage_eleven_enables_implemented_balancing_controls(tmp_path: Path) -> 
 
 
 def test_generate_revalidates_when_pack_changed(tmp_path: Path) -> None:
-    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import generate_bfcl, prepare_bfcl
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pipeline import (
+        generate_bfcl,
+        prepare_bfcl,
+    )
 
     pack = _copy_tiny_pack(tmp_path)
     temp_config = _write_tiny_config(

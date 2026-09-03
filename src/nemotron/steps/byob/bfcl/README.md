@@ -1532,6 +1532,20 @@ requirements, see
 a score means, see
 [`../references/bfcl-eval-scoring-contract.md`](../references/bfcl-eval-scoring-contract.md).
 
+## Read-only B1–B16 bias audit
+
+`python -m nemotron.steps.byob.scripts.audit_bfcl_bias` verifies frozen
+generation, publication, held-out, paraphrase, and evaluation evidence without
+rebuilding the benchmark. It recomputes exactly one primary metric for every
+B1–B16 entry, fails closed on missing applicable evidence or hash drift, and
+writes content-addressed `bias_audit_report.json` and
+`bias_audit_report.md`. Reviewed B10 distractor and B13 truth-creep evidence is
+bound to the exact run manifest and deterministic sample.
+
+See
+[`../references/bfcl-bias-audit-contract.md`](../references/bfcl-bias-audit-contract.md)
+for the versioned schema, evidence formats, thresholds, and complete CLI.
+
 ## Capability Matrix
 
 Unsupported capabilities stay gated and are rejected rather than silently
@@ -1548,6 +1562,7 @@ ignored.
 | Translation and localization | **Partial** | Localize benchmark surfaces through a BFCL-specific adapter while preserving executable calls and oracle assertions. |
 | Additional exports | **Integrated** | Emit, read back, validate, hash, and transactionally publish BFCL JSON and NeMo Evaluator input bundles from one canonical projection. |
 | Stage resume | **Implemented** | Resume Stages 3–12 from a recursively verified predecessor checkpoint without accepting stale state, artifacts, pack, endpoint, config, task order, schema, or pipeline identity. |
+| Bias audit | **Implemented** | Read and hash frozen release/eval evidence, rescan expanded/raw/published layers, recompute B1–B16, consume reviewed B10/B13 evidence, and emit deterministic JSON/Markdown reports without modifying source artifacts. |
 
 The final evaluation interface, metric names, artifact schemas, and CLI stage
 names may change while implementation is in progress. Until they are promoted
