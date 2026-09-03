@@ -51,17 +51,90 @@ pip_extras = ["typer", "rich", "pydantic-settings", "indic-nlp-library", "fastte
 Neither is installed by the default profile; a run will fail with the exact
 install command rather than produce a quietly different tokenizer.
 
-## Run
+## Quickstart — extend a tokenizer for your language
+
+Four commands. Each step writes what the next one reads, so run them in order.
+Swap `lepton_` for `slurm_` or `dgxcloud_` to match your backend.
+
 ```bash
-# CPU tokenizer build (Lepton cpu profile)
-uv run nemotron steps run tokenizer_extension/extend -c default --batch <cpu_profile>
-# GPU embedding init -> resized checkpoint
-uv run nemotron steps run tokenizer_extension/init_embeddings -c default --batch <gpu_profile>
-# CPU fertility check
-uv run nemotron steps run tokenizer_extension/evaluate -c default --batch <cpu_profile>
-# GPU BPB check (cross-vocabulary comparable; use max_docs, NOT max_tokens)
-uv run nemotron steps run tokenizer_extension/eval_init -c default --batch <gpu_profile>
+L=vietnamese                                  # your target; see LANGUAGES.md
+OUT=./output/tokenizer_extension              # extend's output_dir
+
+# 1. Build the extended tokenizer (CPU). Pick ONE arm per job.
+uv run nemotron steps run tokenizer_extension/extend \
+  -b lepton_tokenizer_extend -c default \
+  language=$L method=add extension_size=30000 \
+  corpus.hf_dataset=<hf-dataset> corpus.hf_split=<split>
+#    -> $OUT/add/   (tokenizer + summary.json)
+
+# 2. Initialise the new embedding rows -> resized HF checkpoint (GPU).
+uv run nemotron steps run tokenizer_extension/init_embeddings \
+  -b lepton_tokenizer_init_embeddings -c default \
+  language=$L arm=add extended_tokenizer=$OUT/add \
+  output_dir=./output/resized_checkpoint
+#    -> ./output/resized_checkpoint/   <- this is CPT's hf_model_path
+
+# 3. (optional) How many tokens per word? Lower is better.
+uv run nemotron steps run tokenizer_extension/evaluate \
+  -b lepton_tokenizer_evaluate -c default tokenizer=$OUT/add
+
+# 4. (optional) BPB vs the base model — the cross-vocabulary quality check.
+uv run nemotron steps run tokenizer_extension/eval_init \
+  -b lepton_tokenizer_eval_init -c default \
+  models=[./output/resized_checkpoint] max_docs=2000
 ```
 
-Set `language:` on `extend` and `init_embeddings` to target a language other than
-Hindi (see `LANGUAGES.md`); everything else follows from the profile.
+Add `-d` to any command to print the compiled config without running it.
+
+## Choosing the arm
+
+| `method` | What it does | Use when |
+|---|---|---|
+| `add` | trains a BPE on your corpus and splices the new tokens **into the merge table** | default choice; robust across a script family |
+| `replace` | first prunes the base's existing target-script tokens, then splices | one target language, want the smallest vocab |
+| `expand` | registers decoded surfaces via `add_tokens()`, **no merge rules** | baseline for comparison only — atomic tokens do not compose, so extra vocabulary buys little |
+
+## Adapting to your language
+
+Only three things are language-specific:
+
+1. **`language:`** — picks the corpus normalizer, the Replace prune script, the
+   auxiliary encoder and the fastText vectors, all from one key. Supported values
+   and how to add a new one: `LANGUAGES.md`.
+2. **`corpus:`** — an HF dataset (`hf_dataset` / `hf_name` / `hf_split`) or a
+   local path (`path` + `glob`), plus `text_field`.
+3. **`extension_size:`** — how many tokens to add. 30k is a reasonable default.
+
+Do **not** set `remove_script:` or `subword.bert_model:` unless you are
+deliberately overriding the profile — an explicit value silently wins over
+`language:`.
+
+## Outputs
+
+| Step | Writes | Next consumer |
+|---|---|---|
+| `extend` | `output_dir/{add,replace}/` + `summary.json` | `init_embeddings.extended_tokenizer` |
+| `init_embeddings` | `output_dir/` (weights + tokenizer) | `pretrain/megatron_bridge.hf_model_path` |
+| `evaluate` | fertility JSON | — |
+| `eval_init` | BPB/perplexity JSON | — |
+
+`summary.json` records `tokens_spliced`; check it equals `extension_size`.
+
+## Dependencies
+
+Two packages are not in the base install; the shipped profiles install them.
+Running elsewhere: `uv pip install -e '.[tokenizer-extension]'`.
+
+| Package | Needed by | If missing |
+|---|---|---|
+| `indic-nlp-library` | `extend` when `language:` uses a script normalizer (Devanagari family) | hard error — it will not silently fall back to NFKC, which would train a different tokenizer |
+| `fasttext-wheel` | `init_embeddings` with `method: focus` | hard error at point of use; other methods unaffected |
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `Unknown script 'None'` | `remove_script:` set to null in an older config — remove the key |
+| `tokens_spliced` < `extension_size` | corpus too small for the requested budget; widen it or lower `extension_size` |
+| BPB run refuses to start | scoring several tokenizers under `max_tokens`; set `max_docs` instead |
+| FOCUS init fails on import | install the `tokenizer-extension` extra |

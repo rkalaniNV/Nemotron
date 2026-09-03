@@ -54,6 +54,10 @@ checks:
     - dgxcloud_peft_megatron_bridge
     - dgxcloud_peft_automodel
     - dgxcloud_convert_model
+    - dgxcloud_tokenizer_extend
+    - dgxcloud_tokenizer_init_embeddings
+    - dgxcloud_tokenizer_evaluate
+    - dgxcloud_tokenizer_eval_init
     - dgxcloud_rl_nemo_rl_dpo
     - dgxcloud_rl_nemo_rl_rlvr
     - dgxcloud_rl_nemo_rl_rlhf
@@ -296,6 +300,50 @@ sections:
     env_vars:
       CONVERT_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/workspace}/output/convert
 
+  # ---------------------------------------------------------------------------
+  # tokenizer_extension/*: build an extended tokenizer, initialise the new
+  # embedding rows, and measure the result. Four sub-steps with genuinely
+  # different shapes, so one profile each.
+  #
+  # Optional dependencies (declared as the `tokenizer-extension` extra):
+  #   indic-nlp-library  extend, when the target language uses a script
+  #                      normalizer (Devanagari family). Missing, the step
+  #                      raises rather than silently normalising with NFKC only,
+  #                      which would train a different tokenizer.
+  #   fasttext-wheel     init_embeddings, method=focus only. The import is lazy,
+  #                      so the other init methods run without it.
+  # ---------------------------------------------------------------------------
+
+  dgxcloud_tokenizer_extend:
+    extends: dgxcloud_base
+    nodes: 1
+    gpus_per_node: 0
+    nprocs_per_node: 1
+    startup_commands:
+      - python -m pip install --quiet --break-system-packages indic-nlp-library
+    env_vars:
+      TOKEXT_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/workspace}/output/tokenizer_extension
+
+  dgxcloud_tokenizer_init_embeddings:
+    extends: dgxcloud_base
+    nodes: 1
+    gpus_per_node: 1
+    nprocs_per_node: 1
+    startup_commands:
+      - python -m pip install --quiet --break-system-packages fasttext-wheel indic-nlp-library
+    env_vars:
+      TOKEXT_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/workspace}/output/tokenizer_extension
+      FASTTEXT_CACHE_DIR: ${oc.env:NEMOTRON_WORKSPACE,/workspace}/output/tokenizer_extension/aux
+
+  dgxcloud_tokenizer_evaluate:
+    extends: dgxcloud_base
+    nodes: 1
+    gpus_per_node: 0
+    nprocs_per_node: 1
+
+  dgxcloud_tokenizer_eval_init:
+    extends: dgxcloud_base
+    nodes: 1
   # rl/nemo_rl/dpo: NeMo-RL image plus output override. Runtime RL knobs stay in step YAML.
   dgxcloud_rl_nemo_rl_dpo:
     extends: dgxcloud_base

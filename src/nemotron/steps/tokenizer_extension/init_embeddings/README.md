@@ -46,7 +46,9 @@ See `../guide.md`.
 
 ## Run
 ```bash
-uv run nemotron steps run tokenizer_extension/init_embeddings -c default --batch <gpu_profile>
+uv run nemotron steps run tokenizer_extension/init_embeddings \
+  -b lepton_tokenizer_init_embeddings -c default \
+  language=<your-language> arm=add extended_tokenizer=./output/tokenizer_extension/add
 ```
 Output: `output_dir/` = resized HF checkpoint (weights + tokenizer) → set as
 `pretrain/megatron_bridge` `hf_model_path`.

@@ -52,6 +52,7 @@ normalization, which trains a different tokenizer. See `../guide.md`.
 
 ## Run
 ```bash
-uv run nemotron steps run tokenizer_extension/extend -c default --batch <cpu_profile>
+uv run nemotron steps run tokenizer_extension/extend \
+  -b lepton_tokenizer_extend -c default language=<your-language> method=add
 ```
 Output: `output_dir/{add,replace}/` (tokenizers) + `summary.json`.

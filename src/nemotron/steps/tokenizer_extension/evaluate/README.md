@@ -26,7 +26,8 @@ Run the same corpus block across tokenizers to keep numbers comparable.
 
 ## Run
 ```bash
-uv run nemotron steps run tokenizer_extension/evaluate -c default --batch <cpu_profile>
+uv run nemotron steps run tokenizer_extension/evaluate \
+  -b lepton_tokenizer_evaluate -c default tokenizer=./output/tokenizer_extension/add
 ```
 Output: a JSON with `fertility`, `chars_per_token`, `unique_tokens_used`,
 `vocab_coverage`, and timing.

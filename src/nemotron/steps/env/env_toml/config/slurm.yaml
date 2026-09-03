@@ -54,6 +54,10 @@ checks:
     - slurm_peft_megatron_bridge
     - slurm_peft_automodel
     - slurm_convert_model
+    - slurm_tokenizer_extend
+    - slurm_tokenizer_init_embeddings
+    - slurm_tokenizer_evaluate
+    - slurm_tokenizer_eval_init
     - slurm_rl_nemo_rl_dpo
     - slurm_rl_nemo_rl_rlvr
     - slurm_rl_nemo_rl_rlhf
@@ -321,6 +325,64 @@ sections:
     env_vars:
       CONVERT_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/lustre/${oc.env:USER}}/output/convert
 
+  # ---------------------------------------------------------------------------
+  # tokenizer_extension/*: build an extended tokenizer, initialise the new
+  # embedding rows, and measure the result. Four sub-steps with genuinely
+  # different shapes, so one profile each.
+  #
+  # Optional dependencies (declared as the `tokenizer-extension` extra):
+  #   indic-nlp-library  extend, when the target language uses a script
+  #                      normalizer (Devanagari family). Missing, the step
+  #                      raises rather than silently normalising with NFKC only,
+  #                      which would train a different tokenizer.
+  #   fasttext-wheel     init_embeddings, method=focus only. The import is lazy,
+  #                      so the other init methods run without it.
+  # ---------------------------------------------------------------------------
+
+  slurm_tokenizer_extend:
+    extends: slurm_base
+    partition: ${oc.env:SLURM_CPU_PARTITION,cpu}
+    build_partition: ${oc.env:SLURM_CPU_PARTITION,cpu}
+    build_include_gpus: false
+    build_gpus_per_node: 0
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 16
+    gpus_per_node: 0
+    time: "04:00:00"
+    startup_commands:
+      - uv pip install --python /opt/venv/bin/python --quiet indic-nlp-library
+    env_vars:
+      TOKEXT_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/lustre/${oc.env:USER}}/output/tokenizer_extension
+
+  slurm_tokenizer_init_embeddings:
+    extends: slurm_base
+    nodes: 1
+    ntasks_per_node: 1
+    gpus_per_node: 1
+    time: "02:00:00"
+    startup_commands:
+      - uv pip install --python /opt/venv/bin/python --quiet fasttext-wheel indic-nlp-library
+    env_vars:
+      TOKEXT_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/lustre/${oc.env:USER}}/output/tokenizer_extension
+      FASTTEXT_CACHE_DIR: ${oc.env:NEMOTRON_WORKSPACE,/lustre/${oc.env:USER}}/output/tokenizer_extension/aux
+
+  slurm_tokenizer_evaluate:
+    extends: slurm_base
+    partition: ${oc.env:SLURM_CPU_PARTITION,cpu}
+    build_partition: ${oc.env:SLURM_CPU_PARTITION,cpu}
+    build_include_gpus: false
+    build_gpus_per_node: 0
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 8
+    gpus_per_node: 0
+    time: "02:00:00"
+
+  slurm_tokenizer_eval_init:
+    extends: slurm_base
+    nodes: 1
+    time: "02:00:00"
   # rl/nemo_rl/dpo: switch image for NeMo-RL while keeping tunnel/account/mounts.
   slurm_rl_nemo_rl_dpo:
     extends: slurm_base
