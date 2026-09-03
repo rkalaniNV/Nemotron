@@ -22,7 +22,10 @@ The bundled
 [`banking_vn_oracle_pack`](../data/banking_vn_oracle_pack/README.md) is a
 reference implementation. Banking-specific paths and scale are isolated in
 [the reference example](#banking-vn-reference-example); they are not BFCL
-defaults.
+defaults. Its file map, runnable commands, and the release it produced are in
+[banking_vn pack operations](bfcl-banking-vn-pack-operations.md), which is kept
+outside the pack directory because a published benchmark freezes every byte in
+it.
 
 ## 1. User inputs
 
