@@ -13,10 +13,10 @@ nothing about it anyone could have special-cased.
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 from nemotron.steps.curate.runtime import langpack, signals
 from nemotron.steps.curate.runtime import registry as r
@@ -259,6 +259,45 @@ def test_every_shipped_pack_records_where_its_word_list_came_from() -> None:
         assert stopwords.get("license"), f"{tag}: stopwords declare no license"
 
 
+def test_every_shipped_asset_records_origin_and_license() -> None:
+    for tag in langpack.available():
+        for name, source in langpack.load(tag).sources.items():
+            assert source.get("origin"), f"{tag}/{name}: source declares no origin"
+            assert source.get("license"), f"{tag}/{name}: source declares no license"
+
+
+def test_a_source_without_license_is_rejected(tmp_path) -> None:
+    pack_dir = tmp_path / "x-missing-license"
+    pack_dir.mkdir()
+    (pack_dir / "stopwords.txt").write_text("word\n", encoding="utf-8")
+    (pack_dir / "pack.toml").write_text(
+        '[pack]\npack_id="x"\nlanguage_tag="x"\nversion="1"\nschema=1\n'
+        '[sources]\nstopwords={file="stopwords.txt", origin="test"}\n'
+        '[capabilities]\nsupports=["stopword_ratio"]\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(langpack.LanguagePackInvalidError, match="license"):
+        langpack.load_pack(pack_dir)
+
+
+def test_text_resources_are_normalized_to_nfc(tmp_path) -> None:
+    import unicodedata
+
+    pack_dir = tmp_path / "x-nfd"
+    pack_dir.mkdir()
+    nfd = unicodedata.normalize("NFD", "café")
+    (pack_dir / "stopwords.txt").write_text(f"{nfd}\n", encoding="utf-8")
+    (pack_dir / "pack.toml").write_text(
+        '[pack]\npack_id="x"\nlanguage_tag="x"\nversion="1"\nschema=1\n'
+        '[sources]\nstopwords={file="stopwords.txt", origin="test", license="Apache-2.0"}\n'
+        '[capabilities]\nsupports=["stopword_ratio"]\n',
+        encoding="utf-8",
+    )
+
+    assert langpack.load_pack(pack_dir).stopwords == {"café"}
+
+
 # -- fold map -----------------------------------------------------------------
 
 
@@ -285,6 +324,35 @@ def test_a_pack_without_a_fold_map_folds_only_combining_marks() -> None:
 
     assert hi.fold_map == {}
     assert hi.fold("भारत") == "भारत" or len(hi.fold("भारत")) <= len("भारत")
+
+
+def test_fold_map_must_be_a_mapping(tmp_path) -> None:
+    pack_dir = tmp_path / "x-invalid-fold-map"
+    pack_dir.mkdir()
+    (pack_dir / "pack.toml").write_text(
+        'fold_map=["not", "a", "mapping"]\n'
+        '[pack]\npack_id="x"\nlanguage_tag="x"\nversion="1"\nschema=1\n'
+        '[capabilities]\nsupports=["sentence_end_ratio"]\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(langpack.LanguagePackInvalidError, match="fold_map must be a mapping"):
+        langpack.load_pack(pack_dir)
+
+
+def test_diacritic_capability_requires_an_explicit_fold_map(tmp_path) -> None:
+    pack_dir = tmp_path / "x-no-fold-map"
+    pack_dir.mkdir()
+    (pack_dir / "charset.txt").write_text("a\n", encoding="utf-8")
+    (pack_dir / "pack.toml").write_text(
+        '[pack]\npack_id="x"\nlanguage_tag="x"\nversion="1"\nschema=1\n'
+        '[sources]\ncharset={file="charset.txt", origin="test", license="Apache-2.0"}\n'
+        '[capabilities]\nsupports=["diacritic_ratio"]\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(langpack.LanguagePackInvalidError, match="fold_map"):
+        langpack.load_pack(pack_dir)
 
 
 # -- provenance ---------------------------------------------------------------

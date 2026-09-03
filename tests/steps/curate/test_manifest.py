@@ -48,9 +48,7 @@ def test_canonical_json_does_not_escape_non_ascii() -> None:
 def test_json_safe_turns_non_finite_floats_into_null() -> None:
     """A statistic over documents that all failed to score is absent, not a number."""
     inf = float("inf")
-    cleaned = m.json_safe(
-        {"p50": float("nan"), "hi": inf, "lo": -inf, "kept": 0.5, "n": 3, "name": "x"}
-    )
+    cleaned = m.json_safe({"p50": float("nan"), "hi": inf, "lo": -inf, "kept": 0.5, "n": 3, "name": "x"})
 
     assert cleaned == {"p50": None, "hi": None, "lo": None, "kept": 0.5, "n": 3, "name": "x"}
 
@@ -68,9 +66,7 @@ def test_json_safe_output_survives_a_strict_parser() -> None:
     with pytest.raises(ValueError, match="Out of range float"):
         json.dumps(document, allow_nan=False)
 
-    assert json.loads(json.dumps(m.json_safe(document), allow_nan=False)) == {
-        "quantiles": {"p50": None}
-    }
+    assert json.loads(json.dumps(m.json_safe(document), allow_nan=False)) == {"quantiles": {"p50": None}}
 
 
 def test_config_hash_carries_its_algorithm() -> None:
@@ -230,6 +226,56 @@ def test_validation_reports_every_fault_in_one_pass() -> None:
 
 def test_a_non_mapping_is_rejected_without_raising() -> None:
     assert m.validate_manifest(["not", "a", "manifest"])
+
+
+def test_output_gain_is_a_manifest_contract_violation() -> None:
+    document = _valid()
+    document["input"]["row_count"] = 1
+    document["output"]["row_count"] = 2
+    document["declared"]["rows_absent_from_output"] = -1
+
+    problems = m.validate_manifest(document)
+
+    assert any("must not exceed" in problem for problem in problems)
+
+
+def test_writing_refuses_a_manifest_with_output_gain(tmp_path) -> None:
+    document = _valid()
+    document["input"]["row_count"] = 1
+    document["output"]["row_count"] = 2
+
+    with pytest.raises(ValueError, match="must not exceed"):
+        m.write_manifest(tmp_path / "run_manifest.json", document)
+
+
+def test_an_injected_tool_revision_takes_precedence(monkeypatch) -> None:
+    monkeypatch.setenv("NEMOTRON_TOOL_REVISION", "git:0123456789abcdef")
+
+    assert m.tool_revision() == "git:0123456789abcdef"
+
+
+def test_runtime_dependencies_include_an_exact_vcs_commit(monkeypatch) -> None:
+    class FakeDistribution:
+        version = "0.10.0+a8425c9"
+
+        @staticmethod
+        def read_text(filename: str) -> str | None:
+            if filename != "direct_url.json":
+                return None
+            return json.dumps(
+                {
+                    "url": "https://example.invalid/run.git",
+                    "vcs_info": {"vcs": "git", "commit_id": "a8425c9f11a45412e6d5338cecb1c014b0ecc0c4"},
+                }
+            )
+
+    monkeypatch.setattr("importlib.metadata.distribution", lambda _name: FakeDistribution())
+
+    assert m.runtime_dependencies()["nemo-run"] == {
+        "version": "0.10.0+a8425c9",
+        "commit_id": "a8425c9f11a45412e6d5338cecb1c014b0ecc0c4",
+        "source_url": "https://example.invalid/run.git",
+    }
 
 
 # -- write / read -------------------------------------------------------------

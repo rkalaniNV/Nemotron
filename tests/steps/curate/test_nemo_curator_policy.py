@@ -44,6 +44,8 @@ CLEAN = 3
 SIGNAL = "unicode_alpha_numeric"
 SCORE_COLUMN = f"__{SIGNAL}"
 BASE_COLUMNS = {"id", "text"}
+POLICY_CORPUS_FINGERPRINT = "sha256:" + "d" * 64
+PROFILE_DIGEST = "sha256:" + "e" * 64
 
 
 # -- executable stubs ---------------------------------------------------------
@@ -133,12 +135,12 @@ def approved_policy(**overrides) -> dict:
     document = {
         "schema_version": policy_module.SCHEMA_VERSION,
         "approved": True,
-        "corpus": {"fingerprint": "sha256:deadbeef"},
+        "corpus": {"fingerprint": POLICY_CORPUS_FINGERPRINT},
         "signals_impl_version": signal_registry.IMPL_VERSION,
-        "profile_digest": "sha256:cafe",
+        "profile_digest": PROFILE_DIGEST,
         "approval": {
             "method": "manual",
-            "approver": "hndo@nvidia.com",
+            "approver": "reviewer@example.test",
             "date": "2026-08-25",
             "evidence": "retention curve reviewed against a 200-doc sample",
         },
@@ -233,9 +235,7 @@ def test_a_policy_with_no_approval_block_still_runs(step, tmp_path) -> None:
     del document["approval"]
     path = write_policy(tmp_path, document)
 
-    thresholds, _, _ = step.resolve_policy(
-        {"heuristic_filters": {"approved_policy": str(path)}}
-    )
+    thresholds, _, _ = step.resolve_policy({"heuristic_filters": {"approved_policy": str(path)}})
 
     assert thresholds, "thresholds are what make a policy executable"
 
@@ -260,6 +260,55 @@ def test_an_approved_policy_warns_about_nothing(step, tmp_path) -> None:
 
     assert warnings == []
     assert thresholds == [{"signal": SIGNAL, "max": 0.25}]
+
+
+def test_policy_is_bound_to_the_configured_input_corpus(step, tmp_path) -> None:
+    from nemotron.steps.curate.runtime import integrity
+
+    first = tmp_path / "first.jsonl"
+    second = tmp_path / "second.jsonl"
+    first.write_text('{"id":"1","text":"first corpus"}\n', encoding="utf-8")
+    second.write_text('{"id":"1","text":"different corpus"}\n', encoding="utf-8")
+    document = approved_policy(corpus={"fingerprint": integrity.corpus_fingerprint(str(first), "text", "id")})
+    path = write_policy(tmp_path, document)
+
+    with pytest.raises(ValueError, match="configured input fingerprints"):
+        step.resolve_policy(
+            {
+                "input_glob": str(second),
+                "text_field": "text",
+                "id_field": "id",
+                "heuristic_filters": {"approved_policy": str(path)},
+            }
+        )
+
+
+def test_resolved_policy_contents_participate_in_manifest_identity(step, tmp_path) -> None:
+    from nemotron.steps.curate.runtime import integrity, manifest
+
+    corpus = tmp_path / "input.jsonl"
+    corpus.write_text('{"id":"1","text":"same corpus"}\n', encoding="utf-8")
+    fingerprint = integrity.corpus_fingerprint(str(corpus), "text", "id")
+    path = write_policy(tmp_path, approved_policy(corpus={"fingerprint": fingerprint}))
+    cfg = {
+        "input_glob": str(corpus),
+        "text_field": "text",
+        "id_field": "id",
+        "heuristic_filters": {"approved_policy": str(path)},
+    }
+    first = step._resolve_policy(cfg)
+    first_hash = manifest.config_hash(step.manifest_config(cfg, first))
+
+    changed = approved_policy(
+        corpus={"fingerprint": fingerprint},
+        thresholds=[{"signal": SIGNAL, "max": 0.20}],
+    )
+    path.write_text(yaml.safe_dump(changed), encoding="utf-8")
+    second = step._resolve_policy(cfg)
+    second_hash = manifest.config_hash(step.manifest_config(cfg, second))
+
+    assert first.identity["policy_digest"] != second.identity["policy_digest"]
+    assert first_hash != second_hash
 
 
 def test_a_policy_from_another_langpack_is_refused(step, tmp_path) -> None:
@@ -378,9 +427,7 @@ def test_a_policy_naming_a_pack_signal_can_actually_be_executed(step) -> None:
     """The handover curate/profile -> curate/nemo_curator, end to end."""
     document = pack_policy()
 
-    stages = step.policy_stages(
-        document["thresholds"], "text", "annotate", document["langpack"]
-    )
+    stages = step.policy_stages(document["thresholds"], "text", "annotate", document["langpack"])
 
     assert len(stages) == 1
     assert stages[0].score_fn.score_document("của và những là một trong") > 0
@@ -394,11 +441,7 @@ def test_every_pack_backed_signal_in_the_registry_can_be_built(step) -> None:
     pack = langpack.load("vi")
     spec = {"language_tag": "vi", "content_hash": pack.content_hash}
     supported = [n for n in sorted(signal_registry.PACK_SIGNALS) if n in signal_registry.SIGNALS]
-    buildable = [
-        n
-        for n in supported
-        if set(signal_registry.SIGNALS[n].requires) <= set(pack.capabilities)
-    ]
+    buildable = [n for n in supported if set(signal_registry.SIGNALS[n].requires) <= set(pack.capabilities)]
 
     assert buildable, "the vi pack must back at least one registry signal"
     for name in buildable:
@@ -441,9 +484,7 @@ def test_a_pack_free_policy_never_loads_a_pack(step, monkeypatch) -> None:
 def test_resolve_policy_hands_the_pack_spec_to_the_caller(step, tmp_path) -> None:
     path = write_policy(tmp_path, pack_policy())
 
-    thresholds, spec, _ = step.resolve_policy(
-        {"heuristic_filters": {"approved_policy": str(path)}}
-    )
+    thresholds, spec, _ = step.resolve_policy({"heuristic_filters": {"approved_policy": str(path)}})
 
     assert thresholds[0]["signal"] == PACK_SIGNAL
     assert spec["language_tag"] == "vi"
@@ -486,6 +527,25 @@ def test_an_interval_signal_needs_both_bounds(step) -> None:
         step.policy_stages([{"signal": "word_count", "min": 50}], "text", "filter")
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), "0.5", True])
+def test_pipeline_refuses_non_finite_or_non_numeric_bounds(step, value) -> None:
+    with pytest.raises(ValueError, match="finite number"):
+        step.policy_stages(
+            [{"signal": SIGNAL, "max": value}],
+            "text",
+            "filter",
+        )
+
+
+def test_pipeline_refuses_inverted_interval_bounds(step) -> None:
+    with pytest.raises(ValueError, match="must not be greater"):
+        step.policy_stages(
+            [{"signal": "word_count", "min": 5000, "max": 50}],
+            "text",
+            "filter",
+        )
+
+
 def test_a_signal_with_no_bound_and_no_default_is_refused(step) -> None:
     with pytest.raises(ValueError, match="no shipped default"):
         step.policy_stages([{"signal": "token_count"}], "text", "filter", {"tokenizer": "m"})
@@ -508,9 +568,7 @@ def test_every_registry_signal_has_a_known_direction() -> None:
 def test_a_signal_needing_a_tokenizer_says_so_instead_of_failing_on_a_kwarg(step) -> None:
     """token_count is proposed by profile whenever models.tokenizer is set."""
     with pytest.raises(ValueError, match="needs a tokenizer"):
-        step.policy_stages(
-            [{"signal": "token_count", "min": 10, "max": 4096}], "text", "filter"
-        )
+        step.policy_stages([{"signal": "token_count", "min": 10, "max": 4096}], "text", "filter")
 
 
 def test_every_requirement_the_registry_declares_is_one_this_step_can_supply() -> None:
@@ -568,9 +626,7 @@ def test_a_policy_omitting_the_pack_hash_is_refused(step) -> None:
     declares no hash used to sail past both checks.
     """
     with pytest.raises(ValueError, match="declares no langpack.content_hash"):
-        step.policy_stages(
-            [{"signal": "stopword_ratio", "min": 0.1}], "text", "filter", {"language_tag": "vi"}
-        )
+        step.policy_stages([{"signal": "stopword_ratio", "min": 0.1}], "text", "filter", {"language_tag": "vi"})
 
 
 def test_resolve_policy_carries_the_config_tokenizer_and_pack_dir(step, tmp_path) -> None:

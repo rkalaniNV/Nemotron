@@ -184,8 +184,12 @@ def scan_shard(
 
                 report.row_count += 1
                 if source_field is not None:
-                    value = record.get(source_field)
-                    counts[str(value) if value is not None else "__missing__"] += 1
+                    if isinstance(record, dict):
+                        value = record.get(source_field)
+                        key = str(value) if value is not None else "__missing__"
+                    else:
+                        key = "__non_mapping__"
+                    counts[key] += 1
     except OSError as exc:
         report.readable = False
         report.error = f"unreadable: {exc}"
@@ -204,10 +208,7 @@ def scan_corpus(
     want_digest: bool = True,
 ) -> list[ShardReport]:
     """Scan every shard, in sorted path order so two runs agree."""
-    return [
-        scan_shard(p, source_field=source_field, want_digest=want_digest)
-        for p in sorted(str(x) for x in paths)
-    ]
+    return [scan_shard(p, source_field=source_field, want_digest=want_digest) for p in sorted(str(x) for x in paths)]
 
 
 def corpus_digest(reports: Sequence[ShardReport], *, root: str | Path | None = None) -> str:
@@ -324,9 +325,7 @@ def expand_inputs(pattern: str | list[str] | None) -> list[str]:
     return sorted({f for f in found if Path(f).is_file()})
 
 
-def corpus_fingerprint(
-    pattern: str | list[str] | None, text_field: str, id_field: str | None = None
-) -> str:
+def corpus_fingerprint(pattern: str | list[str] | None, text_field: str, id_field: str | None = None) -> str:
     """Order-independent fingerprint of a corpus's **contents**.
 
     Ties a filtering policy to the data its thresholds were measured on. The key
@@ -541,19 +540,13 @@ def containment(
     if sub.rows_keyed == 0:
         reasons.append("no target record could be keyed")
     if not sub.complete:
-        reasons.append(
-            f"{sub.rows_seen - sub.rows_keyed} of {sub.rows_seen} target rows could not be keyed"
-        )
+        reasons.append(f"{sub.rows_seen - sub.rows_keyed} of {sub.rows_seen} target rows could not be keyed")
     if not sup.complete:
-        reasons.append(
-            f"{sup.rows_seen - sup.rows_keyed} of {sup.rows_seen} reference rows could not be keyed"
-        )
+        reasons.append(f"{sup.rows_seen - sup.rows_keyed} of {sup.rows_seen} reference rows could not be keyed")
     if duplicate_ids == "reject":
         for side, keyed in (("target", sub), ("reference", sup)):
             if keyed.duplicate_keys:
-                reasons.append(
-                    f"{keyed.duplicate_keys} {side} key(s) repeat while duplicate_ids='reject'"
-                )
+                reasons.append(f"{keyed.duplicate_keys} {side} key(s) repeat while duplicate_ids='reject'")
 
     return {
         "comparison_fields": list(comparison_fields),

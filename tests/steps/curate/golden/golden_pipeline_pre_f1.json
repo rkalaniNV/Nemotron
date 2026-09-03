@@ -12,7 +12,13 @@
       "fields": [
         "text"
       ],
-      "file_paths": "<TMP>/in/*.jsonl"
+      "file_paths": [
+        "<TMP>/in/a.jsonl"
+      ],
+      "read_kwargs": {
+        "convert_dates": false,
+        "dtype": false
+      }
     },
     "stage": "JsonlReader"
   },

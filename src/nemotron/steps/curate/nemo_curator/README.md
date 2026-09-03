@@ -71,6 +71,8 @@ filters. In a project overlay, developers usually change:
 - `quality_filters`: set both `min_words` and `max_words` together when using
   word count.
 - `domains`, `models.hf_cache_dir`, and `ray.num_cpus`.
+- `domain_score_field`: optionally retain the complete class-probability vector
+  in model label order. This field is not a scalar confidence value.
 
 On small CPU Lepton runs, set `NEMOTRON_CURATOR_RAY_NUM_CPUS=4` through the
 env profile when the YAML does not include `ray.num_cpus`.

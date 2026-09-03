@@ -14,11 +14,15 @@ import yaml
 
 from nemotron.steps.curate.runtime import policy
 
+PROFILE_DIGEST = "sha256:" + "a" * 64
+CORPUS_FINGERPRINT = "sha256:" + "b" * 64
+LANGPACK_CONTENT_HASH = "sha256:" + "c" * 64
+
 
 def _candidates(**overrides):
     document = policy.build_candidate_policies(
         candidates=[{"signal": "word_count", "bands": []}],
-        profile_digest="sha256:abc",
+        profile_digest=PROFILE_DIGEST,
         signals_impl_version="curate-runtime-0.1.0",
         corpus={"glob": "./x/*.jsonl", "document_count": 10},
     )
@@ -30,9 +34,9 @@ def _approved(**overrides):
     document = {
         "schema_version": 1,
         "approved": True,
-        "corpus": {"fingerprint": "sha256:def", "document_count": 10, "source_field": "source"},
+        "corpus": {"fingerprint": CORPUS_FINGERPRINT, "document_count": 10, "source_field": "source"},
         "signals_impl_version": "curate-runtime-0.1.0",
-        "profile_digest": "sha256:abc",
+        "profile_digest": PROFILE_DIGEST,
         "approval": {
             "method": "manual",
             "approver": "someone",
@@ -106,12 +110,15 @@ def test_the_profiling_path_cannot_produce_an_approved_policy() -> None:
     import inspect as _inspect
 
     assert "approved" not in _inspect.signature(policy.build_candidate_policies).parameters
-    assert policy.build_candidate_policies(
-        candidates=[],
-        profile_digest="sha256:x",
-        signals_impl_version="v",
-        corpus={"fingerprint": "sha256:c"},
-    )["approved"] is False
+    assert (
+        policy.build_candidate_policies(
+            candidates=[],
+            profile_digest=PROFILE_DIGEST,
+            signals_impl_version="v",
+            corpus={"fingerprint": CORPUS_FINGERPRINT},
+        )["approved"]
+        is False
+    )
 
 
 def test_writing_a_policy_claiming_approval_is_refused(tmp_path) -> None:
@@ -129,7 +136,7 @@ def test_candidates_carry_the_caveat_in_the_file(tmp_path) -> None:
 
 
 def test_candidates_link_back_to_the_profile_they_came_from() -> None:
-    assert _candidates()["profile_digest"] == "sha256:abc"
+    assert _candidates()["profile_digest"] == PROFILE_DIGEST
 
 
 def test_the_digest_is_content_addressed() -> None:
@@ -201,6 +208,52 @@ def test_a_policy_must_name_the_corpus_it_was_derived_from() -> None:
     problems = policy.validate_approved_policy(_approved(corpus={"document_count": 10}))
 
     assert any("fingerprint" in p for p in problems)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("signals_impl_version", None),
+        ("signals_impl_version", ""),
+        ("profile_digest", None),
+        ("profile_digest", ""),
+    ],
+)
+def test_required_provenance_values_cannot_be_empty(field, value) -> None:
+    problems = policy.validate_approved_policy(_approved(**{field: value}))
+
+    assert any(field in problem for problem in problems)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"profile_digest": "sha256:abc"}, "profile_digest"),
+        ({"profile_digest": "sha256:" + "g" * 64}, "profile_digest"),
+        ({"corpus": {"fingerprint": "sha256:def"}}, "corpus.fingerprint"),
+    ],
+)
+def test_provenance_digests_must_be_full_sha256_values(overrides, expected) -> None:
+    problems = policy.validate_approved_policy(_approved(**overrides))
+
+    assert any(expected in problem for problem in problems)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), "0.5", True])
+def test_threshold_bounds_must_be_finite_numbers(value) -> None:
+    problems = policy.validate_approved_policy(
+        _approved(thresholds=[{"signal": "unicode_alpha_numeric", "max": value}])
+    )
+
+    assert any("finite number" in problem for problem in problems)
+
+
+def test_interval_bounds_cannot_be_inverted() -> None:
+    problems = policy.validate_approved_policy(
+        _approved(thresholds=[{"signal": "word_count", "min": 5000, "max": 50}])
+    )
+
+    assert any("greater than max" in problem for problem in problems)
 
 
 def test_a_non_mapping_is_rejected_without_raising() -> None:
@@ -296,10 +349,10 @@ def _candidate_with_bands(**overrides):
                 "note": "retention-stable range; not a recommendation",
             },
         ],
-        profile_digest="sha256:abc",
+        profile_digest=PROFILE_DIGEST,
         signals_impl_version="curate-runtime-0.1.0",
-        corpus={"glob": "./x/*.jsonl", "document_count": 10, "fingerprint": "sha256:corpus"},
-        langpack={"language_tag": "vi", "content_hash": "sha256:pack"},
+        corpus={"glob": "./x/*.jsonl", "document_count": 10, "fingerprint": CORPUS_FINGERPRINT},
+        langpack={"language_tag": "vi", "content_hash": LANGPACK_CONTENT_HASH},
     )
     document.update(overrides)
     return document
@@ -332,9 +385,9 @@ def test_promote_carries_provenance_forward() -> None:
         approval=APPROVAL,
     )
 
-    assert document["corpus"]["fingerprint"] == "sha256:corpus"
-    assert document["langpack"]["content_hash"] == "sha256:pack"
-    assert document["profile_digest"] == "sha256:abc"
+    assert document["corpus"]["fingerprint"] == CORPUS_FINGERPRINT
+    assert document["langpack"]["content_hash"] == LANGPACK_CONTENT_HASH
+    assert document["profile_digest"] == PROFILE_DIGEST
     assert document["signals_impl_version"] == "curate-runtime-0.1.0"
 
 
@@ -375,6 +428,24 @@ def test_promote_refuses_a_bound_that_would_invert_the_gate() -> None:
         policy.promote(
             _candidate_with_bands(),
             thresholds=[{"signal": "stopword_ratio", "max": 0.9}],
+            approval=APPROVAL,
+        )
+
+
+def test_promote_refuses_non_finite_and_inverted_thresholds() -> None:
+    with pytest.raises(policy.PolicyNotPromotableError, match="non-finite"):
+        policy.promote(
+            _candidate_with_bands(),
+            thresholds=[{"signal": "unicode_alpha_numeric", "max": float("nan")}],
+            approval=APPROVAL,
+        )
+
+    candidate = _candidate_with_bands()
+    candidate["candidates"].append({"signal": "word_count", "bands": []})
+    with pytest.raises(policy.PolicyNotPromotableError, match="greater than max"):
+        policy.promote(
+            candidate,
+            thresholds=[{"signal": "word_count", "min": 5000, "max": 50}],
             approval=APPROVAL,
         )
 

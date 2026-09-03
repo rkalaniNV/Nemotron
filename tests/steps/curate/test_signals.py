@@ -43,9 +43,7 @@ def ascii_ratio(text: str) -> float:
 def mn_only_ratio(text: str) -> float:
     """The natural fix when only Vietnamese is available to test against."""
     keep = set("\n?!,.")
-    kept = sum(
-        1 for c in text if ud.category(c)[0] in ("L", "N") or ud.category(c) == "Mn" or c in keep
-    )
+    kept = sum(1 for c in text if ud.category(c)[0] in ("L", "N") or ud.category(c) == "Mn" or c in keep)
     return (len(text) - kept) / len(text) if text else 1.0
 
 
@@ -106,9 +104,7 @@ def test_devanagari_marks_are_mostly_spacing_combining() -> None:
     """Why Mn alone is not enough, as a property of the script rather than a claim."""
     marks = [c for c in HI if ud.category(c).startswith("M")]
 
-    assert sum(1 for c in marks if ud.category(c) == "Mc") > sum(
-        1 for c in marks if ud.category(c) == "Mn"
-    )
+    assert sum(1 for c in marks if ud.category(c) == "Mc") > sum(1 for c in marks if ud.category(c) == "Mn")
 
 
 def test_d_bar_does_not_decompose_and_needs_the_pack(unicode_filter) -> None:
@@ -140,9 +136,7 @@ def test_treating_joiners_as_junk_would_reject_correct_hindi() -> None:
     joined = HI.replace("क", "क‍")
 
     without_exemption = sum(
-        1
-        for c in joined
-        if not (ud.category(c)[0] in ("L", "N", "M") or c in set("\n?!,."))
+        1 for c in joined if not (ud.category(c)[0] in ("L", "N", "M") or c in set("\n?!,."))
     ) / len(joined)
 
     assert without_exemption > CURATOR_DEFAULT, "if this stops holding the exemption is moot"

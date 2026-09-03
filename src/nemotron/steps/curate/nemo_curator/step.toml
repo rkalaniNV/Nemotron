@@ -93,7 +93,7 @@ default = false
 
 [[parameters]]
 name = "domain_score_field"
-description = "Column for the classifier's confidence in its own label. Absent reproduces Curator's default of recording only the argmax. Named, a later run can gate on how sure the model was rather than on the label alone."
+description = "Optional column for Curator's complete class-probability vector in model label order. It is not a scalar confidence. Absent reproduces Curator's default of recording only the argmax label."
 default = "null"
 
 [[parameters]]

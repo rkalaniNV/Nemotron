@@ -14,6 +14,11 @@ import sys
 import pytest
 
 from nemotron.steps.curate.runtime import registry as r
+from nemotron.steps.curate.runtime import signals
+
+
+def test_registry_and_local_scorers_publish_one_implementation_version() -> None:
+    assert r.IMPL_VERSION == signals.IMPL_VERSION
 
 
 def test_the_registry_imports_without_nemo_curator() -> None:
@@ -227,9 +232,7 @@ def test_excluded_filters_record_why() -> None:
 
 
 def test_no_excluded_filter_is_also_registered() -> None:
-    registered_classes = {
-        getattr(s.factory, "__name__", "").removeprefix("build_") for s in r.SIGNALS.values()
-    }
+    registered_classes = {getattr(s.factory, "__name__", "").removeprefix("build_") for s in r.SIGNALS.values()}
 
     assert not (set(r.EXCLUDED) & registered_classes)
 

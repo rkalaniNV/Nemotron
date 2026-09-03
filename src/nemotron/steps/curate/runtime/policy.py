@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,20 @@ APPROVAL_METHODS = ("manual", "ablation")
 
 class PolicyNotApprovedError(ValueError):
     """A policy was used for filtering while still marked unapproved."""
+
+
+def _sha256_digest(value: Any) -> bool:
+    payload = value.removeprefix("sha256:") if isinstance(value, str) else ""
+    return (
+        isinstance(value, str)
+        and value.startswith("sha256:")
+        and len(payload) == hashlib.sha256().digest_size * 2
+        and all(character in "0123456789abcdef" for character in payload.casefold())
+    )
+
+
+def _finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
 
 
 def digest(document: Mapping[str, Any]) -> str:
@@ -177,11 +192,19 @@ def promote(
 
     from nemotron.steps.curate.runtime import registry as signal_registry
 
-    profiled = {c.get("signal"): c for c in candidate.get("candidates") or [] if isinstance(c, dict)}
+    profiled: dict[str, dict[str, Any]] = {}
+    for profiled_candidate in candidate.get("candidates") or []:
+        if not isinstance(profiled_candidate, dict):
+            continue
+        profiled_name = profiled_candidate.get("signal")
+        if isinstance(profiled_name, str) and profiled_name:
+            profiled[profiled_name] = profiled_candidate
     warnings: list[str] = []
 
     for entry in thresholds:
         name = entry.get("signal")
+        if not isinstance(name, str) or not name:
+            raise PolicyNotPromotableError("each threshold must name a non-empty signal")
         if name not in profiled:
             raise PolicyNotPromotableError(
                 f"{name!r} was not profiled on this corpus (profiled: {sorted(profiled)}). "
@@ -190,6 +213,11 @@ def promote(
         signal = signal_registry.SIGNALS.get(name)
         bands = profiled[name].get("bands") or []
         chosen = [entry[k] for k in ("min", "max") if k in entry]
+        invalid = [value for value in chosen if not _finite_number(value)]
+        if invalid:
+            raise PolicyNotPromotableError(f"{name!r} has a non-finite or non-numeric threshold {invalid[0]!r}")
+        if "min" in entry and "max" in entry and entry["min"] > entry["max"]:
+            raise PolicyNotPromotableError(f"{name!r} has min {entry['min']!r} greater than max {entry['max']!r}")
         for value in chosen:
             if bands and not any(
                 b.get("threshold_low", float("-inf")) <= value <= b.get("threshold_high", float("inf"))
@@ -257,6 +285,14 @@ def validate_approved_policy(document: Any) -> list[str]:
     if document.get("approved") is not True:
         problems.append("approved must be true for a policy to be executable")
 
+    signals_impl_version = document.get("signals_impl_version")
+    if not isinstance(signals_impl_version, str) or not signals_impl_version.strip():
+        problems.append("signals_impl_version must be a non-empty string")
+
+    profile_digest = document.get("profile_digest")
+    if not _sha256_digest(profile_digest):
+        problems.append("profile_digest must be a sha256 digest")
+
     # approver / date / evidence are recorded when given and never required.
     # They say who decided and why, which is useful to a reader and worth
     # nothing to a machine — a name in a YAML file proves no more than an empty
@@ -284,6 +320,9 @@ def validate_approved_policy(document: Any) -> list[str]:
                 continue
 
             name = entry.get("signal")
+            if not isinstance(name, str) or not name:
+                problems.append(f"thresholds[{i}].signal must be a non-empty string")
+                continue
             signal = signal_registry.SIGNALS.get(name)
             if signal is None:
                 # Checked here and not only at execution: this function exists so
@@ -291,8 +330,7 @@ def validate_approved_policy(document: Any) -> list[str]:
                 # a name that validates cleanly then fails at pipeline
                 # construction makes that claim false.
                 problems.append(
-                    f"thresholds[{i}] names unknown signal {name!r}; "
-                    f"allowed: {sorted(signal_registry.SIGNALS)}"
+                    f"thresholds[{i}] names unknown signal {name!r}; allowed: {sorted(signal_registry.SIGNALS)}"
                 )
                 continue
 
@@ -300,13 +338,22 @@ def validate_approved_policy(document: Any) -> list[str]:
             if not present:
                 problems.append(f"thresholds[{i}] ({name}) sets neither min nor max")
                 continue
+            for bound in present:
+                if not _finite_number(entry[bound]):
+                    problems.append(f"thresholds[{i}] ({name}) {bound} must be a finite number, got {entry[bound]!r}")
+            if (
+                "min" in entry
+                and "max" in entry
+                and _finite_number(entry["min"])
+                and _finite_number(entry["max"])
+                and entry["min"] > entry["max"]
+            ):
+                problems.append(f"thresholds[{i}] ({name}) min must not be greater than max")
 
             # Direction, not merely presence. A `max` bound on a min-direction
             # signal is a valid-looking document that inverts the gate, keeping
             # exactly the documents the policy meant to drop.
-            expected = {"min": ["min"], "max": ["max"], "interval": ["min", "max"]}.get(
-                signal.direction, []
-            )
+            expected = {"min": ["min"], "max": ["max"], "interval": ["min", "max"]}.get(signal.direction, [])
             wrong = [b for b in present if b not in expected]
             if wrong:
                 problems.append(
@@ -322,8 +369,12 @@ def validate_approved_policy(document: Any) -> list[str]:
                 )
 
     corpus = document.get("corpus")
-    if isinstance(corpus, dict) and not corpus.get("fingerprint"):
-        problems.append("corpus.fingerprint is required so the policy can be tied to the data it was derived from")
+    if not isinstance(corpus, dict):
+        problems.append("corpus must be a mapping")
+    elif not _sha256_digest(corpus.get("fingerprint")):
+        problems.append(
+            "corpus.fingerprint must be a sha256 digest so the policy can be tied to the data it was derived from"
+        )
 
     return problems
 

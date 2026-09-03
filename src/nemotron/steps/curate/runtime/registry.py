@@ -34,7 +34,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-IMPL_VERSION = "curate-runtime-0.1.0"
+IMPL_VERSION = "curate-runtime-0.2.0"
 
 Direction = Literal["min", "max", "interval", "categorical"]
 
@@ -118,9 +118,7 @@ class Signal:
         object, say — which cannot live in a module-level table.
         """
         if len(thresholds) != len(self.threshold_params):
-            raise ValueError(
-                f"{self.name} takes {len(self.threshold_params)} threshold(s), got {len(thresholds)}"
-            )
+            raise ValueError(f"{self.name} takes {len(self.threshold_params)} threshold(s), got {len(thresholds)}")
         kwargs = dict(zip(self.threshold_params, thresholds))
         kwargs.update(self.extra_kwargs)
         kwargs.update(overrides)
@@ -476,12 +474,9 @@ PACK_SIGNALS = frozenset(
 #: is visible to the next person rather than looking like an oversight.
 EXCLUDED: dict[str, str] = {
     "CommonEnglishWordsFilter": (
-        "hardcodes eight English function words and get_word_splitter('en'); it reports "
-        "nothing on other languages"
+        "hardcodes eight English function words and get_word_splitter('en'); it reports nothing on other languages"
     ),
-    "BoilerPlateStringFilter": (
-        "policy_substrings are English cookie/privacy phrases; it matches nothing elsewhere"
-    ),
+    "BoilerPlateStringFilter": ("policy_substrings are English cookie/privacy phrases; it matches nothing elsewhere"),
     "RepeatedLinesFilter": (
         "keep_document is `score >= cutoff` while the parameter is named "
         "max_repeated_line_fraction. Until that is resolved upstream the direction cannot be "
@@ -502,8 +497,7 @@ EXCLUDED: dict[str, str] = {
         "is meaningless; it also downloads a histogram at construction time"
     ),
     "FastTextQualityFilter": (
-        "keep_document draws from a Pareto distribution, so retention is not a function "
-        "of the threshold"
+        "keep_document draws from a Pareto distribution, so retention is not a function of the threshold"
     ),
     "PornographicUrlsFilter": "binary, not a swept threshold",
     "SubstringFilter": "binary, and its parameter is a substring rather than a threshold",

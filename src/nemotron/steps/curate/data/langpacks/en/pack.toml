@@ -9,13 +9,13 @@
 [pack]
 pack_id      = "en-generic"
 language_tag = "en"
-version      = "1.0"
+version      = "1.1"
 schema       = 1
 
 [sources]
 stopwords = { file = "stopwords.txt", n = 110, origin = "assembled for C4-en transfer validation", license = "CC0-1.0" }
-charset = { file = "charset.txt", script = "Latn", note = "unmarked Latin a-zA-Z" }
-boilerplate = { file = "boilerplate.txt", n = 12, origin = "observed on English news and forum crawls" }
+charset = { file = "charset.txt", script = "Latn", note = "unmarked Latin a-zA-Z", origin = "Unicode Standard Latin repertoire curated for English", license = "Unicode-3.0" }
+boilerplate = { file = "boilerplate.txt", n = 12, origin = "observed on English news and forum crawls", license = "Apache-2.0" }
 
 [orthography]
 sentence_terminators = [".", "!", "?"]

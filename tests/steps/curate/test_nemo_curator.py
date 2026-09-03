@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
-import pytest
 import tomllib
+
+import pytest
 import yaml
 
 from .._step_helpers import assert_step_static, step_dir
@@ -87,10 +88,16 @@ def _stub_curator(monkeypatch):
     import types
 
     for name in (
-        "nemo_curator", "nemo_curator.core", "nemo_curator.core.client",
-        "nemo_curator.pipeline", "nemo_curator.stages", "nemo_curator.stages.text",
-        "nemo_curator.stages.text.io", "nemo_curator.stages.text.io.reader",
-        "nemo_curator.stages.text.io.writer", "huggingface_hub",
+        "nemo_curator",
+        "nemo_curator.core",
+        "nemo_curator.core.client",
+        "nemo_curator.pipeline",
+        "nemo_curator.stages",
+        "nemo_curator.stages.text",
+        "nemo_curator.stages.text.io",
+        "nemo_curator.stages.text.io.reader",
+        "nemo_curator.stages.text.io.writer",
+        "huggingface_hub",
     ):
         monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
     sys.modules["nemo_curator.core.client"].RayClient = object
@@ -208,9 +215,7 @@ def test_a_breakdown_that_does_not_reconcile_is_discarded(tmp_path, monkeypatch)
 def test_removals_are_the_difference_between_consecutive_stages(monkeypatch) -> None:
     step = _stub_curator(monkeypatch)
 
-    assert step.attribute_removals(
-        ["a", "b", "c"], {"a": 100, "b": 90, "c": 85}, 15
-    ) == {"a": 10, "b": 5}
+    assert step.attribute_removals(["a", "b", "c"], {"a": 100, "b": 90, "c": 85}, 15) == {"a": 10, "b": 5}
 
 
 def test_a_stage_that_removed_nothing_is_not_named(monkeypatch) -> None:
@@ -231,6 +236,23 @@ def test_composite_stage_names_are_matched_by_prefix(monkeypatch) -> None:
     )
 
     assert result == {"jsonl_reader": 4}
+
+
+def test_overlapping_stage_prefixes_are_matched_to_the_most_specific_name(monkeypatch) -> None:
+    step = _stub_curator(monkeypatch)
+
+    result = step.attribute_removals(
+        ["reader", "stopword_ratio", "stopword_ratio_folded", "writer"],
+        {
+            "reader": 100,
+            "stopword_ratio_folded_worker": 80,
+            "stopword_ratio_worker": 90,
+            "writer": 80,
+        },
+        20,
+    )
+
+    assert result == {"reader": 10, "stopword_ratio": 10}
 
 
 def test_one_stage_cannot_be_differenced(monkeypatch) -> None:
@@ -270,7 +292,11 @@ def test_an_incomplete_run_still_writes_its_ledger(tmp_path, monkeypatch) -> Non
     step.emit_ledger(_corpus(tmp_path, 100, 3), str(path), completed=False)
 
     assert path.is_file()
-    assert ledger_module.load_ledger(path).notes["completed"] is False
+    loaded = ledger_module.load_ledger(path)
+    assert loaded.notes["completed"] is False
+    assert loaded.n_filtered == 0
+    assert loaded.n_failed == 97
+    assert loaded.failed_units
 
 
 def test_emit_ledger_is_documented_and_defaults_to_off() -> None:
@@ -295,9 +321,86 @@ def test_emit_ledger_is_documented_and_defaults_to_off() -> None:
 def test_the_langid_fallback_matches_curator(monkeypatch) -> None:
     step = _stub_curator(monkeypatch)
 
-    assert step.DEFAULT_LANGID_SCORE == 0.3, (
-        "a fallback below Curator's own default silently weakens the gate"
+    assert step.DEFAULT_LANGID_SCORE == 0.3, "a fallback below Curator's own default silently weakens the gate"
+
+
+def test_a_zero_input_glob_is_refused_before_ray_starts(tmp_path, monkeypatch) -> None:
+    step = _stub_curator(monkeypatch)
+    cfg = {
+        "input_glob": str(tmp_path / "missing" / "*.jsonl"),
+        "output_dir": str(tmp_path / "out"),
+        "text_field": "text",
+    }
+
+    with pytest.raises(ValueError, match="matched no"):
+        step.run(cfg)
+
+
+def test_a_new_attempt_removes_stale_success_artifacts(tmp_path, monkeypatch) -> None:
+    step = _stub_curator(monkeypatch)
+    manifest_path = tmp_path / "run_manifest.json"
+    ledger_path = tmp_path / "curation_ledger.json"
+    manifest_path.write_text('{"producer":{"completed_at":"old"}}', encoding="utf-8")
+    ledger_path.write_text('{"notes":{"completed":true}}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="mode must be"):
+        step.run(
+            {
+                "mode": "invalid",
+                "emit_manifest": str(manifest_path),
+                "emit_ledger": str(ledger_path),
+            }
+        )
+
+    assert not manifest_path.exists()
+    assert not ledger_path.exists()
+
+
+def test_manifest_and_ledger_cannot_share_an_artifact_path(tmp_path, monkeypatch) -> None:
+    step = _stub_curator(monkeypatch)
+    artifact_path = tmp_path / "run_artifact.json"
+    artifact_path.write_text('{"old":"artifact"}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must use different paths"):
+        step.run(
+            {
+                "emit_manifest": str(artifact_path),
+                "emit_ledger": str(artifact_path),
+            }
+        )
+
+    assert artifact_path.read_text(encoding="utf-8") == '{"old":"artifact"}\n'
+
+
+def test_input_accounting_uses_only_reader_supported_extensions(tmp_path, monkeypatch) -> None:
+    step = _stub_curator(monkeypatch)
+    (tmp_path / "accepted.jsonl").write_text('{"text":"kept"}\n', encoding="utf-8")
+    (tmp_path / "ignored.txt").write_text('{"text":"not read"}\n', encoding="utf-8")
+
+    assert [path.rsplit("/", 1)[-1] for path in step.resolve_inputs(str(tmp_path / "*"))] == ["accepted.jsonl"]
+
+
+def test_real_jsonl_reader_preserves_string_ids_and_mixed_metadata(tmp_path) -> None:
+    reader_module = pytest.importorskip("nemo_curator.stages.text.io.reader.jsonl")
+    path = tmp_path / "input.jsonl"
+    path.write_text(
+        '{"id":"001","mixed":"01","text":"first"}\n{"id":"1","mixed":2,"text":"second"}\n',
+        encoding="utf-8",
     )
+
+    stage = reader_module.JsonlReaderStage(
+        fields=["id", "mixed", "text"],
+        read_kwargs={"dtype": False, "convert_dates": False},
+    )
+    records = stage.read_data(
+        [str(path)],
+        read_kwargs=stage.read_kwargs,
+        fields=stage.fields,
+    ).to_dict(orient="records")
+
+    assert records[0]["id"] == "001"
+    assert records[1]["id"] == "1"
+    assert records[0]["mixed"] == "01"
 
 
 def test_writing_into_a_directory_that_already_has_output_is_refused(tmp_path, monkeypatch) -> None:
@@ -333,9 +436,7 @@ def test_the_language_gates_are_named_apart() -> None:
     assert 'language_stage.name = "language_code"' in source, (
         "Curator resets Filter.name in __post_init__, so it must be set afterwards"
     )
-    assert "filter_fn=language_code" in source, (
-        "the callable itself should also be named, not a lambda"
-    )
+    assert "filter_fn=language_code" in source, "the callable itself should also be named, not a lambda"
 
 
 def test_the_domain_classifier_must_not_truncate_the_corpus() -> None:
@@ -355,6 +456,34 @@ def test_the_domain_classifier_must_not_truncate_the_corpus() -> None:
     assert '"max_chars"' in source or "max_chars=" in source, (
         "max_chars must be named explicitly; its default rewrites the corpus"
     )
-    assert "DOMAIN_MAX_CHARS" in source, (
-        "the value deserves a named constant carrying why it is what it is"
-    )
+    assert "DOMAIN_MAX_CHARS" in source, "the value deserves a named constant carrying why it is what it is"
+
+
+def test_domain_score_field_is_documented_as_a_probability_vector() -> None:
+    with (STEP_DIR / "step.toml").open("rb") as handle:
+        manifest = tomllib.load(handle)
+
+    description = {parameter["name"]: parameter["description"] for parameter in manifest["parameters"]}[
+        "domain_score_field"
+    ]
+    assert "vector" in description
+    assert "not a scalar" in description
+
+
+def test_curate_extra_installs_a_locked_text_runtime() -> None:
+    root = STEP_DIR.parents[4]
+    with (root / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)
+
+    curate = project["project"]["optional-dependencies"]["curate"]
+    assert any("nemo-curator[text_cpu]==1.3.0" in requirement for requirement in curate)
+    runtime = project["tool"]["nemotron"]["runtime"]["curate"]
+    assert "nemo-curator" not in runtime.get("omit-packages", [])
+
+
+def test_project_python_floor_matches_the_curate_runtime() -> None:
+    root = STEP_DIR.parents[4]
+    with (root / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)
+
+    assert project["project"]["requires-python"].startswith(">=3.11")

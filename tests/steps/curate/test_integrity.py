@@ -89,6 +89,15 @@ def test_per_source_counts_only_when_asked(tmp_path) -> None:
     assert integrity.scan_shard(shard, source_field="source").per_source == {"news": 1, "wiki": 2}
 
 
+def test_a_json_scalar_does_not_crash_source_accounting(tmp_path) -> None:
+    shard = write(tmp_path / "a.jsonl", "42", '["not", "an", "object"]', '{"source":"wiki"}')
+
+    report = integrity.scan_shard(shard, source_field="source")
+
+    assert report.row_count == 3
+    assert report.per_source == {"__non_mapping__": 2, "wiki": 1}
+
+
 # -- corpus digest ------------------------------------------------------------
 
 
@@ -132,9 +141,9 @@ def test_digest_survives_moving_the_corpus_when_a_root_is_given(tmp_path) -> Non
     write(one / "a.jsonl", '{"id":"1"}')
     write(two / "a.jsonl", '{"id":"1"}')
 
-    assert integrity.corpus_digest(
-        integrity.scan_corpus([one / "a.jsonl"]), root=one
-    ) == integrity.corpus_digest(integrity.scan_corpus([two / "a.jsonl"]), root=two)
+    assert integrity.corpus_digest(integrity.scan_corpus([one / "a.jsonl"]), root=one) == integrity.corpus_digest(
+        integrity.scan_corpus([two / "a.jsonl"]), root=two
+    )
 
 
 # -- summary ------------------------------------------------------------------

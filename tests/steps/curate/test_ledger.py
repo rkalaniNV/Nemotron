@@ -218,6 +218,36 @@ def test_invalid_json_is_refused(tmp_path) -> None:
         ledger.load_ledger(path)
 
 
+def test_an_unsupported_schema_version_is_refused(tmp_path) -> None:
+    path = balanced().write(tmp_path / "ledger.json")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = 999
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ledger.LedgerInvalidError, match="schema_version"):
+        ledger.load_ledger(path)
+
+
+def test_malformed_terminal_state_data_is_refused(tmp_path) -> None:
+    path = balanced().write(tmp_path / "ledger.json")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["failed_units"] = [{"unit": "part-0", "reason": "failed", "records": -1}]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ledger.LedgerInvalidError, match="records"):
+        ledger.load_ledger(path)
+
+
+def test_serialized_totals_must_match_terminal_state_records(tmp_path) -> None:
+    path = balanced().write(tmp_path / "ledger.json")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["n_filtered"] += 1
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ledger.LedgerInvalidError, match="n_filtered"):
+        ledger.load_ledger(path)
+
+
 # -- attribution --------------------------------------------------------------
 
 

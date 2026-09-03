@@ -35,13 +35,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+import tomllib
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 SCHEMA_VERSION = 1
 
@@ -124,9 +123,7 @@ class LanguagePack:
         """
         for source, target in self.fold_map.items():
             text = text.replace(source, target)
-        return "".join(
-            ch for ch in unicodedata.normalize("NFD", text) if not unicodedata.combining(ch)
-        )
+        return "".join(ch for ch in unicodedata.normalize("NFD", text) if not unicodedata.combining(ch))
 
     def folded_stopwords(self) -> frozenset[str]:
         """The stopword list with marks removed, for un-marked text.
@@ -142,7 +139,7 @@ def _read_lines(path: Path) -> list[str]:
     if not path.is_file():
         raise LanguagePackInvalidError(f"pack file is missing: {path}")
     return [
-        line.strip()
+        unicodedata.normalize("NFC", line.strip())
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
@@ -193,13 +190,27 @@ def load_pack(directory: str | Path) -> LanguagePack:
     capabilities = frozenset(declared)
 
     sources = raw.get("sources") or {}
+    if not isinstance(sources, dict):
+        raise LanguagePackInvalidError(f"{manifest_path}: sources must be a mapping")
+    for name, entry in sources.items():
+        if not isinstance(entry, dict):
+            raise LanguagePackInvalidError(f"{manifest_path}: sources.{name} must be a mapping")
+        for field_name in ("file", "origin", "license"):
+            if not isinstance(entry.get(field_name), str) or not entry[field_name].strip():
+                raise LanguagePackInvalidError(f"{manifest_path}: sources.{name}.{field_name} is required")
     files = [manifest_path]
 
     def _load(name: str) -> list[str]:
         entry = sources.get(name)
         if not entry:
             return []
-        path = root / entry["file"]
+        path = (root / entry["file"]).resolve()
+        try:
+            path.relative_to(root.resolve())
+        except ValueError as exc:
+            raise LanguagePackInvalidError(
+                f"{manifest_path}: sources.{name}.file must stay inside the pack directory"
+            ) from exc
         files.append(path)
         return _read_lines(path)
 
@@ -214,9 +225,21 @@ def load_pack(directory: str | Path) -> LanguagePack:
         except re.error as exc:
             raise LanguagePackInvalidError(f"{root}: boilerplate pattern {pattern!r} does not compile: {exc}") from exc
 
-    fold_map = {str(k): str(v) for k, v in (raw.get("fold_map") or {}).items()}
+    raw_fold_map = raw.get("fold_map") or {}
+    if not isinstance(raw_fold_map, dict):
+        raise LanguagePackInvalidError(f"{manifest_path}: fold_map must be a mapping")
+    fold_map = {
+        unicodedata.normalize("NFC", str(key)): unicodedata.normalize("NFC", str(value))
+        for key, value in raw_fold_map.items()
+    }
+    for source, target in fold_map.items():
+        if len(source) != 1 or not target or source == target:
+            raise LanguagePackInvalidError(
+                f"{manifest_path}: fold_map entries must map one character to different text"
+            )
     terminators = tuple(
-        (raw.get("orthography") or {}).get("sentence_terminators") or DEFAULT_SENTENCE_TERMINATORS
+        unicodedata.normalize("NFC", str(value))
+        for value in ((raw.get("orthography") or {}).get("sentence_terminators") or DEFAULT_SENTENCE_TERMINATORS)
     )
 
     loaded = LanguagePack(
@@ -244,7 +267,7 @@ def load_pack(directory: str | Path) -> LanguagePack:
 #: an error, which is the failure mode this check exists to prevent.
 CAPABILITY_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "script_ratio": ("charset",),
-    "diacritic_ratio": ("charset",),
+    "diacritic_ratio": ("charset", "fold_map"),
     "stopword_ratio": ("stopwords",),
     "stopword_ratio_folded": ("stopwords", "fold_map"),
     "boilerplate_hits": ("boilerplate",),
@@ -266,7 +289,7 @@ def _assert_capabilities_are_backed(pack: LanguagePack, manifest_path: Path) -> 
 
 def resolve_dir(langpack_dir: str | Path | None) -> Path:
     """Where to look for packs. ``'bundled'`` means the ones that ship here."""
-    if langpack_dir in (None, "", BUNDLED):
+    if langpack_dir is None or langpack_dir == "" or langpack_dir == BUNDLED:
         return BUNDLED_DIR
     return Path(langpack_dir)
 

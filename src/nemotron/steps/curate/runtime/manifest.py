@@ -29,11 +29,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from collections import Counter
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 SCHEMA_VERSION = 1
 
@@ -50,7 +51,7 @@ ATTRIBUTION_DECLARED = "declared"
 
 def utc_now() -> str:
     """Timestamp in RFC 3339 UTC, seconds resolution."""
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def canonical_json(obj: Any) -> str:
@@ -79,6 +80,10 @@ def json_safe(obj: Any) -> Any:
     return obj
 
 
+def _nonnegative_int(value: Any) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def config_hash(config: dict[str, Any]) -> str:
     """Content hash of a resolved config, prefixed with its algorithm."""
     digest = hashlib.sha256(canonical_json(config).encode("utf-8")).hexdigest()
@@ -94,12 +99,58 @@ def tool_revision() -> str:
     injected = os.environ.get("NEMOTRON_TOOL_REVISION")
     if injected:
         return injected
+    source = Path(__file__).resolve()
+    for parent in source.parents:
+        if not (parent / ".git").exists():
+            continue
+        try:
+            revision = subprocess.run(
+                ["git", "-C", str(parent), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            dirty = subprocess.run(
+                ["git", "-C", str(parent), "status", "--porcelain", "--untracked-files=no"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            return f"git:{revision}{'+dirty' if dirty else ''}"
+        except (OSError, subprocess.SubprocessError):
+            break
     try:
         from importlib.metadata import version
 
         return f"nemotron {version('nemotron')}"
     except Exception:  # noqa: BLE001 - version lookup must never fail a run
         return "unknown"
+
+
+def runtime_dependencies() -> dict[str, dict[str, str]]:
+    """Installed runtime identities that can change pipeline behavior."""
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import distribution as installed_distribution
+
+    found: dict[str, dict[str, str]] = {}
+    for name in ("nemo-curator", "nemo-run"):
+        try:
+            installed = installed_distribution(name)
+        except PackageNotFoundError:
+            continue
+        identity = {"version": installed.version}
+        try:
+            direct_url = json.loads(installed.read_text("direct_url.json") or "null")
+        except (json.JSONDecodeError, OSError):
+            direct_url = None
+        if isinstance(direct_url, dict):
+            vcs_info = direct_url.get("vcs_info")
+            if isinstance(vcs_info, dict) and isinstance(vcs_info.get("commit_id"), str):
+                identity["commit_id"] = vcs_info["commit_id"]
+            if isinstance(direct_url.get("url"), str):
+                identity["source_url"] = direct_url["url"]
+        found[name] = identity
+    return found
 
 
 def count_jsonl(paths: Iterable[str | Path], source_field: str | None = None) -> dict[str, Any]:
@@ -143,7 +194,7 @@ def build_manifest(
     step_id: str,
     config: dict[str, Any],
     started_at: str,
-    input_glob: str,
+    input_glob: str | list[str],
     input_counts: dict[str, Any],
     output_counts: dict[str, Any],
     id_field: str | None = None,
@@ -178,6 +229,9 @@ def build_manifest(
         "config_hash": config_hash(config),
         "started_at": started_at,
     }
+    dependencies = runtime_dependencies()
+    if dependencies:
+        producer["runtime_dependencies"] = dependencies
     if completed_at is not None:
         producer["completed_at"] = completed_at
 
@@ -234,6 +288,15 @@ def validate_manifest(manifest: Any) -> list[str]:
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 problems.append(f"{block}.{key} must be a non-negative integer, got {value!r}")
 
+    input_section = manifest.get("input")
+    output_section = manifest.get("output")
+    if isinstance(input_section, dict) and isinstance(output_section, dict):
+        input_rows = input_section.get("row_count")
+        output_rows = output_section.get("row_count")
+        if _nonnegative_int(input_rows) and _nonnegative_int(output_rows):
+            if output_rows > input_rows:
+                problems.append(f"output.row_count must not exceed input.row_count, got {output_rows} > {input_rows}")
+
     declared = manifest.get("declared")
     if not isinstance(declared, dict):
         problems.append("declared block is missing or not a mapping")
@@ -276,6 +339,6 @@ def write_manifest(path: str | Path, manifest: dict[str, Any]) -> Path:
     return destination
 
 
-def read_manifest(path: str | Path) -> dict[str, Any]:
+def read_manifest(path: str | Path) -> Any:
     """Read a manifest without validating it, so an auditor can report on a bad one."""
     return json.loads(Path(path).read_text(encoding="utf-8"))

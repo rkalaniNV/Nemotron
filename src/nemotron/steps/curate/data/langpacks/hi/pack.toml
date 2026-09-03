@@ -10,13 +10,13 @@
 [pack]
 pack_id      = "hi-generic"
 language_tag = "hi"
-version      = "1.0"
+version      = "1.1"
 schema       = 1
 
 [sources]
 stopwords = { file = "stopwords.txt", n = 89, origin = "assembled for cross-script transfer validation", license = "CC0-1.0" }
-charset = { file = "charset.txt", script = "Deva", note = "letters, matras (Mn and Mc) and Devanagari digits" }
-boilerplate = { file = "boilerplate.txt", n = 12, origin = "observed on Hindi news sites" }
+charset = { file = "charset.txt", script = "Deva", note = "letters, matras (Mn and Mc) and Devanagari digits", origin = "Unicode Standard Devanagari repertoire curated for Hindi", license = "Unicode-3.0" }
+boilerplate = { file = "boilerplate.txt", n = 12, origin = "observed on Hindi news sites", license = "Apache-2.0" }
 
 # The danda U+0964 is the sentence terminator. Curator's PunctuationFilter looks
 # for '.', '!' and '?' only, so a correct Hindi paragraph scores zero against it.

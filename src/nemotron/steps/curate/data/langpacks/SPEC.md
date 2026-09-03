@@ -31,8 +31,8 @@ schema       = 1
 
 [sources]
 stopwords   = { file = "stopwords.txt",   n = 287, origin = "…", license = "…" }
-charset     = { file = "charset.txt",     script = "Latn" }
-boilerplate = { file = "boilerplate.txt", n = 31,  origin = "…" }
+charset     = { file = "charset.txt",     script = "Latn", origin = "…", license = "…" }
+boilerplate = { file = "boilerplate.txt", n = 31,  origin = "…", license = "…" }
 
 [orthography]
 sentence_terminators = [".", "!", "?"]
@@ -63,6 +63,9 @@ Declaring a capability without the data behind it is rejected at load. It would
 otherwise fill a report with zeroes, which reads as a finding about the corpus
 rather than a hole in the pack.
 
+Every source entry must record both `origin` and `license`. The loader rejects
+an asset whose provenance is absent, even when the file itself is present.
+
 **Do not declare a capability that does not apply to your language.** Vietnamese
 tone marks strip to degraded but readable text, so a diacritic ratio measures
 something real. Devanagari matras are obligatory vowels; stripping them yields
@@ -83,6 +86,9 @@ of the language, not a defect in your word list.
 
 Every character that counts as this language's own script, including marked
 forms. If you list only base letters, correct text scores as foreign.
+
+Text resources and fold-map entries are normalized to NFC when loaded, matching
+the normalization used before signal scoring.
 
 For an abugida, include the matras — and note that they split across Unicode
 categories `Mn` (nonspacing) and `Mc` (spacing combining). Omitting `Mc` is the

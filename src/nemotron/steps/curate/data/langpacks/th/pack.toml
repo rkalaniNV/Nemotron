@@ -7,13 +7,13 @@
 [pack]
 pack_id      = "th-generic"
 language_tag = "th"
-version      = "1.0"
+version      = "1.1"
 schema       = 1
 
 [sources]
 stopwords = { file = "stopwords.txt", n = 38, origin = "assembled for C4-th transfer validation", license = "CC0-1.0" }
-charset = { file = "charset.txt", script = "Thai", note = "Thai block including tone marks (Mn) and vowel signs (Mc)" }
-boilerplate = { file = "boilerplate.txt", n = 8, origin = "observed on Thai news and forum crawls" }
+charset = { file = "charset.txt", script = "Thai", note = "Thai block including tone marks (Mn) and vowel signs (Mc)", origin = "Unicode Standard Thai repertoire curated for Thai", license = "Unicode-3.0" }
+boilerplate = { file = "boilerplate.txt", n = 8, origin = "observed on Thai news and forum crawls", license = "Apache-2.0" }
 
 [orthography]
 sentence_terminators = [".", "!", "?", "ฯ"]

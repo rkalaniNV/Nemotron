@@ -42,7 +42,7 @@ import json
 import os
 from collections import Counter
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +53,7 @@ SCHEMA_VERSION = 1
 MAX_REPORTED_UNITS = 10
 
 
-class TerminalState(str, Enum):
+class TerminalState(StrEnum):
     """The only four ways a record may leave a stage."""
 
     SUCCESS = "success"
@@ -108,15 +108,11 @@ class StageLedger:
 
     def add_failed(self, unit: str, reason: str, n_records: int) -> None:
         """A unit — shard, source, batch — that could not be processed at all."""
-        self.failed_units.append(
-            {"unit": str(unit), "reason": str(reason), "records": int(n_records)}
-        )
+        self.failed_units.append({"unit": str(unit), "reason": str(reason), "records": int(n_records)})
 
     def add_quarantined(self, unit: str, reason: str, n_records: int) -> None:
         """A unit set aside for inspection: unreadable input, bad schema, ..."""
-        self.quarantined_units.append(
-            {"unit": str(unit), "reason": str(reason), "records": int(n_records)}
-        )
+        self.quarantined_units.append({"unit": str(unit), "reason": str(reason), "records": int(n_records)})
 
     # -- derived --------------------------------------------------------------
 
@@ -232,6 +228,10 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def load_ledger(path: os.PathLike[str] | str) -> StageLedger:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -239,14 +239,68 @@ def load_ledger(path: os.PathLike[str] | str) -> StageLedger:
         raise LedgerInvalidError(f"{path}: not valid JSON ({exc})") from exc
     if not isinstance(data, dict) or "stage" not in data:
         raise LedgerInvalidError(f"{path}: not a ledger — no 'stage' field")
+    if data.get("schema_version") != SCHEMA_VERSION:
+        raise LedgerInvalidError(
+            f"{path}: schema_version must be {SCHEMA_VERSION}, got {data.get('schema_version')!r}"
+        )
+    if not isinstance(data["stage"], str) or not data["stage"]:
+        raise LedgerInvalidError(f"{path}: stage must be a non-empty string")
+    if not isinstance(data.get("source", ""), str):
+        raise LedgerInvalidError(f"{path}: source must be a string")
+
+    for field_name in ("n_input", "n_success"):
+        if not _is_count(data.get(field_name)):
+            raise LedgerInvalidError(
+                f"{path}: {field_name} must be a non-negative integer, got {data.get(field_name)!r}"
+            )
+
+    filtered = data.get("filtered_by_reason")
+    if not isinstance(filtered, dict) or any(
+        not isinstance(reason, str) or not reason or not _is_count(count) for reason, count in filtered.items()
+    ):
+        raise LedgerInvalidError(f"{path}: filtered_by_reason must map non-empty strings to non-negative integers")
+
+    units_by_state: dict[str, list[dict[str, Any]]] = {}
+    for field_name in ("failed_units", "quarantined_units"):
+        units = data.get(field_name)
+        if not isinstance(units, list):
+            raise LedgerInvalidError(f"{path}: {field_name} must be a list")
+        for index, unit in enumerate(units):
+            if not isinstance(unit, dict):
+                raise LedgerInvalidError(f"{path}: {field_name}[{index}] must be a mapping")
+            if not isinstance(unit.get("unit"), str) or not unit["unit"]:
+                raise LedgerInvalidError(f"{path}: {field_name}[{index}].unit must be a non-empty string")
+            if not isinstance(unit.get("reason"), str) or not unit["reason"]:
+                raise LedgerInvalidError(f"{path}: {field_name}[{index}].reason must be a non-empty string")
+            if not _is_count(unit.get("records")):
+                raise LedgerInvalidError(f"{path}: {field_name}[{index}].records must be a non-negative integer")
+        units_by_state[field_name] = units
+
+    notes = data.get("notes")
+    if not isinstance(notes, dict):
+        raise LedgerInvalidError(f"{path}: notes must be a mapping")
 
     ledger = StageLedger(stage=data["stage"], source=data.get("source", ""))
-    ledger.n_input = int(data.get("n_input", 0))
-    ledger.n_success = int(data.get("n_success", 0))
-    ledger.filtered = Counter(data.get("filtered_by_reason") or {})
-    ledger.failed_units = list(data.get("failed_units") or [])
-    ledger.quarantined_units = list(data.get("quarantined_units") or [])
-    ledger.notes = dict(data.get("notes") or {})
+    ledger.n_input = data["n_input"]
+    ledger.n_success = data["n_success"]
+    ledger.filtered = Counter(filtered)
+    ledger.failed_units = units_by_state["failed_units"]
+    ledger.quarantined_units = units_by_state["quarantined_units"]
+    ledger.notes = notes
+
+    derived = {
+        "n_filtered": ledger.n_filtered,
+        "n_failed": ledger.n_failed,
+        "n_quarantined": ledger.n_quarantined,
+        "n_accounted": ledger.n_accounted,
+        "balanced": ledger.balanced,
+    }
+    for field_name, expected in derived.items():
+        if data.get(field_name) != expected:
+            raise LedgerInvalidError(
+                f"{path}: {field_name} is {data.get(field_name)!r}, expected {expected!r} "
+                "from the terminal-state records"
+            )
     return ledger
 
 
@@ -275,16 +329,11 @@ def lost_unit_report(ledgers: list[StageLedger], stage: str, where: str = "") ->
 
     records = sum(ledger.n_failed + ledger.n_quarantined for ledger in ledgers)
     listed = "\n  ".join(f"{u['unit']}: {str(u['reason'])[:120]}" for u in units[:MAX_REPORTED_UNITS])
-    more = (
-        f"\n  ... and {len(units) - MAX_REPORTED_UNITS} more"
-        if len(units) > MAX_REPORTED_UNITS
-        else ""
-    )
+    more = f"\n  ... and {len(units) - MAX_REPORTED_UNITS} more" if len(units) > MAX_REPORTED_UNITS else ""
     return (
         f"[{stage}] {len(units)} unit(s) failed or were quarantined; "
         f"{records:,} records counted — and that count is a FLOOR, because a shard "
-        f"too damaged to open reports 0 rows.\n  {listed}{more}"
-        + (f"\nSee {where}" if where else "")
+        f"too damaged to open reports 0 rows.\n  {listed}{more}" + (f"\nSee {where}" if where else "")
     )
 
 

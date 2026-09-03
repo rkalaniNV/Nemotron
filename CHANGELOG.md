@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Python 3.11 is now the minimum supported runtime.
+- `curate/nemo_curator` now uses a `min_langid_score` of `0.3` when the key is
+  omitted, matching both the shipped configuration and NeMo Curator. Set it
+  explicitly to `0.0` only when retaining low-confidence language predictions
+  is intentional.
+- Curation runtimes now use NeMo Curator 1.3.0 and a fixed NeMo Run revision
+  instead of moving development branches.
+- Approved policies are now bound to the input corpus, signal implementation,
+  thresholds, and language-pack content recorded in run manifests.
+- Curation manifests, ledgers, input discovery, and artifact handling now reject
+  invalid accounting and stale-output states before they can appear successful.
+- Bundled language-pack assets now record their origin and license, and text
+  resources are normalized to NFC when loaded.
+
 ### Added
 
 #### Core Framework
@@ -58,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - rich >= 13.0.0
 - wandb (optional)
 
-**Python Support:** 3.10+
+**Python Support:** 3.11+
 
 **Package Management:** uv
 

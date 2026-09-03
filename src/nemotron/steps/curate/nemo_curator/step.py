@@ -30,10 +30,14 @@ from __future__ import annotations
 
 import argparse
 import glob as globlib
+import hashlib
+import math
 import os
 from ast import literal_eval
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from huggingface_hub import snapshot_download
@@ -88,7 +92,12 @@ def reader_fields(cfg: dict) -> list[str]:
 
     fields = [cfg["text_field"], *declared]
     seen: set[str] = set()
-    return [f for f in fields if not (f in seen or seen.add(f))]
+    unique_fields = []
+    for field in fields:
+        if field not in seen:
+            seen.add(field)
+            unique_fields.append(field)
+    return unique_fields
 
 
 #: Extensions the reader will pick up from a directory. Curator's own discovery
@@ -97,6 +106,10 @@ def reader_fields(cfg: dict) -> list[str]:
 #: missing it would report a manifest input count of zero for a run that read
 #: everything.
 JSONL_EXTENSIONS = (".jsonl", ".json")
+
+# Pandas otherwise infers a column-wide numeric or datetime dtype. That changes
+# identifiers such as "001" to 1 before the first pipeline stage sees them.
+JSONL_READ_KWARGS = {"dtype": False, "convert_dates": False}
 
 
 def resolve_inputs(input_glob: str | list[str]) -> list[str]:
@@ -107,35 +120,45 @@ def resolve_inputs(input_glob: str | list[str]) -> list[str]:
     for exactly that reason; the local fallback exists so the manifest can still
     be written when it is unavailable.
     """
-    patterns = [input_glob] if isinstance(input_glob, str) else list(input_glob)
-    paths: list[str] = []
-
     try:
         from nemo_curator.utils.file_utils import get_all_file_paths_under
     except Exception:  # noqa: BLE001 - the fallback below is the point
         get_all_file_paths_under = None
 
+    patterns = [input_glob] if isinstance(input_glob, str) else list(input_glob)
+    recurse = isinstance(input_glob, str)
+    paths: list[str] = []
     for pattern in patterns:
-        if any(ch in pattern for ch in "*?["):
-            paths.extend(globlib.glob(pattern, recursive=True))
-            continue
-        candidate = Path(pattern)
-        if not candidate.is_dir():
-            paths.append(pattern)
-            continue
+        pattern = str(pattern)
         if get_all_file_paths_under is not None:
-            paths.extend(
-                get_all_file_paths_under(
-                    str(candidate),
-                    recurse_subdirectories=True,
-                    keep_extensions=list(JSONL_EXTENSIONS),
+            try:
+                paths.extend(
+                    get_all_file_paths_under(
+                        pattern,
+                        recurse_subdirectories=recurse,
+                        keep_extensions=list(JSONL_EXTENSIONS),
+                    )
                 )
-            )
-        else:
+            except FileNotFoundError:
+                pass
+            continue
+
+        candidate = Path(pattern)
+        if any(ch in pattern for ch in "*?["):
             paths.extend(
-                str(p)
-                for p in sorted(candidate.rglob("*"))
-                if p.is_file() and p.suffix in JSONL_EXTENSIONS
+                path
+                for path in globlib.glob(pattern, recursive=recurse)
+                if Path(path).suffix.casefold() in JSONL_EXTENSIONS
+            )
+            continue
+        if candidate.is_file():
+            if candidate.suffix.casefold() in JSONL_EXTENSIONS:
+                paths.append(pattern)
+            continue
+        if candidate.is_dir():
+            iterator = candidate.rglob("*") if recurse else candidate.glob("*")
+            paths.extend(
+                str(path) for path in iterator if path.is_file() and path.suffix.casefold() in JSONL_EXTENSIONS
             )
 
     return sorted({p for p in paths if Path(p).is_file()})
@@ -163,28 +186,27 @@ DOMAIN_MAX_CHARS = None
 MODES = ("filter", "annotate", "both")
 
 
-def resolve_policy(cfg: dict) -> tuple[list[dict], dict, list[str]]:
-    """Load the approved filtering policy, if one is configured.
+@dataclass(frozen=True)
+class PolicyResolution:
+    thresholds: list[dict[str, Any]]
+    langpack_spec: dict[str, Any]
+    warnings: list[str]
+    identity: dict[str, Any]
 
-    Returns the thresholds to apply, the language pack the policy declares it was
-    derived from, and any warnings to log. A policy that has not been approved is
-    refused: distribution analysis can say what a threshold removes, never whether
-    removing it is right, so promoting a candidate is a separate act that records
-    who did it and on what evidence.
-    """
+
+def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -> PolicyResolution:
     block = cfg.get("heuristic_filters") or {}
     path = block.get("approved_policy")
     if not path:
-        return [], {}, []
+        return PolicyResolution([], {}, [], {})
 
     from nemotron.steps.curate.runtime import policy as policy_module
 
-    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    policy_bytes = Path(path).read_bytes()
+    document = yaml.safe_load(policy_bytes) or {}
     try:
         warnings = list(
-            policy_module.require_approved(
-                document, allow_unvalidated=bool(block.get("allow_unvalidated_policy"))
-            )
+            policy_module.require_approved(document, allow_unvalidated=bool(block.get("allow_unvalidated_policy")))
         )
     except policy_module.PolicyNotApprovedError as exc:
         # require_approved reports which fields are unmet but never sees a path.
@@ -199,12 +221,31 @@ def resolve_policy(cfg: dict) -> tuple[list[dict], dict, list[str]]:
     from nemotron.steps.curate.runtime import registry as signal_registry
 
     declared_impl = document.get("signals_impl_version")
-    if declared_impl and declared_impl != signal_registry.IMPL_VERSION:
+    if declared_impl != signal_registry.IMPL_VERSION:
         raise ValueError(
             f"{path}: thresholds were calibrated by signals implementation {declared_impl}, "
             f"but this run has {signal_registry.IMPL_VERSION}. A scorer change moves the "
             "numbers the thresholds refer to; re-profile against the current implementation."
         )
+
+    from nemotron.steps.curate.runtime import integrity
+
+    declared_fingerprint = (document.get("corpus") or {}).get("fingerprint")
+    actual_fingerprint = declared_fingerprint
+    if input_files is not None or "input_glob" in cfg:
+        resolved_inputs = input_files if input_files is not None else resolve_inputs(cfg["input_glob"])
+        actual_fingerprint = integrity.corpus_fingerprint(
+            resolved_inputs,
+            cfg["text_field"],
+            cfg.get("id_field"),
+        )
+        if declared_fingerprint != actual_fingerprint:
+            raise ValueError(
+                f"{path}: policy was approved for corpus {declared_fingerprint}, but the "
+                f"configured input fingerprints to {actual_fingerprint}. Re-profile and "
+                "approve against this input instead of applying thresholds calibrated on "
+                "different data."
+            )
 
     declared_pack = dict(document.get("langpack") or {})
     declared = declared_pack.get("content_hash")
@@ -222,7 +263,30 @@ def resolve_policy(cfg: dict) -> tuple[list[dict], dict, list[str]]:
         if block.get(key) is not None:
             declared_pack[key] = block[key]
 
-    return list(document.get("thresholds") or []), declared_pack, warnings
+    thresholds = [dict(entry) for entry in document.get("thresholds") or []]
+    identity = {
+        "policy_digest": f"sha256:{hashlib.sha256(policy_bytes).hexdigest()}",
+        "profile_digest": document.get("profile_digest"),
+        "signals_impl_version": declared_impl,
+        "corpus_fingerprint": actual_fingerprint,
+        "thresholds": thresholds,
+        **({"langpack_content_hash": declared_pack["content_hash"]} if declared_pack.get("content_hash") else {}),
+    }
+    return PolicyResolution(thresholds, declared_pack, warnings, identity)
+
+
+def resolve_policy(cfg: dict) -> tuple[list[dict], dict, list[str]]:
+    """Load and validate the approved policy against the configured input."""
+    resolved = _resolve_policy(cfg)
+    return resolved.thresholds, resolved.langpack_spec, resolved.warnings
+
+
+def manifest_config(cfg: dict[str, Any], policy_resolution: PolicyResolution | None = None) -> dict[str, Any]:
+    """Resolved run identity used by the manifest's configuration hash."""
+    document = deepcopy(cfg)
+    if policy_resolution is not None and policy_resolution.identity:
+        document["resolved_policy"] = deepcopy(policy_resolution.identity)
+    return document
 
 
 #: Requirements a signal may declare that are satisfied by loading a language
@@ -245,7 +309,7 @@ PACK_REQUIREMENTS: frozenset[str] = frozenset(
 KNOWN_REQUIREMENTS: frozenset[str] = PACK_REQUIREMENTS | {"tokenizer"}
 
 
-def load_policy_pack(langpack_spec: dict, needed_by: list[str]):
+def load_policy_pack(langpack_spec: dict, needed_by: list[str]) -> Any:
     """Load the language pack a policy was derived from.
 
     Half the registry's signals are parameterised by a pack — their word lists,
@@ -262,7 +326,7 @@ def load_policy_pack(langpack_spec: dict, needed_by: list[str]):
     from nemotron.steps.curate.runtime import langpack
 
     tag = langpack_spec.get("language_tag") or langpack_spec.get("id")
-    if not tag:
+    if not isinstance(tag, str) or not tag:
         raise ValueError(
             f"policy uses language-pack signals {sorted(needed_by)} but declares no "
             "langpack.language_tag. There is no default language: a wrong one produces "
@@ -302,7 +366,7 @@ BOUND_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
-def threshold_bounds(signal, entry: dict) -> tuple[float, ...]:
+def threshold_bounds(signal: Any, entry: dict) -> tuple[float, ...]:
     """Map a policy entry's ``min``/``max`` onto the signal's threshold parameters.
 
     Refuses a bound the signal's direction cannot express. The alternative —
@@ -321,7 +385,7 @@ def threshold_bounds(signal, entry: dict) -> tuple[float, ...]:
                 f"{signal.name} sets neither min nor max and has no shipped default, so there "
                 "is no threshold to apply. Give it an explicit bound."
             )
-        return signal.curator_default
+        return tuple(float(value) for value in signal.curator_default)
 
     wrong = [key for key in present if key not in expected]
     if wrong:
@@ -338,10 +402,17 @@ def threshold_bounds(signal, entry: dict) -> tuple[float, ...]:
             f"the policy omits {missing[0]!r}. A two-sided gate given one bound would fix "
             "the other at an unstated value and attribute all of the effect to the one set."
         )
-    return tuple(entry[key] for key in expected)
+    raw_values = tuple(entry[key] for key in expected)
+    for key, value in zip(expected, raw_values, strict=True):
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+            raise ValueError(f"{signal.name} {key} must be a finite number, got {value!r}")
+    values = tuple(float(value) for value in raw_values)
+    if expected == ("min", "max") and values[0] > values[1]:
+        raise ValueError(f"{signal.name} min must not be greater than max, got {values[0]!r} > {values[1]!r}")
+    return values
 
 
-def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_spec: dict | None = None):
+def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_spec: dict | None = None) -> list[Any]:
     """Turn approved thresholds into Curator stages.
 
     Signal names resolve through the closed allowlist, never an import path from
@@ -354,8 +425,14 @@ def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_s
 
     from nemotron.steps.curate.runtime import registry as signal_registry
 
-    named = [entry.get("signal") for entry in thresholds]
-    unknown = [n for n in named if n not in signal_registry.SIGNALS]
+    named: list[str] = []
+    for index, entry in enumerate(thresholds):
+        name = entry.get("signal")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"threshold {index} must name a non-empty signal")
+        named.append(name)
+
+    unknown = [name for name in named if name not in signal_registry.SIGNALS]
     if unknown:
         raise ValueError(
             f"unknown signal {unknown[0]!r} in policy. Allowed: {sorted(signal_registry.SIGNALS)}. "
@@ -408,16 +485,13 @@ def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_s
 
         if mode == "annotate":
             # Score never filters, so every row survives carrying its score.
-            stages.append(
-                Score(document_filter, score_field=f"__{name}", text_field=text_field)
-            )
+            assert Score is not None
+            stages.append(Score(document_filter, score_field=f"__{name}", text_field=text_field))
         elif mode == "both":
             # ScoreFilter writes score_field before applying keep_document, so one
             # stage already does score-then-filter. Score + Filter would be a
             # two-pass spelling of the same result.
-            stages.append(
-                ScoreFilter(document_filter, text_field=text_field, score_field=f"__{name}")
-            )
+            stages.append(ScoreFilter(document_filter, text_field=text_field, score_field=f"__{name}"))
         else:
             # score_field defaults to None, which discards the score after use —
             # the same shape as the WordCountFilter gate above it.
@@ -455,7 +529,7 @@ def ray_client_kwargs(cfg: dict) -> dict:
     return kwargs
 
 
-def text_filter_stages():
+def text_filter_stages() -> tuple[type[Any], type[Any]]:
     """Return Filter/ScoreFilter across supported NeMo Curator releases."""
     try:
         from nemo_curator.stages.text.modules import Filter, ScoreFilter
@@ -464,16 +538,21 @@ def text_filter_stages():
     return Filter, ScoreFilter
 
 
-def score_stage():
+def score_stage() -> type[Any]:
     """Return Score across supported NeMo Curator releases."""
     try:
         from nemo_curator.stages.text.modules import Score
     except ImportError:
         from nemo_curator.stages.text.filters import Score
-    return Score
+    return cast(type[Any], Score)
 
 
-def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
+def build_pipeline(
+    cfg: dict,
+    *,
+    input_files: list[str] | None = None,
+    policy_resolution: PolicyResolution | None = None,
+) -> tuple[Any, list[str]]:
     """Construct the Curator pipeline for this config, without running it.
 
     Split out from :func:`run` so the pipeline's *shape* can be inspected and
@@ -486,7 +565,13 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
     quality_filters = cfg.get("quality_filters") or {}
 
     pipeline = Pipeline(name="curate_nemo_curator")
-    pipeline.add_stage(JsonlReader(file_paths=cfg["input_glob"], fields=reader_fields(cfg)))
+    pipeline.add_stage(
+        JsonlReader(
+            file_paths=input_files if input_files is not None else cfg["input_glob"],
+            fields=reader_fields(cfg),
+            read_kwargs=dict(JSONL_READ_KWARGS),
+        )
+    )
     if allowed_languages:
         Filter, ScoreFilter = text_filter_stages()  # noqa: N806 -- these are Curator stage classes, not variables
         from nemo_curator.stages.text.filters.fasttext import FastTextLangId
@@ -506,21 +591,10 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
                 score_field="language",
             )
         )
-        # Named, not a lambda. Curator derives the stage name from the callable's
-        # __name__ (score_filter.py:348), and the ledger's per-gate attribution
-        # is keyed on stage names — so a lambda produced an entry reading
-        # "filter_fn: 5134", which tells a reader nothing about what removed
-        # their documents. The two language stages are the confidence gate and
-        # the code gate, and the ledger should say which is which.
+
         def language_code(value: str) -> bool:
             return keep_language(value, allowed_languages)
 
-        # Curator's Filter defaults its stage name to the literal "filter_fn"
-        # (score_filter.py:24). The ledger's per-gate attribution is keyed on
-        # stage names, so leaving it produced an entry reading "filter_fn: 5134"
-        # — a number with no way to tell what removed those documents. The two
-        # language stages are the confidence gate and the code gate; the ledger
-        # has to say which is which.
         # Curator's Filter hardcodes its stage name to "filter_fn"
         # (score_filter.py:24, and __post_init__ overwrites whatever the
         # constructor is given). The ledger's per-gate attribution is keyed on
@@ -551,8 +625,8 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
     # Two ways to reach the classifier, because "which domains do I keep" is a
     # decision that needs evidence, and the evidence is the labels themselves.
     # Filtering on a first run drops most of a corpus with nothing to justify it;
-    # annotating writes the label and the probability and drops nothing, so the
-    # next run can gate on a distribution somebody looked at.
+    # annotating writes the label and class-probability vector and drops nothing,
+    # so the next run can gate on a distribution somebody looked at.
     if cfg.get("domains") or cfg.get("annotate_domains"):
         from nemo_curator.stages.text.classifiers import MultilingualDomainClassifier
 
@@ -564,19 +638,19 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
             # Never the default. See DOMAIN_MAX_CHARS.
             "max_chars": cfg.get("domain_max_chars", DOMAIN_MAX_CHARS),
         }
-        # Passed only when asked for. Naming it records how confident the
-        # prediction was — an argmax label with no strength cannot be gated on
-        # later — but passing it unconditionally, even as None, changes the
-        # constructed call for every config that already used `domains`.
+        # Curator writes the complete class-probability vector into this field,
+        # in model label order. Passing it unconditionally, even as None, changes
+        # the constructed call for every config that already used `domains`.
         if cfg.get("domain_score_field"):
             domain_kwargs["score_field"] = cfg["domain_score_field"]
 
         pipeline.add_stage(MultilingualDomainClassifier(**domain_kwargs))
     # F2: approved-policy filtering. Absent config adds nothing, so a run that
     # predates it builds exactly the pipeline it built before.
-    thresholds, langpack_spec, policy_warnings = resolve_policy(cfg)
-    for warning in policy_warnings:
-        print(f"curate/nemo_curator: WARNING {warning}")
+    resolved = policy_resolution or _resolve_policy(cfg, input_files)
+    thresholds = resolved.thresholds
+    langpack_spec = resolved.langpack_spec
+    policy_warnings = resolved.warnings
     for stage in policy_stages(thresholds, cfg["text_field"], mode, langpack_spec):
         pipeline.add_stage(stage)
 
@@ -584,96 +658,134 @@ def build_pipeline(cfg: dict) -> tuple[Any, list[str]]:
     return pipeline, policy_warnings
 
 
+def _reset_artifact_paths(*paths: str | None) -> None:
+    destinations = [Path(raw_path) for raw_path in paths if raw_path]
+    resolved = [path.resolve() for path in destinations]
+    if len(resolved) != len(set(resolved)):
+        raise ValueError("emit_manifest and emit_ledger must use different paths")
+
+    for path in destinations:
+        if path.exists() and not path.is_file():
+            raise ValueError(f"artifact path is not a file: {path}")
+        path.unlink(missing_ok=True)
+
+
 def run(cfg: dict) -> dict[str, Any]:
-    """Curate the corpus and return a report describing what the run did.
-
-    The uniform entry point every curate step exposes. Does not raise
-    ``SystemExit``: a caller running several steps decides what a failure means.
-    """
-    # Validate before any work: a typo in mode should not cost a snapshot download.
+    """Curate the corpus and return a report describing what the run did."""
     mode = cfg.get("mode", "filter")
-    if mode not in MODES:
-        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
-
-    if cfg.get("dataset"):
-        snapshot_download(**cfg["dataset"])
-
-    # Curator's writer names shards by content hash, so a second run into the
-    # same directory ADDS to it rather than replacing it. Measured: one corpus
-    # ended with 31,689 rows out of 20,000 in, mixing a policy run with an
-    # earlier no-policy one, and the two were indistinguishable by filename.
-    #
-    # Refusing rather than deleting: this step does not own every file under
-    # output_dir, and silently removing a previous run's corpus is worse than
-    # stopping. The ledger and audit do catch it afterwards, but only after the
-    # work has been done twice.
-    existing = sorted(Path(cfg["output_dir"]).rglob("*.jsonl")) if cfg.get("output_dir") else []
-    if existing:
-        raise ValueError(
-            f"{cfg['output_dir']} already holds {len(existing)} .jsonl file(s) from a previous "
-            f"run, e.g. {existing[0].name}. Curator's writer names shards by content hash, so "
-            "this run would add to them rather than replace them and the corpus would be a "
-            "mixture of two policies. Remove the directory, or point output_dir somewhere new."
-        )
-
-    pipeline, policy_warnings = build_pipeline(cfg)
-    for warning in policy_warnings:
-        print(f"curate/nemo_curator: WARNING {warning}")
-
     manifest_path = cfg.get("emit_manifest")
     ledger_path = cfg.get("emit_ledger")
     started_at = run_manifest.utc_now()
+    input_files: list[str] | None = None
+    policy_resolution: PolicyResolution | None = None
 
-    ray_client = RayClient(**ray_client_kwargs(cfg))
-    ray_client.start()
+    _reset_artifact_paths(manifest_path, ledger_path)
     try:
-        # The returned tasks carry Curator's per-stage counters, which is where
-        # the ledger's per-gate breakdown comes from.
-        tasks = pipeline.run()
-    except BaseException:
-        # A manifest without completed_at is how an auditor learns the run died
-        # rather than inferring completion from whatever files happen to exist.
-        if manifest_path:
-            emit_manifest(cfg, manifest_path, started_at, completed=False)
-        if ledger_path:
-            emit_ledger(cfg, ledger_path, completed=False)
-        raise
-    finally:
-        ray_client.stop()
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
 
-    # Everything below is accounting over a corpus that is already written, so
-    # none of it may fail the run: a missing attribute costs the breakdown, not
-    # the output.
-    stage_counts = collect_stage_counts(tasks or [])
-    stage_names = [getattr(stage, "name", "") for stage in getattr(pipeline, "stages", [])]
+        if cfg.get("dataset"):
+            snapshot_download(**cfg["dataset"])
 
-    if manifest_path:
-        emit_manifest(
+        input_files = resolve_inputs(cfg["input_glob"])
+        if not input_files:
+            raise ValueError(f"input_glob {cfg['input_glob']!r} matched no .jsonl or .json files")
+
+        # Curator's writer names shards by content hash, so a second run into the
+        # same directory adds to it instead of replacing the previous corpus.
+        existing = sorted(Path(cfg["output_dir"]).rglob("*.jsonl")) if cfg.get("output_dir") else []
+        if existing:
+            raise ValueError(
+                f"{cfg['output_dir']} already holds {len(existing)} .jsonl file(s) from a "
+                f"previous run, e.g. {existing[0].name}. Remove the directory, or point "
+                "output_dir somewhere new."
+            )
+
+        policy_resolution = _resolve_policy(cfg, input_files)
+        pipeline, policy_warnings = build_pipeline(
             cfg,
-            manifest_path,
-            started_at,
-            completed=True,
-            stage_names=stage_names,
-            stage_counts=stage_counts,
+            input_files=input_files,
+            policy_resolution=policy_resolution,
         )
-    if ledger_path:
-        emit_ledger(
-            cfg, ledger_path, completed=True, stage_names=stage_names, stage_counts=stage_counts
-        )
+        for warning in policy_warnings:
+            print(f"curate/nemo_curator: WARNING {warning}")
 
-    return {
-        "step_id": "curate/nemo_curator",
-        "started_at": started_at,
-        "completed_at": run_manifest.utc_now(),
-        "mode": mode,
-        "output_dir": cfg["output_dir"],
-        "warnings": list(policy_warnings),
-        "artifacts": {
-            k: v
-            for k, v in (("run_manifest", manifest_path), ("curation_ledger", ledger_path))
-            if v
-        },
-    }
+        ray_client = RayClient(**ray_client_kwargs(cfg))
+        ray_started = False
+        try:
+            ray_client.start()
+            ray_started = True
+            tasks = pipeline.run()
+        finally:
+            if ray_started:
+                ray_client.stop()
+
+        stage_counts = collect_stage_counts(tasks or [])
+        stage_names = [getattr(stage, "name", "") for stage in getattr(pipeline, "stages", [])]
+        identity_config = manifest_config(cfg, policy_resolution)
+
+        if manifest_path:
+            emit_manifest(
+                cfg,
+                manifest_path,
+                started_at,
+                completed=True,
+                stage_names=stage_names,
+                stage_counts=stage_counts,
+                input_files=input_files,
+                identity_config=identity_config,
+            )
+        if ledger_path:
+            emit_ledger(
+                cfg,
+                ledger_path,
+                completed=True,
+                stage_names=stage_names,
+                stage_counts=stage_counts,
+                input_files=input_files,
+            )
+
+        return {
+            "step_id": "curate/nemo_curator",
+            "started_at": started_at,
+            "completed_at": run_manifest.utc_now(),
+            "mode": mode,
+            "output_dir": cfg["output_dir"],
+            "warnings": list(policy_warnings),
+            "artifacts": {
+                key: value
+                for key, value in (
+                    ("run_manifest", manifest_path),
+                    ("curation_ledger", ledger_path),
+                )
+                if value
+            },
+        }
+    except BaseException:
+        identity_config = manifest_config(cfg, policy_resolution)
+        if manifest_path:
+            try:
+                emit_manifest(
+                    cfg,
+                    manifest_path,
+                    started_at,
+                    completed=False,
+                    input_files=input_files,
+                    identity_config=identity_config,
+                )
+            except Exception as exc:  # noqa: BLE001 - preserve the original pipeline failure
+                print(f"curate/nemo_curator: WARNING could not write failed manifest: {exc}")
+        if ledger_path:
+            try:
+                emit_ledger(
+                    cfg,
+                    ledger_path,
+                    completed=False,
+                    input_files=input_files,
+                )
+            except Exception as exc:  # noqa: BLE001 - preserve the original pipeline failure
+                print(f"curate/nemo_curator: WARNING could not write failed ledger: {exc}")
+        raise
 
 
 #: What ``filtered`` is attributed to when the per-gate breakdown could not be
@@ -727,9 +839,7 @@ def collect_stage_counts(tasks: list) -> dict[str, int]:
     return counts
 
 
-def attribute_removals(
-    stage_names: list[str], counts: dict[str, int], observed_removed: int
-) -> dict[str, int] | None:
+def attribute_removals(stage_names: list[str], counts: dict[str, int], observed_removed: int) -> dict[str, int] | None:
     """Turn per-stage item counts into per-gate removal counts.
 
     A filter chain is a sequence of stages each fed by the previous one, so what
@@ -745,11 +855,22 @@ def attribute_removals(
     silently dropping rows would produce a breakdown that looks complete.
     """
     ordered: list[tuple[str, int]] = []
+    used_metrics: set[str] = set()
     for declared in stage_names:
-        for name, count in counts.items():
-            if name == declared or name.startswith(declared):
-                ordered.append((declared, count))
-                break
+        exact = declared if declared in counts and declared not in used_metrics else None
+        candidates = [
+            name
+            for name in counts
+            if name not in used_metrics
+            and name.startswith(declared)
+            and not any(
+                other != declared and len(other) > len(declared) and name.startswith(other) for other in stage_names
+            )
+        ]
+        matched = exact or min(candidates, key=lambda name: (len(name), name), default=None)
+        if matched is not None:
+            ordered.append((declared, counts[matched]))
+            used_metrics.add(matched)
 
     if len(ordered) < 2:  # noqa: PLR2004 - a diff needs two points
         return None
@@ -771,6 +892,7 @@ def emit_ledger(
     completed: bool,
     stage_names: list[str] | None = None,
     stage_counts: dict[str, int] | None = None,
+    input_files: list[str] | None = None,
 ) -> None:
     """Write the run's record accounting.
 
@@ -784,7 +906,8 @@ def emit_ledger(
     from nemotron.steps.curate.runtime import ledger as ledger_module
 
     source_field = cfg.get("source_field")
-    input_counts = run_manifest.count_jsonl(resolve_inputs(cfg["input_glob"]), source_field)
+    resolved_inputs = input_files if input_files is not None else resolve_inputs(cfg["input_glob"])
+    input_counts = run_manifest.count_jsonl(resolved_inputs, source_field)
     output_files = sorted(str(p) for p in Path(cfg["output_dir"]).rglob("*.jsonl"))
     output_counts = run_manifest.count_jsonl(output_files, source_field)
 
@@ -792,7 +915,13 @@ def emit_ledger(
     entry.add_input(input_counts["row_count"])
     entry.add_success(output_counts["row_count"])
     removed = input_counts["row_count"] - output_counts["row_count"]
-    if removed > 0:
+    if not completed:
+        entry.add_failed(
+            cfg["output_dir"],
+            "pipeline did not complete; absent rows cannot be classified as filtered",
+            max(removed, 0),
+        )
+    elif removed > 0:
         per_gate = attribute_removals(list(stage_names or []), dict(stage_counts or {}), removed)
         if per_gate:
             for gate, count in per_gate.items():
@@ -803,7 +932,8 @@ def emit_ledger(
             # disagreed with the files on disk". The second is a finding.
             if stage_counts:
                 entry.notes["unreconciled"] = UNRECONCILED_NOTE.format(observed=removed)
-    entry.notes["attribution"] = ATTRIBUTION_NOTE
+    if completed:
+        entry.notes["attribution"] = ATTRIBUTION_NOTE
     entry.notes["completed"] = completed
     entry.notes["mode"] = cfg.get("mode", "filter")
 
@@ -817,8 +947,8 @@ def emit_ledger(
             0,
         )
 
-    # A run that died has an unbalanced ledger by definition, and that is the
-    # signal an auditor needs — refusing to write it would destroy the evidence.
+    # A failed run must preserve its terminal-state evidence even when the
+    # available counts cannot balance.
     entry.write(path, require_balanced=completed and removed >= 0)
 
 
@@ -838,6 +968,8 @@ def emit_manifest(
     completed: bool,
     stage_names: list[str] | None = None,
     stage_counts: dict[str, int] | None = None,
+    input_files: list[str] | None = None,
+    identity_config: dict[str, Any] | None = None,
 ) -> None:
     """Write the run manifest after the pipeline's own write barrier.
 
@@ -854,12 +986,21 @@ def emit_manifest(
     source_field = cfg.get("source_field")
     output_files = sorted(str(p) for p in Path(cfg["output_dir"]).rglob("*.jsonl"))
 
-    input_counts = run_manifest.count_jsonl(resolve_inputs(cfg["input_glob"]), source_field)
+    resolved_inputs = input_files if input_files is not None else resolve_inputs(cfg["input_glob"])
+    input_counts = run_manifest.count_jsonl(resolved_inputs, source_field)
     output_counts = run_manifest.count_jsonl(output_files, source_field)
 
     declared = None
     removed = input_counts.get("row_count", 0) - output_counts.get("row_count", 0)
-    if removed > 0:
+    if not completed:
+        declared = {
+            "attribution": run_manifest.ATTRIBUTION_DECLARED,
+            "rows_absent_from_output": max(removed, 0),
+            "filtered": None,
+            "failed": max(removed, 0),
+            "quarantined": None,
+        }
+    elif removed > 0:
         per_gate = attribute_removals(list(stage_names or []), dict(stage_counts or {}), removed)
         if per_gate:
             declared = {
@@ -872,7 +1013,7 @@ def emit_manifest(
 
     document = run_manifest.build_manifest(
         step_id="curate/nemo_curator",
-        config=cfg,
+        config=identity_config if identity_config is not None else cfg,
         started_at=started_at,
         input_glob=cfg["input_glob"],
         input_counts=input_counts,

@@ -29,16 +29,16 @@ otherwise treat one of these as a plain callable.
 from __future__ import annotations
 
 import unicodedata
-from typing import Any
+from typing import Any, cast
 
 from nemotron.steps.curate.runtime.langpack import LanguagePack
+from nemotron.steps.curate.runtime.registry import IMPL_VERSION
 
 #: Bumped when a signal's numbers change, so a policy or profile measured under
 #: the previous version is refused rather than silently compared. 0.2.0 scores on
 #: NFC: every signal that reads letters or diacritics returns a different value
 #: for non-NFC text than 0.1.0 did, and 11.69% of a Vietnamese and 28.82% of a
 #: Hindi C4 sample are affected.
-IMPL_VERSION = "curate-signals-0.2.0"
 
 
 def _document_filter_base() -> type:
@@ -46,7 +46,7 @@ def _document_filter_base() -> type:
     try:
         from nemo_curator.stages.text.filters.doc_filter import DocumentFilter
 
-        return DocumentFilter
+        return cast(type, DocumentFilter)
     except Exception:  # noqa: BLE001 - importability on a plain CI host is the point
 
         class _StandaloneDocumentFilter:
@@ -107,7 +107,7 @@ class _Base(_RAW_BASE):  # type: ignore[valid-type,misc]
         def score_document(self: Any, text: str, _inner: Any = scorer) -> float:
             if text and not unicodedata.is_normalized("NFC", text):
                 text = unicodedata.normalize("NFC", text)
-            return _inner(self, text)
+            return cast(float, _inner(self, text))
 
         score_document._nfc_wrapped = True  # type: ignore[attr-defined]
         score_document.__doc__ = scorer.__doc__
@@ -332,11 +332,7 @@ class ForeignScriptRatio(_PackFilter):
         letters = [ch for ch in text if unicodedata.category(ch)[0] == "L"]
         if not letters:
             return 0.0
-        foreign = sum(
-            1
-            for ch in letters
-            if ch not in self._pack.charset and not (ch.isascii() and ch.isalpha())
-        )
+        foreign = sum(1 for ch in letters if ch not in self._pack.charset and not (ch.isascii() and ch.isalpha()))
         return foreign / len(letters)
 
     def keep_document(self, score: float) -> bool:

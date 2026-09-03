@@ -3,22 +3,19 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""F1 must not change what an existing config does.
+"""Record intentional compatibility fixes in the constructed pipeline.
 
-ONE deliberate break is recorded in the golden, and it is a data-loss fix rather
-than a refinement. MultilingualDomainClassifier now receives ``max_chars=None``
-where it used to receive nothing. Curator's tokenizer truncates IN PLACE on the
-DataFrame that continues to the writer, so the classifier's default reading
-window of 2000 characters silently became the delivered corpus: measured on a
-real run, 53.4% of Vietnamese documents were cut to exactly 2000 characters and
-29.7 million characters were destroyed, while the ledger, the manifest and the
-audit all reported a clean run because every one of them counts rows.
+Two deliberate breaks are recorded. MultilingualDomainClassifier receives
+``max_chars=None`` because its default mutates delivered text. JsonlReader
+receives the exact preflight file list plus ``dtype=False`` and
+``convert_dates=False`` because pandas otherwise changes identifiers such as
+``"001"`` to ``1`` before the first stage.
 
 
 The plan's acceptance criterion is a golden-file test proving byte-identical
 behaviour when the new keys are absent. Behaviour here means the pipeline that
 gets built: the stages, in order, with their arguments. If a config that predates
-F1 produces the same stage sequence it produced before, its output cannot differ.
+F1 produces the recorded stage sequence, any later output change is explicit.
 
 ``nemo_curator`` is a runtime dependency and is not installed on a plain CI host,
 so the framework is stubbed and the constructed pipeline is recorded instead.
@@ -108,9 +105,7 @@ def pipeline_log(monkeypatch):
                 out = getattr(stage, "__written_to__", None)
                 if out:
                     Path(out).mkdir(parents=True, exist_ok=True)
-                    (Path(out) / "shard.jsonl").write_text(
-                        '{"text":"hello"}\n', encoding="utf-8"
-                    )
+                    (Path(out) / "shard.jsonl").write_text('{"text":"hello"}\n', encoding="utf-8")
             # list[Task] | None. None here: no executor ran, so no counters.
             return None
 
@@ -205,9 +200,7 @@ def test_a_config_predating_f1_builds_the_recorded_pipeline(pipeline_log, tmp_pa
     )
 
 
-def test_the_reader_projects_text_only_when_metadata_fields_is_absent(
-    pipeline_log, tmp_path, monkeypatch
-) -> None:
+def test_the_reader_projects_text_only_when_metadata_fields_is_absent(pipeline_log, tmp_path, monkeypatch) -> None:
     """The single seam F1 touches. Anything else in the diff cannot reach the output."""
     step, log = pipeline_log
 
@@ -217,9 +210,7 @@ def test_the_reader_projects_text_only_when_metadata_fields_is_absent(
     assert reader["kwargs"]["fields"] == ["text"]
 
 
-def test_an_empty_metadata_fields_list_is_identical_to_omitting_it(
-    pipeline_log, tmp_path, monkeypatch
-) -> None:
+def test_an_empty_metadata_fields_list_is_identical_to_omitting_it(pipeline_log, tmp_path, monkeypatch) -> None:
     """The shipped default sets it to []; that must not widen the projection."""
     step, log = pipeline_log
 
@@ -255,9 +246,7 @@ def test_the_text_field_is_not_duplicated_if_also_listed(pipeline_log, tmp_path,
     assert reader["kwargs"]["fields"] == ["text", "id"]
 
 
-def test_no_manifest_is_written_when_emit_manifest_is_absent(
-    pipeline_log, tmp_path, monkeypatch
-) -> None:
+def test_no_manifest_is_written_when_emit_manifest_is_absent(pipeline_log, tmp_path, monkeypatch) -> None:
     step, _log = pipeline_log
 
     _run(step, _legacy_config(tmp_path), tmp_path, monkeypatch)
@@ -300,8 +289,9 @@ def test_the_filters_on_golden_actually_records_the_filter_stages() -> None:
     """Guards the guard: a golden that recorded nothing would pass forever."""
     stages = [entry["stage"] for entry in json.loads(GOLDEN_FILTERS_ON.read_text(encoding="utf-8"))]
 
-    assert {"FastTextLangId", "ScoreFilter", "Filter", "WordCountFilter",
-            "MultilingualDomainClassifier"} <= set(stages)
+    assert {"FastTextLangId", "ScoreFilter", "Filter", "WordCountFilter", "MultilingualDomainClassifier"} <= set(
+        stages
+    )
 
 
 def test_score_filter_records_the_filter_it_wraps() -> None:

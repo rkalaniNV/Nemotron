@@ -15,8 +15,8 @@ schema       = 1
 
 [sources]
 stopwords = { file = "stopwords.txt", n = 21, origin = "invented", license = "CC0-1.0" }
-charset = { file = "charset.txt", script = "Armn", note = "invented; Armenian letters plus a combining acute" }
-boilerplate = { file = "boilerplate.txt", n = 2, origin = "invented" }
+charset = { file = "charset.txt", script = "Armn", note = "invented; Armenian letters plus a combining acute", origin = "synthetic test fixture", license = "Apache-2.0" }
+boilerplate = { file = "boilerplate.txt", n = 2, origin = "invented", license = "Apache-2.0" }
 
 [orthography]
 sentence_terminators = ["\u058A", ".", "!"]

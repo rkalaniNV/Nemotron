@@ -8,13 +8,13 @@
 [pack]
 pack_id      = "ja-generic"
 language_tag = "ja"
-version      = "1.0"
+version      = "1.1"
 schema       = 1
 
 [sources]
 stopwords = { file = "stopwords.txt", n = 33, origin = "particles and copulas assembled for C4-ja transfer validation", license = "CC0-1.0" }
-charset = { file = "charset.txt", script = "Jpan", note = "Hiragana, Katakana, CJK Unified Ideographs, fullwidth Latin" }
-boilerplate = { file = "boilerplate.txt", n = 10, origin = "observed on Japanese news and blog crawls" }
+charset = { file = "charset.txt", script = "Jpan", note = "Hiragana, Katakana, CJK Unified Ideographs, fullwidth Latin", origin = "Unicode Standard Japanese script repertoires curated for Japanese", license = "Unicode-3.0" }
+boilerplate = { file = "boilerplate.txt", n = 10, origin = "observed on Japanese news and blog crawls", license = "Apache-2.0" }
 
 [orthography]
 sentence_terminators = ["。", "！", "？", ".", "!", "?"]

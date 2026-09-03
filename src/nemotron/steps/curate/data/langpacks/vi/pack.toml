@@ -6,13 +6,13 @@
 [pack]
 pack_id      = "vi-generic"
 language_tag = "vi"
-version      = "2.0"
+version      = "2.1"
 schema       = 1
 
 [sources]
 stopwords = { file = "stopwords.txt", n = 287, origin = "SOVAI Vietnamese CPT curation run", license = "CC0-1.0" }
-charset = { file = "charset.txt", script = "Latn", note = "base Latin plus every marked Vietnamese form" }
-boilerplate = { file = "boilerplate.txt", n = 31, origin = "observed on Vietnamese news and forum crawls" }
+charset = { file = "charset.txt", script = "Latn", note = "base Latin plus every marked Vietnamese form", origin = "Unicode Standard Latin repertoire curated for Vietnamese orthography", license = "Unicode-3.0" }
+boilerplate = { file = "boilerplate.txt", n = 31, origin = "observed on Vietnamese news and forum crawls", license = "Apache-2.0" }
 
 [orthography]
 sentence_terminators = [".", "!", "?"]
