@@ -66,6 +66,9 @@ task_generation:
   # separate turn mix therefore targets the available scripted dialogue
   # inventory without misclassifying tool-chain depth as multiturn.
   turn_mix: {single_turn: 0.70, multi_turn: 0.30}
+  # Banking workflows deliberately retain fee lookup, status reconciliation,
+  # and other multi-call paths instead of using the generic 75/20/5 example.
+  tool_call_count_mix: {"1": 0.60, "2": 0.30, "3+": 0.10}
   # Conversation policy is the axis a candidate is most likely to fail on, so the
   # release declares it rather than letting inventory decide. `irrelevant` is
   # pinned at one sixth because the out_of_scope category owes 232 rows and

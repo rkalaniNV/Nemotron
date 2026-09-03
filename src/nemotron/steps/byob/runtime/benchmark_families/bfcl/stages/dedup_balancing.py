@@ -27,14 +27,18 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contrac
     Stage11Coverage,
     validate_complete_decision_set,
 )
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
+    canonical_json,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     BALANCED_TASKS,
     balanced_tasks_schema,
     write_stage_table,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.surface_quality import user_facing_turns
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.surface_quality import (
+    user_facing_turns,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.surface_quality_contract import (
     SurfaceQualityCheckResult,
     validate_complete_check_set,
@@ -137,9 +141,7 @@ def _is_word_char(character: str) -> bool:
 # and non-breaking spaces, and the Swiss apostrophes. Only uniform three-digit groups
 # are recognized, so a locale with mixed group widths keeps its value unmasked rather
 # than risking a wrong match on unrelated digits.
-_GROUPED_NUMBER = re.compile(
-    r"(?<!\d)\d{1,3}(?:[.,\u00a0\u202f '\u2019]\d{3})+(?!\d)"
-)
+_GROUPED_NUMBER = re.compile(r"(?<!\d)\d{1,3}(?:[.,\u00a0\u202f '\u2019]\d{3})+(?!\d)")
 
 
 def mask_slot_literals(text: str, task: Mapping[str, Any]) -> tuple[str, list[str]]:
@@ -217,9 +219,7 @@ def execution_case_hash(task: Mapping[str, Any]) -> str:
     task, while different fixture bindings, call policies, assertions, or
     distractor sets remain distinct evaluation cases.
     """
-    return _sha256(
-        canonical_json({key: task.get(key) for key in EXECUTION_CASE_KEYS})
-    )
+    return _sha256(canonical_json({key: task.get(key) for key in EXECUTION_CASE_KEYS}))
 
 
 def project_dedup_text(task: Mapping[str, Any], surface: Mapping[str, Any]) -> dict[str, Any]:
@@ -303,9 +303,7 @@ class DedupSettings:
     def group_caps(self) -> dict[str, int]:
         """Return the declared per-group ceilings keyed by balancing feature."""
         return {
-            feature: cap
-            for feature, attribute, _ in GROUP_REUSE_CAPS
-            if (cap := getattr(self, attribute)) is not None
+            feature: cap for feature, attribute, _ in GROUP_REUSE_CAPS if (cap := getattr(self, attribute)) is not None
         }
 
     @property
@@ -319,10 +317,10 @@ def resolve_dedup_settings(config: BfclConfig) -> DedupSettings:
     if not dedup.get("enabled"):
         raise ValueError("Stage 11 requires semantic_deduplication_config.enabled")
     unmet_target_policy = dedup.get("unmet_target_policy", "abort")
-    if (
-        not isinstance(unmet_target_policy, str)
-        or unmet_target_policy not in {"abort", "publish_non_gold"}
-    ):
+    if not isinstance(unmet_target_policy, str) or unmet_target_policy not in {
+        "abort",
+        "publish_non_gold",
+    }:
         raise ValueError("Stage 11 unmet_target_policy must be 'abort' or 'publish_non_gold'")
     return DedupSettings(
         model_identifier=str(dedup["model_identifier"]),
@@ -330,28 +328,18 @@ def resolve_dedup_settings(config: BfclConfig) -> DedupSettings:
         eps=float(dedup["eps"]),
         remove_duplicates=bool(dedup["remove_duplicates"]),
         max_exact_surface_reuse=(
-            int(dedup["max_exact_surface_reuse"])
-            if dedup.get("max_exact_surface_reuse") is not None
-            else None
+            int(dedup["max_exact_surface_reuse"]) if dedup.get("max_exact_surface_reuse") is not None else None
         ),
         min_exact_surface_ratio=(
-            float(dedup["min_exact_surface_ratio"])
-            if dedup.get("min_exact_surface_ratio") is not None
-            else None
+            float(dedup["min_exact_surface_ratio"]) if dedup.get("min_exact_surface_ratio") is not None else None
         ),
         max_rows_per_intent=(
-            int(dedup["max_rows_per_intent"])
-            if dedup.get("max_rows_per_intent") is not None
-            else None
+            int(dedup["max_rows_per_intent"]) if dedup.get("max_rows_per_intent") is not None else None
         ),
         max_execution_case_reuse=(
-            int(dedup["max_execution_case_reuse"])
-            if dedup.get("max_execution_case_reuse") is not None
-            else None
+            int(dedup["max_execution_case_reuse"]) if dedup.get("max_execution_case_reuse") is not None else None
         ),
-        representative_source_preference=tuple(
-            dedup.get("representative_source_preference") or ("template", "model")
-        ),
+        representative_source_preference=tuple(dedup.get("representative_source_preference") or ("template", "model")),
         unmet_target_policy=unmet_target_policy,
     )
 
@@ -1127,6 +1115,7 @@ def _solve_balanced_selection(
     budget: int,
     category_cap: int,
     target_counts: Mapping[str, Mapping[str, int]],
+    conditional_target_mixes: Mapping[str, Mapping[str, float]],
     group_caps: Mapping[str, int],
     min_unique_surface_count: int,
     stable_key: Callable[[str], tuple[Any, ...]],
@@ -1145,8 +1134,7 @@ def _solve_balanced_selection(
         overflow = sum(
             max(
                 0,
-                sum(features[task_id]["category"] == category for task_id in selected)
-                - category_cap,
+                sum(features[task_id]["category"] == category for task_id in selected) - category_cap,
             )
             for category in {features[task_id]["category"] for task_id in ordered}
         )
@@ -1155,10 +1143,16 @@ def _solve_balanced_selection(
             counts = Counter(features[task_id][dimension] for task_id in selected)
             for bucket in set(quotas) | set(counts):
                 deviation += abs(counts[bucket] - quotas.get(bucket, 0))
+        for dimension, mix in conditional_target_mixes.items():
+            counts = Counter(
+                str(features[task_id][dimension]) for task_id in selected if str(features[task_id][dimension]) in mix
+            )
+            quotas = largest_remainder_quotas(sum(counts.values()), mix)
+            deviation += sum(abs(counts[bucket] - target) for bucket, target in quotas.items())
         return overflow, deviation
 
     try:
-        import pulp
+        import pulp  # type: ignore[import-untyped]
     except ModuleNotFoundError:
         # Unit/minimal installations do not include the BYOB optimization extra.
         # Keep small deterministic use cases functional, but never fall back to an
@@ -1167,8 +1161,7 @@ def _solve_balanced_selection(
 
         if len(ordered) > 24:
             raise RuntimeError(
-                "exact Stage 11 balancing requires the BYOB dependency 'pulp' "
-                "when more than 24 candidates survive"
+                "exact Stage 11 balancing requires the BYOB dependency 'pulp' when more than 24 candidates survive"
             ) from None
         best: tuple[tuple[int, int, int], tuple[str, ...]] | None = None
         rank = {task_id: index + 1 for index, task_id in enumerate(ordered)}
@@ -1179,15 +1172,10 @@ def _solve_balanced_selection(
             if any(
                 count > cap
                 for feature, cap in group_caps.items()
-                for count in Counter(
-                    str(features[task_id][feature]) for task_id in chosen_tuple
-                ).values()
+                for count in Counter(str(features[task_id][feature]) for task_id in chosen_tuple).values()
             ):
                 continue
-            surface_counts = Counter(
-                str(features[task_id]["surface_text_hash"])
-                for task_id in chosen_tuple
-            )
+            surface_counts = Counter(str(features[task_id]["surface_text_hash"]) for task_id in chosen_tuple)
             if len(surface_counts) < min_unique_surface_count:
                 continue
             if any(
@@ -1199,7 +1187,10 @@ def _solve_balanced_selection(
                 for decision in (by_decision[task_id],)
             ):
                 continue
-            score = (*cost(chosen_tuple), sum(rank[task_id] for task_id in chosen_tuple))
+            score = (
+                *cost(chosen_tuple),
+                sum(rank[task_id] for task_id in chosen_tuple),
+            )
             candidate = (score, chosen_tuple)
             if best is None or candidate < best:
                 best = candidate
@@ -1208,8 +1199,7 @@ def _solve_balanced_selection(
         return set(best[1])
 
     variables = {
-        task_id: pulp.LpVariable(f"selected_{index}", cat=pulp.LpBinary)
-        for index, task_id in enumerate(ordered)
+        task_id: pulp.LpVariable(f"selected_{index}", cat=pulp.LpBinary) for index, task_id in enumerate(ordered)
     }
     problem = pulp.LpProblem("bfcl_stage11_balancing", pulp.LpMinimize)
     problem += pulp.lpSum(variables.values()) == budget
@@ -1217,11 +1207,7 @@ def _solve_balanced_selection(
         problem += pulp.lpSum(variables[task_id] for task_id in members) >= 1
     for task_id in ordered:
         representative_id = by_decision[task_id].representative_task_id
-        if (
-            representative_id is not None
-            and representative_id != task_id
-            and representative_id in variables
-        ):
+        if representative_id is not None and representative_id != task_id and representative_id in variables:
             problem += variables[task_id] <= variables[representative_id]
 
     for feature, cap in sorted(group_caps.items()):
@@ -1244,11 +1230,7 @@ def _solve_balanced_selection(
     overflow_terms: list[Any] = []
     categories = sorted({str(features[task_id]["category"]) for task_id in ordered})
     for category in categories:
-        count = pulp.lpSum(
-            variables[task_id]
-            for task_id in ordered
-            if features[task_id]["category"] == category
-        )
+        count = pulp.lpSum(variables[task_id] for task_id in ordered if features[task_id]["category"] == category)
         overflow = pulp.LpVariable(
             f"category_overflow_{len(overflow_terms)}",
             lowBound=0,
@@ -1259,15 +1241,9 @@ def _solve_balanced_selection(
 
     deviation_terms: list[Any] = []
     for dimension, quotas in sorted(target_counts.items()):
-        buckets = sorted(
-            set(quotas) | {str(features[task_id][dimension]) for task_id in ordered}
-        )
+        buckets = sorted(set(quotas) | {str(features[task_id][dimension]) for task_id in ordered})
         for bucket in buckets:
-            count = pulp.lpSum(
-                variables[task_id]
-                for task_id in ordered
-                if features[task_id][dimension] == bucket
-            )
+            count = pulp.lpSum(variables[task_id] for task_id in ordered if features[task_id][dimension] == bucket)
             under = pulp.LpVariable(
                 f"under_{len(deviation_terms)}",
                 lowBound=0,
@@ -1280,6 +1256,22 @@ def _solve_balanced_selection(
             )
             problem += count + under - over == quotas.get(bucket, 0)
             deviation_terms.extend((under, over))
+    for dimension, mix in sorted(conditional_target_mixes.items()):
+        applicable_total = pulp.lpSum(
+            variables[task_id] for task_id in ordered if str(features[task_id][dimension]) in mix
+        )
+        for bucket, weight in sorted(mix.items()):
+            count = pulp.lpSum(variables[task_id] for task_id in ordered if str(features[task_id][dimension]) == bucket)
+            under = pulp.LpVariable(
+                f"conditional_under_{len(deviation_terms)}",
+                lowBound=0,
+            )
+            over = pulp.LpVariable(
+                f"conditional_over_{len(deviation_terms)}",
+                lowBound=0,
+            )
+            problem += count + under - over == float(weight) * applicable_total
+            deviation_terms.extend((under, over))
 
     # The three objectives are ranked, not weighted. The category budget is a
     # publication invariant that only coverage may break, declared mixes are targets
@@ -1290,9 +1282,7 @@ def _solve_balanced_selection(
     # result keeps the ranking exact.
     total_overflow = pulp.lpSum(overflow_terms)
     total_deviation = pulp.lpSum(deviation_terms)
-    tie_break_cost = pulp.lpSum(
-        (index + 1) * variables[task_id] for index, task_id in enumerate(ordered)
-    )
+    tie_break_cost = pulp.lpSum((index + 1) * variables[task_id] for index, task_id in enumerate(ordered))
 
     def solve(objective: Any, phase: str) -> None:
         problem.setObjective(objective)
@@ -1310,12 +1300,8 @@ def _solve_balanced_selection(
     ):
         solve(objective, phase)
         if phase != "stable_order":
-            problem += objective <= round(float(pulp.value(objective) or 0.0))
-    return {
-        task_id
-        for task_id in ordered
-        if float(pulp.value(variables[task_id]) or 0.0) >= 0.5
-    }
+            problem += objective <= float(pulp.value(objective) or 0.0) + 1e-7
+    return {task_id for task_id in ordered if float(pulp.value(variables[task_id]) or 0.0) >= 0.5}
 
 
 def balance_publication_set(
@@ -1417,21 +1403,24 @@ def balance_publication_set(
     if settings.min_exact_surface_ratio is not None:
         group_budgets["surface_text_hash"] = min(
             group_budgets.get("surface_text_hash", len(candidates)),
-            math.floor(
-                len(group_inventory["surface_text_hash"]) / settings.min_exact_surface_ratio
-            ),
+            math.floor(len(group_inventory["surface_text_hash"]) / settings.min_exact_surface_ratio),
         )
     target_mixes = _target_mix_by_dimension(config)
+    conditional_target_mixes = {
+        dimension: mix for dimension, mix in target_mixes.items() if dimension == "tool_call_count"
+    }
+    fixed_target_mixes = {
+        dimension: mix for dimension, mix in target_mixes.items() if dimension not in conditional_target_mixes
+    }
 
     # The inventory does not change while the budget shrinks, so counting it once keeps
     # the search linear even when the declared mix forces many steps down.
     mix_inventory = {
-        dimension: Counter(features[task_id][dimension] for task_id in candidates)
-        for dimension in target_mixes
+        dimension: Counter(features[task_id][dimension] for task_id in candidates) for dimension in target_mixes
     }
 
     def quotas_fit(total: int) -> bool:
-        for dimension, mix in target_mixes.items():
+        for dimension, mix in fixed_target_mixes.items():
             inventory = mix_inventory[dimension]
             quotas = largest_remainder_quotas(total, mix)
             if any(quotas[bucket] > inventory.get(bucket, 0) for bucket in quotas):
@@ -1440,32 +1429,22 @@ def balance_publication_set(
 
     feasible_budget = min([len(candidates), category_budget, *group_budgets.values()])
     declared_target = generation.get("target_published_tasks")
-    budget = (
-        min(feasible_budget, int(declared_target))
-        if declared_target is not None
-        else feasible_budget
-    )
+    budget = min(feasible_budget, int(declared_target)) if declared_target is not None else feasible_budget
     # A publication shortfall costs a whole run, so record which bound produced it
     # instead of reporting one fixed cause for every reason a target can be missed.
     shortfall_bounds = {
         "insufficient_candidate_inventory": len(candidates),
         "category_cap_limits_inventory": category_budget,
-        **{
-            reason: group_budgets[feature]
-            for feature, _, reason in GROUP_REUSE_CAPS
-            if feature in group_budgets
-        },
+        **{reason: group_budgets[feature] for feature, _, reason in GROUP_REUSE_CAPS if feature in group_budgets},
     }
     mix_exceeds_inventory = False
     while budget > len(mandatory) and not quotas_fit(budget):
         budget -= 1
         mix_exceeds_inventory = True
     budget = max(budget, len(mandatory))
-    target_counts = {dimension: largest_remainder_quotas(budget, mix) for dimension, mix in target_mixes.items()}
+    target_counts = {dimension: largest_remainder_quotas(budget, mix) for dimension, mix in fixed_target_mixes.items()}
     min_unique_surface_count = (
-        math.ceil(budget * settings.min_exact_surface_ratio)
-        if settings.min_exact_surface_ratio is not None
-        else 0
+        math.ceil(budget * settings.min_exact_surface_ratio) if settings.min_exact_surface_ratio is not None else 0
     )
 
     # This is a multi-dimensional cardinality problem. A local greedy/swap
@@ -1479,15 +1458,24 @@ def balance_publication_set(
         budget=budget,
         category_cap=category_cap,
         target_counts=target_counts,
+        conditional_target_mixes=conditional_target_mixes,
         group_caps=group_caps,
         min_unique_surface_count=min_unique_surface_count,
         stable_key=stable_key,
     )
     selected_order = sorted(selected, key=stable_key)
     selected_counts = {
-        dimension: Counter(features[task_id][dimension] for task_id in selected)
-        for dimension in BALANCING_DIMENSIONS
+        dimension: Counter(features[task_id][dimension] for task_id in selected) for dimension in BALANCING_DIMENSIONS
     }
+    target_counts.update(
+        {
+            dimension: largest_remainder_quotas(
+                sum(selected_counts[dimension].get(bucket, 0) for bucket in mix),
+                mix,
+            )
+            for dimension, mix in conditional_target_mixes.items()
+        }
+    )
     selected_group_counts = {
         feature: Counter(str(features[task_id][feature]) for task_id in selected_order)
         for feature, _, _ in GROUP_REUSE_CAPS
@@ -1610,8 +1598,20 @@ def balance_publication_set(
                 }
             )
     for dimension, quotas in target_counts.items():
+        conditional_mix = conditional_target_mixes.get(dimension)
+        conditional_total = (
+            sum(actual_counts[dimension].get(bucket, 0) for bucket in conditional_mix)
+            if conditional_mix is not None
+            else 0
+        )
         for bucket, target in sorted(quotas.items()):
             actual = actual_counts[dimension].get(bucket, 0)
+            if (
+                conditional_mix is not None
+                and conditional_total > 0
+                and abs(actual / conditional_total - float(conditional_mix[bucket])) <= 0.05
+            ):
+                continue
             if actual != target:
                 inventory = inventory_counts[dimension].get(bucket, 0)
                 unmet.append(
@@ -1622,9 +1622,7 @@ def balance_publication_set(
                         "actual": actual,
                         "inventory": inventory,
                         "reason": (
-                            "insufficient_inventory"
-                            if inventory < target
-                            else "coverage_or_cross_dimension_constraint"
+                            "insufficient_inventory" if inventory < target else "coverage_or_cross_dimension_constraint"
                         ),
                     }
                 )
@@ -1640,11 +1638,7 @@ def balance_publication_set(
         "actual_counts": actual_counts,
         "exact_surface_diversity": {
             "unique": len(selected_surface_counts),
-            "unique_ratio": (
-                len(selected_surface_counts) / len(selected_order)
-                if selected_order
-                else 1.0
-            ),
+            "unique_ratio": (len(selected_surface_counts) / len(selected_order) if selected_order else 1.0),
             "max_reuse": max(selected_surface_counts.values(), default=0),
             "max_exact_surface_reuse": settings.max_exact_surface_reuse,
             "min_exact_surface_ratio": settings.min_exact_surface_ratio,
@@ -1766,9 +1760,7 @@ def write_dedup_balancing_artifacts(
         semantic = semantic_by_id[task_id]
         if representative.get("curator_cluster_id") != semantic.get("cluster_id"):
             raise ValueError(f"task {task_id!r} Curator cluster metadata drifted")
-        if bool(representative.get("curator_is_duplicate", False)) != bool(
-            semantic.get("is_duplicate", False)
-        ):
+        if bool(representative.get("curator_is_duplicate", False)) != bool(semantic.get("is_duplicate", False)):
             raise ValueError(f"task {task_id!r} Curator duplicate metadata drifted")
         for key in ("text_hash", "curator_predecessor_id", "curator_similarity_score"):
             if representative.get(key) != semantic.get(key):
@@ -1856,22 +1848,10 @@ def write_dedup_balancing_artifacts(
         for signature in sorted(edge_inventory)
     }
     drop_reason_counts = dict(
-        sorted(
-            Counter(
-                decision.drop_reason for decision in validated if decision.drop_reason is not None
-            ).items()
-        )
+        sorted(Counter(decision.drop_reason for decision in validated if decision.drop_reason is not None).items())
     )
     actual_counts: dict[str, dict[str, int]] = {
-        dimension: dict(
-            sorted(
-                Counter(
-                    str(row[dimension])
-                    for row in rows
-                    if row["selected"]
-                ).items()
-            )
-        )
+        dimension: dict(sorted(Counter(str(row[dimension]) for row in rows if row["selected"]).items()))
         for dimension in BALANCING_DIMENSIONS
     }
     summary_actual_counts = balancing_summary.get("actual_counts")
@@ -1894,13 +1874,8 @@ def write_dedup_balancing_artifacts(
             "stage_ten_survivors": len(task_ids),
             "curator_duplicates": sum(bool(row["curator_is_duplicate"]) for row in rows),
             "final_duplicates": sum(decision.is_duplicate for decision in validated),
-            "semantic_duplicate_annotations": sum(
-                decision.is_duplicate for decision in validated
-            ),
-            "semantic_duplicate_drops": sum(
-                decision.drop_reason == "semantic_duplicate"
-                for decision in validated
-            ),
+            "semantic_duplicate_annotations": sum(decision.is_duplicate for decision in validated),
+            "semantic_duplicate_drops": sum(decision.drop_reason == "semantic_duplicate" for decision in validated),
             "selected": sum(decision.selected for decision in validated),
             "dropped": sum(not decision.selected for decision in validated),
         },
@@ -1913,22 +1888,14 @@ def write_dedup_balancing_artifacts(
         "target_counts": balancing_summary.get("target_counts") or {},
         "actual_counts": actual_counts,
         "diversity": {
-            "candidate_exact_surfaces": semantic_result.get(
-                "exact_surface_diversity"
-            ),
-            "candidate_execution_cases": semantic_result.get(
-                "execution_case_diversity"
-            ),
-            "published_exact_surfaces": balancing_summary.get(
-                "exact_surface_diversity"
-            ),
+            "candidate_exact_surfaces": semantic_result.get("exact_surface_diversity"),
+            "candidate_execution_cases": semantic_result.get("execution_case_diversity"),
+            "published_exact_surfaces": balancing_summary.get("exact_surface_diversity"),
         },
         "unmet_targets": unmet_targets,
         "release_policy": {
             "unmet_target_policy": settings.unmet_target_policy,
-            "unmet_target_action": (
-                settings.unmet_target_policy if unmet_targets else "none"
-            ),
+            "unmet_target_action": (settings.unmet_target_policy if unmet_targets else "none"),
             "gold_eligible": not unmet_targets,
         },
         "hard_limit_drops": hard_limit_drops,
@@ -2006,10 +1973,7 @@ def run_dedup_balancing_stage(
         balancing_summary,
         coverage_by_task_id=coverage,
     )
-    if (
-        balancing_summary.get("unmet_targets")
-        and resolve_dedup_settings(config).unmet_target_policy == "abort"
-    ):
+    if balancing_summary.get("unmet_targets") and resolve_dedup_settings(config).unmet_target_policy == "abort":
         raise DedupBalancingPolicyError(
             "Stage 11 balancing targets are infeasible and unmet_target_policy='abort'; "
             f"inspect {artifacts['report_path']}"

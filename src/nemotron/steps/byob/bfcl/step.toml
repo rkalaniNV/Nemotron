@@ -57,6 +57,10 @@ description = "tool_trace_cache.jsonl in the eval output tree: append-only, hash
 type = "bfcl_eval_artifacts"
 description = "eval_report.json, eval_task_results.parquet, and eval_manifest.json binding source, plan, candidate aggregates, result hashes, and both replay caches."
 
+[[produces]]
+type = "bfcl_bias_audit_reports"
+description = "Content-addressed bias_audit_report.json and deterministic bias_audit_report.md recomputing the versioned B1-B16 contract from frozen release and evaluation evidence."
+
 [[parameters]]
 name = "family"
 description = "Benchmark family implementation to run."
@@ -117,6 +121,11 @@ skill = "src/nemotron/steps/byob/patterns/create-bfcl-from-oracle-pack.md"
 when = "You need to validate an oracle pack without producing a publishable benchmark"
 then = "Run stage=prepare or `python -m nemotron.steps.byob.scripts.validate_oracle_pack --config <CONFIG>`. Configs that pin lineage.policy=smoke_no_publication record generation_mode=smoke_no_publication and are never publication-eligible."
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
+
+[[strategies]]
+when = "You need to audit a frozen BFCL release for B1-B16 bias"
+then = "Run `python -m nemotron.steps.byob.scripts.audit_bfcl_bias --run-manifest <RUN_MANIFEST> --output-dir <AUDIT_DIR>` and provide raw, expanded, pack, contamination, B10, B12, and B13 evidence when applicable. The read-only audit verifies hashes, recomputes one primary metric per bias id, fails closed on missing or drifted evidence, and writes content-addressed JSON plus deterministic Markdown."
+skill = "src/nemotron/steps/byob/references/bfcl-bias-audit-contract.md"
 
 [[strategies]]
 when = "You want a domain-sized run covering every supported conversation shape"
