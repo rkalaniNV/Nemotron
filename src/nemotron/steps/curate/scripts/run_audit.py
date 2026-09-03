@@ -74,7 +74,7 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
     """Measure the target corpus and decide which measurements are findings."""
     mode = cfg.get("mode", "integrity")
     if mode not in MODES:
-        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+        raise ConfigError(f"mode must be one of {MODES}, got {mode!r}")
 
     target_paths = expand(cfg.get("target_glob"))
     if not target_paths:
@@ -194,9 +194,7 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
     reference_paths = expand(cfg.get("reference_glob"))
     reference_reports: list[integrity.ShardReport] = []
     if reference_paths:
-        reference_reports = integrity.scan_corpus(
-            reference_paths, source_field=source_field, want_digest=False
-        )
+        reference_reports = integrity.scan_corpus(reference_paths, source_field=source_field, want_digest=False)
         ref = integrity.summarize(reference_reports)
         report["observations"].append(
             {
@@ -224,7 +222,7 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
     # -- containment ---------------------------------------------------------
     if mode in ("containment", "all"):
         if not reference_paths:
-            raise ValueError("containment mode requires reference_glob")
+            raise ConfigError("containment mode requires reference_glob")
         duplicate_ids = _nested(declared, "canonicalization", "duplicate_ids") or "reject"
         result = integrity.containment(
             target_paths, reference_paths, cfg.get("comparison_fields") or [], duplicate_ids=duplicate_ids
@@ -321,7 +319,7 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
             declared_block = (declared or {}).get("declared") or {}
             declared_gates = declared_block.get("filtered")
             observed_gates = attribution.get("filtered_by_reason")
-            if declared_gates and observed_gates and declared_gates != observed_gates:
+            if declared_gates is not None and observed_gates is not None and declared_gates != observed_gates:
                 findings.append(
                     {
                         "name": "attribution_disagreement",
@@ -370,10 +368,7 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
                 findings.append(
                     {
                         "name": "unexplained_loss",
-                        "message": (
-                            f"{gap} record(s) left the pipeline for a reason no stage "
-                            f"recorded. {accounted}"
-                        ),
+                        "message": (f"{gap} record(s) left the pipeline for a reason no stage recorded. {accounted}"),
                     }
                 )
             elif gap and gap < 0:
@@ -408,14 +403,24 @@ def run(cfg: dict[str, Any]) -> dict[str, Any]:
     process takes that decision away from it. ``main`` maps the report to an
     exit code instead.
     """
-    report = audit(cfg)
-
     output_dir = Path(cfg.get("output_dir") or ".")
     output_dir.mkdir(parents=True, exist_ok=True)
     destination = output_dir / "audit_report.json"
-    destination.write_text(
-        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    temporary = output_dir / ".audit_report.json.tmp"
+    destination.unlink(missing_ok=True)
+    temporary.unlink(missing_ok=True)
+
+    try:
+        report = audit(cfg)
+        temporary.write_text(
+            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
+        raise
     report["artifacts"] = {"audit_report": str(destination)}
     return report
 

@@ -13,10 +13,10 @@ resharding invalidates every claim subset and decontamination make.
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 import yaml
 
 from nemotron.steps.curate.runtime import ingest as ingest_module
@@ -142,12 +142,27 @@ def test_a_minted_id_survives_resharding(tmp_path) -> None:
 
     split_dir = tmp_path / "split"
     split_dir.mkdir()
-    jsonl(split_dir / "a.jsonl", rows[3:])   # reversed order, different shards
+    jsonl(split_dir / "a.jsonl", rows[3:])  # reversed order, different shards
     jsonl(split_dir / "b.jsonl", rows[:3])
     two = cfg(tmp_path, str(split_dir), output_dir=str(tmp_path / "o2"))
     run_ingest.run(two)
 
     assert {r["id"] for r in written(one)} == {r["id"] for r in written(two)}
+
+
+def test_a_minted_id_keeps_the_full_sha256_digest(tmp_path) -> None:
+    config = cfg(tmp_path, jsonl(tmp_path / "a.jsonl", [{"text": "one document"}]))
+
+    run_ingest.run(config)
+
+    assert len(written(config)[0]["id"]) == 64
+
+
+def test_identity_field_boundaries_cannot_collide() -> None:
+    left = {"url": "alpha\nbeta", "text": "gamma"}
+    right = {"url": "alpha", "text": "beta\ngamma"}
+
+    assert ingest_module.mint_id(left, ["url", "text"], "") != ingest_module.mint_id(right, ["url", "text"], "")
 
 
 def test_the_recipe_is_recorded_so_ids_can_be_regenerated(tmp_path) -> None:
@@ -186,6 +201,13 @@ def test_different_id_fields_give_different_ids(tmp_path) -> None:
     assert {r["id"] for r in written(by_text)} != {r["id"] for r in written(by_both)}
 
 
+def test_minted_identity_fields_must_include_document_text(tmp_path) -> None:
+    source = jsonl(tmp_path / "a.jsonl", [{"url": "u", "text": "document"}])
+
+    with pytest.raises(ingest_module.IngestError, match="must include text_field"):
+        run_ingest.run(cfg(tmp_path, source, id_fields=["url"]))
+
+
 # -- duplicates ---------------------------------------------------------------
 
 
@@ -200,8 +222,32 @@ def test_byte_identical_documents_are_refused_by_default(tmp_path) -> None:
         run_ingest.run(cfg(tmp_path, source))
 
     message = str(excinfo.value)
-    assert "1 document(s) are byte-identical" in message
+    assert "1 document(s) repeat" in message
     assert "on_duplicate" in message, "the error must name the way out"
+
+
+def test_refuse_leaves_no_partial_shards_or_success_report(tmp_path) -> None:
+    config = cfg(tmp_path, jsonl(tmp_path / "a.jsonl", DUPES))
+
+    with pytest.raises(ingest_module.IngestError):
+        run_ingest.run(config)
+
+    output = Path(config["output_dir"])
+    assert not list(output.glob("part_*.jsonl"))
+    assert not (output / "ingest_report.json").exists()
+
+
+def test_a_failed_rerun_removes_the_previous_success_artifacts(tmp_path) -> None:
+    source = tmp_path / "a.jsonl"
+    config = cfg(tmp_path, jsonl(source, [{"text": "unique"}]))
+    run_ingest.run(config)
+    jsonl(source, DUPES)
+
+    with pytest.raises(ingest_module.IngestError):
+        run_ingest.run(config)
+
+    assert not list(Path(config["output_dir"]).glob("part_*.jsonl"))
+    assert not (Path(config["output_dir"]) / "ingest_report.json").exists()
 
 
 def test_drop_keeps_the_first_of_each_group(tmp_path) -> None:
@@ -222,6 +268,41 @@ def test_suffix_keeps_every_copy_under_a_distinguishable_id(tmp_path) -> None:
 
     assert report["counts"]["written"] == 3
     assert len(set(ids)) == 3, "suffixing must actually disambiguate"
+
+
+def test_suffix_never_collides_with_a_corpus_id(tmp_path) -> None:
+    rows = [
+        {"doc_id": "same-1", "text": "reserved suffix"},
+        {"doc_id": "same", "text": "first"},
+        {"doc_id": "same", "text": "second"},
+    ]
+    config = cfg(
+        tmp_path,
+        jsonl(tmp_path / "a.jsonl", rows),
+        id_from="doc_id",
+        on_duplicate="suffix",
+    )
+
+    run_ingest.run(config)
+
+    ids = [row["id"] for row in written(config)]
+    assert len(ids) == len(set(ids)) == 3
+    assert "same-2" in ids
+
+
+def test_corpus_id_duplicates_are_not_described_as_identical_content(tmp_path) -> None:
+    rows = [
+        {"doc_id": "same", "text": "first"},
+        {"doc_id": "same", "text": "different"},
+    ]
+    config = cfg(tmp_path, jsonl(tmp_path / "a.jsonl", rows), id_from="doc_id")
+
+    with pytest.raises(ingest_module.IngestError) as excinfo:
+        run_ingest.run(config)
+
+    message = str(excinfo.value)
+    assert "duplicate 'doc_id'" in message
+    assert "byte-identical" not in message
 
 
 def test_duplicate_examples_are_distinct_ids(tmp_path) -> None:
@@ -291,11 +372,53 @@ def test_unparsable_lines_are_counted(tmp_path) -> None:
     assert report["counts"]["unparsable_lines"] == 1
 
 
+def test_valid_non_object_json_values_are_counted(tmp_path) -> None:
+    path = tmp_path / "a.jsonl"
+    path.write_text('{"text": "ok"}\n"scalar"\n[1, 2]\nnull\n', encoding="utf-8")
+
+    report = run_ingest.run(cfg(tmp_path, str(path)))
+
+    assert report["counts"]["records_read"] == 4
+    assert report["counts"]["skipped_non_mapping"] == 3
+    assert any("non-object JSON" in warning for warning in report["warnings"])
+
+
+def test_missing_corpus_ids_are_warned_not_only_counted(tmp_path) -> None:
+    rows = [{"doc_id": "kept", "text": "one"}, {"text": "missing id"}]
+    config = cfg(tmp_path, jsonl(tmp_path / "a.jsonl", rows), id_from="doc_id")
+
+    report = run_ingest.run(config)
+
+    assert report["counts"]["skipped_missing_id"] == 1
+    assert any("no 'doc_id'" in warning for warning in report["warnings"])
+
+
 def test_a_corpus_with_nothing_usable_is_an_error(tmp_path) -> None:
     source = jsonl(tmp_path / "a.jsonl", [{"url": "a"}, {"url": "b"}])
 
     with pytest.raises(ingest_module.IngestError, match="no usable documents"):
         run_ingest.run(cfg(tmp_path, source))
+
+
+def test_no_usable_documents_leave_no_empty_shard(tmp_path) -> None:
+    config = cfg(tmp_path, jsonl(tmp_path / "a.jsonl", [{"url": "a"}, {"url": "b"}]))
+
+    with pytest.raises(ingest_module.IngestError):
+        run_ingest.run(config)
+
+    assert not list(Path(config["output_dir"]).glob("part_*.jsonl"))
+
+
+def test_exact_shard_boundary_does_not_create_a_trailing_empty_shard(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(run_ingest, "SHARD_SIZE", 2)
+    config = cfg(
+        tmp_path,
+        jsonl(tmp_path / "a.jsonl", [{"text": "one"}, {"text": "two"}]),
+    )
+
+    run_ingest.run(config)
+
+    assert [path.name for path in Path(config["output_dir"]).glob("part_*.jsonl")] == ["part_0.jsonl"]
 
 
 def test_an_unmatched_input_is_an_error(tmp_path) -> None:
@@ -309,7 +432,12 @@ def test_every_error_is_documented() -> None:
 
     documented = {e["name"] for e in manifest.get("errors", [])}
 
-    assert {"duplicate_documents", "mixed_formats", "no_usable_documents"} <= documented
+    assert {
+        "duplicate_documents",
+        "mixed_formats",
+        "no_usable_documents",
+        "invalid_identity_fields",
+    } <= documented
 
 
 # -- a step must not read its own output --------------------------------------
@@ -349,14 +477,14 @@ def test_the_previous_report_is_not_read_back_as_corrupt_documents(tmp_path) -> 
 
 
 def test_skipped_own_output_is_reported_rather_than_silent(tmp_path) -> None:
-    """"1 file" where the user expected 3 must be traceable without re-deriving it."""
+    """ "1 file" where the user expected 2 must be traceable without re-deriving it."""
     config = _nested(tmp_path)
     run_ingest.run(dict(config))
 
     second = run_ingest.run(dict(config))
 
     assert second["input"]["files"] == 1
-    assert second["input"]["skipped_own_output"] == 2
+    assert second["input"]["skipped_own_output"] == 1
 
 
 def test_an_input_that_is_only_the_previous_output_is_refused(tmp_path) -> None:

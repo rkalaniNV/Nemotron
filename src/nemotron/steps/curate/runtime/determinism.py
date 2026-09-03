@@ -122,9 +122,7 @@ def allocate(populations: dict[str, int], max_total_docs: int) -> dict[str, Sour
             # every per-source figure without saying so.
             break
         biggest = max(trimmable, key=lambda a: (a.sampled, a.source))
-        allocations[biggest.source] = SourceAllocation(
-            biggest.source, biggest.population, biggest.sampled - 1
-        )
+        allocations[biggest.source] = SourceAllocation(biggest.source, biggest.population, biggest.sampled - 1)
         drawn -= 1
 
     return allocations
@@ -201,10 +199,7 @@ def sample_by_source(
             heapq.heapreplace(heap, entry)
 
     per_source: dict[str, list[tuple[str, Any]]] = {
-        source: [
-            (key, payload)
-            for _negh, key, _negindex, payload in sorted(heap, key=lambda t: (-t[0], t[1], -t[2]))
-        ]
+        source: [(key, payload) for _negh, key, _negindex, payload in sorted(heap, key=lambda t: (-t[0], t[1], -t[2]))]
         for source, heap in heaps.items()
     }
     per_source.update(uncapped)

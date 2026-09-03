@@ -74,9 +74,7 @@ def test_the_fixture_has_unequal_sources() -> None:
 def _make_filter(direction: str, score_fn):
     class _Stub:
         def __init__(self, **kwargs):
-            self._thresholds = tuple(
-                v for k, v in kwargs.items() if k not in ("lang", "n")
-            )
+            self._thresholds = tuple(v for k, v in kwargs.items() if k not in ("lang", "n"))
 
         def score_document(self, text):
             return score_fn(text)
@@ -130,9 +128,7 @@ def curator_stub(monkeypatch):
         "nemo_curator.stages": types.ModuleType("nemo_curator.stages"),
         "nemo_curator.stages.text": types.ModuleType("nemo_curator.stages.text"),
         "nemo_curator.stages.text.filters": types.ModuleType("nemo_curator.stages.text.filters"),
-        "nemo_curator.stages.text.filters.heuristic": types.ModuleType(
-            "nemo_curator.stages.text.filters.heuristic"
-        ),
+        "nemo_curator.stages.text.filters.heuristic": types.ModuleType("nemo_curator.stages.text.filters.heuristic"),
         "nemo_curator.stages.text.filters.heuristic.repetition": types.ModuleType(
             "nemo_curator.stages.text.filters.heuristic.repetition"
         ),
@@ -229,6 +225,30 @@ def test_macro_and_micro_differ_on_unequal_sources(tmp_path, curator_stub) -> No
     assert macro > micro * 1.5, "wiki's length must visibly pull the equal-weight view up"
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_scores_are_not_counted_as_successfully_scored(value) -> None:
+    class NonFiniteFilter:
+        @staticmethod
+        def score_document(_text):
+            return value
+
+    signal = r.Signal(
+        name="non_finite",
+        factory=lambda **_kwargs: NonFiniteFilter(),
+        direction="max",
+        units="ratio",
+        grid=r.Grid(0.0, 1.0),
+        threshold_params=("max_value",),
+    )
+
+    _scores, health = run_profile.score_sample([signal], {"source": [("doc-1", "document")]})
+
+    assert health["non_finite"]["documents_attempted"] == 1
+    assert health["non_finite"]["documents_scored"] == 0
+    assert health["non_finite"]["scoring_failures"] == 1
+    assert health["non_finite"]["non_finite_scores"] == 1
+
+
 def test_a_named_unsupported_signal_fails(tmp_path, curator_stub) -> None:
     with pytest.raises(r.SignalRequirementsUnmetError):
         run_profile.build_report(_config(tmp_path, signals=["token_count"]))
@@ -287,9 +307,7 @@ def test_the_digest_is_recomputable_from_the_written_report(tmp_path, curator_st
     policies = yaml.safe_load((tmp_path / "candidate_policies.yaml").read_text(encoding="utf-8"))
 
     assert report["producer"]["digest_covers"] == "every key except producer and profile_digest"
-    measurements = {
-        k: v for k, v in report.items() if k not in ("producer", "profile_digest")
-    }
+    measurements = {k: v for k, v in report.items() if k not in ("producer", "profile_digest")}
     assert policy.digest(measurements) == report["profile_digest"]
     assert policies["profile_digest"] == report["profile_digest"]
 
@@ -336,9 +354,7 @@ def test_the_revision_reaches_the_filter(tmp_path, curator_stub, monkeypatch) ->
         seen.update(kwargs)
         return stub(min_tokens=kwargs["min_tokens"], max_tokens=kwargs["max_tokens"])
 
-    monkeypatch.setitem(
-        r.SIGNALS, "token_count", dataclasses.replace(r.SIGNALS["token_count"], factory=spy)
-    )
+    monkeypatch.setitem(r.SIGNALS, "token_count", dataclasses.replace(r.SIGNALS["token_count"], factory=spy))
 
     cfg = _config(tmp_path, signals=["token_count"])
     cfg["models"] = {"tokenizer": {"name": "org/model", "revision": "abc123"}}
@@ -399,9 +415,7 @@ def test_a_corpus_without_the_source_field_says_so(tmp_path, curator_stub) -> No
     shard = tmp_path / "in.jsonl"
     shard.write_text('{"id":"1","text":"a document with words"}\n', encoding="utf-8")
 
-    report, _, _ = run_profile.build_report(
-        _config(tmp_path, input_glob=str(shard), signals=["non_alpha_numeric"])
-    )
+    report, _, _ = run_profile.build_report(_config(tmp_path, input_glob=str(shard), signals=["non_alpha_numeric"]))
 
     assert any("shard path" in note for note in report["notes"])
 
@@ -442,9 +456,7 @@ def test_unparsable_lines_are_counted_and_noted(tmp_path, curator_stub) -> None:
         encoding="utf-8",
     )
 
-    report, _, _ = run_profile.build_report(
-        _config(tmp_path, input_glob=str(shard), signals=["non_alpha_numeric"])
-    )
+    report, _, _ = run_profile.build_report(_config(tmp_path, input_glob=str(shard), signals=["non_alpha_numeric"]))
 
     assert report["corpus"]["unparsable_lines"] == 1
     assert report["corpus"]["damaged_shards"] == 1

@@ -29,7 +29,9 @@ source: null
 # Columns carried through. Everything else is dropped at ingestion.
 keep_fields: [url]
 
-# Two byte-identical documents mint the same id. There is no safe default:
+# Two documents with the same identity fields (which must include text), or two
+# corpus records with the same id_from value, produce the same id. There is no
+# safe default:
 #   refuse  stop and report (default)
 #   drop    keep the first of each group
 #   suffix  keep every copy under a distinguishable id

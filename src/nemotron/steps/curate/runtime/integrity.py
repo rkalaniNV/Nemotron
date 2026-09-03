@@ -96,12 +96,13 @@ class ShardReport:
 def iter_records(
     paths: Iterable[str | Path], damage: dict[str, int] | None = None
 ) -> Iterator[tuple[str, dict[str, Any]]]:
-    """Yield ``(shard_path, record)`` for every parsable line.
+    """Yield ``(shard_path, record)`` for every parsable mapping.
 
-    An unparsable line is COUNTED into ``damage``, never silently skipped. That
-    is a property of the category rather than of one step: ``curate/audit``
-    calls exactly this damage a finding, so a reader that stayed quiet about it
-    would describe a corpus its own sibling considers broken.
+    An unparsable line or a JSON value that is not an object is COUNTED into
+    ``damage``, never silently skipped. That is a property of the category
+    rather than of one step: ``curate/audit`` calls exactly this damage a
+    finding, so a reader that stayed quiet about it would describe a corpus its
+    own sibling considers broken.
 
     ``damage`` is optional because ``curate/profile`` reads the corpus twice and
     only the counting pass has somewhere to put the tally.
@@ -114,11 +115,16 @@ def iter_records(
                 if not stripped:
                     continue
                 try:
-                    yield text, json.loads(stripped)
+                    record = json.loads(stripped)
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     if damage is not None:
                         damage[text] = damage.get(text, 0) + 1
                     continue
+                if not isinstance(record, dict):
+                    if damage is not None:
+                        damage[text] = damage.get(text, 0) + 1
+                    continue
+                yield text, record
 
 
 def scan_shard(
@@ -182,13 +188,18 @@ def scan_shard(
                     # caller comparing counts needs them.
                     continue
 
+                if not isinstance(record, dict):
+                    report.readable = False
+                    report.bad_record_count += 1
+                    if report.error is None:
+                        report.error = "non-object record"
+                        report.error_byte_offset = line_offset
+                    continue
+
                 report.row_count += 1
                 if source_field is not None:
-                    if isinstance(record, dict):
-                        value = record.get(source_field)
-                        key = str(value) if value is not None else "__missing__"
-                    else:
-                        key = "__non_mapping__"
+                    value = record.get(source_field)
+                    key = str(value) if value is not None else "__missing__"
                     counts[key] += 1
     except OSError as exc:
         report.readable = False
@@ -286,6 +297,26 @@ class RowDigest:
 #: :func:`ingest.detect_format` and stop the run.
 CORPUS_EXTENSIONS = ("jsonl", "json", "ndjson", "parquet", "pq")
 
+# Reports and accounting artifacts are JSON, but they are not corpus shards.
+# A bare directory means "discover the corpus under here", so including one of
+# these files turns a successful run's own metadata into input records.
+CORPUS_SIDECAR_NAMES = frozenset(
+    {
+        "audit_report.json",
+        "curation_ledger.json",
+        "decontamination_report.json",
+        "flow_plan.json",
+        "flow_report.json",
+        "ingest_report.json",
+        "plan.json",
+        "profile_report.json",
+        "run_manifest.json",
+        "sample_manifest.json",
+        "subset_report.json",
+        "token_counts.json",
+    }
+)
+
 
 def expand_inputs(pattern: str | list[str] | None) -> list[str]:
     """Resolve a corpus reference the way every curate step already does.
@@ -319,7 +350,11 @@ def expand_inputs(pattern: str | list[str] | None) -> list[str]:
             # Every corpus extension, not just .jsonl: ingest reads parquet too,
             # and matching only .jsonl made `input: ./raw/` over a parquet corpus
             # resolve to nothing and report an empty corpus as though read.
-            found.extend(str(p) for p in path.rglob("*") if p.suffix.lstrip(".").casefold() in CORPUS_EXTENSIONS)
+            found.extend(
+                str(p)
+                for p in path.rglob("*")
+                if p.suffix.lstrip(".").casefold() in CORPUS_EXTENSIONS and p.name not in CORPUS_SIDECAR_NAMES
+            )
         else:
             found.append(item)
     return sorted({f for f in found if Path(f).is_file()})

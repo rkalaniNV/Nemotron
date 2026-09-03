@@ -190,9 +190,7 @@ def canonical_url(url: Any) -> str:
         return head
 
     kept = sorted(
-        part
-        for part in query.split("&")
-        if part and part.split("=", 1)[0].strip().lower() not in TRACKING_PARAMS
+        part for part in query.split("&") if part and part.split("=", 1)[0].strip().lower() not in TRACKING_PARAMS
     )
     return f"{head}?{'&'.join(kept)}" if kept else head
 

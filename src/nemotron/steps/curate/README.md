@@ -18,6 +18,7 @@ can feed translation, pretraining prep, or SFT prep.
 | Need | Step | Input | Output |
 |---|---|---|---|
 | Run the whole category from one config | [`curate/flow`](flow/README.md) | `raw_jsonl` | everything below, plus `flow_report` |
+| Convert raw JSONL/parquet and establish stable document ids | [`curate/ingest`](ingest/README.md) | `raw_jsonl` or parquet | canonical `raw_jsonl`, `ingest_report` |
 | Lightweight JSONL filtering with optional language/word-count/domain gates | [`curate/nemo_curator`](nemo_curator/README.md) | `raw_jsonl` (or HF snapshot) | `filtered_jsonl` |
 | Evidence that a curation run did not silently lose records | [`curate/audit`](audit/README.md) | `filtered_jsonl` | `curation_report` |
 | What candidate filtering thresholds would do to this corpus | [`curate/profile`](profile/README.md) | `filtered_jsonl` | `profile_report`, `filter_policy` |
@@ -27,6 +28,12 @@ can feed translation, pretraining prep, or SFT prep.
 ## Data And Artifact Flow
 
 ```text
+raw JSONL / parquet
+  -> curate/ingest (optional format conversion + stable identity)
+  -> raw_jsonl
+  -> curate/profile (measure before filtering)
+  -> profile_report + candidate_policies.yaml
+
 raw_jsonl / HF snapshot
   -> curate/nemo_curator (JsonlReader -> optional filters -> JsonlWriter)
   -> filtered_jsonl
@@ -49,11 +56,13 @@ filtered_jsonl + a held-out split
   -> reduced training split + decontamination_report
 ```
 
-`curate/decontamination` is the only step in this category that requires a GPU,
-and the only one whose scope limit is worth stating twice: it detects
-whole-document near-duplicates, not a benchmark question embedded inside a long
-document. Its reports say "near-duplicate overlap detected and removed", never
-"holdout verified clean".
+`curate/decontamination` is the only step in this category that requires a GPU.
+Its similarity pass uses the separate `nemotron[curate-gpu]` extra (or
+`curate-gpu` isolated runtime), so the five CPU paths do not pull in RAPIDS.
+Its scope limit is worth stating twice: it detects whole-document
+near-duplicates, not a benchmark question embedded inside a long document. Its
+reports say "near-duplicate overlap detected and removed", never "holdout
+verified clean".
 
 `curate/profile` measures; it does not decide. Its candidate policies carry
 `approved: false` and are not executable — a retention curve says what a
@@ -71,7 +80,7 @@ instead, and guarantees that a smaller tier is contained in every larger one —
 which means it cannot also promise to fill the budget. The unmet remainder is
 reported as `token_shortfall` rather than made up from another stratum.
 
-## One Config, Or Five
+## One Config, Or Six
 
 [`curate/flow`](flow/README.md) runs the steps below from a single config with
 per-step `enabled` flags. It exists for one reason beyond convenience: two

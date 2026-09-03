@@ -26,7 +26,7 @@ the documents it already resolved:
 ``candidates``
     Curator's ``FuzzyDeduplicationWorkflow`` over the union of both splits.
     GPU-backed, and the reason this step declares ``gpus_per_node = 1`` while
-    the other three curate steps declare zero. LSH proposes; it does not decide.
+    the other curate steps declare zero. LSH proposes; it does not decide.
 
 ``verify``
     Exact Jaccard on every candidate pair, at the *same* shingling the
@@ -43,7 +43,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import sys
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +60,8 @@ DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "decontamination" / "conf
 
 SPLIT_FIELD = "__split"
 TRAIN, HOLDOUT = "train", "holdout"
+CURATOR_ID_FIELD = "_curator_dedup_id"
+CURATOR_BUCKET_FIELD = "_bucket_id"
 
 
 class ConfigError(ValueError):
@@ -77,10 +81,14 @@ def resolve_inputs(pattern: str | list[str], label: str) -> list[str]:
     return resolved
 
 
-def read_split(paths: list[str], id_field: str, text_field: str, label: str) -> list[dict[str, Any]]:
+def read_split(
+    paths: list[str], id_field: str, text_field: str, label: str
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
     unparsable = 0
+    non_mapping = 0
+    missing_text = 0
     for path in paths:
         with Path(path).open("rb") as handle:
             for raw in handle:
@@ -91,6 +99,12 @@ def read_split(paths: list[str], id_field: str, text_field: str, label: str) -> 
                     record = json.loads(stripped)
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     unparsable += 1
+                    continue
+                if not isinstance(record, dict):
+                    non_mapping += 1
+                    continue
+                if not isinstance(record.get(text_field), str) or not record[text_field]:
+                    missing_text += 1
                     continue
                 doc_id = record.get(id_field)
                 if doc_id is None or str(doc_id).strip() == "":
@@ -105,35 +119,66 @@ def read_split(paths: list[str], id_field: str, text_field: str, label: str) -> 
                         "report keyed on a non-unique id cannot say which document it removed."
                     )
                 seen.add(doc_id)
-                if not isinstance(record.get(text_field), str):
-                    continue
                 records.append(record)
     if unparsable:
         logger.warning("%s: skipped %d unparsable line(s)", label, unparsable)
+    if non_mapping:
+        logger.warning("%s: skipped %d non-object JSON value(s)", label, non_mapping)
+    if missing_text:
+        logger.warning("%s: skipped %d record(s) without usable %r", label, missing_text, text_field)
     if not records:
         raise ConfigError(f"{label}: no records with a {text_field!r} string")
-    return records
+    return records, {
+        "unparsable_lines": unparsable,
+        "skipped_non_mapping": non_mapping,
+        "skipped_missing_text": missing_text,
+    }
 
 
-def candidate_pairs(cfg: dict, train: list[dict], holdout: list[dict], id_field: str, text_field: str):
+def candidate_pairs(
+    cfg: dict[str, Any],
+    train: list[dict[str, Any]],
+    holdout: list[dict[str, Any]],
+    id_field: str,
+    text_field: str,
+) -> list[tuple[str, str]]:
     """Cross-split candidate pairs from Curator's fuzzy deduplication workflow.
 
     Imported lazily and only when the GPU pass is enabled, so the module — and
     every test in this file — loads on a host without ``cudf``.
     """
-    from nemo_curator.stages.deduplication.fuzzy.workflow import FuzzyDeduplicationWorkflow
+    try:
+        from nemo_curator.stages.deduplication.fuzzy.workflow import FuzzyDeduplicationWorkflow
+    except ModuleNotFoundError as exc:
+        raise ConfigError(
+            "the similarity pass needs NeMo Curator's CUDA deduplication dependencies. "
+            "Install `nemotron[curate-gpu]` (or use the `curate-gpu` isolated runtime), "
+            "or set skip_similarity: true to run only the CPU source-identity pass"
+        ) from exc
 
     work_dir = Path(cfg.get("work_dir") or "./cache/decontamination")
+    # The final stages are conditional. If a run finds no LSH candidates
+    # Curator never constructs them, so their previous output must not survive
+    # beside the current run.
+    for stale in (work_dir / "cache" / "ConnectedComponentsStage", work_dir / "out"):
+        if stale.is_dir():
+            shutil.rmtree(stale)
     union_dir = work_dir / "union"
     union_dir.mkdir(parents=True, exist_ok=True)
     union_path = union_dir / "union.jsonl"
 
     split_of: dict[str, str] = {}
+    curator_id_to_key: dict[int, str] = {}
     with union_path.open("w", encoding="utf-8") as handle:
         for split, records in ((HOLDOUT, holdout), (TRAIN, train)):
             for record in records:
                 key = f"{split}:{record[id_field]}"
                 split_of[key] = split
+                # FuzzyDeduplicationWorkflow 1.3 assigns consecutive internal
+                # ids to this one union file in row order and writes those ids
+                # in its connected-component table. Preserve the reversible
+                # mapping to the corpus's stable ids.
+                curator_id_to_key[len(curator_id_to_key)] = key
                 handle.write(
                     json.dumps(
                         {id_field: key, text_field: record[text_field], SPLIT_FIELD: split},
@@ -157,39 +202,113 @@ def candidate_pairs(cfg: dict, train: list[dict], holdout: list[dict], id_field:
     )
     workflow.run()
 
-    return read_cross_split_pairs(work_dir / "out", split_of, id_field)
+    id_map_path = work_dir / "out" / "fuzzy_id_generator.json"
+    try:
+        id_map = json.loads(id_map_path.read_text(encoding="utf-8"))
+        ranges = list((id_map.get("batch_registry") or {}).values())
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        raise ConfigError(f"Curator did not write a readable id mapping at {id_map_path}") from exc
+    expected_range = [0, len(curator_id_to_key) - 1]
+    if ranges != [expected_range] or id_map.get("next_id") != len(curator_id_to_key):
+        raise ConfigError(
+            "Curator's internal id allocation no longer matches the one-file union order: "
+            f"expected range {expected_range}, got {ranges}. Refusing to attach candidate "
+            "pairs to the wrong corpus ids."
+        )
+
+    return read_cross_split_pairs(
+        work_dir / "cache" / "LSHStage",
+        split_of,
+        curator_id_to_key,
+    )
 
 
-def read_cross_split_pairs(output_dir: Path, split_of: dict[str, str], id_field: str):
-    """Keep only pairs that straddle the split.
+def read_cross_split_pairs(
+    output_dir: Path,
+    split_of: dict[str, str],
+    curator_id_to_key: dict[int, str],
+) -> list[tuple[str, str]]:
+    """Expand Curator LSH buckets into candidate pairs that straddle the split.
 
     Same-split matches are ordinary duplicates. Removing them here would silently
     turn a decontamination run into a deduplication run, which is a different
     decision with a different owner.
+
+    The workflow's final output contains one internal removal-id column, not
+    candidate pairs. Its LSH artifacts retain each complete bucket, so expanding
+    those named columns preserves every cross-split candidate without depending
+    on parquet column order or generating the quadratic cross-product of an
+    entire transitive connected component.
     """
     import pandas as pd
 
-    frames = [pd.read_parquet(p) for p in sorted(Path(output_dir).rglob("*.parquet"))]
-    if not frames:
+    paths = sorted(Path(output_dir).rglob("*.parquet"))
+    if not paths:
         return []
-    edges = pd.concat(frames, ignore_index=True)
+    required = {CURATOR_ID_FIELD, CURATOR_BUCKET_FIELD}
 
-    columns = list(edges.columns)
-    left_col, right_col = columns[0], columns[1]
-    pairs = []
-    for left, right in zip(edges[left_col], edges[right_col], strict=True):
-        left, right = str(left), str(right)
-        left_split, right_split = split_of.get(left), split_of.get(right)
-        if left_split == right_split or None in (left_split, right_split):
-            continue
-        train_key = left if left_split == TRAIN else right
-        holdout_key = right if left_split == TRAIN else left
-        pairs.append((train_key.split(":", 1)[1], holdout_key.split(":", 1)[1]))
-    return sorted(set(pairs))
+    pairs: set[tuple[str, str]] = set()
+    for path in paths:
+        buckets = pd.read_parquet(path)
+        if not required <= set(buckets.columns):
+            raise ConfigError(
+                "Curator's LSH bucket schema changed: expected columns "
+                f"{sorted(required)}, got "
+                f"{sorted(str(column) for column in buckets.columns)} in {path}"
+            )
+        for raw_ids in buckets[CURATOR_ID_FIELD]:
+            if isinstance(raw_ids, (str, bytes)) or not hasattr(raw_ids, "__iter__"):
+                raise ConfigError(f"Curator emitted invalid LSH bucket members {raw_ids!r}; expected a list of ids")
+            keys: set[str] = set()
+            for raw_id in raw_ids:
+                try:
+                    curator_id = int(raw_id)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ConfigError(f"Curator emitted invalid internal id {raw_id!r}") from exc
+                key = curator_id_to_key.get(curator_id)
+                if key is None:
+                    raise ConfigError(
+                        f"Curator emitted internal id {curator_id} outside the "
+                        f"0..{len(curator_id_to_key) - 1} union mapping"
+                    )
+                keys.add(key)
+            train_keys = sorted(key for key in keys if split_of.get(key) == TRAIN)
+            holdout_keys = sorted(key for key in keys if split_of.get(key) == HOLDOUT)
+            for train_key, holdout_key in product(train_keys, holdout_keys):
+                pairs.add(
+                    (
+                        train_key.split(":", 1)[1],
+                        holdout_key.split(":", 1)[1],
+                    )
+                )
+    return sorted(pairs)
+
+
+def _reset_output_artifacts(output_dir: Path) -> None:
+    """Remove every final or temporary artifact owned by this step."""
+    for name in (
+        "train_decontaminated.jsonl",
+        "decontamination_report.json",
+        ".train_decontaminated.jsonl.tmp",
+        ".decontamination_report.json.tmp",
+    ):
+        (output_dir / name).unlink(missing_ok=True)
 
 
 def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
+    """Run decontamination without leaving a partial corpus or success report."""
     started_at = started_at or run_manifest.utc_now()
+    output_dir = Path(cfg.get("output_dir") or ".")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _reset_output_artifacts(output_dir)
+    try:
+        return _run(cfg, started_at, output_dir)
+    except BaseException:
+        _reset_output_artifacts(output_dir)
+        raise
+
+
+def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
     id_field = cfg.get("id_field")
     if not id_field:
         raise ConfigError("id_field is required so the report can name what it removed")
@@ -198,8 +317,8 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
     if not 0.0 < threshold <= 1.0:
         raise ConfigError(f"threshold must be in (0, 1], got {threshold}")
 
-    train = read_split(resolve_inputs(cfg["train_glob"], "train_glob"), id_field, text_field, TRAIN)
-    holdout = read_split(
+    train, train_stats = read_split(resolve_inputs(cfg["train_glob"], "train_glob"), id_field, text_field, TRAIN)
+    holdout, holdout_stats = read_split(
         resolve_inputs(cfg["holdout_glob"], "holdout_glob"), id_field, text_field, HOLDOUT
     )
 
@@ -214,7 +333,10 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
 
     # -- pass 1: exact source identity, no GPU -------------------------------
     groups = grouping.cross_split_groups(
-        train, holdout, left_source=TRAIN, right_source=HOLDOUT,
+        train,
+        holdout,
+        left_source=TRAIN,
+        right_source=HOLDOUT,
         cfg=grouping.GroupKeyConfig(text_field=text_field),
     )
     if not groups["comparable"]:
@@ -235,9 +357,7 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
             "ingested one."
         )
 
-    group_removals = {
-        left_id for entry in groups["shared_groups"] for left_id in entry["left_ids"] if left_id
-    }
+    group_removals = {left_id for entry in groups["shared_groups"] for left_id in entry["left_ids"] if left_id}
 
     # -- pass 2: candidates ---------------------------------------------------
     if cfg.get("skip_similarity"):
@@ -263,10 +383,9 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
     verified = decon.removals(pairs, threshold)
     remove = set(verified) | group_removals
 
-    output_dir = Path(cfg.get("output_dir") or ".")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    corpus_tmp = output_dir / ".train_decontaminated.jsonl.tmp"
     kept = 0
-    with (output_dir / "train_decontaminated.jsonl").open("w", encoding="utf-8") as handle:
+    with corpus_tmp.open("w", encoding="utf-8") as handle:
         for record in train:
             if str(record[id_field]) in remove:
                 continue
@@ -317,11 +436,13 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
             "train": {
                 "documents": len(train),
                 "fingerprint": decon.corpus_fingerprint(train_text),
+                **train_stats,
             },
             "holdout": {
                 "documents": len(holdout),
                 "fingerprint": decon.corpus_fingerprint(holdout_text),
                 "modified": False,
+                **holdout_stats,
             },
         },
         "group_overlap": {
@@ -363,9 +484,11 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
             "removed_by_both": len(group_removals & set(verified)),
         },
     }
-    (output_dir / "decontamination_report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    report_tmp = output_dir / ".decontamination_report.json.tmp"
+    report_tmp.write_text(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+    corpus_tmp.replace(output_dir / "train_decontaminated.jsonl")
+    # The report is the completion marker and is committed last.
+    report_tmp.replace(output_dir / "decontamination_report.json")
 
     if unverifiable:
         logger.warning(
@@ -380,9 +503,7 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Remove training documents that near-duplicate a holdout split"
-    )
+    parser = argparse.ArgumentParser(description="Remove training documents that near-duplicate a holdout split")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")

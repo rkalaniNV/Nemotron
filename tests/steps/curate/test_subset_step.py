@@ -12,11 +12,12 @@ plan that predicted them.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 import yaml
 
 from nemotron.steps.curate.scripts import run_subset
@@ -139,9 +140,7 @@ def test_records_pass_through_unchanged(tmp_path) -> None:
     cfg = config(tmp_path)
     run_subset.run(cfg, "2026-08-25T00:00:00Z")
 
-    line = (
-        Path(cfg["output_dir"]) / "budget_4000_words" / "subset.jsonl"
-    ).read_text(encoding="utf-8").splitlines()[0]
+    line = (Path(cfg["output_dir"]) / "budget_4000_words" / "subset.jsonl").read_text(encoding="utf-8").splitlines()[0]
 
     assert set(json.loads(line)) == {"id", "source", "text", "__quality", "url"}
 
@@ -218,11 +217,56 @@ def test_a_tokenizer_without_a_revision_is_refused(tmp_path) -> None:
         )
 
 
+@pytest.mark.parametrize("budgets", [[1.5], ["100"], [True], [0]])
+def test_token_budgets_must_really_be_positive_integers(tmp_path, budgets) -> None:
+    with pytest.raises(run_subset.ConfigError, match="positive integers"):
+        run_subset.run(config(tmp_path, token_budgets=budgets), "2026-08-25T00:00:00Z")
+
+
+@pytest.mark.parametrize("bands", [[16.5, 50], ["16", "50"], [True, 50], [50, 16], [16, 16]])
+def test_length_bands_must_really_be_increasing_positive_integers(tmp_path, bands) -> None:
+    with pytest.raises(run_subset.ConfigError, match="length_bands"):
+        run_subset.run(config(tmp_path, length_bands=bands), "2026-08-25T00:00:00Z")
+
+
 def test_a_score_field_absent_from_the_data_is_refused(tmp_path) -> None:
     with pytest.raises(run_subset.subset.SubsetError, match="__missing"):
+        run_subset.run(config(tmp_path, quality_score_field="__missing"), "2026-08-25T00:00:00Z")
+
+
+def test_non_finite_quality_scores_are_refused_by_the_step(tmp_path) -> None:
+    path = tmp_path / "non-finite.jsonl"
+    path.write_text(
+        json.dumps({"id": "bad", "source": "web", "text": "one two", "__q": float("nan")}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(run_subset.subset.SubsetError, match="non-finite"):
         run_subset.run(
-            config(tmp_path, quality_score_field="__missing"), "2026-08-25T00:00:00Z"
+            config(tmp_path, input_glob=str(path), quality_score_field="__q"),
+            "2026-08-25T00:00:00Z",
         )
+
+
+def test_non_positive_token_counts_are_refused_by_the_step(tmp_path, monkeypatch) -> None:
+    class BrokenCounter:
+        name = "broken"
+        revision = "test"
+        hits = 0
+        misses = 0
+
+        @staticmethod
+        def count(_doc_id, _text):
+            return 0
+
+        @staticmethod
+        def save():
+            return None
+
+    monkeypatch.setattr(run_subset, "build_counter", lambda _cfg: (BrokenCounter(), "tokens"))
+
+    with pytest.raises(run_subset.subset.SubsetError, match="non-positive token count"):
+        run_subset.run(config(tmp_path), "2026-08-25T00:00:00Z")
 
 
 def test_an_unmatched_glob_is_an_error(tmp_path) -> None:
@@ -258,9 +302,7 @@ def test_unparsable_lines_are_counted_not_ignored(tmp_path) -> None:
     damaged = tmp_path / "damaged.jsonl"
     damaged.write_text(source.read_text(encoding="utf-8") + "{not json\n", encoding="utf-8")
 
-    report = run_subset.run(
-        config(tmp_path, input_glob=str(damaged)), "2026-08-25T00:00:00Z"
-    )
+    report = run_subset.run(config(tmp_path, input_glob=str(damaged)), "2026-08-25T00:00:00Z")
 
     assert report["corpus"]["unparsable_lines"] == 1
 
@@ -287,7 +329,19 @@ def test_a_cache_from_another_tokenizer_is_ignored(tmp_path, caplog) -> None:
     assert counter._counts == {}, "reusing counts from another tokenizer is silent corruption"
 
 
+@pytest.mark.parametrize("contents", ["[]", "{not json"])
+def test_a_malformed_token_cache_is_ignored(tmp_path, contents, caplog) -> None:
+    cache = tmp_path / "counts.json"
+    cache.write_text(contents, encoding="utf-8")
+
+    counter = run_subset.TokenCounter("m", "r", cache)
+
+    assert counter._counts == {}
+    assert "ignored" in caplog.text
+
+
 def test_a_cache_from_the_same_tokenizer_is_reused(tmp_path) -> None:
+    text = "ignored"
     cache = tmp_path / "counts.json"
     cache.write_text(
         json.dumps(
@@ -295,7 +349,12 @@ def test_a_cache_from_the_same_tokenizer_is_reused(tmp_path) -> None:
                 "cache_version": run_subset.CACHE_VERSION,
                 "tokenizer": "m",
                 "revision": "r",
-                "counts": {"doc-0000": 42},
+                "counts": {
+                    "doc-0000": {
+                        "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                        "tokens": 42,
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -303,18 +362,56 @@ def test_a_cache_from_the_same_tokenizer_is_reused(tmp_path) -> None:
 
     counter = run_subset.TokenCounter("m", "r", cache)
 
-    assert counter.count("doc-0000", "ignored") == 42
+    assert counter.count("doc-0000", text) == 42
     assert counter.hits == 1 and counter.misses == 0
+
+
+def test_token_cache_invalidates_when_text_changes(tmp_path, monkeypatch) -> None:
+    old_text = "old content"
+    cache = tmp_path / "counts.json"
+    cache.write_text(
+        json.dumps(
+            {
+                "cache_version": run_subset.CACHE_VERSION,
+                "tokenizer": "m",
+                "revision": "r",
+                "counts": {
+                    "doc-0000": {
+                        "content_sha256": hashlib.sha256(old_text.encode()).hexdigest(),
+                        "tokens": 42,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    counter = run_subset.TokenCounter("m", "r", cache)
+
+    class Filter:
+        @staticmethod
+        def score_document(_text):
+            return 7
+
+    monkeypatch.setattr(counter, "_load", lambda: Filter())
+
+    assert counter.count("doc-0000", "new content") == 7
+    assert counter.hits == 0 and counter.misses == 1
 
 
 def test_the_cache_round_trips(tmp_path) -> None:
     cache = tmp_path / "counts.json"
     first = run_subset.WordCounter()
     written = run_subset.TokenCounter("m", "r", cache)
-    written._counts = {"a": 7}
+    text = "x"
+    written._counts = {
+        "a": {
+            "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "tokens": 7,
+        }
+    }
     written.save()
 
-    assert run_subset.TokenCounter("m", "r", cache).count("a", "x") == 7
+    assert run_subset.TokenCounter("m", "r", cache).count("a", text) == 7
     assert first.count("a", "one two three") == 3
 
 
@@ -373,8 +470,7 @@ def test_token_count_filter_still_accepts_these_arguments() -> None:
     for name in ("hf_model_name", "transformers_init_kwargs", "min_tokens", "max_tokens"):
         assert name in params, f"TokenCountFilter no longer accepts {name}"
     assert "revision" not in params, (
-        "TokenCountFilter grew a revision parameter; the transformers_init_kwargs "
-        "detour is no longer necessary"
+        "TokenCountFilter grew a revision parameter; the transformers_init_kwargs detour is no longer necessary"
     )
 
 
@@ -398,14 +494,49 @@ def test_the_written_check_reads_the_ids_it_actually_wrote(tmp_path) -> None:
     source = (STEP_DIR.parent / "scripts" / "run_subset.py").read_text(encoding="utf-8")
 
     assert "written_ids[budget] = wanted" not in source, (
-        "the written-tier check must collect the ids it wrote, not the planned "
-        "set the first check already verified"
+        "the written-tier check must collect the ids it wrote, not the planned set the first check already verified"
     )
 
 
-def test_a_tier_that_wrote_fewer_documents_than_planned_is_reported(tmp_path) -> None:
-    """write_mismatch is the only record of a short write, so it must survive."""
-    source = (STEP_DIR.parent / "scripts" / "run_subset.py").read_text(encoding="utf-8")
+def test_a_tier_that_writes_fewer_documents_than_planned_is_refused(tmp_path, monkeypatch) -> None:
+    real_materialize = run_subset.subset.materialize
 
-    assert "write_mismatch" in source
-    assert "planned %d documents but wrote %d" in source, "and it must reach the log"
+    def include_an_unaddressable_id(plan, rows):
+        results = real_materialize(plan, rows)
+        for result in results.values():
+            result.doc_ids.append("not-present-in-the-corpus")
+        return results
+
+    monkeypatch.setattr(run_subset.subset, "materialize", include_an_unaddressable_id)
+    cfg = config(tmp_path)
+
+    with pytest.raises(run_subset.subset.SubsetError, match="planned .* but wrote"):
+        run_subset.run(cfg, "2026-08-25T00:00:00Z")
+
+    output = Path(cfg["output_dir"])
+    assert not (output / "plan.json").exists()
+    assert not (output / "subset_report.json").exists()
+    assert not list(output.glob("budget_*"))
+
+
+def test_a_failed_write_leaves_no_partial_tiers_or_success_reports(tmp_path, monkeypatch) -> None:
+    real_verify = run_subset.subset.verify_nesting
+    calls = 0
+
+    def fail_second_verification(results):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return ["forced write failure"]
+        return real_verify(results)
+
+    monkeypatch.setattr(run_subset.subset, "verify_nesting", fail_second_verification)
+    cfg = config(tmp_path)
+
+    with pytest.raises(run_subset.subset.NestingViolationError, match="written tiers"):
+        run_subset.run(cfg, "2026-08-25T00:00:00Z")
+
+    output = Path(cfg["output_dir"])
+    assert not (output / "plan.json").exists()
+    assert not (output / "subset_report.json").exists()
+    assert not list(output.glob("budget_*"))

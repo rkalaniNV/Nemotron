@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI for ``steps/curate/flow`` — one config, five steps, one command.
+"""CLI for ``steps/curate/flow`` — one config, six steps, one command.
 
-Running the curate category by hand means five configs plus a hand-written
+Running the curate category by hand means six configs plus a hand-written
 approved policy, and the paths between them have to agree. Two of those
 agreements are silent when broken: ``curate/nemo_curator`` ships
 ``emit_manifest: null`` while ``curate/audit`` ships ``declared_manifest: null``,
@@ -26,7 +26,7 @@ The shape is deliberately thin. Every step already exposes ``run(cfg) -> report`
 (see ``tests/steps/curate/test_step_seam.py``), so this module owns three things
 and no algorithms:
 
-``derive``     one authored config becomes five per-step configs
+``derive``     one authored config becomes six per-step configs
 ``preflight``  everything that can be refused is refused before any work starts
 ``run``        the enabled steps, in dependency order, with their reports collected
 
@@ -50,7 +50,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -156,6 +156,21 @@ def _artifact_paths(root: Path) -> dict[str, str]:
     }
 
 
+def _write_json_atomic(path: Path, document: dict[str, Any]) -> None:
+    """Commit a JSON artifact without exposing an interrupted partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def derive(cfg: dict) -> tuple[list[Resolved], dict[str, str]]:
     """Turn one authored config into one config per step.
 
@@ -168,17 +183,26 @@ def derive(cfg: dict) -> tuple[list[Resolved], dict[str, str]]:
     root = Path(cfg.get("output_root") or "./output/curate")
     paths = _artifact_paths(root)
     steps_cfg = cfg.get("steps") or {}
+    ingest_on = bool((steps_cfg.get("ingest") or {}).get("enabled"))
 
+    # Ingest reads the author's raw field names but deliberately emits the
+    # category's canonical schema. Every consumer must therefore read the
+    # canonical names when ingest is enabled; carrying the raw names forward
+    # makes a perfectly valid `content`/`doc_id` corpus disappear at profile or
+    # subset time.
     shared = {
-        "text_field": corpus.get("text_field", "text"),
-        "id_field": corpus.get("id_field"),
-        "source_field": corpus.get("source_field"),
+        "text_field": "text" if ingest_on else corpus.get("text_field", "text"),
+        "id_field": "id" if ingest_on else corpus.get("id_field"),
+        "source_field": (
+            "source"
+            if ingest_on and (corpus.get("source_field_in_source") or corpus.get("source_value"))
+            else (None if ingest_on else corpus.get("source_field"))
+        ),
     }
 
     # What profile and filter actually read. When ingest runs it is the corpus
     # ingest wrote, not the raw files: reading the raw corpus after normalising
     # it would measure a different set of documents from the one being filtered.
-    ingest_on = bool((steps_cfg.get("ingest") or {}).get("enabled"))
     read_from = f"{paths['prepared']}/*.jsonl" if ingest_on else corpus["input"]
 
     resolved: list[Resolved] = []
@@ -205,16 +229,12 @@ def derive(cfg: dict) -> tuple[list[Resolved], dict[str, str]]:
                 or [
                     f
                     for f in ("url", corpus.get("text_field", "text"))
-                    if f == corpus.get("text_field", "text")
-                    or f in (corpus.get("metadata_fields") or [])
+                    if f == corpus.get("text_field", "text") or f in (corpus.get("metadata_fields") or [])
                 ],
                 "id_prefix": corpus.get("id_prefix") or "",
                 "source_from": corpus.get("source_field_in_source"),
                 "source": corpus.get("source_value"),
-                "keep_fields": [
-                    f for f in (corpus.get("metadata_fields") or [])
-                    if f not in ("id", "source")
-                ],
+                "keep_fields": [f for f in (corpus.get("metadata_fields") or []) if f not in ("id", "source")],
             }
         elif plan.key == "profile":
             step_cfg = {
@@ -226,11 +246,18 @@ def derive(cfg: dict) -> tuple[list[Resolved], dict[str, str]]:
                 "language": corpus.get("language"),
             }
         elif plan.key == "filter":
+            metadata_fields = list(corpus.get("metadata_fields") or [])
+            if ingest_on:
+                # These are produced by ingest independently of their raw
+                # source names and must survive Curator's reader.
+                metadata_fields.append("id")
+                if shared["source_field"]:
+                    metadata_fields.append("source")
             step_cfg = {
                 **shared,
                 "input_glob": read_from,
                 "output_dir": out,
-                "metadata_fields": corpus.get("metadata_fields") or [],
+                "metadata_fields": list(dict.fromkeys(metadata_fields)),
                 "emit_manifest": paths["manifest"],
                 "emit_ledger": paths["ledger"],
             }
@@ -313,7 +340,7 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
     """Refuse everything refusable before the first step does any work.
 
     A flow that fails forty minutes in, after the filter has rewritten the
-    corpus, is worse than five separate commands — the whole point of running
+    corpus, is worse than six separate commands — the whole point of running
     them together is that the run either starts or explains why not.
     """
     problems: list[str] = []
@@ -324,9 +351,7 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
     # for, and the run would report success having never attempted it.
     unknown = sorted(set(cfg.get("steps") or {}) - set(STEPS_BY_KEY))
     if unknown:
-        problems.append(
-            f"unknown step(s) under steps: {unknown}. Known: {sorted(STEPS_BY_KEY)}."
-        )
+        problems.append(f"unknown step(s) under steps: {unknown}. Known: {sorted(STEPS_BY_KEY)}.")
 
     if not enabled:
         problems.append("no steps are enabled; set steps.<name>.enabled: true for at least one")
@@ -335,9 +360,7 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
         if not resolved_step.enabled:
             continue
         for artifact in resolved_step.plan.needs:
-            producer = next(
-                (p.key for p in STEP_ORDER if artifact in p.produces), None
-            )
+            producer = next((p.key for p in STEP_ORDER if artifact in p.produces), None)
             if producer in enabled:
                 continue
             # The producer is disabled. Reuse a previous run's artifact only if
@@ -345,8 +368,7 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
             # rather than letting the step report an empty-looking result.
             if _artifact_exists(paths[artifact]):
                 resolved_step.notes.append(
-                    f"reusing {artifact} from a previous run at {paths[artifact]} "
-                    f"(steps.{producer}.enabled is false)"
+                    f"reusing {artifact} from a previous run at {paths[artifact]} (steps.{producer}.enabled is false)"
                 )
                 if artifact == "corpus":
                     # A corpus left behind by a filter run that DIED parses
@@ -480,13 +502,19 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
             "written but nothing applies it. Enable steps.filter, or drop approve if you "
             "only meant to record the decision."
         )
+    if cfg.get("approve") and "profile" in enabled:
+        problems.append(
+            "approve is set while steps.profile is enabled. Profiling and approval are two "
+            "runs on purpose: otherwise this run can replace candidate_policies.yaml with "
+            "measurements nobody reviewed while carrying the old approval block forward. "
+            "Run profile first, review its output, then disable steps.profile before approving."
+        )
 
     if "decontamination" in enabled:
         decon = next(r for r in resolved if r.plan.key == "decontamination")
         if not decon.config.get("holdout_glob"):
             problems.append(
-                "steps.decontamination needs steps.decontamination.holdout: the split it "
-                "protects cannot be guessed"
+                "steps.decontamination needs steps.decontamination.holdout: the split it protects cannot be guessed"
             )
         if not decon.config.get("skip_similarity"):
             warnings.append(
@@ -496,9 +524,7 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
             )
 
     if problems:
-        raise FlowConfigError(
-            "the flow cannot run as configured:\n  - " + "\n  - ".join(problems)
-        )
+        raise FlowConfigError("the flow cannot run as configured:\n  - " + "\n  - ".join(problems))
     return warnings
 
 
@@ -506,7 +532,12 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
 
 
 def materialise_policy(
-    cfg: dict, resolved: list[Resolved], paths: dict[str, str], *, dry_run: bool = False
+    cfg: dict,
+    resolved: list[Resolved],
+    paths: dict[str, str],
+    *,
+    dry_run: bool = False,
+    defer_corpus_verification: bool = False,
 ) -> list[str]:
     """Turn the authored ``approve:`` block into an approved policy on disk.
 
@@ -547,17 +578,21 @@ def materialise_policy(
     # and carried through verbatim when present; a block full of nulls would
     # record nothing while looking like provenance.
     approval = {
-        key: approve[key]
-        for key in ("method", "approver", "date", "evidence")
-        if approve.get(key) is not None
+        key: approve[key] for key in ("method", "approver", "date", "evidence") if approve.get(key) is not None
     }
-    document, warnings = policy_module.promote(
-        candidate, thresholds=thresholds, approval=approval
+    document, warnings = cast(
+        tuple[dict[str, Any], list[str]],
+        policy_module.promote(candidate, thresholds=thresholds, approval=approval),
     )
 
     corpus = _corpus(cfg)
     declared = (document.get("corpus") or {}).get("fingerprint")
-    if approve.get("verify_corpus", True):
+    if approve.get("verify_corpus", True) and defer_corpus_verification:
+        warnings.append(
+            "corpus fingerprint verification is deferred until ingest has committed this "
+            "run's prepared corpus, immediately before the filter can apply the policy"
+        )
+    elif approve.get("verify_corpus", True):
         # The corpus the thresholds will be applied to, which is the one the
         # profile measured: with ingest enabled that is the ingested JSONL, not
         # the raw input the flow started from. Verifying corpus.input instead
@@ -565,10 +600,14 @@ def materialise_policy(
         # refused every approval over a parquet source.
         filter_step = next((r for r in resolved if r.plan.key == "filter"), None)
         verified = (filter_step.config.get("input_glob") if filter_step else None) or corpus["input"]
+        verified_text_field = filter_step.config.get("text_field") if filter_step else corpus.get("text_field", "text")
+        verified_id_field = filter_step.config.get("id_field") if filter_step else corpus.get("id_field")
+        if not isinstance(verified_text_field, str) or not verified_text_field:
+            raise FlowConfigError("the corpus text_field used for approval verification must be a non-empty string")
+        if verified_id_field is not None and (not isinstance(verified_id_field, str) or not verified_id_field):
+            raise FlowConfigError("the corpus id_field used for approval verification must be a non-empty string")
         try:
-            actual = integrity.corpus_fingerprint(
-                verified, corpus.get("text_field", "text"), corpus.get("id_field")
-            )
+            actual = integrity.corpus_fingerprint(verified, verified_text_field, verified_id_field)
         except integrity.UnreadableCorpusError as exc:
             raise FlowConfigError(
                 f"the approval cannot be verified against {verified}: {exc} Enable "
@@ -586,22 +625,30 @@ def materialise_policy(
         warnings.append(f"corpus fingerprint verified against the data: {actual}")
 
     destination = Path(paths["approved_policy"])
-    if dry_run:
-        # Everything above already ran: promote()'s checks and the corpus
-        # fingerprint comparison. A preview whose whole purpose is to surface
-        # refusals before a long run must exercise the gate; it just must not
-        # leave an approved policy behind.
-        return warnings
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        yaml.safe_dump(document, sort_keys=False, allow_unicode=True), encoding="utf-8"
-    )
-
     for resolved_step in resolved:
         if resolved_step.plan.key == "filter":
             block = dict(resolved_step.config.get("heuristic_filters") or {})
-            block.setdefault("approved_policy", str(destination))
+            existing = block.get("approved_policy")
+            if existing and Path(existing).resolve() != destination.resolve():
+                raise FlowConfigError(
+                    "approve promotes a policy to "
+                    f"{destination}, but steps.filter.heuristic_filters.approved_policy points "
+                    f"at {existing}. The flow cannot truthfully report which policy it applied; "
+                    "remove the per-step path and let approve wire the promoted policy."
+                )
+            block["approved_policy"] = str(destination)
             resolved_step.config["heuristic_filters"] = block
+
+    if dry_run or defer_corpus_verification:
+        # Everything above already ran: promote()'s checks and the corpus
+        # fingerprint comparison when the input already exists. A preview must
+        # not leave an approved policy behind, and a deferred verification must
+        # not publish one before ingest proves which corpus this run will use.
+        return warnings
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    temporary.write_text(yaml.safe_dump(document, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    temporary.replace(destination)
     return warnings
 
 
@@ -625,7 +672,7 @@ def step_runner(key: str) -> Callable[[dict], dict]:
     if key == "filter":
         from nemotron.steps.curate.nemo_curator import step as nemo_curator_step
 
-        return nemo_curator_step.run
+        return cast(Callable[[dict], dict], nemo_curator_step.run)
     if key == "audit":
         from nemotron.steps.curate.scripts import run_audit
 
@@ -647,37 +694,42 @@ def plan(cfg: dict, *, dry_run: bool = False) -> tuple[list[Resolved], dict[str,
     Shared by ``run`` and ``--plan`` so the preview cannot describe a different
     run from the one that would happen.
     """
+    root = Path(cfg.get("output_root") or "./output/curate")
+    plan_path = root / "flow_plan.json"
+    plan_path.unlink(missing_ok=True)
+    plan_path.with_name(f".{plan_path.name}.tmp").unlink(missing_ok=True)
+
     resolved, paths = derive(cfg)
     warnings = preflight(cfg, resolved, paths)
-    warnings += materialise_policy(cfg, resolved, paths, dry_run=dry_run)
+    enabled = {step.plan.key for step in resolved if step.enabled}
+    defer_verification = bool(cfg.get("approve") and {"ingest", "filter"} <= enabled)
+    warnings += materialise_policy(
+        cfg,
+        resolved,
+        paths,
+        dry_run=dry_run,
+        defer_corpus_verification=defer_verification,
+    )
 
-    root = Path(cfg.get("output_root") or "./output/curate")
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "flow_plan.json").write_text(
-        json.dumps(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "output_root": str(root),
-                "dry_run": dry_run,
-                "artifacts": paths,
-                "steps": [
-                    {
-                        "key": r.plan.key,
-                        "step_id": r.plan.step_id,
-                        "enabled": r.enabled,
-                        "notes": r.notes,
-                        "config": r.config,
-                    }
-                    for r in resolved
-                ],
-                "warnings": warnings,
-            },
-            indent=2,
-            sort_keys=True,
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
+    _write_json_atomic(
+        plan_path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "output_root": str(root),
+            "dry_run": dry_run,
+            "artifacts": paths,
+            "steps": [
+                {
+                    "key": r.plan.key,
+                    "step_id": r.plan.step_id,
+                    "enabled": r.enabled,
+                    "notes": r.notes,
+                    "config": r.config,
+                }
+                for r in resolved
+            ],
+            "warnings": warnings,
+        },
     )
     return resolved, paths, warnings
 
@@ -689,8 +741,12 @@ def run(cfg: dict) -> dict[str, Any]:
     future flow of flows — keeps control of what a failure means.
     """
     started_at = run_manifest.utc_now()
-    resolved, paths, warnings = plan(cfg)
     root = Path(cfg.get("output_root") or "./output/curate")
+    root.mkdir(parents=True, exist_ok=True)
+    report_path = root / "flow_report.json"
+    report_path.unlink(missing_ok=True)
+    report_path.with_name(f".{report_path.name}.tmp").unlink(missing_ok=True)
+    resolved, paths, warnings = plan(cfg)
 
     for warning in warnings:
         logger.warning(warning)
@@ -703,6 +759,18 @@ def run(cfg: dict) -> dict[str, Any]:
             continue
         logger.info("running %s", resolved_step.plan.step_id)
         try:
+            if (
+                resolved_step.plan.key == "filter"
+                and cfg.get("approve")
+                and any(step.plan.key == "ingest" and step.enabled for step in resolved)
+            ):
+                # Planning cannot verify the corpus ingest has not written yet.
+                # Do it after ingest commits and before the first consumer can
+                # apply the policy; this closes the old-output/new-input race.
+                for warning in materialise_policy(cfg, resolved, paths):
+                    if warning not in warnings:
+                        warnings.append(warning)
+                        logger.warning(warning)
             report = step_runner(resolved_step.plan.key)(resolved_step.config)
         except BaseException as exc:  # noqa: BLE001 - re-raised after the report
             # A run that dies mid-flow has already written some steps' artifacts
@@ -741,9 +809,7 @@ def run(cfg: dict) -> dict[str, Any]:
     # Presence of an approve block is not application. When steps.filter is
     # disabled the policy is promoted and written and nothing runs it, and a
     # report claiming otherwise is the specific lie this field would tell.
-    policy_applied = bool(
-        cfg.get("approve") and filter_result and filter_result["status"] == "ok"
-    )
+    policy_applied = bool(cfg.get("approve") and filter_result and filter_result["status"] == "ok")
     report = {
         "schema_version": SCHEMA_VERSION,
         "step_id": "curate/flow",
@@ -758,9 +824,7 @@ def run(cfg: dict) -> dict[str, Any]:
         "policy_applied": policy_applied,
         "policy_promoted": bool(cfg.get("approve")),
     }
-    (root / "flow_report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    _write_json_atomic(report_path, report)
     ran = [r["step_id"] for r in results if r["status"] == "ok"]
     if failure is not None:
         failed = next(r["step_id"] for r in results if r["status"] == "failed")

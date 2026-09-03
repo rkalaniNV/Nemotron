@@ -64,10 +64,7 @@ def test_every_tier_nests_in_every_larger_tier() -> None:
 
 def test_nesting_holds_with_a_score_field_full_of_ties() -> None:
     """Deciles of a coarse score column put many documents on a cut boundary."""
-    rows = [
-        ScanRow(f"doc-{i:04d}", ["web", "wiki"][i % 2], 100, score=round(i % 4 / 4, 2))
-        for i in range(200)
-    ]
+    rows = [ScanRow(f"doc-{i:04d}", ["web", "wiki"][i % 2], 100, score=round(i % 4 / 4, 2)) for i in range(200)]
 
     _, results = tiers(rows, score_field="__q")
 
@@ -176,9 +173,7 @@ def test_filling_the_budget_and_nesting_cannot_both_hold() -> None:
 
 def test_shortfall_is_reported_rather_than_redistributed() -> None:
     """One large document blocks its stratum; the tokens must not move elsewhere."""
-    rows = [ScanRow("big", "a", 10_000)] + [
-        ScanRow(f"small-{i}", "b", 10) for i in range(50)
-    ]
+    rows = [ScanRow("big", "a", 10_000)] + [ScanRow(f"small-{i}", "b", 10) for i in range(50)]
 
     _, results = tiers(rows, [600])
     result = results[600]
@@ -266,6 +261,27 @@ def test_a_score_field_set_but_absent_is_an_error_not_a_silent_downgrade() -> No
     assert "annotate" in message, "the error should say where a score column comes from"
 
 
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_quality_scores_are_refused(score) -> None:
+    rows = [ScanRow("finite", "a", 100, score=0.5), ScanRow("bad", "a", 100, score=score)]
+
+    with pytest.raises(subset.SubsetError, match="non-finite"):
+        subset.build_plan(rows, BUDGETS, score_field="__q")
+
+
+@pytest.mark.parametrize("tokens", [0, -1])
+def test_non_positive_token_counts_are_refused(tokens) -> None:
+    rows = [ScanRow("valid", "a", 10), ScanRow("bad", "a", tokens)]
+
+    with pytest.raises(subset.SubsetError, match="non-positive token count"):
+        subset.build_plan(rows, BUDGETS)
+
+
+def test_length_bands_must_be_strictly_increasing() -> None:
+    with pytest.raises(subset.SubsetError, match="strictly increasing"):
+        subset.build_plan(corpus(10), BUDGETS, length_bands=(512, 128))
+
+
 def test_without_a_score_field_the_stratum_key_is_source_and_length() -> None:
     plan = subset.build_plan(corpus(60), BUDGETS)
 
@@ -282,9 +298,7 @@ def test_with_a_score_field_deciles_join_the_stratum_key() -> None:
 
 def test_length_bands_separate_short_from_long_documents() -> None:
     """A subset with the right source mix and the wrong length mix is not neutral."""
-    rows = [ScanRow(f"s{i}", "a", 10) for i in range(50)] + [
-        ScanRow(f"l{i}", "a", 5000) for i in range(50)
-    ]
+    rows = [ScanRow(f"s{i}", "a", 10) for i in range(50)] + [ScanRow(f"l{i}", "a", 5000) for i in range(50)]
 
     plan = subset.build_plan(rows, [10_000])
 

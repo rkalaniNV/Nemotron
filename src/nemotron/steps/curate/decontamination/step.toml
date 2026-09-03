@@ -116,7 +116,7 @@ recovery = "shingle_kind and minhash.char_ngrams must describe the same shinglin
 
 [[errors]]
 name = "no_gpu_available"
-recovery = "The similarity pass calls Curator's GPU-backed MinHash and LSH stages, so this step declares gpus_per_node = 1 while the other curate steps declare zero. Set skip_similarity: true to run the exact source-identity pass on CPU alone."
+recovery = "The similarity pass calls Curator's GPU-backed MinHash and LSH stages, so install nemotron[curate-gpu] (or select the curate-gpu isolated runtime) and provide a GPU. Set skip_similarity: true to run the exact source-identity pass on the ordinary CPU-only curate extra."
 
 [reference]
 skill = "src/nemotron/steps/curate/decontamination/README.md"

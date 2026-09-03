@@ -235,9 +235,7 @@ def verify_pairs(
         left_text = train_text.get(train_id)
         right_text = holdout_text.get(holdout_id)
         if left_text is None or right_text is None:
-            verified.append(
-                Pair(train_id, holdout_id, 0.0, False, "a document in the pair was not found")
-            )
+            verified.append(Pair(train_id, holdout_id, 0.0, False, "a document in the pair was not found"))
             continue
 
         left = shingle_for("train", train_id, left_text)
@@ -336,9 +334,7 @@ def candidate_recall(
         "recalled": len(found),
         "missed": sorted(truth - proposed),
         "recall": len(found) / len(truth) if truth else None,
-        "false_positive_rate": (
-            (len(proposed) - len(proposed & truth)) / len(proposed) if proposed else None
-        ),
+        "false_positive_rate": ((len(proposed) - len(proposed & truth)) / len(proposed) if proposed else None),
         "note": (
             "Measured by brute force on this sample. Recall depends on the LSH band and "
             "row structure and on the corpus, so it does not transfer to another run."

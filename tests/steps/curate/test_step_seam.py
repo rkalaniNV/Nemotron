@@ -85,8 +85,7 @@ def test_run_is_callable_with_only_a_config(step_module) -> None:
     assert parameters[0].name == "cfg", f"{name}.run()'s first parameter is not cfg"
     for extra in parameters[1:]:
         assert extra.default is not inspect.Parameter.empty, (
-            f"{name}.run() requires {extra.name!r} beyond cfg, so a caller holding only a "
-            "config cannot invoke it"
+            f"{name}.run() requires {extra.name!r} beyond cfg, so a caller holding only a config cannot invoke it"
         )
 
 
@@ -142,15 +141,9 @@ def test_the_module_list_covers_every_step_directory() -> None:
     from pathlib import Path
 
     root = Path(inspect.getfile(importlib.import_module("nemotron.steps.curate"))).parent
-    found = {
-        f"curate/{p.name}"
-        for p in root.iterdir()
-        if p.is_dir() and (p / "step.toml").is_file()
-    }
+    found = {f"curate/{p.name}" for p in root.iterdir() if p.is_dir() and (p / "step.toml").is_file()}
 
-    assert found == set(STEP_MODULES), (
-        f"step directories and the seam list disagree: {found ^ set(STEP_MODULES)}"
-    )
+    assert found == set(STEP_MODULES), f"step directories and the seam list disagree: {found ^ set(STEP_MODULES)}"
 
 
 # -- one corpus reference means one corpus -------------------------------------
@@ -237,16 +230,23 @@ def test_every_step_resolves_a_glob_to_the_same_corpus(tmp_path) -> None:
 _MISSING_INPUT = {
     "run_ingest": lambda t: {"input": f"{t}/nope/*.jsonl", "output_dir": f"{t}/o"},
     "run_profile": lambda t: {
-        "input_glob": f"{t}/nope/*.jsonl", "output_dir": f"{t}/o", "language": "vi",
+        "input_glob": f"{t}/nope/*.jsonl",
+        "output_dir": f"{t}/o",
+        "language": "vi",
     },
     "run_audit": lambda t: {"target_glob": f"{t}/nope/*.jsonl", "output_dir": f"{t}/o"},
     "run_subset": lambda t: {
-        "input_glob": f"{t}/nope/*.jsonl", "output_dir": f"{t}/o", "id_field": "id",
-        "token_budgets": [100], "tokenizer": None,
+        "input_glob": f"{t}/nope/*.jsonl",
+        "output_dir": f"{t}/o",
+        "id_field": "id",
+        "token_budgets": [100],
+        "tokenizer": None,
     },
     "run_decontamination": lambda t: {
-        "train_glob": f"{t}/nope/*.jsonl", "holdout_glob": f"{t}/nope2/*.jsonl",
-        "output_dir": f"{t}/o", "id_field": "id",
+        "train_glob": f"{t}/nope/*.jsonl",
+        "holdout_glob": f"{t}/nope2/*.jsonl",
+        "output_dir": f"{t}/o",
+        "id_field": "id",
     },
 }
 
@@ -262,6 +262,4 @@ def test_a_corpus_that_is_not_there_is_refused_the_same_way(module_name, tmp_pat
     with pytest.raises(ValueError) as caught:
         module.run(cfg)
 
-    assert "nope" in str(caught.value), (
-        f"{module_name} refused without naming the reference that failed"
-    )
+    assert "nope" in str(caught.value), f"{module_name} refused without naming the reference that failed"

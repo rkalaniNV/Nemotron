@@ -25,8 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shipped as a user default. Pack resources are normalized to NFC when loaded.
 - Release wheels exclude the curation `__local__` workspace so downloaded
   corpora, models, and prior run outputs cannot enter packages.
+- Ingest now commits shards only after validation and uses full SHA-256 minted
+  ids over unambiguous canonical field framing; subset token caches bind counts
+  to document content and reject invalid scores, costs, budgets, and tier writes.
+- Decontamination now maps NeMo Curator's named LSH bucket schema back to stable
+  corpus ids instead of interpreting final-output parquet columns by position,
+  and its CUDA dependencies are available through the separate `curate-gpu`
+  extra/runtime.
+- The curation flow now preserves canonical field names across ingest handoffs,
+  re-verifies approved policies after this run's ingest, and commits lifecycle
+  reports atomically so stale success artifacts cannot describe a failed rerun.
 
 ### Added
+
+#### Curation Workflow
+- Standalone corpus ingest, integrity audit, corpus profiling, deterministic
+  token-budget subset, and train/holdout decontamination steps.
+- A one-config curation flow that derives cross-step artifact identities,
+  preflights invalid combinations, records partial failures, and keeps policy
+  approval as an explicit action.
+- CPU smoke fixtures and regression coverage for stable identity, accounting,
+  policy provenance, nested subsets, and cross-split decontamination.
 
 #### Core Framework
 - Artifact system with Pydantic validation for reproducible pipelines

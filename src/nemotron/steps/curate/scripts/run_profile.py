@@ -33,6 +33,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -102,9 +103,7 @@ def expand(pattern: str | list[str] | None) -> list[str]:
     return integrity.expand_inputs(pattern)
 
 
-def iter_records(
-    paths: list[str], damage: dict[str, int] | None = None
-) -> Iterator[tuple[str, dict[str, Any]]]:
+def iter_records(paths: list[str], damage: dict[str, int] | None = None) -> Iterator[tuple[str, dict[str, Any]]]:
     """Shared with every other step. See :func:`integrity.iter_records`."""
     return integrity.iter_records(paths, damage)
 
@@ -131,7 +130,12 @@ def count_sources(
     """
     fingerprint = integrity.RowDigest()
     populations: dict[str, int] = {}
-    stats = {"records": 0, "with_source_field": 0, "without_text": 0, "unparsable_lines": 0}
+    stats: dict[str, Any] = {
+        "records": 0,
+        "with_source_field": 0,
+        "without_text": 0,
+        "unparsable_lines": 0,
+    }
     damage: dict[str, int] = {}
 
     for path, record in iter_records(paths, damage):
@@ -171,7 +175,11 @@ def draw_sample(
         text = record.get(text_field)
         if not isinstance(text, str):
             continue
-        key = determinism.make_key(record, id_field, text_field, lambda i=index: f"row:{i}")
+
+        def fallback(i: int = index) -> str:
+            return f"row:{i}"
+
+        key = determinism.make_key(record, id_field, text_field, fallback)
         records.append((source_of(path, record, source_field), key, text))
 
     return determinism.sample_by_source(records, allocations, seed)
@@ -220,25 +228,34 @@ def score_sample(
             raise SignalUnavailableError(f"{signal.name} could not be constructed: {exc}") from exc
 
         failures = 0
+        non_finite = 0
         by_source: dict[str, list[float]] = {}
         for source, items in sample.items():
             values = []
             for _key, text in items:
                 try:
-                    values.append(float(document_filter.score_document(text)))
+                    value = float(document_filter.score_document(text))
                 except Exception:  # noqa: BLE001 - one bad document must not end the profile
                     values.append(float("nan"))
                     failures += 1
+                    continue
+                if not math.isfinite(value):
+                    values.append(float("nan"))
+                    failures += 1
+                    non_finite += 1
+                else:
+                    values.append(value)
             by_source[source] = values
 
         scores = profiling.SignalScores(name=signal.name, by_source=by_source)
         flat = scores.flat()
-        finite = sum(1 for v in flat if v == v and abs(v) != float("inf"))
+        finite = sum(1 for value in flat if math.isfinite(value))
         scored[signal.name] = scores
         health[signal.name] = {
             "documents_attempted": len(flat),
             "documents_scored": finite,
             "scoring_failures": failures,
+            "non_finite_scores": non_finite,
         }
 
     return scored, health
@@ -246,7 +263,7 @@ def score_sample(
 
 def _placeholder_thresholds(signal: signal_registry.Signal) -> tuple[float, ...]:
     """Any valid construction: ``score_document`` does not depend on the threshold."""
-    if signal.direction == "interval":
+    if isinstance(signal.grid, signal_registry.IntervalGrid):
         return (signal.grid.lo_grid.values()[0], signal.grid.hi_grid.values()[-1])
     return (signal.grid.values()[-1],)
 
@@ -268,11 +285,10 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
     seed = int(cfg.get("seed") or 0)
     max_total_docs = int(cfg.get("max_total_docs") or 0)
 
-    populations, scan_stats = count_sources(paths, source_field, text_field, cfg.get('id_field'))
+    populations, scan_stats = count_sources(paths, source_field, text_field, cfg.get("id_field"))
     if not populations:
-        raise ValueError(
-            f"corpus contains no records with a string {text_field!r} field "
-            f"({scan_stats['records']} record(s) read)"
+        raise ConfigError(
+            f"corpus contains no records with a string {text_field!r} field ({scan_stats['records']} record(s) read)"
         )
 
     notes: list[str] = []
@@ -314,16 +330,17 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
     # The pack decides which signals can run at all. There is deliberately no
     # default language: a wrong default silently produces wrong numbers for a
     # corpus, which is worse than refusing to start.
-    pack = langpack.load(cfg.get("language"), cfg.get("langpack_dir", langpack.BUNDLED))
+    language = cfg.get("language")
+    if not isinstance(language, str) or not language:
+        raise ConfigError("language must be a non-empty BCP-47 tag")
+    pack = langpack.load(language, cfg.get("langpack_dir", langpack.BUNDLED))
 
     tokenizer = resolve_tokenizer(cfg)
     capabilities = set(pack.capabilities)
     if tokenizer:
         capabilities.add("tokenizer")
 
-    extra_kwargs: dict[str, dict[str, Any]] = {
-        name: {"pack": pack} for name in signal_registry.PACK_SIGNALS
-    }
+    extra_kwargs: dict[str, dict[str, Any]] = {name: {"pack": pack} for name in signal_registry.PACK_SIGNALS}
     if tokenizer:
         name, revision = tokenizer
         extra_kwargs["token_count"] = {
@@ -375,15 +392,13 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
             )
             # Also at report level: a reader scanning `notes` should not have to
             # open every signal entry to learn one of them measured nothing.
-            notes.append(
-                f"{signal.name}: {entry['retention_suppressed']}"
-            )
+            notes.append(f"{signal.name}: {entry['retention_suppressed']}")
             per_signal.append(entry)
             continue
 
         micro_weights = scores.micro_weights(weights)
 
-        if signal.direction == "interval":
+        if isinstance(signal.grid, signal_registry.IntervalGrid):
             entry["retention"] = profiling.retention_surface(flat, signal.grid, micro_weights)
             entry["retention_view"] = profiling.MICRO
             candidates.append(
@@ -440,9 +455,7 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
     # Co-occurrence is only defined AT a threshold per signal, so it can only be
     # computed for signals that carry a reference operating point. Most do not:
     # a pack-parameterised signal has no Curator default to borrow.
-    operating_points = {
-        s.name: s.curator_default for s in signals if s.curator_default
-    }
+    operating_points = {s.name: s.curator_default for s in signals if s.curator_default}
     masks = profiling.operating_point_masks(
         {name: sc.flat() for name, sc in scored.items()}, signals, operating_points
     )
@@ -484,9 +497,7 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
         # Recorded even when absent: a token_count figure is only meaningful
         # against a named revision, and its absence explains why the signal
         # is missing from the report.
-        "tokenizer": (
-            {"name": tokenizer[0], "revision": tokenizer[1]} if tokenizer else None
-        ),
+        "tokenizer": ({"name": tokenizer[0], "revision": tokenizer[1]} if tokenizer else None),
         "views": {
             profiling.MACRO: "each source weighted equally",
             profiling.MICRO: "each sampled document weighted by the documents it stands for",
@@ -577,31 +588,49 @@ def run(cfg: dict[str, Any]) -> dict[str, Any]:
     ``SystemExit``; ``main`` translates the exceptions into exit codes so a
     caller running several steps keeps control of what a failure means.
     """
-    report, policies, manifest = build_report(cfg)
-
     output_dir = Path(cfg.get("output_dir") or ".")
     output_dir.mkdir(parents=True, exist_ok=True)
+    artifact_names = (
+        "profile_report.json",
+        "sample_manifest.json",
+        "candidate_policies.yaml",
+        "profile_summary.md",
+    )
+    for name in artifact_names:
+        (output_dir / name).unlink(missing_ok=True)
+        (output_dir / f".{name}.tmp").unlink(missing_ok=True)
 
-    # allow_nan=False asserts the sanitising pass in build_report covered
-    # everything: a leak fails here rather than writing a file that a strict
-    # parser cannot read.
-    (output_dir / "profile_report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
-    (output_dir / "sample_manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
-    policy.write_candidate_policies(output_dir / "candidate_policies.yaml", policies)
+    try:
+        report, policies, manifest = build_report(cfg)
 
-    # The half a person reads. profile_report.json carries 64 retention points and
-    # a 32-bin histogram per signal — the machine's copy, and unreadable by eye. A
-    # step whose purpose is "measure before you gate" has not delivered until the
-    # measurement can be read without a script.
-    (output_dir / "profile_summary.md").write_text(
-        profiling.summarise(report), encoding="utf-8"
-    )
+        # allow_nan=False asserts the sanitising pass in build_report covered
+        # everything: a leak fails here rather than writing a file that a strict
+        # parser cannot read.
+        report_tmp = output_dir / ".profile_report.json.tmp"
+        sample_tmp = output_dir / ".sample_manifest.json.tmp"
+        summary_tmp = output_dir / ".profile_summary.md.tmp"
+        report_tmp.write_text(
+            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        sample_tmp.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        # The half a person reads. profile_report.json carries 64 retention
+        # points and a 32-bin histogram per signal — the machine's copy, and
+        # unreadable by eye.
+        summary_tmp.write_text(profiling.summarise(report), encoding="utf-8")
+        policy.write_candidate_policies(output_dir / "candidate_policies.yaml", policies)
+        sample_tmp.replace(output_dir / "sample_manifest.json")
+        summary_tmp.replace(output_dir / "profile_summary.md")
+        # The report is the completion marker and is committed last.
+        report_tmp.replace(output_dir / "profile_report.json")
+    except BaseException:
+        for name in artifact_names:
+            (output_dir / name).unlink(missing_ok=True)
+            (output_dir / f".{name}.tmp").unlink(missing_ok=True)
+        raise
 
     for note in report["notes"]:
         logger.warning(note)

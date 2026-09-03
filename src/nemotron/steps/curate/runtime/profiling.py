@@ -33,7 +33,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -55,12 +55,12 @@ class DirectionMismatchError(RuntimeError):
 def keep_mask(scores: np.ndarray, direction: str, *thresholds: float) -> np.ndarray:
     """Which documents a gate keeps, as a boolean mask."""
     if direction == "max":
-        return scores <= thresholds[0]
+        return cast(np.ndarray, scores <= thresholds[0])
     if direction == "min":
-        return scores >= thresholds[0]
+        return cast(np.ndarray, scores >= thresholds[0])
     if direction == "interval":
         lo, hi = thresholds
-        return (scores >= lo) & (scores <= hi)
+        return cast(np.ndarray, (scores >= lo) & (scores <= hi))
     raise ValueError(f"cannot sweep a {direction!r} signal")
 
 
@@ -113,7 +113,7 @@ def verify_direction(
 
 def as_float_array(values: Sequence[float]) -> np.ndarray:
     """Coerce scores to floats, mapping None to NaN so positions are preserved."""
-    return np.asarray([np.nan if v is None else v for v in values], dtype=float)
+    return cast(np.ndarray, np.asarray([np.nan if v is None else v for v in values], dtype=float))
 
 
 def weighted_quantiles(
@@ -133,8 +133,7 @@ def weighted_quantiles(
 
     if weights is not None and len(weights) != len(values):
         raise ValueError(
-            f"weights must align with values one to one: got {len(weights)} weights "
-            f"for {len(values)} values"
+            f"weights must align with values one to one: got {len(weights)} weights for {len(values)} values"
         )
 
     scores = arr[keep]
@@ -188,9 +187,7 @@ def distribution(scores: SignalScores, source_weights: Mapping[str, float]) -> d
     removes overall. They differ whenever sources differ in size, and a figure
     that does not say which one it is cannot be acted on.
     """
-    per_source = {
-        source: weighted_quantiles(values) for source, values in sorted(scores.by_source.items())
-    }
+    per_source = {source: weighted_quantiles(values) for source, values in sorted(scores.by_source.items())}
     macro = {
         key: float(np.nanmean([q[key] for q in per_source.values()])) if per_source else float("nan")
         for key in (per_source[next(iter(per_source))] if per_source else {})
@@ -260,10 +257,7 @@ def retention_surface(
     if total <= 0:
         matrix = [[float("nan") for _ in highs] for _ in lows]
     else:
-        matrix = [
-            [float(w[keep_mask(arr, "interval", lo, hi) & finite].sum() / total) for hi in highs]
-            for lo in lows
-        ]
+        matrix = [[float(w[keep_mask(arr, "interval", lo, hi) & finite].sum() / total) for hi in highs] for lo in lows]
 
     return {
         "kind": "surface",
@@ -274,12 +268,8 @@ def retention_surface(
         # grid edge. Stated here because a marginal read as "retention at this
         # bound" would understate what the pair removes together.
         "marginal_note": "each marginal maximises over the other bound across the grid",
-        "marginal_min": [
-            {"threshold": float(lo), "retained": max(row)} for lo, row in zip(lows, matrix)
-        ],
-        "marginal_max": [
-            {"threshold": float(hi), "retained": max(col)} for hi, col in zip(highs, zip(*matrix))
-        ],
+        "marginal_min": [{"threshold": float(lo), "retained": max(row)} for lo, row in zip(lows, matrix)],
+        "marginal_max": [{"threshold": float(hi), "retained": max(col)} for hi, col in zip(highs, zip(*matrix))],
     }
 
 
@@ -410,8 +400,8 @@ def sparkline(counts: Sequence[int]) -> str:
     return "".join(SPARK[min(len(SPARK) - 1, (c * len(SPARK)) // (top + 1))] for c in counts)
 
 
-def gate_table(entry: Mapping[str, Any]) -> list[tuple[float, float]]:
-    """``(threshold, retained)`` at each named retention level.
+def gate_table(entry: Mapping[str, Any]) -> list[tuple[float, float, float]]:
+    """``(threshold, retained, target level)`` at each named retention level.
 
     Answers the question a threshold is actually chosen to answer — "gate here
     and you keep this much" — rather than leaving the reader to interpolate a
@@ -457,9 +447,7 @@ def summarise(report: Mapping[str, Any]) -> str:
     lines.append(f"- documents: {corpus.get('document_count', 0):,} from {corpus.get('file_count', 0)} file(s)")
     lines.append(f"- sources: {corpus.get('source_count', 0)}")
     method = sampling.get("method", "?")
-    lines.append(
-        f"- sampled: {sampling.get('sampled', 0):,} ({method}, seed {sampling.get('seed')})"
-    )
+    lines.append(f"- sampled: {sampling.get('sampled', 0):,} ({method}, seed {sampling.get('seed')})")
     if pack:
         lines.append(f"- language pack: {pack.get('pack_id')} ({', '.join(pack.get('capabilities') or [])})")
     for note in report.get("notes") or []:
@@ -516,9 +504,7 @@ def summarise(report: Mapping[str, Any]) -> str:
                     f"{_fmt(edges[busiest + 1], units)}. Read the quantiles, not a histogram."
                 )
             else:
-                lines.append(
-                    f"```\n{_fmt(edges[0], units)} {sparkline(counts)} {_fmt(edges[-1], units)}\n```"
-                )
+                lines.append(f"```\n{_fmt(edges[0], units)} {sparkline(counts)} {_fmt(edges[-1], units)}\n```")
             lines.append("")
 
         gates = gate_table(entry)
@@ -541,8 +527,7 @@ def summarise(report: Mapping[str, Any]) -> str:
         default = entry.get("curator_default")
         if default:
             lines.append(
-                f"Curator's own bound {default['thresholds']} would keep "
-                f"{default['retained'] * 100:.2f}% here."
+                f"Curator's own bound {default['thresholds']} would keep {default['retained'] * 100:.2f}% here."
             )
             lines.append("")
 

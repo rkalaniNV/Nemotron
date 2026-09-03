@@ -19,8 +19,9 @@ Four phases, in this order for a reason:
 ``scan``
     Read every document once, count its tokens with the configured tokenizer,
     and record its stratum inputs. Token counts are cached keyed by
-    ``(id, tokenizer, revision)`` because re-tokenizing a corpus to change a
-    budget is the slowest possible way to answer a cheap question.
+    ``(id, content digest, tokenizer, revision)`` because re-tokenizing a
+    corpus to change a budget is the slowest possible way to answer a cheap
+    question.
 
 ``plan``
     Compute every tier's per-stratum quota **before writing anything**, and
@@ -46,8 +47,10 @@ ablation pair.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import shutil
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -63,7 +66,7 @@ logger = logging.getLogger("curate.subset")
 DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "subset" / "config" / "default.yaml"
 
 #: Cache schema. Bumped when a change would alter a cached count's meaning.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 class ConfigError(ValueError):
@@ -86,13 +89,9 @@ def resolve_inputs(input_glob: str | list[str]) -> list[str]:
     return resolved
 
 
-def iter_records(
-    paths: list[str], damage: dict[str, int] | None = None
-) -> Iterator[tuple[str, dict[str, Any]]]:
+def iter_records(paths: list[str], damage: dict[str, int] | None = None) -> Iterator[tuple[str, dict[str, Any]]]:
     """Shared with every other step. See :func:`integrity.iter_records`."""
     return integrity.iter_records(paths, damage)
-
-
 
 
 # -- tokenization -------------------------------------------------------------
@@ -101,35 +100,47 @@ def iter_records(
 class TokenCounter:
     """Curator's ``TokenCountFilter``, pinned to a revision and cached on disk.
 
-    The cache is keyed by ``(tokenizer, revision, document id)``. A cache that
-    ignored the revision would answer a later run with counts from a different
-    tokenizer and there would be nothing in the output to show it.
+    The cache is keyed by ``(tokenizer, revision, document id, content hash)``.
+    The content hash matters because filtering or annotation can rewrite text
+    without changing an id; reusing the old count would silently change tier
+    membership.
     """
 
     def __init__(self, name: str, revision: str, cache_path: Path | None) -> None:
         self.name = name
         self.revision = revision
         self.cache_path = cache_path
-        self._counts: dict[str, int] = {}
-        self._filter = None
+        self._counts: dict[str, dict[str, Any]] = {}
+        self._filter: Any = None
         self.hits = 0
         self.misses = 0
 
         if cache_path and cache_path.is_file():
-            cached = json.loads(cache_path.read_text(encoding="utf-8"))
-            if (
-                cached.get("cache_version") == CACHE_VERSION
-                and cached.get("tokenizer") == name
-                and cached.get("revision") == revision
+            try:
+                loaded = json.loads(cache_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("token cache at %s is unreadable and is ignored: %s", cache_path, exc)
+                loaded = None
+            if not isinstance(loaded, dict):
+                if loaded is not None:
+                    logger.warning("token cache at %s is not a JSON object and is ignored", cache_path)
+            elif (
+                loaded.get("cache_version") == CACHE_VERSION
+                and loaded.get("tokenizer") == name
+                and loaded.get("revision") == revision
             ):
-                self._counts = dict(cached.get("counts") or {})
+                raw_counts = loaded.get("counts")
+                if isinstance(raw_counts, dict):
+                    self._counts = {
+                        str(doc_id): dict(entry) for doc_id, entry in raw_counts.items() if isinstance(entry, dict)
+                    }
             else:
                 logger.warning(
                     "token cache at %s was written for a different tokenizer or schema and is ignored",
                     cache_path,
                 )
 
-    def _load(self):
+    def _load(self) -> Any:
         if self._filter is None:
             from nemo_curator.stages.text.filters.token.token_count import TokenCountFilter
 
@@ -148,19 +159,30 @@ class TokenCounter:
         return self._filter
 
     def count(self, doc_id: str, text: str) -> int:
-        if doc_id in self._counts:
+        content_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        cached = self._counts.get(doc_id)
+        if (
+            isinstance(cached, dict)
+            and cached.get("content_sha256") == content_sha256
+            and isinstance(cached.get("tokens"), int)
+            and not isinstance(cached.get("tokens"), bool)
+        ):
             self.hits += 1
-            return self._counts[doc_id]
+            return int(cached["tokens"])
         self.misses += 1
         value = int(self._load().score_document(text))
-        self._counts[doc_id] = value
+        self._counts[doc_id] = {
+            "content_sha256": content_sha256,
+            "tokens": value,
+        }
         return value
 
     def save(self) -> None:
         if not self.cache_path:
             return
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_path.write_text(
+        temporary = self.cache_path.with_name(f".{self.cache_path.name}.tmp")
+        temporary.write_text(
             json.dumps(
                 {
                     "cache_version": CACHE_VERSION,
@@ -173,6 +195,7 @@ class TokenCounter:
             + "\n",
             encoding="utf-8",
         )
+        temporary.replace(self.cache_path)
 
 
 class WordCounter:
@@ -200,9 +223,9 @@ def build_counter(cfg: dict) -> tuple[Any, str]:
     block = cfg.get("tokenizer")
     if block in (None, False):
         return WordCounter(), "words"
-    if not isinstance(block, dict) or not block.get("name"):
+    if not isinstance(block, dict) or not isinstance(block.get("name"), str) or not block["name"].strip():
         raise ConfigError("tokenizer must be a mapping with a name, or null to count words")
-    if not block.get("revision"):
+    if not isinstance(block.get("revision"), str) or not block["revision"].strip():
         raise ConfigError(
             "tokenizer.revision is required. Token counts from two revisions are not "
             "comparable, and a subset that cannot name its revision cannot be reused as "
@@ -210,7 +233,7 @@ def build_counter(cfg: dict) -> tuple[Any, str]:
         )
     cache = cfg.get("token_cache")
     return (
-        TokenCounter(block["name"], str(block["revision"]), Path(cache) if cache else None),
+        TokenCounter(block["name"], block["revision"], Path(cache) if cache else None),
         "tokens",
     )
 
@@ -244,13 +267,25 @@ def scan(cfg: dict, paths: list[str], counter: Any) -> tuple[list[subset.ScanRow
             skipped_no_id += 1
             continue
         doc_id = str(raw_id)
-        score = record.get(score_field) if score_field else None
+        raw_score = record.get(score_field) if score_field else None
+        try:
+            score = float(raw_score) if raw_score is not None else None
+        except (TypeError, ValueError) as exc:
+            raise subset.SubsetError(
+                f"document {doc_id!r} has non-numeric quality score {raw_score!r} in {score_field!r}"
+            ) from exc
+        tokens = counter.count(doc_id, text)
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0:
+            raise subset.SubsetError(
+                f"document {doc_id!r} has non-positive token count {tokens!r}. "
+                "A token budget requires every selected document to have a positive cost."
+            )
         rows.append(
             subset.ScanRow(
                 doc_id=doc_id,
                 source=str(record.get(source_field) or path) if source_field else path,
-                tokens=counter.count(doc_id, text),
-                score=float(score) if score is not None else None,
+                tokens=tokens,
+                score=score,
             )
         )
 
@@ -270,6 +305,17 @@ def scan(cfg: dict, paths: list[str], counter: Any) -> tuple[list[subset.ScanRow
             f"{sum(damage.values())} unparsable line(s)"
         )
     return rows, stats
+
+
+def _reset_output_artifacts(output_dir: Path) -> None:
+    """Remove stale or partial artifacts owned by this step."""
+    for name in ("plan.json", "subset_report.json", ".plan.json.tmp", ".subset_report.json.tmp"):
+        (output_dir / name).unlink(missing_ok=True)
+    for path in output_dir.glob("budget_*"):
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -295,32 +341,55 @@ def main() -> None:
 
 
 def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
+    """Run the subset lifecycle, removing all owned artifacts on failure."""
     started_at = started_at or run_manifest.utc_now()
+    output_dir = Path(cfg.get("output_dir") or ".")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _reset_output_artifacts(output_dir)
+    try:
+        return _run(cfg, started_at, output_dir)
+    except BaseException:
+        _reset_output_artifacts(output_dir)
+        raise
+
+
+def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
     budgets = cfg.get("token_budgets") or []
-    if not isinstance(budgets, list) or not budgets:
+    if (
+        not isinstance(budgets, list)
+        or not budgets
+        or any(isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0 for budget in budgets)
+    ):
         raise ConfigError("token_budgets must be a non-empty list of positive integers")
+    raw_length_bands = cfg.get("length_bands")
+    length_bands = subset.DEFAULT_LENGTH_BANDS if raw_length_bands is None else raw_length_bands
+    if (
+        not isinstance(length_bands, (list, tuple))
+        or not length_bands
+        or any(isinstance(edge, bool) or not isinstance(edge, int) or edge <= 0 for edge in length_bands)
+        or list(length_bands) != sorted(set(length_bands))
+    ):
+        raise ConfigError("length_bands must be a non-empty, strictly increasing list of positive integers")
 
     paths = resolve_inputs(cfg["input_glob"])
     counter, unit = build_counter(cfg)
-    output_dir = Path(cfg.get("output_dir") or ".")
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     rows, scan_stats = scan(cfg, paths, counter)
     counter.save()
 
     plan = subset.build_plan(
         rows,
-        [int(b) for b in budgets],
+        budgets,
         seed=int(cfg.get("seed") or 0),
         score_field=cfg.get("quality_score_field"),
-        length_bands=tuple(cfg.get("length_bands") or subset.DEFAULT_LENGTH_BANDS),
+        length_bands=tuple(length_bands),
     )
     plan_doc = plan.to_dict()
     plan_doc["unit"] = unit
     plan_doc["tokenizer"] = {"name": counter.name, "revision": counter.revision}
-    (output_dir / "plan.json").write_text(
-        json.dumps(plan_doc, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    plan_tmp = output_dir / ".plan.json.tmp"
+    plan_tmp.write_text(json.dumps(plan_doc, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+    plan_tmp.replace(output_dir / "plan.json")
     for warning in plan.warnings:
         logger.warning(warning)
 
@@ -332,8 +401,7 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
     problems = subset.verify_nesting(results)
     if problems:
         raise subset.NestingViolationError(
-            "the tiers do not nest, so they cannot support the ablation they exist for: "
-            + "; ".join(problems)
+            "the tiers do not nest, so they cannot support the ablation they exist for: " + "; ".join(problems)
         )
 
     id_field = cfg["id_field"]
@@ -353,7 +421,8 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
         # already checked, so a tier that silently failed to write a document
         # still reported nesting_verified: true.
         actually_written: set[str] = set()
-        with (tier_dir / "subset.jsonl").open("w", encoding="utf-8") as handle:
+        tier_tmp = tier_dir / ".subset.jsonl.tmp"
+        with tier_tmp.open("w", encoding="utf-8") as handle:
             for _, record in iter_records(paths, damage):
                 raw_id = record.get(id_field)
                 if raw_id is None:
@@ -361,6 +430,7 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
                 if str(raw_id) in wanted and isinstance(record.get(text_field), str):
                     handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
                     actually_written.add(str(raw_id))
+        tier_tmp.replace(tier_dir / "subset.jsonl")
         written = len(actually_written)
         written_ids[budget] = actually_written
 
@@ -369,9 +439,10 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
         entry["documents_written"] = written
         entry["output"] = str(tier_dir)
         if written != len(wanted):
-            entry["write_mismatch"] = len(wanted) - written
-            logger.warning(
-                "tier %s: planned %d documents but wrote %d", budget, len(wanted), written
+            raise subset.SubsetError(
+                f"tier {budget}: planned {len(wanted)} document(s) but wrote {written}. "
+                "The corpus changed between planning and materialization, or a selected id "
+                "could not be addressed; publishing a partial tier would make the plan false."
             )
         tiers.append(entry)
 
@@ -406,13 +477,11 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
             "token_shortfall and is never made up from another stratum."
         ),
     }
-    (output_dir / "subset_report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    report_tmp = output_dir / ".subset_report.json.tmp"
+    report_tmp.write_text(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+    report_tmp.replace(output_dir / "subset_report.json")
 
-    print(
-        f"curate/subset: wrote {len(tiers)} tier(s), plan.json and subset_report.json to {output_dir}"
-    )
+    print(f"curate/subset: wrote {len(tiers)} tier(s), plan.json and subset_report.json to {output_dir}")
     return report
 
 

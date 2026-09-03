@@ -94,8 +94,10 @@ Set `tokenizer: null` to count whitespace words instead — useful for smoke run
 and for corpora you do not want to tokenize twice. Every artifact then records
 `unit: words`, so the two can never be confused for one another.
 
-Counts are cached keyed by `(tokenizer, revision, id)`. A cache written under a
-different tokenizer or revision is ignored with a warning, never reused.
+Counts are cached keyed by `(tokenizer, revision, id, content SHA-256)`. The
+content digest prevents edited or re-filtered text from reusing a stale count
+merely because its id stayed the same. A cache written under a different
+tokenizer, revision, or schema is ignored with a warning, never reused.
 
 ## Relationship To CLIMB
 
@@ -153,3 +155,10 @@ Output:
   the confound the step exists to remove.
 - Quote `achieved_tokens`, not the budget. They are not the same number and the
   report keeps them separate on purpose.
+- Every usable document must have a positive token count, and every configured
+  quality score must be finite. Zero/negative costs and NaN/infinite scores are
+  refused because they make budget and decile semantics undefined.
+- Budgets and length-band edges are positive integers; bands must be strictly
+  increasing. Values are validated rather than truncated with `int()`.
+- If materialization cannot write every id selected by the plan, the run removes
+  all tiers and the success report instead of publishing a plan/output mismatch.

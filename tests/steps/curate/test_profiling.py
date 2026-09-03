@@ -305,9 +305,7 @@ def test_masks_mark_rejections_not_keeps() -> None:
 
 def test_weights_follow_their_own_documents_past_a_non_finite_score() -> None:
     """Filtering values but truncating weights pairs each score with a stranger's weight."""
-    heavy_is_first_finite = p.weighted_quantiles(
-        [float("nan"), 1.0, 100.0], [0.5], weights=[1.0, 100.0, 1.0]
-    )["p50"]
+    heavy_is_first_finite = p.weighted_quantiles([float("nan"), 1.0, 100.0], [0.5], weights=[1.0, 100.0, 1.0])["p50"]
 
     assert heavy_is_first_finite < 2.0, "the weight of 100 belongs to the document scoring 1.0"
 
@@ -323,9 +321,7 @@ def test_macro_and_micro_agree_on_a_single_source_corpus() -> None:
 
     result = p.distribution(scores, {"only": 1.0})
 
-    assert result["views"][p.MACRO]["quantiles"]["p50"] == pytest.approx(
-        result["views"][p.MICRO]["quantiles"]["p50"]
-    )
+    assert result["views"][p.MACRO]["quantiles"]["p50"] == pytest.approx(result["views"][p.MICRO]["quantiles"]["p50"])
 
 
 def test_a_signal_that_scored_nothing_reports_nan_not_zero_retention() -> None:

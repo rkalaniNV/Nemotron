@@ -29,7 +29,7 @@ corpus:
 
   # Required by subset and decontamination. C4 ships no id, so mint one from
   # content before running this — a positional id does not survive resharding:
-  #   id = "c4vi-" + sha256(url + "\n" + text)[:16]
+  #   id = "c4vi-" + sha256(canonical_json([url, text]))
   id_field: id
   source_field: source
 
@@ -110,7 +110,8 @@ steps:
 # ── Run 1 leaves this absent ─────────────────────────────────────────────────
 # There is nothing to approve until profile has measured the corpus. Read
 # output/vi/profile/profile_report.json, pick thresholds from the retention
-# curves, then uncomment, set steps.profile.enabled to false, and re-run.
+# curves, then uncomment, set steps.profile.enabled to false, remove the
+# previous output/vi/filtered_jsonl directory, and re-run.
 #
 # Pick values the profile actually swept. The grid is i/63, so round numbers
 # like 0.30 are never measured points and their retention is not in the report;

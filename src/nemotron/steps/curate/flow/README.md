@@ -1,13 +1,13 @@
 # Curate Flow
 
-One config, five steps, one command. You provide this file and your data.
+One config, six steps, one command. You provide this file and your data.
 
 Use this README for workflow and pitfalls; use `step.toml` for the exact
 artifact, parameter, strategy, and error manifest before editing configs.
 
 ## What It Removes
 
-Running the category by hand is five configs plus a hand-written approved
+Running the category by hand is six configs plus a hand-written approved
 policy, and the paths between them have to agree. Two of those agreements fail
 *silently*:
 
@@ -27,7 +27,7 @@ Four configs ship with the step, run by name:
 
 | `-c <name>` | For |
 |---|---|
-| `tiny` | smoke test on packaged fixtures, CPU, no downloads |
+| `tiny` | ingest → profile smoke on packaged fixtures, CPU, no downloads |
 | `default` | the shape, commented, to copy |
 | `vi_c4` | worked example: Vietnamese web corpus |
 | `hi_sangraha` | worked example: Hindi with mixed web/OCR/ASR provenance |
@@ -52,6 +52,7 @@ uv run nemotron steps run curate/flow -c ./vi_c4.yaml
 # read output/curate/profile/profile_report.json, decide, write the approve block
 
 # 2. apply thresholds a person signed for
+# remove output/curate/filtered_jsonl first; the filter never appends safely
 uv run nemotron steps run curate/flow -c ./vi_c4.yaml
 ```
 
@@ -71,6 +72,11 @@ the one the approval was granted against**. That is what stops a config being
 copied to a different corpus with its thresholds *and* its approval signature
 attached — the failure mode a shared config file otherwise invites.
 
+When `ingest` is enabled, that check runs after this invocation has committed
+the prepared corpus and immediately before filtering. Verifying the previous
+run's prepared files before re-ingesting would allow changed raw input to pass
+the old fingerprint and then receive a policy approved for different data.
+
 ## Preview Before Running
 
 ```bash
@@ -79,7 +85,7 @@ uv run nemotron steps run curate/flow -c ./vi_c4.yaml --plan
 
 Writes `flow_plan.json` with every derived per-step config and prints what would
 run. Nothing executes. A flow that fails forty minutes in, after the filter has
-rewritten the corpus, is worse than five separate commands — so everything
+rewritten the corpus, is worse than six separate commands — so everything
 refusable is refused before the first step starts.
 
 ## `enabled: false`
@@ -99,7 +105,10 @@ results:
 ## Order, And Why
 
 ```
-profile   reads the UNFILTERED corpus
+ingest    optional raw parquet/JSONL → stable-id JSONL
+   │
+   ▼
+profile   reads the UNFILTERED prepared corpus
    │      (profiling the output measures gates that already ran)
    ▼
 filter    corpus -> filtered_jsonl + run_manifest + ledger
@@ -109,12 +118,18 @@ filter    corpus -> filtered_jsonl + run_manifest + ledger
    └─► decontamination   holdout overlap  ← the only step needing a GPU
 ```
 
+Ingest accepts arbitrary raw names but emits the canonical `text`, `id`, and
+optional `source` fields. The flow derives those canonical names for every
+downstream step and carries `id`/`source` through the filter automatically.
+
 ## GPU
 
-`curate/flow` declares `gpus_per_node = 0`, because four of the five steps need
+`curate/flow` declares `gpus_per_node = 0`, because five of the six steps need
 none. Enabling `decontamination` with the similarity pass needs
 `run.env.gpus_per_node: 1` in your config, or `skip_similarity: true` to run the
-exact source-identity pass on CPU alone.
+exact source-identity pass on CPU alone. Install `nemotron[curate-gpu]` (or use
+the `curate-gpu` isolated runtime) for the CUDA MinHash/LSH dependencies; the
+ordinary `curate` extra is intentionally CPU-only.
 
 ## Output Layout
 
@@ -137,17 +152,21 @@ output/curate/
 Any key you write inside a `steps.<name>` block overrides the derivation. A flow
 config is not a cage — an escape hatch that needs a second file is not one.
 
-The five steps remain independently runnable; this step does not replace them.
+The six steps remain independently runnable; this step does not replace them.
 
 ## Repository Layout
 
 - Manifest: [step.toml](step.toml)
 - Runner: [step.py](step.py) delegating to `../scripts/run_flow.py`
-- Each step's own contract: `../{profile,nemo_curator,audit,subset,decontamination}/README.md`
+- Each step's own contract:
+  `../{ingest,profile,nemo_curator,audit,subset,decontamination}/README.md`
 
 ## Guardrails
 
 - Read `flow_report.json`'s `warnings` before quoting any number from a run.
+- Disable `profile` in the approval run. The flow refuses to let a fresh profile
+  replace `candidate_policies.yaml` while an older human decision is being
+  applied.
 - `audit_passed: false` fails the flow's exit code. A flow that "succeeded"
   while its audit failed would be the same silent success the audit exists to
   catch.

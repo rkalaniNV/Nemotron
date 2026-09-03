@@ -3,7 +3,8 @@
 # Run it twice, on purpose:
 #   1. approve absent  -> profile measures, filter runs without a policy, audit checks
 #   2. you read profile_report.json, write the approve block below, disable profile,
-#      and re-run -> the filter now applies thresholds a person signed for
+#      remove the previous filtered_jsonl directory, and re-run -> the filter
+#      now applies thresholds a person signed for
 #
 # The gate is not collapsible into one run: candidate_policies.yaml does not exist
 # until the profile has read your corpus, so there is nothing to approve on run 1.
@@ -92,8 +93,8 @@ steps:
 
   decontamination:
     # Needs a GPU for the MinHash/LSH pass. Enabling it also needs
-    # run.env.gpus_per_node: 1 in this file, or skip_similarity: true to run the
-    # exact source-identity pass on CPU alone.
+    # nemotron[curate-gpu] plus run.env.gpus_per_node: 1, or skip_similarity:
+    # true to run the exact source-identity pass on CPU alone.
     enabled: false
     holdout: ./data/holdout/*.jsonl
     threshold: 0.8

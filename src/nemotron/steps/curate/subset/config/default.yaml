@@ -39,8 +39,9 @@ tokenizer:
   name: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
   revision: 97ab8012882a655dc38df4fee47422aca9caca07
 
-# Counts are cached keyed by (tokenizer, revision, id). Re-tokenizing a corpus
-# to change a budget is the slowest way to answer a cheap question.
+# Counts are cached keyed by (tokenizer, revision, id, content SHA-256). The
+# content digest prevents a filtered or edited document from reusing the count
+# of older text that happened to carry the same id.
 token_cache: ./cache/subset/token_counts.json
 
 # Optional. Set and present in the data, score deciles join the stratum key.

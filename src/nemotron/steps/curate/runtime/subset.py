@@ -48,6 +48,7 @@ which is the opposite of what a stratified subset is for.
 from __future__ import annotations
 
 import bisect
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -203,7 +204,7 @@ def apportion(budget: int, weights: dict[str, int]) -> dict[str, int]:
     # Bracket the divisor, then bisect. Any d in this range gives a quota sum
     # within a few units of the budget; the greedy pass below closes the gap
     # exactly, so float error here costs iterations, never correctness.
-    lo, hi = total / (budget + len(weights)), total
+    lo, hi = total / (budget + len(weights)), float(total)
     for _ in range(200):
         mid = (lo + hi) / 2
         if mid <= 0:
@@ -327,8 +328,20 @@ def build_plan(
         raise SubsetError("no token budgets requested")
     if any(b <= 0 for b in budgets):
         raise SubsetError(f"token budgets must be positive, got {sorted(budgets)}")
+    if not length_bands or any(edge <= 0 for edge in length_bands):
+        raise SubsetError(f"length bands must be positive, got {list(length_bands)}")
+    if tuple(sorted(set(length_bands))) != length_bands:
+        raise SubsetError(f"length bands must be strictly increasing, got {list(length_bands)}")
 
     _validate_ids(rows)
+    invalid_tokens = [row.doc_id for row in rows if row.tokens <= 0]
+    if invalid_tokens:
+        examples = ", ".join(repr(doc_id) for doc_id in invalid_tokens[:MAX_REPORTED_EXAMPLES])
+        raise SubsetError(
+            f"{len(invalid_tokens)} document(s) have a non-positive token count, e.g. "
+            f"{examples}. A token budget requires every selected document to have a "
+            "positive cost."
+        )
     budgets = sorted(set(budgets))
 
     cut_points: list[float] | None = None
@@ -341,7 +354,16 @@ def build_plan(
                 f"document(s), e.g. {examples}. Produce it with curate/nemo_curator "
                 "mode: annotate or mode: both, or unset quality_score_field."
             )
-        cut_points = score_deciles([float(r.score) for r in rows])
+        non_finite = [row.doc_id for row in rows if row.score is not None and not math.isfinite(float(row.score))]
+        if non_finite:
+            examples = ", ".join(repr(doc_id) for doc_id in non_finite[:MAX_REPORTED_EXAMPLES])
+            raise SubsetError(
+                f"quality_score_field {score_field!r} is non-finite for "
+                f"{len(non_finite)} document(s), e.g. {examples}. NaN or infinity "
+                "cannot define deterministic score deciles."
+            )
+        scores = [float(row.score) for row in rows if row.score is not None]
+        cut_points = score_deciles(scores)
 
     ordered = _ordering(rows, seed)
     strata: dict[str, list[str]] = {}
@@ -487,7 +509,6 @@ def verify_nesting(results: dict[int, TierResult]) -> list[str]:
         if lost:
             examples = ", ".join(repr(d) for d in lost[:MAX_REPORTED_EXAMPLES])
             problems.append(
-                f"{len(lost)} document(s) in tier {smaller} are absent from tier {larger}, "
-                f"e.g. {examples}"
+                f"{len(lost)} document(s) in tier {smaller} are absent from tier {larger}, e.g. {examples}"
             )
     return problems

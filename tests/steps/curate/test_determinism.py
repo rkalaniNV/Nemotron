@@ -22,8 +22,7 @@ def test_hashing_is_stable_across_processes() -> None:
         [
             sys.executable,
             "-c",
-            "from nemotron.steps.curate.runtime import determinism as d;"
-            "print(d.stable_uint64('doc-1', seed=7))",
+            "from nemotron.steps.curate.runtime import determinism as d;print(d.stable_uint64('doc-1', seed=7))",
         ],
         capture_output=True,
         text=True,

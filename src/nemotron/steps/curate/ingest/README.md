@@ -26,13 +26,18 @@ assigns `np.arange(min_id, min_id + num_rows)` from a Ray actor: positional, so
 resharding renames every document and any claim made about the old ids silently
 becomes false — and cluster-bound, so ids cannot be minted before one exists.
 
-So an id is minted from content. Reshard, reorder, re-split: it does not move.
+So an id is minted as a full SHA-256 over a canonical JSON array of configured
+identity-field values, which must include the document text. JSON framing keeps
+field boundaries unambiguous even when a value contains newlines. Reshard,
+reorder, re-split: the id does not move, and the digest is not truncated into a
+collision-prone 64-bit namespace.
 
 ## The Consequence This Step Will Not Hide
 
-Two byte-identical documents mint the **same id**, because by that definition
-they are the same document. This is not hypothetical — measured on Sangraha's
-Hindi `verified` split:
+Two documents with the same configured identity fields mint the **same id**.
+Because text must be one of those fields, byte-identical text is the common
+case. This is not hypothetical — measured on Sangraha's Hindi `verified`
+split:
 
 ```
 20,000 documents
@@ -56,6 +61,8 @@ default and the run stops:
 | `suffix` | keep every copy under a distinguishable id |
 
 `drop` and `suffix` both change what the corpus *is*. Neither happens silently.
+When the corpus provides ids, the same choices apply to duplicate ids, but the
+error does not mislabel two different texts under one id as byte-identical.
 
 ## Two Real Corpora
 
@@ -128,7 +135,10 @@ regenerated when the corpus is re-ingested.
 ## Guardrails
 
 - Read `counts` in `ingest_report.json` before trusting the output size.
-  `skipped_missing_text` and `unparsable_lines` are counted, not hidden.
+  Missing text/id, non-object JSON values, and unparsable lines are counted,
+  not hidden.
+- A refused or failed run leaves neither `part_*.jsonl` nor a success report;
+  shards are staged and `ingest_report.json` is committed last.
 - Set `id_prefix` when the corpus will later be mixed with another. Two corpora
   minting from the same fields can otherwise collide by construction.
 - Re-ingesting under a different `id_fields` produces different ids for the same

@@ -14,9 +14,9 @@
 
 [step]
 id = "curate/flow"
-name = "Curate Flow (one config, five steps)"
+name = "Curate Flow (one config, six steps)"
 category = "curate"
-description = """Run profile, filter, audit, subset and decontamination from a single config with per-step enable flags. Derives every cross-step path so a producer and its consumer cannot disagree, refuses a misconfigured run before any step does work, and keeps the policy approval a separate deliberate act rather than a default."""
+description = """Run ingest, profile, filter, audit, subset and decontamination from a single config with per-step enable flags. Derives every cross-step path so a producer and its consumer cannot disagree, refuses a misconfigured run before any step does work, and keeps the policy approval a separate deliberate act rather than a default."""
 tags = ["curate", "pipeline", "orchestration", "one-config"]
 
 [[consumes]]
@@ -33,7 +33,7 @@ description = "flow_report.json: which steps ran, which were disabled, every war
 
 [[parameters]]
 name = "corpus"
-description = "Shared inputs: input (the UNFILTERED corpus), text_field, id_field, source_field, language, metadata_fields. id_field is required by subset and decontamination — both are statements about sets of document ids. language is a BCP-47 tag with no default."
+description = "Shared inputs: input (the UNFILTERED corpus), text_field, id_field, source_field, language, metadata_fields. With ingest disabled these are the existing corpus columns; with ingest enabled they name raw inputs and every downstream step receives canonical text/id/source fields. id_field is required by subset and decontamination when ingest is disabled. language is a BCP-47 tag with no default."
 
 [[parameters]]
 name = "output_root"
@@ -86,8 +86,28 @@ name = "approve_before_profile"
 recovery = "approve.from points at a candidate_policies.yaml that does not exist. Run once with steps.profile enabled: there is nothing to approve until the corpus has been measured."
 
 [[errors]]
+name = "profile_enabled_during_approval"
+recovery = "Disable steps.profile in the approval run. Re-profiling while applying an older approval could replace the candidate measurements with data nobody reviewed."
+
+[[errors]]
+name = "conflicting_approved_policy"
+recovery = "approve promotes one policy while steps.filter.heuristic_filters.approved_policy points at another. Remove the per-step path and let the flow wire the policy it promoted."
+
+[[errors]]
 name = "no_steps_enabled"
 recovery = "Every steps.<name>.enabled is false. Enable at least one."
+
+[[errors]]
+name = "unknown_step"
+recovery = "A key under steps does not name one of ingest, profile, filter, audit, subset, or decontamination. Correct the spelling; unknown steps are refused because silently ignoring one would report success without running it."
+
+[[errors]]
+name = "stale_filter_output"
+recovery = "steps.filter would write into a directory that already contains corpus shards. Delete the old filtered_jsonl directory or choose a new output_root; otherwise the run would append a second corpus and downstream steps would read their union."
+
+[[errors]]
+name = "ingest_source_field_unmapped"
+recovery = "corpus.source_field names the downstream column, but enabled ingest has neither source_field_in_source nor source_value to create it. Map the raw source column or set a constant source value."
 
 [[errors]]
 name = "decontamination_needs_a_holdout"

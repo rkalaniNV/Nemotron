@@ -89,13 +89,16 @@ def test_per_source_counts_only_when_asked(tmp_path) -> None:
     assert integrity.scan_shard(shard, source_field="source").per_source == {"news": 1, "wiki": 2}
 
 
-def test_a_json_scalar_does_not_crash_source_accounting(tmp_path) -> None:
+def test_json_values_that_are_not_records_are_reported_as_damage(tmp_path) -> None:
     shard = write(tmp_path / "a.jsonl", "42", '["not", "an", "object"]', '{"source":"wiki"}')
 
     report = integrity.scan_shard(shard, source_field="source")
 
-    assert report.row_count == 3
-    assert report.per_source == {"__non_mapping__": 2, "wiki": 1}
+    assert report.row_count == 1
+    assert report.readable is False
+    assert report.bad_record_count == 2
+    assert report.error == "non-object record"
+    assert report.per_source == {"wiki": 1}
 
 
 # -- corpus digest ------------------------------------------------------------
@@ -303,6 +306,19 @@ def test_a_directory_skips_files_that_are_not_corpus(tmp_path) -> None:
     assert [Path(p).name for p in integrity.expand_inputs(str(tmp_path))] == ["part_0.jsonl"]
 
 
+def test_a_directory_skips_json_accounting_sidecars(tmp_path) -> None:
+    write(tmp_path / "part_0.jsonl", '{"text":"a"}')
+    for name in (
+        "ingest_report.json",
+        "run_manifest.json",
+        "curation_ledger.json",
+        "audit_report.json",
+    ):
+        (tmp_path / name).write_text('{"not":"a corpus row"}\n', encoding="utf-8")
+
+    assert [Path(path).name for path in integrity.expand_inputs(str(tmp_path))] == ["part_0.jsonl"]
+
+
 def test_a_directory_is_searched_recursively(tmp_path) -> None:
     nested = tmp_path / "lang" / "vi"
     nested.mkdir(parents=True)
@@ -376,6 +392,16 @@ def test_an_unparsable_line_is_counted_not_skipped(tmp_path) -> None:
 
     assert len(got) == 2, "the readable records still come through"
     assert damage[str(shard)] == 1
+
+
+def test_a_non_mapping_json_value_is_counted_not_yielded(tmp_path) -> None:
+    shard = write(tmp_path / "a.jsonl", "42", '["not", "a", "record"]', '{"id":"1"}')
+    damage: dict[str, int] = {}
+
+    got = list(integrity.iter_records([str(shard)], damage))
+
+    assert [record["id"] for _, record in got] == ["1"]
+    assert damage[str(shard)] == 2
 
 
 def test_counting_damage_is_optional(tmp_path) -> None:

@@ -124,6 +124,11 @@ curate = [
     "huggingface_hub>=0.20.0; python_version>='3.11'",
     "pyyaml>=6.0; python_version>='3.11'",
 ]
+curate-gpu = [
+    "nemo-curator[deduplication_cuda12,text_cpu]==1.3.0 ; python_version>='3.11' and python_version<'3.14' and platform_system=='Linux' and platform_machine=='x86_64'",
+    "huggingface_hub>=0.20.0; python_version>='3.11'",
+    "pyyaml>=6.0; python_version>='3.11'",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=4.0.0",
@@ -140,6 +145,8 @@ all = [
     "imageio-ffmpeg>=0.5.1",
     "data-designer>=0.5.6; python_version>='3.11' and python_version<'3.14'",
     "nemo-curator[translation_all]==1.3.0 ; python_version>='3.11' and python_version<'3.14'",
+    "nemo-curator[text_cpu]==1.3.0 ; python_version>='3.11' and python_version<'3.14'",
+    "nemo-curator[deduplication_cuda12]==1.3.0 ; python_version>='3.11' and python_version<'3.14' and platform_system=='Linux' and platform_machine=='x86_64'",
     "pandas>=2.1.0; python_version>='3.11'",
     "sentence-transformers>=5.0.0,<6.0.0; python_version>='3.11'",
     "scikit-learn>=1.7.0,<1.8.0; python_version>='3.11'",
@@ -320,6 +327,17 @@ extras = ["curate"]
 venv-name = "curate"
 extra-index-urls = ["https://pypi.nvidia.com"]
 required-imports = [
+    "huggingface_hub",
+    "nemo_curator",
+    "yaml",
+]
+
+[tool.nemotron.runtime.curate-gpu]
+extras = ["curate-gpu"]
+venv-name = "curate-gpu"
+extra-index-urls = ["https://pypi.nvidia.com"]
+required-imports = [
+    "cudf",
     "huggingface_hub",
     "nemo_curator",
     "yaml",

@@ -52,7 +52,7 @@ default = "null"
 
 [[parameters]]
 name = "id_fields"
-description = "Which columns a minted id is derived from. Part of the recipe, not an implementation detail: an id built from text alone and one built from url plus text are different ids, and the recipe is recorded in ingest_report.json so a later run can reproduce it."
+description = "Which columns a minted full SHA-256 id is derived from. Values are framed as a canonical JSON array so embedded newlines cannot erase field boundaries. Must include text_field so content changes cannot retain the same derived identity. Part of the recipe, not an implementation detail: an id built from text alone and one built from url plus text are different ids, and the recipe is recorded in ingest_report.json."
 default = ["url", "text"]
 
 [[parameters]]
@@ -77,7 +77,7 @@ default = ["url"]
 
 [[parameters]]
 name = "on_duplicate"
-description = "refuse, drop, or suffix. Two byte-identical documents mint the same id. drop keeps the first of each group and suffix keeps every copy under a distinguishable id — both change what the corpus is, so refuse is the default and the run stops with a count."
+description = "refuse, drop, or suffix. Documents with the same configured identity fields, or records with the same corpus-provided id, collide. drop keeps the first of each group and suffix keeps every copy under a distinguishable id — both change what the corpus is, so refuse is the default and the run stops with a count."
 default = "refuse"
 
 [[strategies]]
@@ -93,12 +93,12 @@ when = "Your corpus already has a stable id"
 then = "Set id_from to that column. Nothing is minted and ingest_report.json records that identity came from the corpus rather than from content."
 
 [[strategies]]
-when = "The run refuses with byte-identical documents"
-then = "That is a real property of the corpus, not a tooling problem — one Hindi corpus measured here held 328 duplicates across 20,000 documents, the largest group 293 copies. Decide deliberately: drop to deduplicate, or suffix to keep every copy."
+when = "The run refuses duplicate derived identities or corpus ids"
+then = "That is a real property of the corpus, not a tooling problem — one Hindi corpus measured here held 328 duplicate texts across 20,000 documents, the largest group 293 copies. Decide deliberately: drop to deduplicate, or suffix to keep every copy."
 
 [[errors]]
 name = "duplicate_documents"
-recovery = "Byte-identical documents mint the same id, and subset and decontamination both refuse a non-unique id. The message reports how many documents and how many distinct groups. Set on_duplicate to drop or suffix."
+recovery = "Repeated configured identity fields or corpus-provided ids create a non-unique id, which subset and decontamination refuse. The message reports how many occurrences and groups without claiming different texts under one corpus id are identical. Set on_duplicate to drop or suffix."
 
 [[errors]]
 name = "mixed_formats"
@@ -110,7 +110,11 @@ recovery = "Every record lacked text, or every line was unparsable. Check text_f
 
 [[errors]]
 name = "input_matched_no_files"
-recovery = "Check the glob. A directory is accepted and searched for .jsonl; parquet must be named explicitly or matched by a glob."
+recovery = "Check the glob. A directory is accepted and searched recursively for JSONL and parquet corpus files; known report and accounting sidecars are excluded."
+
+[[errors]]
+name = "invalid_identity_fields"
+recovery = "id_fields must be a list of column names that includes text_field. Add the text column so edited content cannot keep the same derived id, or set id_from to use a stable corpus-provided identifier."
 
 [reference]
 skill = "src/nemotron/steps/curate/ingest/README.md"

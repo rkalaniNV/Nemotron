@@ -3,22 +3,22 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""curate/flow: one config, five steps, and the things it must refuse.
+"""curate/flow: one config, six steps, and the things it must refuse.
 
 The value of a flow is not that it saves typing — it is that two agreements
 which fail silently by hand (the manifest path the audit compares against, and
 the score column subset stratifies on) become impossible to get wrong. Most of
 these tests are about refusals, because a flow that runs and produces a
-clean-looking result from a broken configuration is worse than five commands.
+clean-looking result from a broken configuration is worse than six commands.
 """
 
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 import yaml
 
 from nemotron.steps.curate.runtime import policy as policy_module
@@ -77,7 +77,7 @@ def test_flow_step_static() -> None:
 
 
 def test_the_flow_declares_no_gpu() -> None:
-    """Four of the five steps need none; decontamination asks per-run instead."""
+    """Five of the six steps need none; decontamination asks per-run instead."""
     source = (STEP_DIR / "step.py").read_text(encoding="utf-8")
 
     assert "gpus_per_node = 0" in source
@@ -94,6 +94,14 @@ def test_the_default_config_covers_every_step_in_the_plan() -> None:
     cfg = yaml.safe_load((STEP_DIR / "config" / "default.yaml").read_text(encoding="utf-8"))
 
     assert set(cfg["steps"]) == {plan.key for plan in run_flow.STEP_ORDER}
+
+
+def test_tiny_runs_ingest_then_profile_without_gpu_or_downloads() -> None:
+    cfg = yaml.safe_load((STEP_DIR / "config" / "tiny.yaml").read_text(encoding="utf-8"))
+
+    assert cfg["steps"]["ingest"]["enabled"] is True
+    assert cfg["steps"]["profile"]["enabled"] is True
+    assert all(not cfg["steps"][key]["enabled"] for key in ("filter", "audit", "subset", "decontamination"))
 
 
 # -- derivation ---------------------------------------------------------------
@@ -126,6 +134,35 @@ def test_profile_reads_the_unfiltered_corpus_and_the_rest_read_the_output(tmp_pa
         assert by_key[key]["input_glob"].startswith(paths["corpus"])
     assert by_key["audit"]["target_glob"].startswith(paths["corpus"])
     assert by_key["decontamination"]["train_glob"].startswith(paths["corpus"])
+
+
+def test_ingest_hands_canonical_field_names_to_every_consumer(tmp_path) -> None:
+    cfg = config(tmp_path)
+    cfg["corpus"].update(
+        {
+            "text_field": "body",
+            "id_field": "doc_key",
+            "id_field_in_source": True,
+            "source_field": "dataset",
+            "source_field_in_source": "origin",
+            "metadata_fields": ["doc_key", "origin"],
+        }
+    )
+    cfg["steps"]["ingest"] = {"enabled": True}
+
+    resolved, _ = run_flow.derive(cfg)
+    by_key = {r.plan.key: r.config for r in resolved}
+
+    assert by_key["ingest"]["text_field"] == "body"
+    assert by_key["ingest"]["id_from"] == "doc_key"
+    assert by_key["ingest"]["source_from"] == "origin"
+    for key in ("profile", "filter", "subset"):
+        assert by_key[key]["text_field"] == "text"
+        assert by_key[key]["id_field"] == "id"
+        assert by_key[key]["source_field"] == "source"
+    assert by_key["decontamination"]["text_field"] == "text"
+    assert by_key["decontamination"]["id_field"] == "id"
+    assert {"id", "source"} <= set(by_key["filter"]["metadata_fields"])
 
 
 def test_an_authored_key_overrides_the_derivation(tmp_path) -> None:
@@ -306,6 +343,16 @@ def test_approving_before_profiling_is_refused(tmp_path) -> None:
         run_flow.materialise_policy(cfg, resolved, paths)
 
 
+def test_profile_cannot_replace_candidates_in_the_approval_run(tmp_path) -> None:
+    cfg = profiled(tmp_path)
+    cfg["steps"]["profile"]["enabled"] = True
+    cfg["approve"] = approve_block()
+    resolved, paths = run_flow.derive(cfg)
+
+    with pytest.raises(run_flow.FlowConfigError, match="Profiling and approval are two runs"):
+        run_flow.preflight(cfg, resolved, paths)
+
+
 def test_an_approval_produces_an_executable_policy_wired_into_the_filter(tmp_path) -> None:
     cfg = profiled(tmp_path)
     cfg["approve"] = approve_block()
@@ -320,6 +367,16 @@ def test_an_approval_produces_an_executable_policy_wired_into_the_filter(tmp_pat
     assert filter_cfg["heuristic_filters"]["approved_policy"] == paths["approved_policy"]
 
 
+def test_approve_refuses_a_conflicting_per_step_policy_path(tmp_path) -> None:
+    cfg = profiled(tmp_path)
+    cfg["approve"] = approve_block()
+    cfg["steps"]["filter"]["heuristic_filters"] = {"approved_policy": str(tmp_path / "other.yaml")}
+    resolved, paths = run_flow.derive(cfg)
+
+    with pytest.raises(run_flow.FlowConfigError, match="cannot truthfully report which policy"):
+        run_flow.materialise_policy(cfg, resolved, paths)
+
+
 def test_an_approval_granted_against_other_data_is_refused(tmp_path) -> None:
     """The failure a shared config file invites: thresholds AND the signature
     that approved them, applied to a corpus nobody approved them for."""
@@ -328,13 +385,8 @@ def test_an_approval_granted_against_other_data_is_refused(tmp_path) -> None:
 
     other = tmp_path / "other"
     other.mkdir()
-    rows = [
-        {"id": f"o{i}", "source": "web", "text": "different corpus entirely here"}
-        for i in range(20)
-    ]
-    (other / "b.jsonl").write_text(
-        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
-    )
+    rows = [{"id": f"o{i}", "source": "web", "text": "different corpus entirely here"} for i in range(20)]
+    (other / "b.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     cfg["corpus"]["input"] = str(other / "*.jsonl")
     resolved, paths = run_flow.derive(cfg)
 
@@ -432,6 +484,19 @@ def test_a_run_writes_a_plan_and_a_report(tmp_path) -> None:
     assert report["step_id"] == "curate/flow"
 
 
+def test_a_failed_rerun_does_not_leave_the_previous_success_report(tmp_path) -> None:
+    cfg = config(tmp_path)
+    run_flow.run(cfg)
+    root = Path(cfg["output_root"])
+    cfg["steps"]["profile"]["enabled"] = False
+
+    with pytest.raises(run_flow.FlowConfigError, match="no steps are enabled"):
+        run_flow.run(cfg)
+
+    assert not (root / "flow_plan.json").exists()
+    assert not (root / "flow_report.json").exists()
+
+
 def test_the_plan_records_every_derived_config_before_anything_runs(tmp_path) -> None:
     """A plan you can only read after the corpus was rewritten cannot reject it."""
     cfg = config(tmp_path)
@@ -462,6 +527,106 @@ def test_the_enabled_step_actually_produced_its_artifacts(tmp_path) -> None:
     profile_dir = Path(cfg["output_root"]) / "profile"
     assert (profile_dir / "profile_report.json").is_file()
     assert (profile_dir / "candidate_policies.yaml").is_file()
+
+
+def test_custom_raw_fields_run_from_ingest_through_profile(tmp_path) -> None:
+    raw_dir = tmp_path / "custom_raw"
+    raw_dir.mkdir()
+    raw_path = raw_dir / "part.jsonl"
+    raw_path.write_text(
+        "".join(
+            json.dumps({"doc_key": f"k{i}", "origin": "web", "body": f"document {i} has useful text"}) + "\n"
+            for i in range(4)
+        ),
+        encoding="utf-8",
+    )
+    cfg = config(tmp_path)
+    cfg["corpus"] = {
+        "input": str(raw_path),
+        "text_field": "body",
+        "id_field": "doc_key",
+        "id_field_in_source": True,
+        "source_field": "dataset",
+        "source_field_in_source": "origin",
+        "language": "vi",
+        "metadata_fields": ["doc_key", "origin"],
+    }
+    cfg["steps"]["ingest"] = {"enabled": True}
+
+    report = run_flow.run(cfg)
+
+    ingested = [
+        json.loads(line)
+        for line in (Path(cfg["output_root"]) / "ingested" / "part_0.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    profile = json.loads((Path(cfg["output_root"]) / "profile" / "profile_report.json").read_text(encoding="utf-8"))
+    assert report["status"] == "ok"
+    assert profile["corpus"]["document_count"] == 4
+    assert profile["corpus"]["source_count"] == 1
+    assert {(row["id"], row["source"], row["text"]) for row in ingested} == {
+        (f"k{i}", "web", f"document {i} has useful text") for i in range(4)
+    }
+
+
+def test_flow_cpu_chain_preserves_manifest_and_ledger_identities(tmp_path, monkeypatch) -> None:
+    """Run the real audit against a CPU producer stub through the flow seam."""
+    from nemotron.steps.curate.runtime import integrity, ledger
+    from nemotron.steps.curate.runtime import manifest as manifest_module
+
+    cfg = config(tmp_path)
+    cfg["steps"]["profile"]["enabled"] = False
+    cfg["steps"]["filter"]["enabled"] = True
+    cfg["steps"]["audit"]["enabled"] = True
+    real_step_runner = run_flow.step_runner
+    filter_config: dict = {}
+
+    def cpu_filter(step_cfg):
+        filter_config.update(step_cfg)
+        inputs = integrity.expand_inputs(step_cfg["input_glob"])
+        output = Path(step_cfg["output_dir"])
+        output.mkdir(parents=True, exist_ok=True)
+        shard = output / "part_0.jsonl"
+        shard.write_text(
+            "".join(Path(path).read_text(encoding="utf-8") for path in inputs),
+            encoding="utf-8",
+        )
+        input_counts = manifest_module.count_jsonl(inputs)
+        output_counts = manifest_module.count_jsonl([shard])
+        document = manifest_module.build_manifest(
+            step_id="curate/nemo_curator",
+            config=step_cfg,
+            started_at="2026-08-25T00:00:00+00:00",
+            completed_at="2026-08-25T00:00:01+00:00",
+            input_glob=step_cfg["input_glob"],
+            input_counts=input_counts,
+            output_counts=output_counts,
+            id_field=step_cfg["id_field"],
+            source_field=step_cfg["source_field"],
+        )
+        manifest_module.write_manifest(step_cfg["emit_manifest"], document)
+        accounting = ledger.StageLedger(stage="curate/nemo_curator")
+        accounting.add_input(input_counts["row_count"])
+        accounting.add_success(output_counts["row_count"])
+        accounting.write(step_cfg["emit_ledger"], require_balanced=True)
+        return {"warnings": []}
+
+    def runner(key):
+        return cpu_filter if key == "filter" else real_step_runner(key)
+
+    monkeypatch.setattr(run_flow, "step_runner", runner)
+
+    report = run_flow.run(cfg)
+
+    audit_config = next(
+        step["config"]
+        for step in json.loads((Path(cfg["output_root"]) / "flow_plan.json").read_text(encoding="utf-8"))["steps"]
+        if step["key"] == "audit"
+    )
+    assert audit_config["declared_manifest"] == filter_config["emit_manifest"]
+    assert audit_config["ledger_glob"] == filter_config["emit_ledger"]
+    assert Path(audit_config["declared_manifest"]).is_file()
+    assert Path(audit_config["ledger_glob"]).is_file()
+    assert report["audit_passed"] is True
 
 
 def test_run_does_not_exit_the_process(tmp_path) -> None:
@@ -502,7 +667,12 @@ def test_every_error_the_flow_raises_is_documented() -> None:
         "score_column_never_written",
         "approval_corpus_mismatch",
         "approve_before_profile",
+        "profile_enabled_during_approval",
+        "conflicting_approved_policy",
         "no_steps_enabled",
+        "unknown_step",
+        "stale_filter_output",
+        "ingest_source_field_unmapped",
     } <= documented
 
 
@@ -516,7 +686,7 @@ EXAMPLE_CONFIGS = ("vi_c4", "hi_sangraha")
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
-def test_the_worked_example_derives_five_step_configs(name) -> None:
+def test_the_worked_example_derives_six_step_configs(name) -> None:
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
 
     resolved, _ = run_flow.derive(cfg)
@@ -612,7 +782,7 @@ def test_an_absent_optional_artifact_is_unset_not_merely_warned(tmp_path) -> Non
 def test_a_misspelled_step_name_is_refused(tmp_path) -> None:
     """Otherwise the flow reports success having never attempted the stage."""
     cfg = config(tmp_path)
-    cfg["steps"]["decontaminate"] = {"enabled": True}   # the real key is decontamination
+    cfg["steps"]["decontaminate"] = {"enabled": True}  # the real key is decontamination
 
     resolved, paths = run_flow.derive(cfg)
     with pytest.raises(run_flow.FlowConfigError, match="unknown step"):
@@ -668,9 +838,12 @@ def test_a_step_failing_still_writes_a_report_saying_how_far_it_got(tmp_path, mo
 def test_policy_applied_is_false_when_nothing_applied_it(tmp_path) -> None:
     """Promoting a policy is not applying one, and the report must not conflate them."""
     cfg = config(tmp_path)
+    cfg["corpus"]["source_field_in_source"] = "source"
+    cfg["corpus"]["id_field_in_source"] = True
+    cfg["steps"]["ingest"] = {"enabled": True}
+    run_flow.run(cfg)  # produce both candidates and the prepared corpus
     cfg["approve"] = approve_block()
-    run_flow.run(config(tmp_path))          # produce candidates first
-    cfg["steps"]["profile"]["enabled"] = True
+    cfg["steps"]["profile"]["enabled"] = False
     cfg["steps"]["filter"]["enabled"] = False
 
     report = run_flow.run(cfg)
@@ -757,9 +930,7 @@ def test_the_fingerprint_covers_content_not_just_identity(tmp_path) -> None:
             encoding="utf-8",
         )
 
-    assert integrity.corpus_fingerprint(str(a), "text", "id") != integrity.corpus_fingerprint(
-        str(b), "text", "id"
-    )
+    assert integrity.corpus_fingerprint(str(a), "text", "id") != integrity.corpus_fingerprint(str(b), "text", "id")
 
 
 def test_the_fingerprint_reads_a_directory_a_glob_and_a_list_alike(tmp_path) -> None:
@@ -882,10 +1053,7 @@ def test_the_approval_is_verified_against_the_corpus_the_filter_reads(tmp_path) 
     raw.mkdir()
     with (raw / "part_0.jsonl").open("w", encoding="utf-8") as fh:
         for i in range(40):
-            fh.write(
-                json.dumps({"id": f"d{i:03d}", "source": "web", "text": f"document {i} " + "body " * 20})
-                + "\n"
-            )
+            fh.write(json.dumps({"id": f"d{i:03d}", "source": "web", "text": f"document {i} " + "body " * 20}) + "\n")
 
     cfg = config(tmp_path)
     cfg["corpus"]["input"] = str(raw / "*.jsonl")
@@ -1005,10 +1173,7 @@ def test_a_policy_can_be_approved_with_ingest_enabled(tmp_path) -> None:
     with (raw / "part_0.jsonl").open("w", encoding="utf-8") as fh:
         for i in range(40):
             body = " ".join(f"w{i}x{j}" for j in range(30))
-            fh.write(
-                json.dumps({"id": f"d{i:03d}", "source": "web", "text": f"document {i} {body}"})
-                + "\n"
-            )
+            fh.write(json.dumps({"id": f"d{i:03d}", "source": "web", "text": f"document {i} {body}"}) + "\n")
 
     cfg = config(tmp_path)
     cfg["corpus"]["input"] = str(raw / "*.jsonl")
@@ -1026,6 +1191,52 @@ def test_a_policy_can_be_approved_with_ingest_enabled(tmp_path) -> None:
     warnings = run_flow.materialise_policy(cfg, resolved, paths)
 
     assert any("fingerprint verified" in w for w in warnings)
+
+
+def test_approval_is_reverified_after_ingest_before_filtering(tmp_path, monkeypatch) -> None:
+    raw = tmp_path / "changing_raw"
+    raw.mkdir()
+    path = raw / "part_0.jsonl"
+
+    def write_raw(changed: bool = False) -> None:
+        with path.open("w", encoding="utf-8") as fh:
+            for i in range(40):
+                text = f"document {i} " + " ".join(f"word{i}_{j}" for j in range(20))
+                if changed and i == 0:
+                    text += " changed after approval profiling"
+                fh.write(json.dumps({"source": "web", "text": text}) + "\n")
+
+    write_raw()
+    cfg = config(tmp_path)
+    cfg["corpus"]["input"] = str(path)
+    cfg["corpus"]["source_field_in_source"] = "source"
+    cfg["steps"]["ingest"] = {"enabled": True}
+    run_flow.run(cfg)
+
+    write_raw(changed=True)
+    cfg["steps"]["profile"]["enabled"] = False
+    cfg["steps"]["filter"]["enabled"] = True
+    cfg["approve"] = approve_block()
+    filter_called = False
+    real_step_runner = run_flow.step_runner
+
+    def runner(key):
+        if key != "filter":
+            return real_step_runner(key)
+
+        def fail_if_called(_cfg):
+            nonlocal filter_called
+            filter_called = True
+            return {}
+
+        return fail_if_called
+
+    monkeypatch.setattr(run_flow, "step_runner", runner)
+
+    with pytest.raises(run_flow.FlowConfigError, match="granted against corpus"):
+        run_flow.run(cfg)
+
+    assert filter_called is False
 
 
 def test_a_policy_is_refused_when_the_corpus_it_names_is_absent(tmp_path) -> None:

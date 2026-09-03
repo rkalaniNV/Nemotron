@@ -78,9 +78,7 @@ def test_the_two_granularities_do_not_agree() -> None:
         for e in edits
     ]
 
-    assert max(disagreements) > 0.05, (
-        "char and word shingling must be able to disagree, or the parameter is pointless"
-    )
+    assert max(disagreements) > 0.05, "char and word shingling must be able to disagree, or the parameter is pointless"
 
 
 def test_an_unknown_shingle_kind_is_refused() -> None:
@@ -327,9 +325,7 @@ def test_a_meaningful_query_parameter_is_not_a_tracking_parameter() -> None:
 
 
 def test_tracking_parameters_are_dropped_but_the_page_parameter_survives() -> None:
-    with_tracking = grouping.canonical_url(
-        "https://forums.example.vn/showthread.php?t=123&utm_source=fb&fbclid=abc"
-    )
+    with_tracking = grouping.canonical_url("https://forums.example.vn/showthread.php?t=123&utm_source=fb&fbclid=abc")
 
     assert with_tracking == "forums.example.vn/showthread.php?t=123"
 
@@ -392,9 +388,7 @@ def test_every_record_receives_exactly_one_group() -> None:
 
 def test_the_field_that_produced_the_key_is_recorded() -> None:
     """So a grouping decision can be inspected rather than inferred."""
-    assigned = grouping.assign_group_keys(
-        [{"id": "1", "url": "https://example.com/a", "text": "x"}], "s"
-    )
+    assigned = grouping.assign_group_keys([{"id": "1", "url": "https://example.com/a", "text": "x"}], "s")
 
     assert assigned[0][grouping.GROUP_KEY_SOURCE_FIELD] == "url"
 
@@ -512,7 +506,10 @@ def test_splits_keyed_by_different_fields_are_refused_not_reported_clean() -> No
     holdout = [{"id": "87737", "text": text}]
 
     result = grouping.cross_split_groups(
-        train, holdout, left_source="train", right_source="holdout",
+        train,
+        holdout,
+        left_source="train",
+        right_source="holdout",
         cfg=grouping.GroupKeyConfig(text_field="text"),
     )
 
@@ -536,7 +533,8 @@ def test_splits_sharing_a_key_field_stay_comparable() -> None:
     result = grouping.cross_split_groups(
         [{"id": "a", "url": url, "text": text}],
         [{"id": "b", "url": url, "text": text}],
-        left_source="train", right_source="holdout",
+        left_source="train",
+        right_source="holdout",
         cfg=grouping.GroupKeyConfig(text_field="text"),
     )
 
@@ -560,21 +558,21 @@ def test_a_holdout_that_mixes_key_fields_is_refused_too() -> None:
     text = "Tư bản - Phê phán khoa kinh tế chính trị " * 40
     url = "https://vi.wikipedia.org/wiki/Tu_ban_"
     train = [{"id": f"t{i}", "url": f"{url}{i}", "text": text + str(i)} for i in range(100)]
-    holdout = (
-        [{"id": f"h{i}", "url": f"{url}{i}", "text": text + str(i)} for i in range(50)]
-        + [{"id": f"h{i}", "text": text + str(i)} for i in range(50, 100)]
-    )
+    holdout = [{"id": f"h{i}", "url": f"{url}{i}", "text": text + str(i)} for i in range(50)] + [
+        {"id": f"h{i}", "text": text + str(i)} for i in range(50, 100)
+    ]
 
     result = grouping.cross_split_groups(
-        train, holdout, left_source="train", right_source="holdout",
+        train,
+        holdout,
+        left_source="train",
+        right_source="holdout",
         cfg=grouping.GroupKeyConfig(text_field="text"),
     )
 
     assert result["shared_group_count"] == 50, "half the duplicates are structurally invisible"
     assert result["unmatchable_right"] == 50
-    assert result["comparable"] is False, (
-        "a shared field name is not comparability; the id-keyed half can never match"
-    )
+    assert result["comparable"] is False, "a shared field name is not comparability; the id-keyed half can never match"
 
 
 def test_a_positional_fallback_key_never_establishes_comparability() -> None:
@@ -587,7 +585,10 @@ def test_a_positional_fallback_key_never_establishes_comparability() -> None:
     holdout = [{"text": "one"}, {"text": "two"}]
 
     result = grouping.cross_split_groups(
-        train, holdout, left_source="train", right_source="holdout",
+        train,
+        holdout,
+        left_source="train",
+        right_source="holdout",
         cfg=grouping.GroupKeyConfig(text_field="text", use_normalized_text=False),
     )
 

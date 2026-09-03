@@ -8,9 +8,10 @@
 from __future__ import annotations
 
 import json
+import tomllib
+from pathlib import Path
 
 import pytest
-import tomllib
 import yaml
 
 from nemotron.steps.curate.runtime import integrity
@@ -135,12 +136,21 @@ def test_a_truncated_shard_is_a_finding_naming_file_and_offset(tmp_path) -> None
     assert "byte 11" in finding["message"]
 
 
+def test_a_valid_json_value_that_is_not_a_record_is_a_finding(tmp_path) -> None:
+    (tmp_path / "a.jsonl").write_text('{"id":"1"}\n[1, 2, 3]\n', encoding="utf-8")
+
+    report = run_audit.audit({"target_glob": str(tmp_path / "*.jsonl")})
+
+    finding = next(f for f in report["findings"] if f["name"] == "unreadable_shard")
+    assert finding["error"] == "non-object record"
+    assert report["target"]["row_count"] == 1
+    assert report["passed"] is False
+
+
 def test_a_manifest_without_completed_at_is_a_finding_not_a_pass(tmp_path) -> None:
     target = corpus(tmp_path, ("a.jsonl", ['{"id":"1"}', '{"id":"2"}']))
 
-    report = run_audit.audit(
-        {"target_glob": target, "declared_manifest": manifest_for(tmp_path, completed=False)}
-    )
+    report = run_audit.audit({"target_glob": target, "declared_manifest": manifest_for(tmp_path, completed=False)})
 
     assert not report["passed"]
     assert any(f["name"] == "manifest_incomplete" for f in report["findings"])
@@ -165,12 +175,23 @@ def test_a_matching_manifest_passes(tmp_path) -> None:
     assert report["completeness"]["claimed"] is True
 
 
+def test_a_directory_target_excludes_ingest_and_accounting_sidecars(tmp_path) -> None:
+    (tmp_path / "part_0.jsonl").write_text('{"id":"1"}\n', encoding="utf-8")
+    (tmp_path / "ingest_report.json").write_text(
+        json.dumps({"counts": {"written": 1}}, indent=2) + "\n", encoding="utf-8"
+    )
+    (tmp_path / "run_manifest.json").write_text("{}\n", encoding="utf-8")
+
+    report = run_audit.audit({"target_glob": str(tmp_path)})
+
+    assert report["target"]["file_count"] == 1
+    assert report["target"]["row_count"] == 1
+
+
 def test_a_manifest_declaring_more_rows_than_exist_is_a_mismatch(tmp_path) -> None:
     target = corpus(tmp_path, ("a.jsonl", ['{"id":"1"}']))
 
-    report = run_audit.audit(
-        {"target_glob": target, "declared_manifest": manifest_for(tmp_path, row_count=999)}
-    )
+    report = run_audit.audit({"target_glob": target, "declared_manifest": manifest_for(tmp_path, row_count=999)})
 
     assert not report["passed"]
     finding = next(f for f in report["findings"] if f["name"] == "manifest_mismatch")
@@ -240,7 +261,7 @@ def test_an_unmatched_target_glob_is_an_error(tmp_path) -> None:
 def test_an_unknown_mode_is_rejected(tmp_path) -> None:
     target = corpus(tmp_path, ("a.jsonl", ['{"id":"1"}']))
 
-    with pytest.raises(ValueError, match="mode must be one of"):
+    with pytest.raises(run_audit.ConfigError, match="mode must be one of"):
         run_audit.audit({"target_glob": target, "mode": "thorough"})
 
 
@@ -299,9 +320,7 @@ def test_a_damaged_reference_is_named_before_any_comparison_is_read(tmp_path) ->
     (target / "a.jsonl").write_text('{"id":"1"}\n', encoding="utf-8")
     (reference / "a.jsonl").write_text('{"id":"1"}\n{"id":"tr', encoding="utf-8")
 
-    report = run_audit.audit(
-        {"target_glob": str(target / "*.jsonl"), "reference_glob": str(reference / "*.jsonl")}
-    )
+    report = run_audit.audit({"target_glob": str(target / "*.jsonl"), "reference_glob": str(reference / "*.jsonl")})
 
     assert any(f["name"] == "unreadable_reference_shard" for f in report["findings"])
 
@@ -311,9 +330,7 @@ def test_a_manifest_that_is_not_an_object_is_reported_not_crashed(tmp_path) -> N
     bad = tmp_path / "bad.json"
     bad.write_text('["not", "an", "object"]', encoding="utf-8")
 
-    report = run_audit.audit(
-        {"target_glob": str(tmp_path / "*.jsonl"), "declared_manifest": str(bad)}
-    )
+    report = run_audit.audit({"target_glob": str(tmp_path / "*.jsonl"), "declared_manifest": str(bad)})
 
     assert report["passed"] is False
     assert any(f["name"] == "manifest_mismatch" for f in report["findings"])
@@ -328,9 +345,7 @@ def test_a_digest_root_that_is_not_a_parent_is_refused(tmp_path) -> None:
     elsewhere.mkdir()
 
     with pytest.raises(integrity.ReleaseLayoutError, match="is not a parent"):
-        run_audit.audit(
-            {"target_glob": str(corpus / "*.jsonl"), "mode": "digest", "digest_root": str(elsewhere)}
-        )
+        run_audit.audit({"target_glob": str(corpus / "*.jsonl"), "mode": "digest", "digest_root": str(elsewhere)})
 
 
 def test_an_empty_but_well_formed_shard_is_an_observation_not_a_finding(tmp_path) -> None:
@@ -379,9 +394,7 @@ def test_without_a_ledger_the_audit_says_it_cannot_attribute(tmp_path) -> None:
 
 def test_a_ledger_attributes_the_delta_to_the_gates_that_caused_it(tmp_path) -> None:
     target = corpus(tmp_path, ("out.jsonl", ['{"id": 1}', '{"id": 2}']))
-    ledger_path = write_ledger(
-        tmp_path, n_input=5, n_success=2, filtered={"language_id": 2, "word_count": 1}
-    )
+    ledger_path = write_ledger(tmp_path, n_input=5, n_success=2, filtered={"language_id": 2, "word_count": 1})
     declared = manifest_for(tmp_path, row_count=2, file_count=1)
     import json as _json
 
@@ -389,15 +402,56 @@ def test_a_ledger_attributes_the_delta_to_the_gates_that_caused_it(tmp_path) -> 
     document["input"]["row_count"] = 5
     open(declared, "w").write(_json.dumps(document))
 
-    report = run_audit.audit(
-        {"target_glob": target, "declared_manifest": declared, "ledger_glob": ledger_path}
-    )
+    report = run_audit.audit({"target_glob": target, "declared_manifest": declared, "ledger_glob": ledger_path})
 
     attribution = report["attribution"]
     assert attribution["available"] is True
     assert attribution["observed_delta"] == 3
     assert attribution["unexplained"] == 0
     assert attribution["filtered_by_reason"] == {"language_id": 2, "word_count": 1}
+
+
+def test_manifest_and_ledger_attribution_disagreement_is_a_finding(tmp_path) -> None:
+    target = corpus(tmp_path, ("out.jsonl", ['{"id": 1}', '{"id": 2}']))
+    ledger_path = write_ledger(tmp_path, n_input=5, n_success=2, filtered={"language_id": 2, "word_count": 1})
+    declared = Path(manifest_for(tmp_path, row_count=2, file_count=1))
+    document = json.loads(declared.read_text(encoding="utf-8"))
+    document["input"]["row_count"] = 5
+    document["declared"] = {"filtered": {"language_id": 1, "word_count": 2}}
+    declared.write_text(json.dumps(document), encoding="utf-8")
+
+    report = run_audit.audit(
+        {
+            "target_glob": target,
+            "declared_manifest": str(declared),
+            "ledger_glob": ledger_path,
+        }
+    )
+
+    finding = next(finding for finding in report["findings"] if finding["name"] == "attribution_disagreement")
+    assert finding["manifest"] != finding["ledger"]
+    assert report["passed"] is False
+
+
+def test_empty_manifest_attribution_still_disagrees_with_a_nonempty_ledger(tmp_path) -> None:
+    target = corpus(tmp_path, ("out.jsonl", ['{"id": 1}', '{"id": 2}']))
+    ledger_path = write_ledger(tmp_path, n_input=3, n_success=2, filtered={"language_id": 1})
+    declared = Path(manifest_for(tmp_path, row_count=2, file_count=1))
+    document = json.loads(declared.read_text(encoding="utf-8"))
+    document["input"]["row_count"] = 3
+    document["declared"] = {"filtered": {}}
+    declared.write_text(json.dumps(document), encoding="utf-8")
+
+    report = run_audit.audit(
+        {
+            "target_glob": target,
+            "declared_manifest": str(declared),
+            "ledger_glob": ledger_path,
+        }
+    )
+
+    assert any(finding["name"] == "attribution_disagreement" for finding in report["findings"])
+    assert report["passed"] is False
 
 
 def test_loss_no_stage_recorded_is_a_finding(tmp_path) -> None:
@@ -411,9 +465,7 @@ def test_loss_no_stage_recorded_is_a_finding(tmp_path) -> None:
     document["input"]["row_count"] = 100
     open(declared, "w").write(_json.dumps(document))
 
-    report = run_audit.audit(
-        {"target_glob": target, "declared_manifest": declared, "ledger_glob": ledger_path}
-    )
+    report = run_audit.audit({"target_glob": target, "declared_manifest": declared, "ledger_glob": ledger_path})
 
     assert report["attribution"]["unexplained"] == 98
     assert any(f["name"] == "unexplained_loss" for f in report["findings"])
@@ -423,9 +475,7 @@ def test_loss_no_stage_recorded_is_a_finding(tmp_path) -> None:
 def test_a_lost_shard_is_a_finding_even_though_it_reports_zero_rows(tmp_path) -> None:
     """A record-count gate cannot see this; the audit must count units."""
     target = corpus(tmp_path, ("out.jsonl", ['{"id": 1}']))
-    ledger_path = write_ledger(
-        tmp_path, n_input=1, n_success=1, failed=[("shard_42.jsonl", "truncated", 0)]
-    )
+    ledger_path = write_ledger(tmp_path, n_input=1, n_success=1, failed=[("shard_42.jsonl", "truncated", 0)])
 
     report = run_audit.audit({"target_glob": target, "ledger_glob": ledger_path})
 
@@ -448,9 +498,7 @@ def test_an_unreadable_ledger_is_a_finding_not_a_crash(tmp_path) -> None:
     (tmp_path / "bad-ledger.json").write_text("{not json", encoding="utf-8")
     target = corpus(tmp_path, ("out.jsonl", ['{"id": 1}']))
 
-    report = run_audit.audit(
-        {"target_glob": target, "ledger_glob": str(tmp_path / "bad-ledger.json")}
-    )
+    report = run_audit.audit({"target_glob": target, "ledger_glob": str(tmp_path / "bad-ledger.json")})
 
     assert any(f["name"] == "ledger_unreadable" for f in report["findings"])
 
@@ -471,9 +519,7 @@ def test_several_ledgers_merge_across_stages(tmp_path) -> None:
     write_ledger(tmp_path, "led-a.json", stage="curate/nemo_curator", n_input=3, n_success=1, filtered={"lang": 2})
     write_ledger(tmp_path, "led-b.json", stage="curate/subset", n_input=1, n_success=1)
 
-    report = run_audit.audit(
-        {"target_glob": target, "ledger_glob": str(tmp_path / "led-*.json")}
-    )
+    report = run_audit.audit({"target_glob": target, "ledger_glob": str(tmp_path / "led-*.json")})
 
     assert report["attribution"]["ledgers"] == 2
     assert report["attribution"]["stages"] == ["curate/nemo_curator", "curate/subset"]
@@ -495,9 +541,7 @@ def test_rows_appearing_is_reported_as_a_gain_not_a_negative_loss(tmp_path) -> N
     document["input"]["row_count"] = 4
     open(declared, "w").write(_json.dumps(document))
 
-    report = run_audit.audit(
-        {"target_glob": target, "declared_manifest": declared, "ledger_glob": ledger_path}
-    )
+    report = run_audit.audit({"target_glob": target, "declared_manifest": declared, "ledger_glob": ledger_path})
 
     names = [f["name"] for f in report["findings"]]
     assert "unaccounted_gain" in names
@@ -533,10 +577,16 @@ def test_the_producer_and_the_consumer_meet(tmp_path, monkeypatch) -> None:
     import types
 
     for name in (
-        "nemo_curator", "nemo_curator.core", "nemo_curator.core.client",
-        "nemo_curator.pipeline", "nemo_curator.stages", "nemo_curator.stages.text",
-        "nemo_curator.stages.text.io", "nemo_curator.stages.text.io.reader",
-        "nemo_curator.stages.text.io.writer", "huggingface_hub",
+        "nemo_curator",
+        "nemo_curator.core",
+        "nemo_curator.core.client",
+        "nemo_curator.pipeline",
+        "nemo_curator.stages",
+        "nemo_curator.stages.text",
+        "nemo_curator.stages.text.io",
+        "nemo_curator.stages.text.io.reader",
+        "nemo_curator.stages.text.io.writer",
+        "huggingface_hub",
     ):
         monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
     sys.modules["nemo_curator.core.client"].RayClient = object

@@ -414,14 +414,13 @@ def test_the_shipped_configs_expose_the_langid_score() -> None:
     checked = 0
     for path in flow_configs:
         cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        block = ((cfg.get("steps") or {}).get("filter") or {})
+        block = (cfg.get("steps") or {}).get("filter") or {}
         if "language_codes" not in block:
             continue
         checked += 1
         quality = block.get("quality_filters") or {}
         assert "min_langid_score" in quality, (
-            f"{path.name} offers language_codes but never names the confidence "
-            "threshold that goes with it"
+            f"{path.name} offers language_codes but never names the confidence threshold that goes with it"
         )
     assert checked, "no flow config declares language_codes"
 

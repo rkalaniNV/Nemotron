@@ -95,6 +95,11 @@ document not found — are reported as **unverifiable** and are not removed.
 Counting them as similarity zero would report a clean result for a comparison
 that never happened.
 
+The split fingerprints in `decontamination_report.json` cover id membership.
+They prove which named split was checked, but they are intentionally not the
+profile/policy corpus fingerprint, which also binds document content. Do not
+compare the two fields as if they used one digest contract.
+
 ## Run It
 
 ```bash
@@ -105,6 +110,9 @@ uv run nemotron steps run curate/decontamination -c tiny
 Full run:
 
 ```bash
+# Adds NeMo Curator's CUDA MinHash/LSH dependencies (RAPIDS).
+uv sync --extra curate-gpu
+
 uv run nemotron steps run curate/decontamination \
   train_glob='./output/filtered_jsonl/**/*.jsonl' \
   holdout_glob='./data/holdout/**/*.jsonl' \
@@ -115,6 +123,8 @@ uv run nemotron steps run curate/decontamination \
 This is the only step in `curate/` that declares `gpus_per_node = 1`. Set
 `skip_similarity: true` to run the identity pass alone on CPU; the report then
 says near-duplicate overlap was **not measured**, rather than reporting none.
+For isolated Curator runtimes, select the `curate-gpu` profile; the ordinary
+`curate` extra intentionally remains CPU-only for the other five steps.
 
 ## Repository Layout
 

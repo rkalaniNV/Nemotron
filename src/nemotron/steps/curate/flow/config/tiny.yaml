@@ -1,23 +1,24 @@
-# Smoke config: the packaged fixtures every curate step ships, run end to end on
-# CPU. No tokenizer download, no GPU, no policy — approve is absent because a
-# first run has nothing to approve.
+# CPU smoke config for the flow seam: ingest the packaged JSONL fixture, then
+# profile exactly what ingest wrote. No tokenizer download, GPU, Ray filter, or
+# policy — approve is absent because a first run has nothing to approve.
 
 corpus:
   input: /nemo_run/code/src/nemotron/steps/curate/profile/data/tiny/*.jsonl
   text_field: text
   id_field: id
+  id_field_in_source: true
   source_field: source
+  source_field_in_source: source
   language: vi
   metadata_fields: [id, source]
 
 output_root: ${oc.env:NEMO_RUN_DIR,${oc.env:PWD}/output}/curate_flow_tiny
 
 steps:
-  # Raw parquet or JSONL in, curatable JSONL out: mints a content-derived id when
-  # the corpus has none. Off by default — a corpus already in that shape should
-  # not be rewritten just to be read.
+  # Exercise the first cross-step handoff even though this fixture already has
+  # stable ids: profile must read the artifact ingest actually committed.
   ingest:
-    enabled: false
+    enabled: true
     on_duplicate: refuse
 
   profile:

@@ -59,7 +59,7 @@ default = "null"
 
 [[parameters]]
 name = "token_budgets"
-description = "One tier per budget. All are planned together in a single run — tiers produced by separate runs cannot be shown to nest."
+description = "One tier per positive integer budget. All are planned together in a single run — tiers produced by separate runs cannot be shown to nest."
 
 [[parameters]]
 name = "tokenizer"
@@ -67,7 +67,7 @@ description = "Mapping with name and revision, forwarded to Curator's TokenCount
 
 [[parameters]]
 name = "token_cache"
-description = "Path for token counts cached by (tokenizer, revision, id). A cache written under a different tokenizer or revision is ignored with a warning rather than reused."
+description = "Path for token counts cached by (tokenizer, revision, id, content SHA-256). The content digest invalidates a stale count when text changes under the same id; a cache from another tokenizer, revision, or schema is ignored."
 default = "null"
 
 [[parameters]]
@@ -77,7 +77,7 @@ default = "null"
 
 [[parameters]]
 name = "length_bands"
-description = "Upper edges of the length bands, in the budget's unit. A subset with the right source mix and the wrong length mix is not neutral."
+description = "Strictly increasing positive integer upper edges of the length bands, in the budget's unit. A subset with the right source mix and the wrong length mix is not neutral."
 default = [128, 512, 2048, 8192]
 
 [[parameters]]
@@ -116,6 +116,22 @@ recovery = "Set id_field to the corpus's own document id. If records do not carr
 [[errors]]
 name = "quality_score_field_absent"
 recovery = "The column is named in config but missing from the records. Produce it with curate/nemo_curator mode: annotate or mode: both, or unset quality_score_field. It is an error rather than a fallback because stratifying on less than was asked for changes what the subset represents."
+
+[[errors]]
+name = "quality_score_non_finite"
+recovery = "At least one configured quality score is NaN or infinite. Repair or remove those scores before stratifying; non-finite values cannot define deterministic decile boundaries."
+
+[[errors]]
+name = "token_count_non_positive"
+recovery = "At least one usable document has a zero or negative token count. Check the tokenizer/cache and input text. Every selected document needs a positive cost for token budgets and shortfall to be meaningful."
+
+[[errors]]
+name = "invalid_budget_or_length_band"
+recovery = "token_budgets must contain positive integers and length_bands must contain strictly increasing positive integers. Decimal, string, boolean, duplicate, and descending values are refused rather than coerced."
+
+[[errors]]
+name = "tier_write_mismatch"
+recovery = "A planned document id could not be written from the corpus during materialization. The run removes every tier and success report rather than publishing an artifact that disagrees with plan.json; ensure the input does not change during the run."
 
 [[errors]]
 name = "tokenizer_revision_missing"

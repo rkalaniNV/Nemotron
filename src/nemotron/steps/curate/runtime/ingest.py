@@ -37,11 +37,11 @@ becomes false — and cluster-bound, so ids cannot be minted before one exists. 
 an id is minted from content instead: reshard, reorder, re-split, and it does not
 move.
 
-That choice has one consequence this module refuses to hide. Two byte-identical
-documents mint the *same* id, because by that definition they are the same
-document. Real corpora contain them — 328 of 20,000 in one Hindi corpus measured
-here, the largest group 293 copies — so the collision is not hypothetical, and
-what to do about it is a decision with three defensible answers. It is the
+That choice has one consequence this module refuses to hide. Two documents with
+the same configured identity fields mint the *same* id. The recipe is required
+to include text, so this includes byte-identical text; real corpora contain it —
+328 of 20,000 in one Hindi corpus measured here, the largest group 293 copies.
+What to do about it is a decision with three defensible answers. It is the
 caller's, not this module's: see :data:`ON_DUPLICATE`.
 """
 
@@ -54,18 +54,17 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a change would alter the id a given document receives.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: How an id is derived when the corpus carries none. Recorded in the ingest
 #: report so a later run can reproduce it, and so an id can be traced back to the
 #: fields it came from rather than being an opaque string.
-ID_RECIPE = "sha256(join(fields, '\\n'))[:16], prefixed"
+ID_RECIPE = "sha256(canonical JSON array of field values), prefixed"
 
-#: What to do when two documents mint the same id — which means their content is
-#: byte-identical. There is no safe default: dropping changes the corpus,
-#: suffixing makes ids no longer purely content-derived, and refusing stops a run
-#: over something many corpora simply contain. So the caller chooses, and the
-#: choice is recorded.
+#: What to do when two documents mint or provide the same id. There is no safe
+#: default: dropping changes the corpus, suffixing makes ids no longer purely
+#: content-derived, and refusing stops a run over something many corpora simply
+#: contain. So the caller chooses, and the choice is recorded.
 ON_DUPLICATE = ("refuse", "drop", "suffix")
 
 FORMATS = ("jsonl", "parquet")
@@ -97,7 +96,8 @@ def detect_format(paths: list[str]) -> str:
     )
 
 
-def iter_jsonl(path: str) -> Iterator[dict[str, Any]]:
+def iter_jsonl(path: str) -> Iterator[dict[str, Any] | None]:
+    """Yield mappings and use ``None`` to expose valid non-object JSON values."""
     with Path(path).open("rb") as handle:
         for raw in handle:
             stripped = raw.strip()
@@ -110,6 +110,11 @@ def iter_jsonl(path: str) -> Iterator[dict[str, Any]]:
                 continue
             if isinstance(record, dict):
                 yield record
+            else:
+                # A scalar or list is valid JSON but not a corpus record. The
+                # caller must count it; silently yielding nothing loses data
+                # without putting the loss in the ingest report.
+                yield None
 
 
 def iter_parquet(path: str, batch_size: int = 8192) -> Iterator[dict[str, Any]]:
@@ -132,8 +137,20 @@ def mint_id(record: dict[str, Any], fields: list[str], prefix: str) -> str:
     re-ingested under a different recipe is a corpus whose ids mean something
     else. The recipe is recorded alongside the output.
     """
-    payload = "\n".join(str(record.get(f) or "") for f in fields)
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    # A delimiter is not framing: ["a\nb", "c"] and ["a", "b\nc"] produce
+    # the same newline-joined bytes. JSON preserves field boundaries and value
+    # types, while sort_keys makes nested mapping values deterministic.
+    payload = json.dumps(
+        [record.get(field) for field in fields],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    # The corpus can hold billions of documents. A 64-bit truncated digest has
+    # a meaningful birthday-collision probability at that scale and would make
+    # unrelated documents look like duplicates, so retain the full SHA-256.
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return f"{prefix}{digest}" if prefix else digest
 
 

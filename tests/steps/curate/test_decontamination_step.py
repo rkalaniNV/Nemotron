@@ -14,10 +14,11 @@ overclaim would live if it lived anywhere.
 from __future__ import annotations
 
 import json
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 import yaml
 
 from nemotron.steps.curate.runtime import decon
@@ -71,10 +72,21 @@ def test_decontamination_step_static() -> None:
 
 
 def test_it_is_the_only_curate_step_that_declares_a_gpu() -> None:
-    """The similarity pass is GPU-backed; the other three curate steps are not."""
+    """The similarity pass is GPU-backed; the other curate steps are not."""
     source = (STEP_DIR / "step.py").read_text(encoding="utf-8")
 
     assert "gpus_per_node = 1" in source
+
+
+def test_the_gpu_path_has_a_packaged_runtime_extra() -> None:
+    with (STEP_DIR.parents[4] / "pyproject.toml").open("rb") as fh:
+        project = tomllib.load(fh)
+
+    requirements = project["project"]["optional-dependencies"]["curate-gpu"]
+    runtime = project["tool"]["nemotron"]["runtime"]["curate-gpu"]
+    assert any("deduplication_cuda12" in requirement for requirement in requirements)
+    assert runtime["extras"] == ["curate-gpu"]
+    assert "cudf" in runtime["required-imports"]
 
 
 def test_the_manifest_states_the_threat_model_boundary() -> None:
@@ -82,9 +94,7 @@ def test_the_manifest_states_the_threat_model_boundary() -> None:
     with (STEP_DIR / "step.toml").open("rb") as fh:
         manifest = tomllib.load(fh)
 
-    text = manifest["step"]["description"] + " ".join(
-        s["then"] for s in manifest.get("strategies", [])
-    )
+    text = manifest["step"]["description"] + " ".join(s["then"] for s in manifest.get("strategies", []))
     assert "substring" in text.lower()
 
 
@@ -248,6 +258,24 @@ def test_a_duplicate_id_is_refused(tmp_path) -> None:
         step.run(config(tmp_path, train, holdout), "2026-08-25T00:00:00Z")
 
 
+def test_incomparable_key_fields_refuse_before_output(tmp_path) -> None:
+    train = [
+        {
+            "id": "train-id",
+            "url": "https://train.example/document",
+            "text": "Training. " + FILLER,
+        }
+    ]
+    holdout = [{"id": "holdout-id", "text": "Holdout. " + FILLER}]
+    cfg = config(tmp_path, train, holdout)
+
+    with pytest.raises(step.ConfigError, match="keyed off a field"):
+        step.run(cfg, "2026-08-25T00:00:00Z")
+
+    assert not Path(cfg["output_dir"], "train_decontaminated.jsonl").exists()
+    assert not Path(cfg["output_dir"], "decontamination_report.json").exists()
+
+
 def test_an_impossible_threshold_is_refused(tmp_path) -> None:
     holdout = [{"id": "h1", "text": FILLER}]
     train = [{"id": "t1", "text": FILLER}]
@@ -276,6 +304,68 @@ def test_the_similarity_pass_is_not_imported_when_skipped(tmp_path, monkeypatch)
     train = [{"id": "t1", "text": FILLER}]
 
     step.run(config(tmp_path, train, holdout), "2026-08-25T00:00:00Z")
+
+
+def test_missing_gpu_dependencies_name_the_install_extra(tmp_path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "nemo_curator.stages.deduplication.fuzzy.workflow", None)
+
+    with pytest.raises(step.ConfigError, match=r"nemotron\[curate-gpu\]"):
+        step.candidate_pairs(
+            {"work_dir": str(tmp_path / "work")},
+            [{"id": "t1", "text": FILLER}],
+            [{"id": "h1", "text": FILLER}],
+            "id",
+            "text",
+        )
+
+
+def test_cross_split_pairs_use_named_lsh_columns_not_column_order(tmp_path) -> None:
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    output = tmp_path / "lsh" / "band_0-band_5"
+    output.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "unrelated": ["ignored", "ignored"],
+            step.CURATOR_BUCKET_FIELD: ["bucket-a", "bucket-b"],
+            step.CURATOR_ID_FIELD: [[0, 1, 2], [1, 2]],
+        }
+    ).to_parquet(output / "part.0.parquet")
+
+    pairs = step.read_cross_split_pairs(
+        tmp_path / "lsh",
+        {
+            "holdout:h1": step.HOLDOUT,
+            "train:t1": step.TRAIN,
+            "train:t2": step.TRAIN,
+        },
+        {0: "holdout:h1", 1: "train:t1", 2: "train:t2"},
+    )
+
+    assert pairs == [("t1", "h1"), ("t2", "h1")]
+
+
+def test_records_without_text_and_non_objects_are_counted(tmp_path) -> None:
+    holdout = [{"id": "h1", "text": "Holdout. " + FILLER}]
+    train_path = tmp_path / "custom_train.jsonl"
+    train_path.write_text(
+        "\n".join(
+            (
+                json.dumps({"id": "t1", "text": "Training. " + FILLER}),
+                json.dumps({"id": "missing-text"}),
+                "42",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cfg = config(tmp_path, [], holdout, train_glob=str(train_path))
+
+    report = step.run(cfg, "2026-08-25T00:00:00Z")
+
+    assert report["splits"]["train"]["documents"] == 1
+    assert report["splits"]["train"]["skipped_missing_text"] == 1
+    assert report["splits"]["train"]["skipped_non_mapping"] == 1
 
 
 # -- verification wiring ------------------------------------------------------
@@ -319,9 +409,7 @@ def test_removed_pairs_carry_their_similarity_as_evidence(tmp_path, monkeypatch)
     train = [{"id": "t1", "text": text}]
 
     monkeypatch.setattr(step, "candidate_pairs", lambda *a, **k: [("t1", "h1")])
-    report = step.run(
-        config(tmp_path, train, holdout, skip_similarity=False), "2026-08-25T00:00:00Z"
-    )
+    report = step.run(config(tmp_path, train, holdout, skip_similarity=False), "2026-08-25T00:00:00Z")
 
     pair = report["similarity"]["removed_pairs"][0]
     assert pair["train_id"] == "t1" and pair["holdout_id"] == "h1"
