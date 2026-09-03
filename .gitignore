@@ -115,6 +115,17 @@ docs/_build/
 skills/*/evals/results/
 skills/*/evals/tier3-reports/
 
+# BFCL local run output. Bundled configs write to a scratch path outside the
+# checkout, but a run driven by hand still lands here: pilot and rollout records,
+# published run trees, an assembled oracle pack, and a hand-written pack config.
+# All of it is generated, and a benchmark committed by accident is worse than
+# unreadable git status.
+/.docker/
+/.scratch/
+/mcp610-*
+/oracle_pack/
+/tiny_library.manual.yaml
+
 # Local retrieval research and visualization artifacts
 /BENCHMARK.md
 /Retrieval-Synthetic-NVDocs-v1/
