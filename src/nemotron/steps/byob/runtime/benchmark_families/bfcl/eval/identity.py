@@ -37,7 +37,10 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
 
-from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import EvalCandidate
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
+    BROAD_SCOPE_DIGEST_SCHEMES,
+    EvalCandidate,
+)
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
 MODEL_IDENTITY_CONTRACT_VERSION: Final = "1.0"
@@ -123,7 +126,9 @@ def _compare_digests(left: str, right: str) -> IdentityVerdict | None:
     Equal bodies are the same digest however each side spelled the algorithm.
     Unequal bodies only prove two different weights when the two digests measure
     the same thing: a different algorithm, or the same algorithm over a different
-    byte scope, produces unequal digests for identical weights. Declining
+    byte scope, produces unequal digests for identical weights. A scheme that
+    covers more than the weights is unequal for reasons that are not about the
+    weights at all, so its inequality is declined even against itself. Declining
     (``None``) sends the comparison down to the name evidence, where it can still
     end in ``unknown`` — never in a clearance this could not support.
     """
@@ -132,6 +137,8 @@ def _compare_digests(left: str, right: str) -> IdentityVerdict | None:
     if left_body == right_body:
         return "match"
     if _conflicts(left_algorithm, right_algorithm) or len(left_body) != len(right_body):
+        return None
+    if {left_algorithm, right_algorithm} & BROAD_SCOPE_DIGEST_SCHEMES:
         return None
     return "different"
 

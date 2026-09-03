@@ -682,6 +682,99 @@ def test_launcher_binding_rewrites_the_runtime_route_not_weight_identity(
     assert captured == [result]
 
 
+def test_launcher_binding_carries_an_unpinned_identity_to_the_route_it_chose(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A candidate with no pin *is* its route, so Launcher re-pointing the route moves it.
+
+    The eval contract holds an unpinned identity to naming its own provider and
+    model. Leaving the identity on the pre-Launcher name would fail that check on
+    a config that was valid before a managed deployment chose an endpoint.
+    """
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+    payload = {
+        "candidates": [
+            {
+                "alias": "candidate",
+                "provider": "nvidia",
+                "model": "original-route",
+                "api": {"base_url": "https://original.example/v1"},
+                "model_identity": {
+                    "source": "nvidia",
+                    "model": "original-route",
+                    "revision": None,
+                    "weights_digest": None,
+                },
+            }
+        ]
+    }
+    config = SimpleNamespace(model_dump=lambda mode: payload)
+
+    class RuntimeConfig:
+        @classmethod
+        def model_validate(cls, value: dict[str, Any]) -> dict[str, Any]:
+            return value
+
+    monkeypatch.setattr(nemo_native_adapter, "BfclEvalConfig", RuntimeConfig)
+
+    result = nemo_native_adapter._runtime_eval_config(
+        adapter,
+        config,  # type: ignore[arg-type]
+        target_url="http://managed-endpoint/v1",
+        target_model_id="launcher-served-name",
+    )
+
+    identity = result["candidates"][0]["model_identity"]
+    assert identity["model"] == "launcher-served-name"
+    assert identity["source"] == "nvidia"
+    assert identity["revision"] is None and identity["weights_digest"] is None
+
+
+def test_launcher_binding_leaves_a_pinned_identity_alone_even_on_the_same_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pin names weights, so a serving name that happens to match it changes nothing."""
+    artifact = write_nemo_evaluator_bundle(_projection(), tmp_path)
+    adapter = _native_adapter(tmp_path, artifact)
+    pinned = {
+        "source": "huggingface",
+        "model": "original-route",
+        "revision": "3f9a1c5e7b2d4068a1c3e5b7d9f0a2c4e6b8d0f2",
+        "weights_digest": None,
+    }
+    payload = {
+        "candidates": [
+            {
+                "alias": "candidate",
+                "provider": "nvidia",
+                "model": "original-route",
+                "api": {"base_url": "https://original.example/v1"},
+                "model_identity": dict(pinned),
+            }
+        ]
+    }
+    config = SimpleNamespace(model_dump=lambda mode: payload)
+
+    class RuntimeConfig:
+        @classmethod
+        def model_validate(cls, value: dict[str, Any]) -> dict[str, Any]:
+            return value
+
+    monkeypatch.setattr(nemo_native_adapter, "BfclEvalConfig", RuntimeConfig)
+
+    result = nemo_native_adapter._runtime_eval_config(
+        adapter,
+        config,  # type: ignore[arg-type]
+        target_url="http://managed-endpoint/v1",
+        target_model_id="launcher-served-name",
+    )
+
+    assert result["candidates"][0]["model_identity"] == pinned
+
+
 def test_the_descriptor_names_every_other_file_and_pins_the_dataset(tmp_path: Path) -> None:
     artifact = write_nemo_evaluator_bundle(_projection([_row("t1"), _row("t2")]), tmp_path)
     root = tmp_path / NEMO_EVALUATOR_ROOT

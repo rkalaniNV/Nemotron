@@ -397,7 +397,7 @@ recovery = "One or more candidates are the same model that profiled, paraphrased
 
 [[errors]]
 name = "eval_contamination_unresolved"
-recovery = "A candidate and an exposed model cannot be told apart from what either side pinned, and publication.requested is true. Pin candidates[].model_identity.weights_digest and record the same identity for the generation role, or pin an immutable revision on both sides. Otherwise set publication.requested: false: the run then proceeds with the unresolved evidence recorded in contamination_report.json and non_publication_reasons."
+recovery = "A candidate and an exposed model cannot be told apart from what either side pinned, and publication.requested is true. Pin candidates[].model_identity.weights_digest and record the same identity for the generation role, or pin an immutable revision on both sides. A bfcl-weight-manifest-v1 digest settles only when both sides recorded the identical directory: it covers every file served beside the weights, so unequal manifests stay unresolved rather than counting as different weights. Otherwise set publication.requested: false: the run then proceeds with the unresolved evidence recorded in contamination_report.json and non_publication_reasons."
 
 [[errors]]
 name = "eval_contamination_empty_task_set"

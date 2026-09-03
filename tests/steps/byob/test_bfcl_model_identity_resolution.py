@@ -99,18 +99,63 @@ def test_a_manifest_digest_names_its_scheme_so_it_is_never_read_as_raw_weight_by
     assert compare_model_identity(scoped, raw_looking) == "unknown"
 
 
-def test_two_manifest_digests_still_settle_the_comparison_between_themselves(
+def test_two_equal_manifest_digests_settle_the_comparison_between_themselves(
     tmp_path: Path,
 ) -> None:
+    """Nothing outside the weights can make two directories agree, so equality still decides."""
     same = digest_weight_directory(_weights(tmp_path / "a"))
-    other = digest_weight_directory(_weights(tmp_path / "b", payload=b"other-weight-bytes"))
     claim = ModelIdentityClaim(weight_model="org/model", weights_digest=same)
 
     assert compare_model_identity(claim, ModelIdentityClaim(weight_model="org/model", weights_digest=same)) == "match"
+
+
+def test_a_note_left_beside_untouched_weights_does_not_clear_the_candidate(
+    tmp_path: Path,
+) -> None:
+    """The manifest covers the whole directory, so its inequality is not about the weights.
+
+    Reading it as a difference is what would clear a candidate that answered from
+    the very weights that wrote the rows, on the strength of a README.
+    """
+    served = _weights(tmp_path / "served")
+    documented = _weights(tmp_path / "documented")
+    (documented / "README.md").write_bytes(b"# served internally\n")
+
+    bare = digest_weight_directory(served)
+    annotated = digest_weight_directory(documented)
+
+    assert bare != annotated
     assert (
-        compare_model_identity(claim, ModelIdentityClaim(weight_model="org/model", weights_digest=other))
-        == "different"
+        compare_model_identity(
+            ModelIdentityClaim(weight_model="org/model", weights_digest=annotated),
+            ModelIdentityClaim(weight_model="org/model", weights_digest=bare),
+        )
+        == "unknown"
     )
+
+
+def test_genuinely_different_weights_are_still_not_cleared_by_a_manifest_digest(
+    tmp_path: Path,
+) -> None:
+    """A manifest cannot tell the two cases apart, so it declines both rather than guessing."""
+    mine = digest_weight_directory(_weights(tmp_path / "a"))
+    theirs = digest_weight_directory(_weights(tmp_path / "b", payload=b"other-weight-bytes"))
+
+    assert (
+        compare_model_identity(
+            ModelIdentityClaim(weight_model="org/model", weights_digest=mine),
+            ModelIdentityClaim(weight_model="org/model", weights_digest=theirs),
+        )
+        == "unknown"
+    )
+
+
+def test_raw_weight_digests_still_tell_two_sets_of_weights_apart() -> None:
+    """The scope-widening rule is about the manifest scheme, not about digests generally."""
+    mine = ModelIdentityClaim(weight_model="org/model", weights_digest="sha256:" + "a" * 64)
+    theirs = ModelIdentityClaim(weight_model="org/model", weights_digest="sha256:" + "b" * 64)
+
+    assert compare_model_identity(mine, theirs) == "different"
 
 
 def test_a_source_this_build_has_no_registry_client_for_is_refused() -> None:

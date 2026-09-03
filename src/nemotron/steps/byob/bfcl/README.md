@@ -933,9 +933,12 @@ to `@provider_managed`, and the run is scored but may not publish — so a hoste
 model that pins nothing is recorded as unpinned instead of being given a
 fabricated digest. Such an identity must restate the candidate's own `provider`
 and `model`, since with no pin the route is the only evidence of which weights
-answered. A `weights_digest` names its scheme: `sha256:` for weight bytes,
-`bfcl-weight-manifest-v1:` for a manifest of weight files, so a comparison across
-the two is reported as unresolved rather than as different weights. Both the
+answered. A `weights_digest` names its scheme, because the schemes measure
+different things: `sha256:` covers weight bytes, so two unequal ones are two sets
+of weights, while `bfcl-weight-manifest-v1:` covers every file in a weights
+directory and moves when a README is added beside untouched weights. An equal
+manifest comparison settles; every other manifest comparison is reported as
+unresolved rather than as different weights. Both the
 unpinned identity and the scheme-qualified digest arrived in schema 1.2; a config
 that declares 1.1 is still read as 1.1 and refuses them. `python -m
 nemotron.steps.byob.scripts.resolve_bfcl_model_identity` produces the block:

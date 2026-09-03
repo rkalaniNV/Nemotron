@@ -358,6 +358,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.oracle_session imp
     open_oracle_session,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
+    BROAD_SCOPE_DIGEST_SCHEMES,
     EVAL_CONFIG_SCHEMA_VERSION,
     EVAL_CONFIG_SCHEMA_VERSIONS,
     EVAL_MODES,
@@ -493,6 +494,7 @@ __all__ = [
     "ExecutableAssertionSpec",
     "ExecutableDependency",
     "BACKEND_INTERFACE",
+    "BROAD_SCOPE_DIGEST_SCHEMES",
     "CANDIDATE_CLIENT_CONTRACT_VERSION",
     "CANDIDATE_IO_CACHE_FILE",
     "CONTAMINATION_CONTRACT_VERSION",
