@@ -1,0 +1,28 @@
+# BPB (byte-normalized => comparable across vocabs): base vs all 8 arms @ iter_1000, held-out Samanantar hi.
+run:
+  env:
+    env_vars:
+      WANDB_PROJECT: sovai-tokenizer-ablation
+      WANDB_NAME: ${oc.env:WANDB_NAME,abl-bpb-1000}
+base_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+models:
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_add_meanconst_1000
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_add_bert_1000
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_add_hfdefault_1000
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_add_focus_1000
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_replace_meanconst_1000
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_replace_bert_1000
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_replace_hfdefault_1000
+  - /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/hf_exports/cpt_replace_focus_1000
+corpus:
+  hf_dataset: ai4bharat/samanantar
+  hf_config: hi
+  hf_split: train
+  text_field: tgt
+  skip_docs: 0
+max_docs: 3000
+max_tokens: 1000000
+max_length: 2048
+stride: 512
+dtype: bfloat16
+output_json: /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/eval/bpb_1000.json

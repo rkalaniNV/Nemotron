@@ -56,6 +56,10 @@ checks:
     - lepton_peft_megatron_bridge
     - lepton_peft_automodel
     - lepton_convert_model
+    - lepton_tokenizer_extend
+    - lepton_tokenizer_init_embeddings
+    - lepton_tokenizer_evaluate
+    - lepton_tokenizer_eval_init
     - lepton_rl_nemo_rl_dpo
     - lepton_rl_nemo_rl_rlvr
     - lepton_rl_nemo_rl_rlhf
@@ -306,6 +310,59 @@ sections:
     env_vars:
       CONVERT_OUTPUT_DIR: ${oc.env:CONVERT_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/convert}
 
+  # ---------------------------------------------------------------------------
+  # tokenizer_extension/*: build an extended tokenizer, initialise the new
+  # embedding rows, and measure the result. Four sub-steps with genuinely
+  # different shapes, so one profile each.
+  #
+  # Optional dependencies (declared as the `tokenizer-extension` extra):
+  #   indic-nlp-library  extend, when the target language uses a script
+  #                      normalizer (Devanagari family). Missing, the step
+  #                      raises rather than silently normalising with NFKC only,
+  #                      which would train a different tokenizer.
+  #   fasttext-wheel     init_embeddings, method=focus only. The import is lazy,
+  #                      so the other init methods run without it.
+  # ---------------------------------------------------------------------------
+
+  # extend: CPU-only BPE training. No GPUs, but the trainer holds the whole
+  # word-count table in RAM, so pick a large-memory shape for big corpora.
+  lepton_tokenizer_extend:
+    extends: lepton_base
+    resource_shape: ${oc.env:LEPTON_CPU_SHAPE,cpu.large}
+    nodes: 1
+    gpus_per_node: 0
+    nprocs_per_node: 1
+    pip_extras: [typer, rich, pydantic-settings, indic-nlp-library]
+    env_vars:
+      TOKEXT_OUTPUT_DIR: ${oc.env:TOKEXT_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/tokenizer_extension}
+
+  # init_embeddings: embedding surgery, no forward pass on the base model, so it
+  # is host-resident. GPUs are used only by the auxiliary encoder (bert/gemma
+  # averaging); a single GPU is enough unless you use gemma_weighted.
+  lepton_tokenizer_init_embeddings:
+    extends: lepton_base
+    resource_shape: ${oc.env:LEPTON_INIT_SHAPE,gpu.1xa100-80gb}
+    nodes: 1
+    gpus_per_node: 1
+    nprocs_per_node: 1
+    pip_extras: [typer, rich, pydantic-settings, fasttext-wheel, indic-nlp-library]
+    env_vars:
+      TOKEXT_OUTPUT_DIR: ${oc.env:TOKEXT_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/tokenizer_extension}
+      # FASTTEXT_CACHE_DIR: shared cache for the cc.<lang>.300 vectors (multi-GB).
+      FASTTEXT_CACHE_DIR: ${oc.env:FASTTEXT_CACHE_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/tokenizer_extension/aux}
+
+  # evaluate: fertility only. Tokenises a corpus, no model, no GPU.
+  lepton_tokenizer_evaluate:
+    extends: lepton_base
+    resource_shape: ${oc.env:LEPTON_CPU_SHAPE,cpu.large}
+    nodes: 1
+    gpus_per_node: 0
+    nprocs_per_node: 1
+
+  # eval_init: BPB/perplexity. Runs the model, so it needs GPUs.
+  lepton_tokenizer_eval_init:
+    extends: lepton_base
+    nodes: 1
   # rl/nemo_rl/dpo: NeMo-RL image plus output override. Runtime RL knobs stay in step YAML.
   lepton_rl_nemo_rl_dpo:
     extends: lepton_base

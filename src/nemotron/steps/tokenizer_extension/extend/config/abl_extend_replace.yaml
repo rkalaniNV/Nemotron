@@ -1,0 +1,23 @@
+# Ablation extend: build replace tokenizer -> /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/tokenizers/nano3_1M_30k_replace
+run:
+  env:
+    env_vars:
+      WANDB_PROJECT: sovai-tokenizer-ablation
+      WANDB_NAME: ${oc.env:WANDB_NAME,abl-extend-replace}
+model_id: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+trust_remote_code: true
+method: replace
+extension_size: 30000
+remove_script: devanagari
+corpus:
+  hf_dataset: ai4bharat/sangraha
+  hf_split: train
+  hf_data_files: "verified/hin/data-[0-9].parquet"
+  streaming: false
+  text_field: text
+  samples: 1000000
+  max_doc_chars: 20000
+  min_frequency: 0
+  diversify: true
+batch_size: 1000
+output_dir: /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/tokenizers/nano3_1M_30k_replace

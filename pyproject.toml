@@ -51,6 +51,13 @@ s3 = ["s3fs>=2024.0.0"]
 gcs = ["gcsfs>=2024.0.0"]
 sentencepiece = ["sentencepiece>=0.2.0"]
 xenna = ["cosmos-xenna"]
+# steps/tokenizer_extension. fastText is a hard import in the FOCUS embedding
+# init; indic-nlp-library supplies the Devanagari normalizer (without it the
+# extend step falls back to NFKC-only and trains a *different* tokenizer).
+tokenizer-extension = [
+    "fasttext-wheel>=0.9.2",
+    "indic-nlp-library>=0.91",
+]
 # Audio/video data prep (e.g. omni3 Valor32k SFT). imageio-ffmpeg ships a static
 # ffmpeg binary as a wheel so we don't need apt-get on the data-prep worker image.
 audio = [
