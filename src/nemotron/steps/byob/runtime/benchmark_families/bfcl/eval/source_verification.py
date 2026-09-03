@@ -42,7 +42,7 @@ import json
 import math
 import re
 import unicodedata
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, cast
@@ -108,8 +108,10 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.origin_provenance impor
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     ResolvedPackPaths,
+    declared_pack_inputs,
     load_held_out_policy,
     oracle_runtime_fixtures,
+    pack_file_hashes,
     pack_files,
     pack_fingerprint,
     resolve_declared_pack_paths,
@@ -949,6 +951,53 @@ def _benchmark_artifacts(
     )
 
 
+def _pack_file_drift(paths: ResolvedPackPaths, recorded: Any) -> str:
+    """Name the pack files whose bytes moved, and separate inputs from the rest.
+
+    The fingerprint is one rolling digest, so on its own it can only say the
+    directory changed. Without this an operator is told to restore a revision
+    nobody has identified, and the only way to learn that a doc edit — not the
+    backend — caused it is to bisect the pack's history.
+
+    Undeclared files are still hashed and still fail the run: nothing stops a
+    backend from reading one. Saying which side a file is on reports that fact
+    without softening it into a judgement about whether the oracle really moved.
+    """
+    current = pack_file_hashes(paths)
+    if not isinstance(recorded, Mapping) or not recorded:
+        return (
+            f" (generation recorded no per-file hashes, so the drifted file cannot be named: "
+            f"the pack hashes {len(current)} files today)"
+        )
+
+    declared = declared_pack_inputs(paths)
+
+    def named(names: Iterable[str]) -> str:
+        return ", ".join(
+            name if name in declared else f"{name} [not a declared oracle input]"
+            for name in sorted(names)
+        )
+
+    changed = [name for name, digest in current.items() if name in recorded and recorded[name] != digest]
+    added = [name for name in current if name not in recorded]
+    removed = [name for name in recorded if name not in current]
+
+    parts: list[str] = []
+    if changed:
+        parts.append(f"changed {named(changed)}")
+    if added:
+        parts.append(f"added {named(added)}")
+    if removed:
+        parts.append(f"removed {named(removed)}")
+    if not parts:
+        # The per-file map agrees while the aggregate does not, so the drift is
+        # in the hashed set itself rather than in any file's bytes.
+        return " (every recorded file still matches, so the hashed set itself changed)"
+    if not any(name in declared for name in (*changed, *added, *removed)):
+        parts.append("every declared oracle input is unchanged")
+    return " (" + "; ".join(parts) + ")"
+
+
 def _verify_oracle(
     config: BfclEvalConfig,
     manifest: Mapping[str, Any],
@@ -1050,7 +1099,8 @@ def _verify_oracle(
     if actual_fingerprint != expected_fingerprint:
         raise OraclePackDriftError(
             "source_oracle.pack",
-            f"pack {pack_id} {pack_version} no longer fingerprints to what generation certified",
+            f"pack {pack_id} {pack_version} no longer fingerprints to what generation certified"
+            f"{_pack_file_drift(paths, pack.get('files'))}",
             actual=actual_fingerprint,
             expected=expected_fingerprint,
             recovery="restore the pack revision the benchmark was generated from; every file in the pack tree "

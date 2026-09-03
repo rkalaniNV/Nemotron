@@ -51,6 +51,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.origin_provenance impor
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
     LoadedPack,
+    pack_file_hashes,
     pack_fingerprint,
     project_model_facing_tools,
 )
@@ -1046,6 +1047,11 @@ def run_final_output(
             "pack_id": pack.manifest.get("pack_id"),
             "version": pack.manifest.get("version"),
             "content_hash": f"sha256:{current_pack_fingerprint}",
+            # content_hash alone proves the pack changed but names no file, which
+            # leaves a later eval telling an operator to restore a revision it
+            # cannot describe. The per-file map is what turns that into "the
+            # README moved, the backend did not".
+            "files": pack_file_hashes(pack.paths),
         },
         "oracle": {
             "kind": "endpoint" if pack.endpoint_config is not None else "python",

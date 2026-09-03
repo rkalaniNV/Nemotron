@@ -2750,6 +2750,74 @@ def test_pack_fingerprint_covers_files_the_backend_reads(tmp_path: Path) -> None
     assert pack_fingerprint(paths) == edited
 
 
+def test_pack_file_hashes_cover_exactly_what_the_fingerprint_hashes(tmp_path: Path) -> None:
+    """The map and the aggregate must agree on the hashed set, or drift reports lie.
+
+    A file the fingerprint covers but the map omits produces drift nobody can
+    name; one the map carries but the fingerprint ignores reports a change that
+    never affected the pack.
+    """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        pack_entries,
+        pack_file_hashes,
+        resolve_pack_paths,
+    )
+
+    pack = _copy_tiny_pack(tmp_path)
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "file-hashes.yaml",
+            oracle_pack={"manifest_path": str(pack / "manifest.yaml")},
+            oracle_runtime={"allowed_roots": [str(tmp_path)]},
+        )
+    )
+    paths = resolve_pack_paths(config)
+
+    assert set(pack_file_hashes(paths)) == set(pack_entries(paths))
+
+    (pack / "policy.json").write_text('{"late_fee": 1}\n', encoding="utf-8")
+    before = pack_file_hashes(paths)
+    assert "tree/policy.json" in before
+
+    (pack / "policy.json").write_text('{"late_fee": 2}\n', encoding="utf-8")
+    after = pack_file_hashes(paths)
+    assert after["tree/policy.json"] != before["tree/policy.json"]
+    assert {name: h for name, h in after.items() if name != "tree/policy.json"} == {
+        name: h for name, h in before.items() if name != "tree/policy.json"
+    }
+
+
+def test_declared_pack_inputs_name_only_what_the_manifest_declares(tmp_path: Path) -> None:
+    """An undeclared file is hashed but is not an oracle input, and the two differ."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+        declared_pack_inputs,
+        pack_file_hashes,
+        resolve_pack_paths,
+    )
+
+    pack = _copy_tiny_pack(tmp_path)
+    (pack / "NOTES.md").write_text("how this pack came to be\n", encoding="utf-8")
+    config = BfclConfig.from_yaml(
+        _write_tiny_config(
+            tmp_path,
+            "declared-inputs.yaml",
+            oracle_pack={"manifest_path": str(pack / "manifest.yaml")},
+            oracle_runtime={"allowed_roots": [str(tmp_path)]},
+        )
+    )
+    paths = resolve_pack_paths(config)
+
+    declared = declared_pack_inputs(paths)
+    assert "tree/NOTES.md" in pack_file_hashes(paths)
+    assert "tree/NOTES.md" not in declared
+    assert "tree/manifest.yaml" in declared
+    assert "tree/tools.json" in declared
+    assert declared <= set(pack_file_hashes(paths))
+
+
 def test_pack_fingerprint_refuses_symbolic_links_in_the_pack_tree(
     tmp_path: Path,
 ) -> None:

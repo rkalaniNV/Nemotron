@@ -266,18 +266,8 @@ def pack_files(paths: ResolvedPackPaths) -> list[Path]:
     return sorted(collected)
 
 
-def pack_fingerprint(paths: ResolvedPackPaths) -> str:
-    """Hash every pack input so cached stage reports can be detected as stale."""
-    entries: dict[str, Path] = {}
-    for path in pack_files(paths):
-        try:
-            logical_name = f"tree/{path.relative_to(paths.pack_root).as_posix()}"
-        except ValueError:
-            # Declared files outside the pack tree receive a semantic name below;
-            # an absolute path would make identical packs hash differently by host.
-            continue
-        entries[logical_name] = path
-    declared = {
+def _declared_roles(paths: ResolvedPackPaths) -> dict[str, Path | None]:
+    return {
         "manifest": paths.manifest_path,
         "tools": paths.tools_path,
         "fixtures": paths.fixtures_path,
@@ -290,21 +280,75 @@ def pack_fingerprint(paths: ResolvedPackPaths) -> str:
         "endpoint_ca_bundle": paths.endpoint_ca_bundle_path,
         "held_out": paths.held_out_path,
     }
-    for role, path in declared.items():
+
+
+def pack_entries(paths: ResolvedPackPaths) -> dict[str, Path]:
+    """Name every hashed pack input, so the fingerprint and its per-file map agree.
+
+    One definition of the hashed set, used by both: a fingerprint and a file map
+    that disagreed about which files count would report drift in a file the
+    fingerprint never covered, or stay silent about one it did.
+    """
+    entries: dict[str, Path] = {}
+    for path in pack_files(paths):
+        try:
+            logical_name = f"tree/{path.relative_to(paths.pack_root).as_posix()}"
+        except ValueError:
+            # Declared files outside the pack tree receive a semantic name below;
+            # an absolute path would make identical packs hash differently by host.
+            continue
+        entries[logical_name] = path
+    for role, path in _declared_roles(paths).items():
         if path is None or not path.is_file():
             continue
         try:
             path.relative_to(paths.pack_root)
         except ValueError:
             entries[f"declared/{role}"] = path
+    return entries
 
+
+def declared_pack_inputs(paths: ResolvedPackPaths) -> frozenset[str]:
+    """Return the hashed names the pack manifest actually declares as oracle inputs.
+
+    Everything else in the tree is hashed too, because nothing stops a backend
+    from reading it. Separating the two lets a drift report say which kind of
+    file changed instead of leaving a reader to diff the tree by hand.
+    """
+    names: set[str] = set()
+    for role, path in _declared_roles(paths).items():
+        if path is None or not path.is_file():
+            continue
+        try:
+            names.add(f"tree/{path.relative_to(paths.pack_root).as_posix()}")
+        except ValueError:
+            names.add(f"declared/{role}")
+    return frozenset(names)
+
+
+def pack_fingerprint(paths: ResolvedPackPaths) -> str:
+    """Hash every pack input so cached stage reports can be detected as stale."""
     digest = hashlib.sha256()
-    for logical_name, path in sorted(entries.items()):
+    for logical_name, path in sorted(pack_entries(paths).items()):
         digest.update(logical_name.encode("utf-8"))
         digest.update(b"\x00")
         digest.update(path.read_bytes())
         digest.update(b"\x00")
     return digest.hexdigest()
+
+
+def pack_file_hashes(paths: ResolvedPackPaths) -> dict[str, str]:
+    """Hash each pack input on its own, under the fingerprint's logical names.
+
+    The fingerprint is a single rolling digest, so a mismatch proves the pack
+    changed without saying which file did. Recording this map beside it is what
+    lets a later reader tell an edited README from a rewritten backend, instead
+    of bisecting the pack's history to find out.
+    """
+    return {
+        logical_name: f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+        for logical_name, path in sorted(pack_entries(paths).items())
+    }
 
 
 def project_model_facing_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:

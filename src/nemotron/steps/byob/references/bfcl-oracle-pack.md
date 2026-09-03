@@ -35,6 +35,17 @@ itself imports (`yaml.py`, `json.py`). Anything a pack imports from outside its 
 is invisible to the fingerprint, so a pack that depends on such a module can be replayed
 against a different version of it without the run noticing.
 
+Covering the whole tree means documentation is covered too, and there is no read
+sandbox that would make a `.md` file provably inert — a backend can open its own
+README. So publishing a benchmark from a pack freezes that directory: any later
+edit, including to a comment or a README, makes every eval of that benchmark fail
+preflight with `eval_source_oracle_pack_drift` until the bytes are restored. Keep
+notes about a pack outside it, and publish a new release rather than editing a
+pack that is still scored. Generation records `pack.files`, a hash per hashed
+file, beside `pack.content_hash`; the aggregate is one rolling digest and proves
+only that something moved, while the map is what lets a drift report name the
+file and say whether any declared oracle input was involved.
+
 Every model-facing entry is validated as an OpenAI function tool: `type` is
 `function`, `function` is a mapping, `description` is text when present, and
 `strict` is boolean when present. `tools.json` keys read only by the pack pipeline
