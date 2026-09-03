@@ -759,11 +759,15 @@ free text, so two candidates on one endpoint could otherwise be spelled two ways
 and slip past the duplicate check that exists to stop exactly that. Requiring the
 route makes the collision surface where it belongs.
 
-A `weights_digest` names its scheme. `sha256:<64 hex>` covers weight bytes;
-`bfcl-weight-manifest-v1:<64 hex>` covers a manifest of weight files. The two
-disagree for identical weights, and the contamination gate reads two unequal
-digests of one scheme as proof of *different* weights — so a cross-scheme
-comparison is reported as unresolved instead of clearing a candidate by accident.
+A `weights_digest` names its scheme, because the two schemes measure different
+things. `sha256:<64 hex>` covers weight bytes, so two unequal ones are two sets of
+weights. `bfcl-weight-manifest-v1:<64 hex>` covers a manifest of every file served
+in a weights directory, down to the names: two equal ones are the same directory,
+but two unequal ones may be the same weights with a note added beside them. So the
+gate settles a manifest comparison only when it is equal, and reports every other
+manifest comparison — unequal, or against a `sha256:` digest — as unresolved. That
+costs an operator a pinned identity; the alternative would clear a candidate that
+answered from the weights that wrote the rows, on the strength of a README.
 Schema 1.1 reads only `sha256:` and requires every candidate to pin; both
 widenings arrived in 1.2, and a config that declares 1.1 is still held to 1.1.
 

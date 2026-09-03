@@ -139,9 +139,20 @@ UNPINNED_REFERENCE: Final = "provider_managed"
 # scheme is part of the value: a manifest digest compared against a raw one has
 # conflicting algorithms, which sends that comparison to "unknown" — the operator
 # is asked to pin comparably instead of a candidate being cleared by an artifact
-# of how someone hashed it.
+# of how someone hashed it. What the scheme measures is recorded separately, in
+# ``BROAD_SCOPE_DIGEST_SCHEMES``.
 WEIGHT_MANIFEST_DIGEST_SCHEME: Final = "bfcl-weight-manifest-v1"
 WEIGHTS_DIGEST_SCHEMES: Final = ("sha256", WEIGHT_MANIFEST_DIGEST_SCHEME)
+
+# Schemes whose byte scope is wider than the weights, so two unequal digests do
+# not establish two different sets of weights. The manifest scheme covers every
+# file in a served directory, including its names: a note dropped beside
+# untouched weights moves the digest. Equality still proves sameness, because
+# nothing outside the weights can make two directories agree by accident. It is
+# inequality that carries no information about the weights, and the
+# contamination gate must not read it as a difference — that reading is what
+# would clear a candidate that wrote the rows it is being scored on.
+BROAD_SCOPE_DIGEST_SCHEMES: Final = frozenset({WEIGHT_MANIFEST_DIGEST_SCHEME})
 _WEIGHTS_DIGEST_PATTERN: Final = (
     r"^(?:" + "|".join(re.escape(scheme) for scheme in WEIGHTS_DIGEST_SCHEMES) + r"):[0-9a-f]{64}$"
 )

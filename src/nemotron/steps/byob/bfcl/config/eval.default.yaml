@@ -91,10 +91,11 @@ candidates:
     # built the benchmark. Set weights_digest whenever the generation roles
     # recorded one, under the same scheme: two comparable digests settle the
     # comparison, while two model names that normalize alike leave it unresolved
-    # and block publication. A sha256: digest covers weight bytes; a
-    # bfcl-weight-manifest-v1: digest covers a manifest of weight files. Comparing
-    # across the two is refused rather than read as different weights, so record
-    # the scheme the other side recorded.
+    # and block publication. A sha256: digest covers weight bytes, so two unequal
+    # ones are two sets of weights. A bfcl-weight-manifest-v1: digest covers every
+    # file in a weights directory, so it settles only when equal — unequal, or
+    # compared against a sha256:, it is reported as unresolved rather than as
+    # different weights. Record the scheme the other side recorded.
     #
     # Do not look these up by hand. Run
     #   python -m nemotron.steps.byob.scripts.resolve_bfcl_model_identity registry \

@@ -103,11 +103,13 @@ def digest_weight_directory(root: Path) -> str:
     is. Symlinks are refused rather than followed: a link can point outside the
     tree, and a digest that depends on where it pointed is not an identity.
 
-    The result is labelled with its scheme instead of a bare ``sha256:``. A
-    digest of this manifest and a digest of the weight bytes disagree for
-    identical weights, and the contamination gate reads two unequal digests of
-    one algorithm as proof of *different* weights. Naming the scheme is what
-    turns that false clearance into an honest "cannot tell".
+    The result is labelled with its scheme instead of a bare ``sha256:``, because
+    what it measures is wider than the weights: this manifest covers everything
+    served alongside them, down to the file names. Two equal manifests are the
+    same directory, but two unequal ones may be the same weights with a note
+    added beside them, so the label is what lets the contamination gate decline
+    that comparison instead of reading it as different weights and clearing a
+    candidate it should not.
     """
     if not root.is_dir():
         raise ModelIdentityResolutionError(f"not a directory: {root}")
