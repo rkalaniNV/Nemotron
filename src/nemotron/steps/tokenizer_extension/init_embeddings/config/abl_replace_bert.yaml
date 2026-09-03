@@ -1,0 +1,21 @@
+# Ablation init: replace/bert
+run:
+  env:
+    env_vars:
+      WANDB_PROJECT: sovai-tokenizer-ablation
+      WANDB_NAME: ${oc.env:WANDB_NAME,abl-init-replace-bert}
+base_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+dtype: bfloat16
+arm: replace
+extended_tokenizer: /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/tokenizers/nano3_1M_30k_replace
+output_dir: /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/checkpoints/nano3_replace_bert_hf
+method: subword
+subword:
+  input_averaging: bert_weighted
+  output_averaging: bert_weighted
+  bert_model: google/muril-base-cased
+  temperature: 0.1
+  input_norm_correction: true
+  output_norm_correction: false
+  input_hindi_norm: true
+  output_hindi_norm: false

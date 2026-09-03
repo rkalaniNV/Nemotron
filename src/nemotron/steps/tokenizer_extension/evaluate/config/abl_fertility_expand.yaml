@@ -1,0 +1,16 @@
+run:
+  env:
+    env_vars:
+      WANDB_PROJECT: sovai-tokenizer-ablation
+      WANDB_NAME: ${oc.env:WANDB_NAME,abl-fertility-expand}
+tokenizer: /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/tokenizers/nano3_1M_30k_expand
+trust_remote_code: true
+corpus:
+  hf_dataset: ai4bharat/samanantar
+  hf_config: hi
+  hf_split: train
+  streaming: true
+  text_field: tgt
+  num_docs: 0
+batch_size: 1000
+output: /mnt/lustre-shared/rapaul/ablation/tokenizer_extension/eval/fertility_expand.json
