@@ -84,5 +84,16 @@ the difference between a benchmark that cannot fail and a candidate that did is 
 one comparison. Each `--stage eval` run writes a fresh `eval-N` directory, because a
 committed eval report belongs to the run that wrote it.
 
+The demo's candidate is a scripted loopback server, so there is no commit and no weight
+digest to point at. It is declared unpinned rather than given a plausible-looking one, and
+the report says so: `canonical_id` ends in `@provider_managed`, `publication_allowed` is
+false, and `non_publication_reasons` names the candidate. Its `model_identity` restates the
+serving route, which is all an unpinned candidate is allowed to claim, and the config
+declares `schema_version: "1.2"`, the first schema that reads an unpinned candidate. That is
+the same shape a hosted frontier model takes when its provider publishes neither value — the
+score is real, and it does not pretend to be reproducible. Use
+`python -m nemotron.steps.byob.scripts.resolve_bfcl_model_identity` to produce the block
+for a candidate that *can* be pinned.
+
 Frozen release artifacts are read-only by design, so removing a finished workdir needs
 write permission restored first (`chmod -R u+w`).

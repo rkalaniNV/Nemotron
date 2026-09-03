@@ -1,4 +1,4 @@
-"""Strict loader for ``eval_config.yaml`` (schema 1.1).
+"""Strict loader for ``eval_config.yaml`` (schemas 1.1 and 1.2).
 
 The resolution order is fixed, and each step exists because skipping it would let
 an invalid evaluation start spending tokens:
@@ -40,6 +40,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import (
     BfclConfig,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.errors import (
+    CandidateIdentityError,
     EvalConfigError,
     EvalConfigPathError,
     EvalConfigSchemaError,
@@ -51,6 +52,8 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.held_out_eval impo
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.eval.schemas import (
     EVAL_CONFIG_SCHEMA_VERSION,
+    EVAL_CONFIG_SCHEMA_VERSIONS,
+    WEIGHT_MANIFEST_DIGEST_SCHEME,
     BfclEvalConfig,
     CandidateApi,
     CandidateInference,
@@ -729,7 +732,8 @@ def _resolve_candidates(data: Mapping[str, Any]) -> tuple[EvalCandidate, ...]:
                 field,
                 f"missing required key(s): {', '.join(missing)}",
                 expected=f"every one of {', '.join(sorted(_CANDIDATE_KEYS))}",
-                recovery="a candidate states both its serving route and the immutable weights it serves",
+                recovery="a candidate states its serving route and the weights it serves; run "
+                "resolve_bfcl_model_identity to fill model_identity in from the registry or the provider",
             )
         api = _section(candidate, "api", _API_KEYS, field=f"{field}.api")
         identity = _section(
@@ -759,6 +763,43 @@ def _resolve_candidates(data: Mapping[str, Any]) -> tuple[EvalCandidate, ...]:
             )
         )
     return tuple(candidates)
+
+
+def _refuse_capabilities_the_declared_schema_lacks(
+    candidates: Sequence[EvalCandidate],
+    schema_version: str,
+) -> None:
+    """Hold a config to the version it declares, not to the newest one this build reads.
+
+    The candidate models accept everything 1.2 allows, because they are also
+    built by callers that have no config version at all. A file that says 1.1 is
+    a promise to every other reader of 1.1 that it contains nothing they would
+    refuse, so the two widenings 1.2 introduced are refused here rather than
+    silently accepted under the older label.
+    """
+    if schema_version != "1.1":
+        return
+    for index, candidate in enumerate(candidates):
+        field = f"candidates[{index}].model_identity"
+        identity = candidate.model_identity
+        if identity.assurance != "weights_pinned":
+            raise CandidateIdentityError(
+                field,
+                "neither revision nor weights_digest is set, and schema 1.1 required every candidate to pin "
+                "the weights it was scored on",
+                expected="revision (immutable) or weights_digest, under schema 1.1",
+                recovery='set schema_version: "1.2" to record a provider-managed candidate and accept a '
+                "non-publishable run, or pin the revision or digest the endpoint serves",
+            )
+        digest = identity.weights_digest
+        if digest is not None and not digest.startswith("sha256:"):
+            raise CandidateIdentityError(
+                field,
+                f"weights_digest names the {digest.split(':', 1)[0]} scheme, which schema 1.1 cannot read",
+                expected="a sha256:<64 hex> digest under schema 1.1",
+                recovery=f'set schema_version: "1.2", which reads {WEIGHT_MANIFEST_DIGEST_SCHEME} digests, or '
+                "record the sha256 digest of the served weights",
+            )
 
 
 def _resolve_outputs(data: Mapping[str, Any], base_dir: Path, source: EvalSource) -> EvalOutputConfig:
@@ -822,12 +863,12 @@ def load_eval_config_mapping(
         )
 
     schema_version = data.get("schema_version")
-    if schema_version != EVAL_CONFIG_SCHEMA_VERSION:
+    if schema_version not in EVAL_CONFIG_SCHEMA_VERSIONS:
         raise EvalConfigSchemaError(
             "schema_version",
             "is not an eval config schema this build reads",
             value=schema_version,
-            expected=f'the string "{EVAL_CONFIG_SCHEMA_VERSION}"',
+            expected="one of " + ", ".join(f'"{version}"' for version in EVAL_CONFIG_SCHEMA_VERSIONS),
             recovery=f'set schema_version: "{EVAL_CONFIG_SCHEMA_VERSION}" (quoted, so YAML keeps it a string)',
         )
     config_status = data.get("config_status")
@@ -877,6 +918,7 @@ def load_eval_config_mapping(
     scoring = _resolve_scoring(data, base_dir)
     limits = _model(EvalLimits, _section(data, "limits", _LIMITS_KEYS), "limits")
     candidates = _resolve_candidates(data)
+    _refuse_capabilities_the_declared_schema_lacks(candidates, str(schema_version))
     contamination = _model(
         ContaminationPolicy,
         _section(data, "contamination", _CONTAMINATION_KEYS),
@@ -892,7 +934,7 @@ def load_eval_config_mapping(
     return _model(
         BfclEvalConfig,
         {
-            "schema_version": EVAL_CONFIG_SCHEMA_VERSION,
+            "schema_version": schema_version,
             "config_status": "resolved",
             "source": source,
             "settings": settings,

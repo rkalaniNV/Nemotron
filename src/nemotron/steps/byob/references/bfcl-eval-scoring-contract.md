@@ -740,6 +740,42 @@ immutable merely because their current names are absent from a denylist. Model
 and revision case is preserved for registries where case is meaningful. Scores
 are only comparable across runs that pin the same weights.
 
+Two things are then possible, and the config says which one it is rather than
+requiring the stronger one everywhere. A candidate that pins a commit or a digest
+is `weights_pinned`. A candidate that leaves both null is `provider_managed`: it
+names a route the provider may re-point, its `canonical_id` ends in
+`@provider_managed` so no consumer can read it as a pin, and the run appears in
+`non_publication_reasons` as `candidates[<alias>].model_identity`. Requesting
+publication for such a run is refused when the config loads, before anything is
+scored. This is the honest shape for a hosted frontier model that publishes
+neither value: the alternative — a digest derived from the model name — would
+identify the string rather than the weights, and would go on claiming
+reproducibility after the provider replaced them. A *stated* reference that can
+move is still refused outright, because it claims a pin it does not have.
+
+An unpinned identity must restate the candidate's own `provider` and `model`.
+With no pin, `source` and `model` are the whole canonical identity and they are
+free text, so two candidates on one endpoint could otherwise be spelled two ways
+and slip past the duplicate check that exists to stop exactly that. Requiring the
+route makes the collision surface where it belongs.
+
+A `weights_digest` names its scheme. `sha256:<64 hex>` covers weight bytes;
+`bfcl-weight-manifest-v1:<64 hex>` covers a manifest of weight files. The two
+disagree for identical weights, and the contamination gate reads two unequal
+digests of one scheme as proof of *different* weights — so a cross-scheme
+comparison is reported as unresolved instead of clearing a candidate by accident.
+Schema 1.1 reads only `sha256:` and requires every candidate to pin; both
+widenings arrived in 1.2, and a config that declares 1.1 is still held to 1.1.
+
+`python -m nemotron.steps.byob.scripts.resolve_bfcl_model_identity` produces the
+block rather than leaving an operator to find it: `registry` resolves a branch or
+tag to the commit it currently names (only for registries this build has a client
+for, so no source is answered with another registry's commit), `local` digests
+weights on disk through a file manifest, and `provider-managed` records the
+unpinnable route together with what it costs. Its `identity_publication_gate`
+field reports that one gate only; scoring, contamination, artifact, and source
+gates are checked when the config loads.
+
 ## Contamination
 
 `contamination.enforce: true`, `on_violation: fail_run`,

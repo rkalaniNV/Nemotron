@@ -11,9 +11,11 @@ operator-chosen ``canonical_id``, and whatever weight identity the operator
 supplied — often just the model name, because a generation run only needs to
 name what it called, not prove which bytes answered.
 
-*Evaluation* records candidates under the evaluation config contract, which is stricter: an
-immutable revision or a weights digest is mandatory, because a score is claimed
-about specific weights.
+*Evaluation* records candidates under the evaluation config contract, which is
+stricter where it can be: a candidate pins an immutable revision or a weights
+digest, because a score is claimed about specific weights. A hosted model whose
+provider publishes neither is recorded as ``provider_managed`` instead, which is
+weaker evidence here and costs that run its right to publish.
 
 Neither identity is a superset of the other, so :func:`compare_model_identity`
 weighs both axes and returns one of three verdicts. The asymmetry that matters
@@ -104,9 +106,11 @@ def _conflicts(left: str | None, right: str | None) -> bool:
 def _digest_parts(value: str) -> tuple[str | None, str]:
     """Split ``algorithm:hex`` apart, tolerating a digest recorded as bare hex.
 
-    Only the candidate side is schema-checked as ``sha256:<64 hex>``; a
-    generation manifest carries whatever the pack config wrote, so the same
-    bytes can arrive as ``sha256:AB…``, ``AB…``, or under another algorithm.
+    The candidate side is schema-checked, but only to one of the schemes the eval
+    contract knows (``sha256`` over weight bytes, ``bfcl-weight-manifest-v1``
+    over a manifest of weight files). A generation manifest carries whatever the
+    pack config wrote, so the same bytes can arrive as ``sha256:AB…``, ``AB…``, or
+    under another algorithm entirely.
     """
     text = value.strip().casefold()
     algorithm, _, body = text.rpartition(":")
