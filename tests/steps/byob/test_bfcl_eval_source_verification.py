@@ -53,6 +53,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
     CanonicalExportRow,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.pack_loader import (
+    pack_file_hashes,
     pack_fingerprint,
     resolve_declared_pack_paths,
 )
@@ -349,9 +350,11 @@ def _publish(
     run_dir.mkdir(parents=True)
     pack_dir = root / "oracle_pack"
     resource = _write_pack(pack_dir, endpoint=endpoint, extra_backend=extra_backend)
-    fingerprint = pack_fingerprint(
-        resolve_declared_pack_paths(OraclePackRef(manifest_path=pack_dir / "manifest.yaml"), (pack_dir,))
+    pack_paths = resolve_declared_pack_paths(
+        OraclePackRef(manifest_path=pack_dir / "manifest.yaml"), (pack_dir,)
     )
+    fingerprint = pack_fingerprint(pack_paths)
+    file_hashes = pack_file_hashes(pack_paths)
 
     published = published_rows if published_rows is not None else [_row("test_pack__tpl__aaaaaaaaaaaaaaaa")]
     raw = raw_rows if raw_rows is not None else [*published, _row("test_pack__tpl__bbbbbbbbbbbbbbbb")]
@@ -370,7 +373,12 @@ def _publish(
         "lineage_policy": "strict_separation",
         "tier": "gold" if gold_eligible else "silver",
         "gold_eligible": gold_eligible,
-        "pack": {"pack_id": "test_pack", "version": "1.0.0", "content_hash": f"sha256:{fingerprint}"},
+        "pack": {
+            "pack_id": "test_pack",
+            "version": "1.0.0",
+            "content_hash": f"sha256:{fingerprint}",
+            "files": dict(file_hashes),
+        },
         "oracle": {
             "kind": "endpoint" if endpoint else "python",
             "endpoint_metadata": (
@@ -849,6 +857,54 @@ def test_a_pack_file_changed_after_generation_fails_before_inference(tmp_path: P
 
     with pytest.raises(OraclePackDriftError, match="no longer fingerprints"):
         verify_eval_source(config)
+
+
+def test_pack_drift_names_the_file_that_changed(tmp_path: Path) -> None:
+    """The aggregate proves the pack moved; the report has to say which file did."""
+    publication = _publish(tmp_path)
+    (publication.pack_dir / "tools.json").write_text("[]\n", encoding="utf-8")
+    config = _load(tmp_path, _config_data(publication, tmp_path / "eval_out", modes=["trace", "executable"]))
+
+    with pytest.raises(OraclePackDriftError) as raised:
+        verify_eval_source(config)
+
+    assert "changed tree/tools.json" in str(raised.value)
+
+
+def test_pack_drift_separates_a_documentation_edit_from_an_oracle_change(tmp_path: Path) -> None:
+    """A README the manifest never declared still fails the run, and is still reported as itself.
+
+    Nothing stops a backend from reading it, so the run must not proceed. What
+    the operator needs is the difference between this and an edited backend,
+    which is the difference between restoring a doc and distrusting a score.
+    """
+    publication = _publish(tmp_path)
+    (publication.pack_dir / "README.md").write_text("notes about the pack\n", encoding="utf-8")
+    config = _load(tmp_path, _config_data(publication, tmp_path / "eval_out", modes=["trace", "executable"]))
+
+    with pytest.raises(OraclePackDriftError) as raised:
+        verify_eval_source(config)
+
+    message = str(raised.value)
+    assert "added tree/README.md [not a declared oracle input]" in message
+    assert "every declared oracle input is unchanged" in message
+
+
+def test_pack_drift_admits_when_generation_recorded_no_file_map(tmp_path: Path) -> None:
+    """Releases published before per-file recording cannot name the drifted file."""
+    publication = _publish(tmp_path)
+    document = publication.manifest()
+    document["pack"].pop("files")
+    publication.manifest_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    (publication.pack_dir / "tools.json").write_text("[]\n", encoding="utf-8")
+    config = _load(tmp_path, _config_data(publication, tmp_path / "eval_out", modes=["trace", "executable"]))
+
+    with pytest.raises(OraclePackDriftError) as raised:
+        verify_eval_source(config)
+
+    assert "recorded no per-file hashes" in str(raised.value)
 
 
 def test_a_backend_edited_after_the_config_resolved_is_refused(tmp_path: Path) -> None:
@@ -1821,14 +1877,13 @@ def _restate_published_hash(document: dict[str, Any], content_hash: str) -> None
 
 def _restate_pack(publication: Publication) -> None:
     """Re-record the pack fingerprint after a test edits a pack file on purpose."""
-    fingerprint = pack_fingerprint(
-        resolve_declared_pack_paths(
-            OraclePackRef(manifest_path=publication.pack_dir / "manifest.yaml"),
-            (publication.pack_dir,),
-        )
+    paths = resolve_declared_pack_paths(
+        OraclePackRef(manifest_path=publication.pack_dir / "manifest.yaml"),
+        (publication.pack_dir,),
     )
     document = publication.manifest()
-    document["pack"]["content_hash"] = f"sha256:{fingerprint}"
+    document["pack"]["content_hash"] = f"sha256:{pack_fingerprint(paths)}"
+    document["pack"]["files"] = pack_file_hashes(paths)
     publication.manifest_path.write_text(
         json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
     )
