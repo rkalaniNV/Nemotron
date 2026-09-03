@@ -92,9 +92,7 @@ def _published_run(
     if oracle:
         manifest["oracle"] = {"kind": "python", "endpoint_metadata": None}
     manifest.update(manifest_extra or {})
-    (run_dir / "run_manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    (run_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return run_dir
 
 
@@ -545,13 +543,135 @@ def test_a_non_commit_revision_is_refused_even_when_it_is_not_on_a_denylist(
         _load(tmp_path, data)
 
 
-def test_a_candidate_must_pin_a_revision_or_a_digest(tmp_path: Path) -> None:
+def _unpinned(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Strip a candidate's pin, leaving the route as the only thing that names it."""
+    candidate["model_identity"] = {
+        "source": candidate["provider"],
+        "model": candidate["model"],
+        "revision": None,
+        "weights_digest": None,
+    }
+    return candidate
+
+
+def test_a_candidate_that_pins_nothing_is_scored_as_provider_managed(tmp_path: Path) -> None:
+    """A hosted route that publishes no pin is recorded, not refused or invented."""
     run_dir = _published_run(tmp_path)
     data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
-    data["candidates"][0]["model_identity"]["revision"] = None
+    _unpinned(data["candidates"][0])
+    data["publication"]["requested"] = False
 
-    with pytest.raises(CandidateIdentityError, match="weights cannot be identified"):
+    config = _load(tmp_path, data)
+
+    identity = config.candidates[0].model_identity
+    assert identity.assurance == "provider_managed"
+    assert config.candidates[0].canonical_model_identity == "nvidia:nemotron-route-a@provider_managed"
+    assert "candidates[candidate_a].model_identity" in config.non_publication_reasons
+    assert config.publication_allowed is False
+
+
+def test_publication_is_refused_while_a_candidate_pins_no_weights(tmp_path: Path) -> None:
+    """The cost of not pinning is paid at load, not after a run has been scored."""
+    run_dir = _published_run(tmp_path)
+    data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
+    _unpinned(data["candidates"][0])
+
+    with pytest.raises(PublicationPolicyError, match=r"candidates\[candidate_a\].model_identity"):
         _load(tmp_path, data)
+
+
+def test_an_unpinned_candidate_may_not_name_weights_other_than_its_route(tmp_path: Path) -> None:
+    """Without a pin, a free-text identity is a claim nothing in the run supports."""
+    run_dir = _published_run(tmp_path)
+    data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
+    data["candidates"][0]["model_identity"] = {
+        "source": "openai",
+        "model": "some-other-model",
+        "revision": None,
+        "weights_digest": None,
+    }
+    data["publication"]["requested"] = False
+
+    with pytest.raises(CandidateIdentityError, match="must name the route that answered"):
+        _load(tmp_path, data)
+
+
+def test_two_unpinned_candidates_on_one_route_cannot_be_told_apart(tmp_path: Path) -> None:
+    """Naming the route is what makes the duplicate check see one deployment."""
+    run_dir = _published_run(tmp_path)
+    data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
+    _unpinned(data["candidates"][0])
+    twin = _second_candidate(model=data["candidates"][0]["model"])
+    data["candidates"].append(_unpinned(twin))
+    data["publication"]["requested"] = False
+
+    with pytest.raises(CandidateIdentityError, match="same weights"):
+        _load(tmp_path, data)
+
+
+def test_a_config_declaring_the_previous_schema_still_loads_unchanged(tmp_path: Path) -> None:
+    """1.2 widened the contract, so a 1.1 config keeps loading and keeps its version."""
+    run_dir = _published_run(tmp_path)
+    data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
+    data["schema_version"] = "1.1"
+
+    config = _load(tmp_path, data)
+
+    assert config.schema_version == "1.1"
+    assert config.semantic_payload()["schema_version"] == "1.1"
+
+
+@pytest.mark.parametrize(
+    ("identity_change", "expected_message"),
+    [
+        ({"revision": None}, "schema 1.1 required every candidate to pin"),
+        (
+            {"revision": None, "weights_digest": f"bfcl-weight-manifest-v1:{'a' * 64}"},
+            "schema 1.1 cannot read",
+        ),
+    ],
+)
+def test_the_previous_schema_refuses_what_only_the_current_one_added(
+    tmp_path: Path,
+    identity_change: dict[str, Any],
+    expected_message: str,
+) -> None:
+    """A file that says 1.1 promises 1.1 readers it holds nothing they would refuse."""
+    run_dir = _published_run(tmp_path)
+    data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
+    data["schema_version"] = "1.1"
+    data["publication"]["requested"] = False
+    _unpinned(data["candidates"][0])
+    data["candidates"][0]["model_identity"].update(identity_change)
+
+    with pytest.raises(CandidateIdentityError, match=expected_message):
+        _load(tmp_path, data)
+
+
+def test_a_manifest_scoped_weights_digest_is_accepted_and_kept_distinct(tmp_path: Path) -> None:
+    """The scheme travels with the digest so a later comparison can see the scope."""
+    run_dir = _published_run(tmp_path)
+    data = _config_data(run_dir, _scoring_contract(tmp_path), tmp_path / "eval_out")
+    digest = f"bfcl-weight-manifest-v1:{'b' * 64}"
+    data["candidates"][0]["model_identity"]["revision"] = None
+    data["candidates"][0]["model_identity"]["weights_digest"] = digest
+
+    config = _load(tmp_path, data)
+
+    assert config.candidates[0].canonical_model_identity.endswith(digest)
+    assert config.publication_allowed is True
+
+
+def test_a_pinned_identity_hashes_the_fields_it_hashed_before_assurance_existed(
+    valid_config: tuple[Path, dict[str, Any]],
+) -> None:
+    """Assurance is derived, so recording it would refork every published hash."""
+    config = load_eval_config(valid_config[0])
+
+    payload = config.candidates[0].model_identity.semantic_payload()
+
+    assert set(payload) == {"source", "model", "revision", "weights_digest", "canonical_id"}
+    assert config.candidates[0].model_identity.assurance == "weights_pinned"
 
 
 def test_a_weights_digest_must_use_the_pinned_format(tmp_path: Path) -> None:
@@ -1125,9 +1245,7 @@ def test_eval_inputs_stay_out_of_generation_lineage(tmp_path: Path) -> None:
     )
 
     plain = BfclConfig.from_yaml(_generation_config(tmp_path))
-    with_eval = BfclConfig.from_yaml(
-        _generation_config(tmp_path, eval_config_path="configs/eval_config.yaml")
-    )
+    with_eval = BfclConfig.from_yaml(_generation_config(tmp_path, eval_config_path="configs/eval_config.yaml"))
 
     assert generation_payload(plain) == generation_payload(with_eval)
     assert resolved_payload(plain) == resolved_payload(with_eval)

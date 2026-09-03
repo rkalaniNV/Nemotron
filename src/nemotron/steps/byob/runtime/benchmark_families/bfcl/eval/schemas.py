@@ -1,4 +1,4 @@
-"""Versioned contract for ``eval_config.yaml`` (schema 1.1).
+"""Versioned contract for ``eval_config.yaml`` (schemas 1.1 and 1.2).
 
 An eval config decides what a score *means*: which benchmark rows are answered,
 which model answered them, how a tool call is compared against the gold call, and
@@ -14,10 +14,12 @@ silently flips ``allow_llm_repair`` on is the difference between a benchmark and
 demo, so every scalar is a strict type and every enum is a ``Literal``.
 
 *Immutable candidate identity.* A serving route (``provider``/``model``) says
-where the request went, not which weights answered it. Scores are only
-comparable when the weights are named by something that cannot move, so a
-candidate must pin an immutable ``revision`` or a ``weights_digest``, and branch
-names such as ``main`` are refused.
+where the request went, not which weights answered it. Scores are only comparable
+when the weights are named by something that cannot move, so a candidate pins an
+immutable ``revision`` or a ``weights_digest``, and branch names such as ``main``
+are refused. A hosted route that publishes neither may leave both null under
+schema 1.2 and is recorded as ``provider_managed``: it names the route it was
+served by, and it cannot publish.
 
 *Path-free semantics.* The hash covers *what the run evaluates*, never *where the
 files live*: referenced files enter as content hashes and ``outputs.output_dir``
@@ -72,7 +74,14 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import 
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
-EVAL_CONFIG_SCHEMA_VERSION: Final = "1.1"
+# The version a config written today declares. 1.2 added two things a 1.1 reader
+# would refuse: a candidate that pins nothing, and a weights digest that names its
+# scheme. Both are widenings, so every 1.1 config still loads and still means
+# exactly what it meant — which is why the declared version is carried through to
+# the resolved config and its hash rather than being restamped as the current one.
+EVAL_CONFIG_SCHEMA_VERSION: Final = "1.2"
+EVAL_CONFIG_SCHEMA_VERSIONS: Final = ("1.1", "1.2")
+EvalConfigSchemaVersion = Literal["1.1", "1.2"]
 
 # Canonical mode order. ``trace`` scores the calls a model proposed against the
 # gold trace; ``executable`` additionally replays them against the oracle. The
@@ -107,6 +116,36 @@ MUTABLE_REVISIONS: Final = frozenset(
 )
 _MUTABLE_REF_PREFIXES: Final = ("refs/heads/", "refs/remotes/")
 _IMMUTABLE_REVISION_PATTERN: Final = re.compile(r"^[0-9a-fA-F]{40,64}$")
+
+# How much a candidate's identity can promise. ``weights_pinned`` names bytes or
+# the immutable commit they came from, so the same config scores the same weights
+# next year. ``provider_managed`` names only a route a provider may re-point
+# underneath it, which several hosted frontier models are the honest case for:
+# they publish no commit and no digest, so demanding one buys a value nobody can
+# verify. The level is derived from the evidence rather than declared, because an
+# operator claim about assurance would be the one part of the identity that is
+# not checkable.
+IdentityAssurance = Literal["weights_pinned", "provider_managed"]
+
+# What a canonical identity says where a pin would go. It reads as a word rather
+# than a hash so that no consumer can mistake an unpinned candidate for a pinned
+# one, and so two unpinned candidates on the same route collide the way two
+# indistinguishable candidates should.
+UNPINNED_REFERENCE: Final = "provider_managed"
+
+# A digest over a manifest of weight files rather than over weight bytes. The two
+# schemes disagree for identical weights, and the contamination gate reads two
+# unequal digests of the same algorithm and length as *different weights*. So the
+# scheme is part of the value: a manifest digest compared against a raw one has
+# conflicting algorithms, which sends that comparison to "unknown" — the operator
+# is asked to pin comparably instead of a candidate being cleared by an artifact
+# of how someone hashed it.
+WEIGHT_MANIFEST_DIGEST_SCHEME: Final = "bfcl-weight-manifest-v1"
+WEIGHTS_DIGEST_SCHEMES: Final = ("sha256", WEIGHT_MANIFEST_DIGEST_SCHEME)
+_WEIGHTS_DIGEST_PATTERN: Final = (
+    r"^(?:" + "|".join(re.escape(scheme) for scheme in WEIGHTS_DIGEST_SCHEMES) + r"):[0-9a-f]{64}$"
+)
+WeightsDigest = Annotated[StrictStr, Field(pattern=_WEIGHTS_DIGEST_PATTERN)]
 
 # The scoring settings a publishable run must use. These are the correctness
 # gates: an operator who relaxes one gets a higher number for the same model, so
@@ -440,12 +479,25 @@ class CandidateApi(_Strict):
 
 
 class CandidateModelIdentity(_Strict):
-    """The weights that answered, named by something that cannot move."""
+    """The weights that answered, named by whatever can honestly name them.
+
+    A registry model can be pinned to bytes or to the commit they came from, and
+    pinning it is what makes a score reproducible. A hosted frontier model often
+    cannot: the provider publishes neither a digest nor an immutable revision, so
+    the strongest true statement is the route. Both are accepted here and told
+    apart by :attr:`assurance`, because the alternative — demanding a pin that
+    does not exist — produces invented values, and an invented digest is worse
+    than an absent one: it claims a reproducibility nothing backs.
+
+    What an unpinned identity may not do is publish. That gate lives in
+    :class:`BfclEvalConfig`, so the cost of not pinning is paid once, visibly, in
+    ``non_publication_reasons`` rather than by refusing the run outright.
+    """
 
     source: IdentityToken
     model: StrictStr
     revision: StrictStr | None = None
-    weights_digest: ContentHash | None = None
+    weights_digest: WeightsDigest | None = None
 
     @field_validator("model")
     @classmethod
@@ -469,19 +521,20 @@ class CandidateModelIdentity(_Strict):
                 "the revision names a moving pointer, so the same config would score different weights later",
                 value=revision,
                 expected="an immutable revision such as a commit sha, or a weights_digest instead",
-                recovery="pin the commit the weights were served from, or set weights_digest to sha256:<64 hex>",
+                recovery="pin the commit the weights were served from, set weights_digest to sha256:<64 hex>, "
+                "or leave both null if the provider publishes neither and accept a non-publishable run",
             )
         return revision
 
     @model_validator(mode="after")
-    def _pins_something_immutable(self) -> CandidateModelIdentity:
-        if self.revision is None and self.weights_digest is None:
-            raise CandidateIdentityError(
-                "candidates[].model_identity",
-                "neither revision nor weights_digest is set, so the weights cannot be identified",
-                expected="revision (immutable) or weights_digest (sha256:<64 hex>)",
-                recovery="add the revision the endpoint serves, or the digest of the served weights",
-            )
+    def _a_stated_revision_is_immutable(self) -> CandidateModelIdentity:
+        """Refuse a revision that names a moving target, but not a missing one.
+
+        Stating nothing and stating ``release-2026`` are different failures. The
+        first is an operator who cannot pin, and the run records that. The second
+        is a pin that will silently mean other weights later, which is the thing
+        this field exists to prevent.
+        """
         if (
             self.weights_digest is None
             and self.revision is not None
@@ -492,10 +545,17 @@ class CandidateModelIdentity(_Strict):
                 "the revision is not a verifiable immutable commit identifier",
                 value=self.revision,
                 expected="40-64 hexadecimal commit characters, or a weights_digest",
-                recovery="pin the full immutable commit, or set weights_digest to sha256:<64 hex>; "
-                "branch and tag names can move",
+                recovery="pin the full immutable commit, set weights_digest to sha256:<64 hex>, or leave both "
+                "null and accept a non-publishable run; branch and tag names can move",
             )
         return self
+
+    @property
+    def assurance(self) -> IdentityAssurance:
+        """How much this identity survives the endpoint changing underneath it."""
+        if self.weights_digest is not None or self.revision is not None:
+            return "weights_pinned"
+        return "provider_managed"
 
     @property
     def canonical_id(self) -> str:
@@ -504,12 +564,17 @@ class CandidateModelIdentity(_Strict):
         The digest wins when both are present: it names the bytes, while a
         revision only names where they came from. Model and revision stay
         case-sensitive because the config supports arbitrary registries, and
-        not every registry case-folds identifiers.
+        not every registry case-folds identifiers. An identity with neither
+        reads as ``provider_managed``, so the string itself says the weights
+        were never pinned instead of looking like a pin that happens to be short.
         """
-        reference = self.weights_digest or self.revision
+        reference = self.weights_digest or self.revision or UNPINNED_REFERENCE
         return f"{self.source}:{self.model}@{reference}"
 
     def semantic_payload(self) -> dict[str, Any]:
+        # The payload keeps the shape it had before assurance existed. The level
+        # is derived from these same fields, so recording it would add no
+        # information while changing the hash of every config already published.
         return {
             "source": self.source,
             "model": self.model,
@@ -589,6 +654,33 @@ class EvalCandidate(_Strict):
         if not value.strip():
             raise ValueError("must be a non-empty string")
         return value.strip()
+
+    @model_validator(mode="after")
+    def _an_unpinned_identity_names_the_route_it_was_served_by(self) -> EvalCandidate:
+        """Hold an unpinned candidate to the only evidence it has: the route.
+
+        A pinned candidate may describe its weights however the registry does,
+        because the pin is what tells two candidates apart. An unpinned one has
+        no pin, so its canonical identity is built from ``source`` and ``model``
+        alone — and those are free text. Two candidates on one endpoint could
+        then be given two spellings and pass the duplicate check that exists to
+        stop exactly that, each reporting a score for "different weights" that
+        the same deployment produced. Requiring the identity to restate the route
+        makes the collision happen where it should.
+        """
+        identity = self.model_identity
+        if identity.assurance == "weights_pinned":
+            return self
+        if identity.source != self.provider or identity.model != self.model:
+            raise CandidateIdentityError(
+                "candidates[].model_identity",
+                "a candidate that pins no weights must name the route that answered, and this one names "
+                f"{identity.source}:{identity.model} while the request goes to {self.provider}:{self.model}",
+                expected=f"source {self.provider!r} and model {self.model!r}, matching provider and model",
+                recovery="restate the serving route as the identity, or pin the revision or weights_digest that "
+                "makes this candidate a different one",
+            )
+        return self
 
     @property
     def canonical_model_identity(self) -> str:
@@ -711,7 +803,7 @@ class EvalOutputConfig(_Strict):
 class BfclEvalConfig(_Strict):
     """A resolved, frozen eval config with one hash that stands for all of it."""
 
-    schema_version: Literal["1.1"]
+    schema_version: EvalConfigSchemaVersion
     config_status: Literal["resolved"]
     source: EvalSource
     settings: EvalSettings
@@ -805,8 +897,7 @@ class BfclEvalConfig(_Strict):
             if unsafe:
                 raise EvalConfigSchemaError(
                     "outputs",
-                    "held_out_eval may not persist private tasks, prompts, or replay caches: "
-                    + ", ".join(unsafe),
+                    "held_out_eval may not persist private tasks, prompts, or replay caches: " + ", ".join(unsafe),
                     expected="write_task_results, cache_candidate_responses, and cache_tool_results all false",
                     recovery="publish only the aggregate held-out generalization report",
                 )
@@ -818,9 +909,10 @@ class BfclEvalConfig(_Strict):
                     "publication was requested with settings that weaken what the score means: "
                     + ", ".join(deviations),
                     value=True,
-                    expected="every correctness, contamination, and artifact gate at its locked value",
-                    recovery="restore the locked values, or set publication.requested to false and treat this "
-                    "run as debug-only",
+                    expected="every correctness, contamination, and artifact gate at its locked value, and "
+                    "weights pinned on every candidate",
+                    recovery="restore the locked values and pin each candidate's revision or weights_digest, or "
+                    "set publication.requested to false and treat this run as debug-only",
                 )
         return self
 
@@ -833,6 +925,15 @@ class BfclEvalConfig(_Strict):
         """
         reasons: list[str] = []
         reasons.extend(self.scoring.publication_deviations())
+        # A candidate the provider may re-point cannot carry a published claim:
+        # the number would be about whatever answered that day. The run is still
+        # allowed, because measuring a hosted model is a real thing to want; what
+        # it may not do is present the result as reproducible.
+        reasons.extend(
+            f"candidates[{candidate.alias}].model_identity"
+            for candidate in self.candidates
+            if candidate.model_identity.assurance != "weights_pinned"
+        )
         reasons.extend(self.contamination.publication_deviations())
         reasons.extend(self.outputs.publication_deviations())
         if self.settings.executable and not self.source.gold_eligible:
@@ -873,11 +974,7 @@ class BfclEvalConfig(_Strict):
             "schema_version": self.schema_version,
             "source": self.source.semantic_payload(),
             "eval": self.settings.semantic_payload(),
-            "held_out_eval": (
-                self.held_out_eval.semantic_payload()
-                if self.held_out_eval is not None
-                else None
-            ),
+            "held_out_eval": (self.held_out_eval.semantic_payload() if self.held_out_eval is not None else None),
             "scoring": self.scoring.semantic_payload(),
             "limits": self.limits.semantic_payload(),
             "candidates": [

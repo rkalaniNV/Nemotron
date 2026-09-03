@@ -135,7 +135,7 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
 when = "You need to evaluate candidate models against a published BFCL benchmark"
-then = "Resolve config/eval.default.yaml (schema 1.1), then point config/eval.cli.yaml at it and run stage=eval. The CLI envelope selects direct or nemo_launcher execution, output rendering, dry-run, and operational paths without changing eval_config_hash. Direct mode dispatches to run_declared_eval_sync(...) and lets the runner perform the single authoritative load of the pinned eval config. Launcher mode requires one candidate, keeps every orchestration path outside the immutable bundle, pins probe_oracle into the adapter config, requires container mounts to be identity mappings that cover every runtime path, and materializes the immutable adapter config, framework package, task entry, and merged eval/model_eval config. Managed deployments leave target URL/model id to Launcher; attached endpoints pin both. Submission follows only after the generated package is explicitly installed. Every failure leaves through one published exit status per registered taxonomy code. stage=generate still refuses eval_config_path and inline eval blocks."
+then = "Resolve config/eval.default.yaml (schema 1.2; 1.1 configs still load and keep their stricter candidate identity rules), then point config/eval.cli.yaml at it and run stage=eval. The CLI envelope selects direct or nemo_launcher execution, output rendering, dry-run, and operational paths without changing eval_config_hash. Direct mode dispatches to run_declared_eval_sync(...) and lets the runner perform the single authoritative load of the pinned eval config. Launcher mode requires one candidate, keeps every orchestration path outside the immutable bundle, pins probe_oracle into the adapter config, requires container mounts to be identity mappings that cover every runtime path, and materializes the immutable adapter config, framework package, task entry, and merged eval/model_eval config. Managed deployments leave target URL/model id to Launcher; attached endpoints pin both. Submission follows only after the generated package is explicitly installed. Every failure leaves through one published exit status per registered taxonomy code. stage=generate still refuses eval_config_path and inline eval blocks."
 skill = "src/nemotron/steps/byob/references/bfcl-eval-scoring-contract.md"
 
 [[strategies]]
@@ -316,7 +316,7 @@ recovery = "evaluator.yaml inside nemo_evaluator_bundle is a W5 adapter contract
 
 [[errors]]
 name = "eval_config_schema_invalid"
-recovery = "eval_config.yaml must be schema_version \"1.1\" with config_status: resolved, every section closed, and every setting stated. Quoted booleans and numbers, unknown keys, missing limits, empty or repeated eval.mode entries, and leftover REPLACE_ME_* values are refused rather than defaulted. Fix the field named in the error."
+recovery = "eval_config.yaml must be schema_version \"1.2\" (or \"1.1\", read under its own stricter candidate identity rules) with config_status: resolved, every section closed, and every setting stated. Quoted booleans and numbers, unknown keys, missing limits, empty or repeated eval.mode entries, and leftover REPLACE_ME_* values are refused rather than defaulted. Fix the field named in the error."
 
 [[errors]]
 name = "eval_config_path_invalid"
@@ -324,11 +324,11 @@ recovery = "source_run_manifest must name run_manifest.json from a completed sta
 
 [[errors]]
 name = "candidate_identity_invalid"
-recovery = "Each candidate needs a unique filesystem-safe alias and a distinct canonical model identity. Weight identity is model_identity (source, model, revision or weights_digest); provider and model only name the serving route. Use one candidate per set of weights."
+recovery = "Each candidate needs a unique filesystem-safe alias and a distinct canonical model identity. Weight identity is model_identity (source, model, and revision or weights_digest); provider and model only name the serving route. Use one candidate per set of weights. Run resolve_bfcl_model_identity to fill the block in: registry resolves a branch or tag to the commit it names, local digests weights on disk, and provider-managed records a hosted route that publishes neither. A candidate that pins nothing must restate its own provider and model, because the route is then the only evidence of which weights answered; two such candidates on one route collide, as nothing distinguishes them. Schema 1.1 has no unpinned candidate and no scheme-qualified digest: declare schema_version 1.2 to use either."
 
 [[errors]]
 name = "candidate_revision_mutable"
-recovery = "A branch or tag such as main, master, latest, refs/heads/*, release-2026, or v1 can move and score different weights on a later run. Without a weights digest, pin a full 40–64 hexadecimal commit id. Otherwise set model_identity.weights_digest to sha256:<64 hex>."
+recovery = "A branch or tag such as main, master, latest, refs/heads/*, release-2026, or v1 can move and score different weights on a later run. Without a weights digest, pin a full 40–64 hexadecimal commit id; resolve_bfcl_model_identity registry turns the reference you have into that commit. Otherwise set model_identity.weights_digest to sha256:<64 hex>. A provider that publishes neither is declared by leaving both null, which records the candidate as provider_managed and makes the run non-publishable; a stated reference that can move is refused rather than downgraded, because it claims a pin it does not have."
 
 [[errors]]
 name = "secret_in_eval_config"
@@ -336,7 +336,7 @@ recovery = "Never write a credential into eval_config.yaml or embed one in base_
 
 [[errors]]
 name = "eval_publication_policy_violation"
-recovery = "publication.requested: true requires every locked gate: argument_matching schema_then_canonical, respect_call_order, respect_call_group, allow_llm_repair false, task_success all_applicable_gates, contamination enforce/fail_run/common_intersection, and all outputs artifacts enabled. Executable publication additionally requires a gold-eligible source run. Restore the gate, or set publication.requested: false and read non_publication_reasons."
+recovery = "publication.requested: true requires every locked gate: argument_matching schema_then_canonical, respect_call_order, respect_call_group, allow_llm_repair false, task_success all_applicable_gates, contamination enforce/fail_run/common_intersection, and all outputs artifacts enabled. It also requires weights pinned on every candidate: a provider_managed identity names a route the provider may re-point, so candidates[<alias>].model_identity appears in non_publication_reasons and blocks publication. Restore the gate or pin the candidate, or set publication.requested: false and read non_publication_reasons."
 
 [[errors]]
 name = "eval_source_invalid"
@@ -536,7 +536,7 @@ recovery = "Pin nemo-evaluator 0.2.8 in the evaluation image and nemo-evaluator-
 
 [[errors]]
 name = "eval_cli_invalid"
-recovery = "Start from config/eval.cli.yaml or config/eval.launcher.yaml, keep stage=eval and family=bfcl, and point eval_config_path at one resolved schema-1.1 BFCL eval config."
+recovery = "Start from config/eval.cli.yaml or config/eval.launcher.yaml, keep stage=eval and family=bfcl, and point eval_config_path at one resolved schema-1.1 or schema-1.2 BFCL eval config."
 
 [[errors]]
 name = "eval_cli_runtime_failed"

@@ -45,8 +45,11 @@ an incomplete checklist, or a reviewer equal to the operator all fail closed
 
 `bfcl-onboarding-evaluator-pin-v1` does not restate what "immutable" means. A
 pinned evaluator is validated by constructing `CandidateModelIdentity` from the
-evaluation config contract, which requires an immutable revision or a weights
-digest and refuses moving pointers such as `main`, `latest`, or a branch ref. The
+evaluation config contract, which refuses moving pointers such as `main`,
+`latest`, or a branch ref. That contract also permits an identity that pins
+nothing, because an evaluation may knowingly score a provider-managed route and
+pay for it by not publishing; a record whose status reads `pinned` may not, so
+the pin additionally requires the identity to be `weights_pinned`. The
 pin record adds only the non-secret serving route, the *name* of the credential
 environment variable, and a digest of the provider evidence the pin was read
 from; a value shaped like a credential is refused.

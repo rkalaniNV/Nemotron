@@ -89,7 +89,7 @@ class EvalConfigError(Exception):
 
 
 class EvalConfigSchemaError(EvalConfigError):
-    """The YAML shape, a key name, or a value type is not schema 1.1."""
+    """The YAML shape, a key name, or a value type is not a schema this build reads."""
 
     code = "eval_config_schema_invalid"
 

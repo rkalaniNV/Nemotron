@@ -653,7 +653,8 @@ def write_eval_config(
     base_url: str,
 ) -> Path:
     document = {
-        "schema_version": "1.1",
+        # 1.2, because the candidate below pins no weights.
+        "schema_version": "1.2",
         "config_status": "resolved",
         "source_run_manifest": str(run_manifest),
         "source_oracle": None,
@@ -686,10 +687,16 @@ def write_eval_config(
                     "base_url": base_url,
                     "api_key_env": "BFCL_DEMO_CANDIDATE_KEY",
                 },
+                # The candidate is a scripted loopback server, so no registry
+                # commit and no weight bytes exist to point at. It is recorded
+                # unpinned rather than given a plausible-looking commit: the run
+                # then reports itself as non-publishable, which is exactly what a
+                # score against an unpinnable endpoint is worth. With no pin, the
+                # route is the identity, so these two restate provider and model.
                 "model_identity": {
-                    "source": "huggingface",
-                    "model": "bfcl-demo/loopback-candidate",
-                    "revision": "0" * 40,
+                    "source": "nvidia",
+                    "model": "bfcl-demo-candidate",
+                    "revision": None,
                     "weights_digest": None,
                 },
                 "inference": {
@@ -707,7 +714,7 @@ def write_eval_config(
             "on_violation": "fail_run",
             "comparison_set": "common_intersection",
         },
-        "publication": {"requested": True, "require_same_task_ids": True},
+        "publication": {"requested": False, "require_same_task_ids": True},
         "outputs": {
             "output_dir": str(output_dir),
             "write_task_results": True,

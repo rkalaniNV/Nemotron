@@ -9,11 +9,13 @@ config would report a different number.
 The authority for "these weights cannot move" already exists in the evaluation
 config contract, so this module does not restate it. A pinned evaluator is
 validated by constructing :class:`CandidateModelIdentity`, which refuses moving
-pointers such as ``main`` or ``latest`` and requires an immutable revision or a
-weights digest. This module adds only what the ablation needs on top: the
-non-secret serving route the operator actually called, the name of the
-environment variable that held the credential, and a digest of the provider
-evidence the pin was read from.
+pointers such as ``main`` or ``latest``. That contract also allows an identity
+that pins nothing, since an evaluation may knowingly score a provider-managed
+route; a record whose status says ``pinned`` may not, so this module requires the
+constructed identity to be ``weights_pinned``. On top of that it adds what the
+ablation needs: the non-secret serving route the operator actually called, the
+name of the environment variable that held the credential, and a digest of the
+provider evidence the pin was read from.
 
 An unpinned evaluator is a first-class record rather than a gap to be filled in
 later with a plausible string. It states why no pinned identity exists and keeps
@@ -197,7 +199,7 @@ def _immutable_identity(
 ) -> CandidateModelIdentity:
     """Validate weight identity through the evaluation config contract, not a local rule."""
     try:
-        return cast(
+        identity = cast(
             CandidateModelIdentity,
             CandidateModelIdentity.model_validate(
                 {
@@ -210,6 +212,17 @@ def _immutable_identity(
         )
     except (EvalConfigError, ValueError) as exc:
         raise EvaluatorPinError(f"evaluator weights are not immutably pinned: {exc}") from exc
+    # The eval contract accepts a route no provider pins and records it as
+    # provider_managed, because scoring a hosted model is a legitimate run that
+    # simply cannot publish. A *pinned* evaluator has no such middle ground: the
+    # record's own status would be a lie, and the unpinned record below is the
+    # place that case belongs.
+    if identity.assurance != "weights_pinned":
+        raise EvaluatorPinError(
+            "evaluator weights are not immutably pinned: neither revision nor weights_digest is set; "
+            "record an unpinned evaluator with reason immutable_pin_unavailable instead"
+        )
+    return identity
 
 
 def _verify_self_digest(pin: PinnedEvaluator | UnpinnedEvaluator) -> None:

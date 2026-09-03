@@ -924,13 +924,26 @@ matched applicable-tool/turn-policy strata, and
 a conservative Newcombe 95% interval.
 
 A candidate separates two identities. `provider`, `model`, and `api.base_url` name
-the route a request takes; `model_identity` names the weights that answered, and
-must pin an immutable `revision` or a `weights_digest`. Branch-style refs such as
-`main` or `refs/heads/*` are refused, and without a digest the revision must be a
-full 40–64 hexadecimal commit id; an arbitrary branch or tag cannot prove
-immutability. Model and revision remain case-sensitive for registries that
-distinguish case. Two candidates may not share an alias or resolve to the same
-canonical weight identity. Credentials never appear: `api.api_key_env` names an
+the route a request takes; `model_identity` names the weights that answered.
+Branch-style refs such as `main` or `refs/heads/*` are refused, and without a
+digest the revision must be a full 40–64 hexadecimal commit id; an arbitrary
+branch or tag cannot prove immutability. Leaving both `revision` and
+`weights_digest` null is allowed and means what it says — the identity resolves
+to `@provider_managed`, and the run is scored but may not publish — so a hosted
+model that pins nothing is recorded as unpinned instead of being given a
+fabricated digest. Such an identity must restate the candidate's own `provider`
+and `model`, since with no pin the route is the only evidence of which weights
+answered. A `weights_digest` names its scheme: `sha256:` for weight bytes,
+`bfcl-weight-manifest-v1:` for a manifest of weight files, so a comparison across
+the two is reported as unresolved rather than as different weights. Both the
+unpinned identity and the scheme-qualified digest arrived in schema 1.2; a config
+that declares 1.1 is still read as 1.1 and refuses them. `python -m
+nemotron.steps.byob.scripts.resolve_bfcl_model_identity` produces the block:
+`registry` resolves a reference to its current commit, `local` digests weights on
+disk, `provider-managed` records the unpinnable route. Model and revision remain
+case-sensitive for registries that distinguish case. Two candidates may not share
+an alias or resolve to the same canonical weight identity, which two candidates
+on the same unpinned route do. Credentials never appear: `api.api_key_env` names an
 environment variable, a literal key anywhere in the file is refused, validation
 diagnostics never echo string values, and a missing variable is an execution
 failure rather than a config error. A variable the endpoint rejects is the same
@@ -1059,7 +1072,9 @@ the one on the plan.
 Each candidate is compared against each exposure on the axes the two artifacts
 actually carry. A generation config only had to name what it *called*: a serving
 route and an operator `canonical_id`, with weight identity optional. An eval
-config must pin an immutable revision or a weights digest. Neither identity is a
+config pins an immutable revision or a weights digest wherever the provider
+publishes one, and records a `provider_managed` route where none exists — which
+is weaker evidence here, and is why such a run cannot publish. Neither identity is a
 superset of the other, so the comparison weighs evidence strongest first — two
 comparable weights digests settle it either way, then an equal operator label,
 then an equal serving route, then a normalized model name plus revision — and
