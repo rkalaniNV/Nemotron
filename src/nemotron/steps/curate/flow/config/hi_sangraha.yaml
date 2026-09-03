@@ -39,6 +39,8 @@ corpus:
   source_field: source
 
   language: hi
+  # Supply your reviewed pack root; no production language packs are bundled.
+  langpack_dir: ./langpacks
   metadata_fields: [id, source]
 
 output_root: ./output/hi

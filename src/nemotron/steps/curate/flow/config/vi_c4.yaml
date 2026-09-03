@@ -34,6 +34,8 @@ corpus:
   source_field: source
 
   language: vi
+  # Supply your reviewed pack root; no production language packs are bundled.
+  langpack_dir: ./langpacks
   metadata_fields: [id, source, url]
 
 output_root: ./output/vi

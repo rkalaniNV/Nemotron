@@ -23,7 +23,12 @@ corpus:
 
   # BCP-47 tag. No default — a wrong one produces plausible numbers for the
   # wrong language, which is worse than refusing to start.
-  language: vi
+  language: null
+
+  # Required when profile or an approved pack-backed policy is enabled.
+  # Nemotron ships no production packs; use a reviewed pack owned by this
+  # corpus workflow.
+  langpack_dir: null
 
   # Columns to carry through the reader. Anything omitted is dropped at the
   # first stage, including the id above.

@@ -64,6 +64,11 @@ A pack is data — word lists, a character set, boilerplate patterns, a fold map
 plus a declaration of what can meaningfully be measured for that language. See
 [../data/langpacks/SPEC.md](../data/langpacks/SPEC.md) to author one.
 
+Nemotron ships no production language packs. Set `langpack_dir` to a reviewed
+pack root owned by your corpus workflow. The `x-test-*` packs under
+`tests/steps/curate/fixtures/langpacks/` validate the implementation but are not
+installed, user defaults, or claims of supported languages.
+
 The capability declaration does real work. Vietnamese tone marks strip to
 degraded but readable text, so a diacritic ratio measures something. Devanagari
 matras are obligatory vowels; stripping them yields nonsense, so the `hi` pack
@@ -74,14 +79,6 @@ on a false premise.
 Naming a signal the pack cannot support is an error. Leaving `signals` empty
 skips it with a warning — the difference is that a named signal is a question
 the caller asked.
-
-| Pack | Capabilities |
-|---|---|
-| `vi` | script, diacritic, stopword, folded stopword, boilerplate, sentence end |
-| `hi` | script, stopword, boilerplate, sentence end |
-| `en` | script, stopword, boilerplate, sentence end |
-| `ja` | script, stopword, boilerplate, sentence end |
-| `th` | script, stopword, boilerplate, sentence end |
 
 ## Signals
 
@@ -125,17 +122,14 @@ before any figure is produced. A mismatch stops the run.
 
 ## Run It
 
-```bash
-uv run nemotron steps run curate/profile -c tiny
-```
-
-Against a real corpus, profile the *unfiltered* input:
+Profile the *unfiltered* input and supply the pack explicitly:
 
 ```bash
 uv run nemotron steps run curate/profile \
   input_glob='./output/raw_jsonl/**/*.jsonl' \
   output_dir=./output/profile \
-  source_field=source id_field=id
+  source_field=source id_field=id \
+  language=vi langpack_dir=./langpacks
 ```
 
 Three files land in `output_dir`:

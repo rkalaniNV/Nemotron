@@ -45,8 +45,8 @@ description = "BCP-47 tag selecting the language pack. No default: a wrong defau
 
 [[parameters]]
 name = "langpack_dir"
-description = "Directory holding language packs. 'bundled' uses the packs shipped with this step."
-default = "bundled"
+description = "Required directory holding reviewed language packs. Nemotron ships no production packs; language-specific repository fixtures are test-only."
+default = "null"
 
 [[parameters]]
 name = "text_field"
@@ -101,7 +101,7 @@ then = "Profile first, then hold the token budget fixed with curate/subset. Othe
 
 [[errors]]
 name = "language_pack_not_found"
-recovery = "No pack for that BCP-47 tag. See data/langpacks/SPEC.md to author one; it is data, not code."
+recovery = "Set langpack_dir to the reviewed external pack root and confirm it contains the requested BCP-47 tag. Nemotron ships no production packs; see data/langpacks/SPEC.md to author one."
 
 [[errors]]
 name = "language_pack_invalid"

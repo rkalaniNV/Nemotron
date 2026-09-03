@@ -333,7 +333,7 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
     language = cfg.get("language")
     if not isinstance(language, str) or not language:
         raise ConfigError("language must be a non-empty BCP-47 tag")
-    pack = langpack.load(language, cfg.get("langpack_dir", langpack.BUNDLED))
+    pack = langpack.load(language, cfg.get("langpack_dir"))
 
     tokenizer = resolve_tokenizer(cfg)
     capabilities = set(pack.capabilities)

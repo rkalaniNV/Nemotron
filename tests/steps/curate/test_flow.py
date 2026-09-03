@@ -28,6 +28,7 @@ from nemotron.steps.curate.scripts import run_flow
 from .._step_helpers import assert_step_static, step_dir
 
 STEP_DIR = step_dir(__file__, "curate", "flow")
+LANGPACK_FIXTURES = Path(__file__).parent / "fixtures" / "langpacks"
 
 
 def corpus_files(tmp_path: Path, n: int = 40) -> str:
@@ -48,7 +49,8 @@ def config(tmp_path: Path, **overrides) -> dict:
             "text_field": "text",
             "id_field": "id",
             "source_field": "source",
-            "language": "vi",
+            "language": "x-test-vi",
+            "langpack_dir": str(LANGPACK_FIXTURES),
         },
         "output_root": str(tmp_path / "out"),
         "steps": {
@@ -87,6 +89,8 @@ def test_the_shipped_default_does_not_filter_on_an_unreviewed_policy() -> None:
     cfg = yaml.safe_load((STEP_DIR / "config" / "default.yaml").read_text(encoding="utf-8"))
 
     assert cfg["approve"] is None
+    assert cfg["corpus"]["language"] is None
+    assert cfg["corpus"]["langpack_dir"] is None
 
 
 def test_the_default_config_covers_every_step_in_the_plan() -> None:
@@ -96,12 +100,12 @@ def test_the_default_config_covers_every_step_in_the_plan() -> None:
     assert set(cfg["steps"]) == {plan.key for plan in run_flow.STEP_ORDER}
 
 
-def test_tiny_runs_ingest_then_profile_without_gpu_or_downloads() -> None:
+def test_tiny_runs_ingest_without_gpu_downloads_or_a_language_pack() -> None:
     cfg = yaml.safe_load((STEP_DIR / "config" / "tiny.yaml").read_text(encoding="utf-8"))
 
     assert cfg["steps"]["ingest"]["enabled"] is True
-    assert cfg["steps"]["profile"]["enabled"] is True
-    assert all(not cfg["steps"][key]["enabled"] for key in ("filter", "audit", "subset", "decontamination"))
+    assert all(not cfg["steps"][key]["enabled"] for key in ("profile", "filter", "audit", "subset", "decontamination"))
+    assert "language" not in cfg["corpus"]
 
 
 # -- derivation ---------------------------------------------------------------
@@ -129,6 +133,8 @@ def test_profile_reads_the_unfiltered_corpus_and_the_rest_read_the_output(tmp_pa
     by_key = {r.plan.key: r.config for r in resolved}
 
     assert by_key["profile"]["input_glob"] == cfg["corpus"]["input"]
+    assert by_key["profile"]["language"] == cfg["corpus"]["language"]
+    assert by_key["profile"]["langpack_dir"] == cfg["corpus"]["langpack_dir"]
     assert by_key["filter"]["input_glob"] == cfg["corpus"]["input"]
     for key in ("subset",):
         assert by_key[key]["input_glob"].startswith(paths["corpus"])
@@ -305,6 +311,15 @@ def test_preflight_refuses_before_any_step_runs(tmp_path) -> None:
     assert not (Path(cfg["output_root"]) / "profile").exists()
 
 
+def test_profile_preflight_requires_an_external_language_pack(tmp_path) -> None:
+    cfg = config(tmp_path)
+    cfg["corpus"]["langpack_dir"] = None
+    resolved, paths = run_flow.derive(cfg)
+
+    with pytest.raises(run_flow.FlowConfigError, match="explicit langpack_dir"):
+        run_flow.preflight(cfg, resolved, paths)
+
+
 # -- the approval gate --------------------------------------------------------
 
 
@@ -365,6 +380,23 @@ def test_an_approval_produces_an_executable_policy_wired_into_the_filter(tmp_pat
     assert policy_module.validate_approved_policy(document) == []
     filter_cfg = next(r for r in resolved if r.plan.key == "filter").config
     assert filter_cfg["heuristic_filters"]["approved_policy"] == paths["approved_policy"]
+    assert filter_cfg["heuristic_filters"]["langpack_dir"] == str(LANGPACK_FIXTURES)
+
+
+@pytest.mark.parametrize("pack_root", [None, "bundled"])
+def test_pack_backed_approval_refuses_without_the_profiled_pack_root(tmp_path, pack_root) -> None:
+    cfg = config(tmp_path)
+    cfg["steps"]["profile"]["signals"] = ["stopword_ratio"]
+    run_flow.run(cfg)
+    cfg["steps"]["profile"]["enabled"] = False
+    cfg["steps"]["filter"]["enabled"] = True
+    cfg["corpus"]["langpack_dir"] = pack_root
+    threshold = next(value for value in signal_registry.SIGNALS["stopword_ratio"].grid.values() if value > 0)
+    cfg["approve"] = approve_block(thresholds=[{"signal": "stopword_ratio", "min": threshold}])
+    resolved, paths = run_flow.derive(cfg)
+
+    with pytest.raises(run_flow.FlowConfigError, match="no langpack_dir"):
+        run_flow.materialise_policy(cfg, resolved, paths)
 
 
 def test_approve_refuses_a_conflicting_per_step_policy_path(tmp_path) -> None:
@@ -548,7 +580,8 @@ def test_custom_raw_fields_run_from_ingest_through_profile(tmp_path) -> None:
         "id_field_in_source": True,
         "source_field": "dataset",
         "source_field_in_source": "origin",
-        "language": "vi",
+        "language": "x-test-vi",
+        "langpack_dir": str(LANGPACK_FIXTURES),
         "metadata_fields": ["doc_key", "origin"],
     }
     cfg["steps"]["ingest"] = {"enabled": True}
@@ -668,6 +701,7 @@ def test_every_error_the_flow_raises_is_documented() -> None:
         "approval_corpus_mismatch",
         "approve_before_profile",
         "profile_enabled_during_approval",
+        "missing_langpack_dir",
         "conflicting_approved_policy",
         "no_steps_enabled",
         "unknown_step",
@@ -709,11 +743,12 @@ def test_the_worked_example_ships_unapproved(name) -> None:
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
-def test_the_worked_example_names_a_language(name) -> None:
-    """There is no default language; an example without one cannot be run as-is."""
+def test_the_worked_example_names_a_language_and_external_pack_root(name) -> None:
+    """Examples must not fall back to private test data or an implicit pack."""
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
 
     assert cfg["corpus"]["language"]
+    assert cfg["corpus"]["langpack_dir"] not in (None, "", "bundled")
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
@@ -728,7 +763,7 @@ def test_the_worked_example_only_names_signals_its_pack_supports(name) -> None:
     from nemotron.steps.curate.runtime import langpack
 
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
-    pack = langpack.load(cfg["corpus"]["language"])
+    pack = langpack.load(f"x-test-{cfg['corpus']['language']}", LANGPACK_FIXTURES)
     named = cfg["steps"]["profile"].get("signals") or []
 
     for signal_name in named:
@@ -1107,7 +1142,8 @@ def _ingest_cfg(tmp_path, **corpus_over):
         "input": str(tmp_path / "raw" / "*.parquet"),
         "text_field": "text",
         "id_field": "id",
-        "language": "vi",
+        "language": "x-test-vi",
+        "langpack_dir": str(LANGPACK_FIXTURES),
     }
     corpus.update(corpus_over)
     return {

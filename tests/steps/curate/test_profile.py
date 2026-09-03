@@ -17,6 +17,7 @@ import dataclasses
 import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 import yaml
@@ -28,6 +29,7 @@ from nemotron.steps.curate.scripts import run_profile
 from .._step_helpers import assert_step_static, step_dir
 
 STEP_DIR = step_dir(__file__, "curate", "profile")
+LANGPACK_FIXTURES = Path(__file__).parent / "fixtures" / "langpacks"
 
 
 # -- static -------------------------------------------------------------------
@@ -52,7 +54,7 @@ def test_language_is_declared_without_a_default() -> None:
     by_name = {p["name"]: p for p in toml["parameters"]}
     assert "language" in by_name
     assert "default" not in by_name["language"], "language must have no default"
-    assert by_name["langpack_dir"]["default"] == "bundled"
+    assert by_name["langpack_dir"]["default"] == "null"
 
 
 def test_the_fixture_has_unequal_sources() -> None:
@@ -155,8 +157,8 @@ def _config(tmp_path, **overrides):
         "text_field": "text",
         "source_field": "source",
         "id_field": "id",
-        "language": "vi",
-        "langpack_dir": "bundled",
+        "language": "x-test-vi",
+        "langpack_dir": str(LANGPACK_FIXTURES),
         "signals": ["non_alpha_numeric", "word_count"],
         "max_total_docs": 0,
         "seed": 0,

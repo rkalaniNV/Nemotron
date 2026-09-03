@@ -57,6 +57,7 @@ import yaml
 from nemotron.steps.curate.runtime import integrity
 from nemotron.steps.curate.runtime import manifest as run_manifest
 from nemotron.steps.curate.runtime import policy as policy_module
+from nemotron.steps.curate.runtime import registry as signal_registry
 
 logger = logging.getLogger("curate.flow")
 
@@ -244,6 +245,7 @@ def derive(cfg: dict) -> tuple[list[Resolved], dict[str, str]]:
                 "input_glob": read_from,
                 "output_dir": out,
                 "language": corpus.get("language"),
+                "langpack_dir": corpus.get("langpack_dir"),
             }
         elif plan.key == "filter":
             metadata_fields = list(corpus.get("metadata_fields") or [])
@@ -510,6 +512,22 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
             "Run profile first, review its output, then disable steps.profile before approving."
         )
 
+    profile_cfg = next((r for r in resolved if r.plan.key == "profile" and r.enabled), None)
+    if profile_cfg:
+        language = profile_cfg.config.get("language")
+        if not isinstance(language, str) or not language:
+            problems.append(
+                "steps.profile requires corpus.language (or a per-step override) as a "
+                "non-empty BCP-47 tag; there is no safe default language."
+            )
+        pack_root = profile_cfg.config.get("langpack_dir")
+        if pack_root is None or str(pack_root).strip() in {"", "bundled"}:
+            problems.append(
+                "steps.profile requires an explicit langpack_dir. Nemotron ships no "
+                "production language packs; point corpus.langpack_dir or "
+                "steps.profile.langpack_dir at the reviewed pack used for this corpus."
+            )
+
     if "decontamination" in enabled:
         decon = next(r for r in resolved if r.plan.key == "decontamination")
         if not decon.config.get("holdout_glob"):
@@ -636,6 +654,27 @@ def materialise_policy(
                     f"at {existing}. The flow cannot truthfully report which policy it applied; "
                     "remove the per-step path and let approve wire the promoted policy."
                 )
+            pack_root = block.get("langpack_dir") or corpus.get("langpack_dir")
+            pack_signals = sorted(
+                {
+                    str(entry.get("signal"))
+                    for entry in document.get("thresholds") or []
+                    if entry.get("signal") in signal_registry.PACK_SIGNALS
+                }
+            )
+            pack_root_configured = pack_root is not None and str(pack_root).strip() not in {
+                "",
+                "bundled",
+            }
+            if pack_signals and not pack_root_configured:
+                raise FlowConfigError(
+                    f"the approved thresholds use language-pack signals {pack_signals}, but "
+                    "no langpack_dir is configured. Nemotron ships no production packs; set "
+                    "corpus.langpack_dir or steps.filter.heuristic_filters.langpack_dir to "
+                    "the reviewed pack root used during profiling."
+                )
+            if pack_root_configured:
+                block["langpack_dir"] = pack_root
             block["approved_policy"] = str(destination)
             resolved_step.config["heuristic_filters"] = block
 

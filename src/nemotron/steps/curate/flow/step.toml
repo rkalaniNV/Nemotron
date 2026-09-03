@@ -33,7 +33,7 @@ description = "flow_report.json: which steps ran, which were disabled, every war
 
 [[parameters]]
 name = "corpus"
-description = "Shared inputs: input (the UNFILTERED corpus), text_field, id_field, source_field, language, metadata_fields. With ingest disabled these are the existing corpus columns; with ingest enabled they name raw inputs and every downstream step receives canonical text/id/source fields. id_field is required by subset and decontamination when ingest is disabled. language is a BCP-47 tag with no default."
+description = "Shared inputs: input (the UNFILTERED corpus), text_field, id_field, source_field, language, langpack_dir, metadata_fields. With ingest disabled these are the existing corpus columns; with ingest enabled they name raw inputs and every downstream step receives canonical text/id/source fields. id_field is required by subset and decontamination when ingest is disabled. language and langpack_dir have no production defaults; profiling requires both explicitly."
 
 [[parameters]]
 name = "output_root"
@@ -88,6 +88,10 @@ recovery = "approve.from points at a candidate_policies.yaml that does not exist
 [[errors]]
 name = "profile_enabled_during_approval"
 recovery = "Disable steps.profile in the approval run. Re-profiling while applying an older approval could replace the candidate measurements with data nobody reviewed."
+
+[[errors]]
+name = "missing_langpack_dir"
+recovery = "Set corpus.langpack_dir (or the per-step override) to the reviewed external pack root. Nemotron does not bundle production language packs or use its test fixtures as user defaults."
 
 [[errors]]
 name = "conflicting_approved_policy"

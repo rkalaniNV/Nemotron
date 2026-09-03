@@ -27,21 +27,27 @@ Four configs ship with the step, run by name:
 
 | `-c <name>` | For |
 |---|---|
-| `tiny` | ingest → profile smoke on packaged fixtures, CPU, no downloads |
+| `tiny` | ingest-only smoke, CPU, no downloads or language pack |
 | `default` | the shape, commented, to copy |
-| `vi_c4` | worked example: Vietnamese web corpus |
-| `hi_sangraha` | worked example: Hindi with mixed web/OCR/ASR provenance |
+| `vi_c4` | worked example: Vietnamese web corpus; requires your `./langpacks/vi` |
+| `hi_sangraha` | worked example: Hindi provenance; requires your `./langpacks/hi` |
 
 ```bash
 uv run nemotron steps run curate/flow -c tiny            # verify it runs
 uv run nemotron steps run curate/flow -c vi_c4 \
-    corpus.input='./raw_jsonl/*.jsonl' output_root=./output/vi
+    corpus.input='./raw_jsonl/*.jsonl' corpus.langpack_dir=./langpacks \
+    output_root=./output/vi
 ```
 
 Copy `vi_c4.yaml` next to your data and edit it — that is your config. Every
 number in it was measured on real documents, and the two examples differ on
 purpose: the Hindi one shows a pack that declares fewer capabilities, and a
 provenance column that changes which gate is safe.
+
+Nemotron ships no production language packs. The language-specific data used by
+the test suite stays under private `x-test-*` fixtures and is not installed.
+Both profiling and an approved pack-backed policy require an explicit,
+reviewed `corpus.langpack_dir`.
 
 ## Run It Twice, On Purpose
 
