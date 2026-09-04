@@ -23,6 +23,13 @@ endpoint URLs are retained in the redacted run configuration for provenance.
 
 ## Run
 
+The generic Nemotron step CLI discovers QASynth from its `step.toml` manifest:
+
+```bash
+uv run nemotron steps list --category sdg
+uv run nemotron steps show sdg/qasynth
+```
+
 Start with the smoke profile:
 
 ```bash
@@ -48,6 +55,9 @@ Stages always follow this order: `questions`, `lexical_dedup`,
 `semantic_dedup`, `answer_seed`, `answers`, `build_sft`, `sample`. Inputs for a
 selected stage must already exist. Reusing an experiment name with a different
 configuration is rejected unless `run.overwrite=true` is explicit.
+
+Use `sdg/qasynth` for persona-grounded MCQ-shaped **SFT training data**. Use
+`byob/mcq` instead when the output is a held-out benchmark or evaluation set.
 
 ## Artifacts
 

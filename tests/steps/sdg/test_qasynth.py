@@ -12,7 +12,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import yaml
+from typer.testing import CliRunner
 
+from nemotron.cli.bin.nemotron import app
 from nemotron.steps.sdg.plugins.qasynth.parsing import parse_question
 from nemotron.steps.sdg.qasynth.runtime.answers import parse_answer_letter
 from nemotron.steps.sdg.qasynth.runtime.lexical import deduplicate, strip_latin_gloss
@@ -68,6 +70,22 @@ def test_step_static() -> None:
         expected_launch="python",
         expected_default_config="default",
     )
+
+
+def test_cli_lists_qasynth_in_sdg_catalog() -> None:
+    result = CliRunner().invoke(app, ["steps", "list", "--category", "sdg", "--json"])
+
+    assert result.exit_code == 0, result.output
+    catalog = json.loads(result.output)
+    assert "sdg/qasynth" in {step["id"] for step in catalog}
+
+
+def test_cli_show_resolves_qasynth() -> None:
+    result = CliRunner().invoke(app, ["steps", "show", "sdg/qasynth"])
+
+    assert result.exit_code == 0, result.output
+    assert "sdg/qasynth" in result.output
+    assert "default" in result.output
 
 
 def test_qasynth_entry_point_is_installed() -> None:

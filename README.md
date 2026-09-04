@@ -123,6 +123,8 @@ The catalog covers the full training lifecycle.
 
 - Data curation and preparation with `curate/*` and `data_prep/*`.
 - Synthetic data generation (SDG) with `sdg/*`.
+  This includes the [persona-grounded QASynth pipeline](src/nemotron/steps/sdg/qasynth/README.md),
+  available as `nemotron steps run sdg/qasynth`.
 - Corpus translation with `translate/*`.
 - Bring-your-own benchmark generation with `byob/*`.
 - Pretraining, supervised fine-tuning (SFT), parameter-efficient fine-tuning (PEFT), and reinforcement learning (RL) with `pretrain/*`, `sft/*`, `peft/*`, and `rl/*`.
