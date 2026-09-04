@@ -124,6 +124,7 @@ _TASK_GENERATION_KEYS = frozenset(
         "difficulty_mix",
         "turn_mix",
         "tool_call_count_mix",
+        "max_intent_share",
         "policy_mix",
     }
 )
@@ -776,6 +777,17 @@ class BfclConfig:
         for key in ("difficulty_mix", "turn_mix", "tool_call_count_mix", "policy_mix"):
             if key in task_generation:
                 task_generation[key] = _require_probability_mix(task_generation[key], f"task_generation.{key}")
+        if "max_intent_share" in task_generation:
+            max_intent_share = _require_number(
+                task_generation["max_intent_share"],
+                "task_generation.max_intent_share",
+            )
+            if not 0.0 < max_intent_share <= 1.0:
+                raise ValueError(
+                    "task_generation.max_intent_share must be greater than 0 "
+                    f"and at most 1, got {task_generation['max_intent_share']!r}"
+                )
+            task_generation["max_intent_share"] = max_intent_share
         turn_keys = set(task_generation.get("turn_mix") or {})
         if unknown := sorted(turn_keys - {"single_turn", "multi_turn"}):
             raise ValueError("task_generation.turn_mix has unknown keys: " + ", ".join(unknown))

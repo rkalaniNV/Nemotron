@@ -69,6 +69,10 @@ task_generation:
   # Banking workflows deliberately retain fee lookup, status reconciliation,
   # and other multi-call paths instead of using the generic 75/20/5 example.
   tool_call_count_mix: {"1": 0.60, "2": 0.30, "3+": 0.10}
+  # B15 treats this as the within-category target and allows five percentage
+  # points of post-selection drift. The stricter 120-row generation cap below
+  # remains the operational bound for this 232-row-per-category release.
+  max_intent_share: 0.50
   # Conversation policy is the axis a candidate is most likely to fail on, so the
   # release declares it rather than letting inventory decide. `irrelevant` is
   # pinned at one sixth because the out_of_scope category owes 232 rows and

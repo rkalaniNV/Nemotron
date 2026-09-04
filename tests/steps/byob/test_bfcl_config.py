@@ -659,6 +659,7 @@ def test_week4_distribution_and_dedup_contracts_parse_strictly(
                 "difficulty_mix": {"easy": 0.3, "medium": 0.5, "hard": 0.2},
                 "turn_mix": {"single_turn": 0.6, "multi_turn": 0.4},
                 "tool_call_count_mix": {"1": 0.75, "2": 0.2, "3+": 0.05},
+                "max_intent_share": 0.50,
             },
             semantic_deduplication_config={
                 "enabled": False,
@@ -672,6 +673,7 @@ def test_week4_distribution_and_dedup_contracts_parse_strictly(
 
     assert config.task_generation["max_turns"] == 6
     assert config.task_generation["difficulty_mix"]["medium"] == 0.5
+    assert config.task_generation["max_intent_share"] == 0.50
     assert config.semantic_deduplication_config["eps"] == 0.08
 
 
@@ -693,6 +695,14 @@ def test_week4_distribution_and_dedup_contracts_parse_strictly(
         (
             {"policy_mix": {"single_turn": 0.5, "not_a_policy": 0.5}},
             r"policy_mix has unknown keys: not_a_policy",
+        ),
+        (
+            {"max_intent_share": 0.0},
+            "must be greater than 0 and at most 1",
+        ),
+        (
+            {"max_intent_share": 1.01},
+            "must be greater than 0 and at most 1",
         ),
     ],
 )
