@@ -119,8 +119,18 @@ def test_manual_recipe_and_reference_pack_readmes_cover_the_runnable_workflow() 
     family_readme = (BYOB_ROOT / "bfcl" / "README.md").read_text(encoding="utf-8")
     assert "Until the eval runner lands" not in family_readme
 
-    for pack in ("tiny_oracle_pack", "banking_vn_oracle_pack"):
-        readme = (BYOB_ROOT / "data" / pack / "README.md").read_text(encoding="utf-8")
+    # What is under test is that an operator can find the file set and the commands
+    # for each reference pack, not which file holds them. A frozen pack keeps its
+    # operator notes outside the pack directory so that editing the notes is not an
+    # edit to the pack, so the notes are read from wherever that pack keeps them.
+    for docs in (
+        (BYOB_ROOT / "data" / "tiny_oracle_pack" / "README.md",),
+        (
+            BYOB_ROOT / "data" / "banking_vn_oracle_pack" / "README.md",
+            BYOB_ROOT / "references" / "bfcl-banking-vn-pack-operations.md",
+        ),
+    ):
+        notes = "\n".join(doc.read_text(encoding="utf-8") for doc in docs)
         for name in (
             "manifest.yaml",
             "tools.json",
@@ -129,7 +139,7 @@ def test_manual_recipe_and_reference_pack_readmes_cover_the_runnable_workflow() 
             "assertions.py",
             "validation_cases.yaml",
         ):
-            assert name in readme
-        assert "validate_oracle_pack" in readme
-        assert "--stage prepare" in readme
-        assert "--stage generate" in readme
+            assert name in notes
+        assert "validate_oracle_pack" in notes
+        assert "--stage prepare" in notes
+        assert "--stage generate" in notes
