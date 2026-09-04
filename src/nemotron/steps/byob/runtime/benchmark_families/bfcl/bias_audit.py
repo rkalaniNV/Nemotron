@@ -26,6 +26,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
 
 BIAS_AUDIT_CONTRACT_VERSION: Final = "1.0"
 BIAS_IDS: Final = tuple(f"B{index}" for index in range(1, 17))
+ABSOLUTE_MIX_TOLERANCE: Final = 0.05
 EDGE_IDS: Final = (
     "B3.single_turn",
     "B3.missing_slot",
@@ -190,6 +191,20 @@ def _canonical_row(row: Mapping[str, Any]) -> dict[str, Any]:
         row.get("messages") or row.get("reference_trace") or [],
         "row.messages",
     )
+    if not messages and row.get("turns"):
+        steps = _list(
+            _json_value(row["turns"], "row.turns"),
+            "row.turns",
+        )
+        messages = [
+            {
+                "role": ("user" if step.get("kind") == "user" else "assistant"),
+                "content": step.get("content"),
+            }
+            for value in steps
+            for step in [_mapping(value, "row turn")]
+            if step.get("kind") in {"user", "assistant_text"}
+        ]
     expected = _json_value(
         row.get("expected_tool_calls") or metadata.get("expected_tool_calls") or [],
         "row.expected_tool_calls",
@@ -642,7 +657,10 @@ def _scalar_strings(value: Any) -> set[str]:
     return set()
 
 
-def _paraphrase_leaks(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+def _paraphrase_leaks(
+    rows: Sequence[Mapping[str, Any]],
+    fallback_tool_names: Sequence[str] = (),
+) -> list[dict[str, str]]:
     canonical_by_base = {
         str(row["base_task_id"]): "\n".join(row.get("user_text") or [])
         for row in rows
@@ -654,7 +672,7 @@ def _paraphrase_leaks(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]
             continue
         task_id = str(row["task_id"])
         candidate = "\n".join(row.get("user_text") or [])
-        for tool in row.get("tools_present") or []:
+        for tool in row.get("tools_present") or fallback_tool_names:
             if _TOOL_TOKEN.pattern.format(re.escape(tool)) and re.search(
                 _TOOL_TOKEN.pattern.format(re.escape(tool)),
                 candidate,
@@ -1235,13 +1253,16 @@ def _build_metrics(
             "tool_call_count_mix_max_abs",
             call_max,
             "<=0.05; at least one multi-call row",
-            call_max is not None and call_max <= 0.05 and multi_call_count > 0,
+            call_max is not None
+            and call_max <= ABSOLUTE_MIX_TOLERANCE
+            and multi_call_count > 0,
             {
                 "counts_excluding_zero_call_rows": dict(sorted(call_buckets.items())),
                 "zero_call_rows": sum(1 for row in published if row["num_tool_calls"] == 0),
                 "empirical": call_rates,
                 "target": call_target,
                 "absolute_errors": call_errors,
+                "absolute_tolerance": ABSOLUTE_MIX_TOLERANCE,
                 "multi_call_rate": multi_call_count / len(published),
                 **({} if target_complete else {"missing_evidence": ("run_manifest.bias_targets.tool_call_count_mix")}),
             },
@@ -1312,7 +1333,16 @@ def _build_metrics(
         )
     )
 
-    paraphrase_hits = {name: _paraphrase_leaks(rows) for name, rows in layer_rows.items()}
+    pack_tool_names: list[str] = []
+    for tool in pack.get("tools") or []:
+        if not isinstance(tool, dict):
+            continue
+        function = tool.get("function")
+        name = function.get("name") if isinstance(function, dict) else tool.get("name")
+        if isinstance(name, str) and name:
+            pack_tool_names.append(name)
+    pack_tool_names = sorted(set(pack_tool_names))
+    paraphrase_hits = {name: _paraphrase_leaks(rows, pack_tool_names) for name, rows in layer_rows.items()}
     paraphrase_unique = {canonical_json(item) for values in paraphrase_hits.values() for item in values}
     paraphrase_complete = all(layers[name]["available"] for name in ("expanded", "raw"))
     paraphrase_missing = [name for name in ("expanded", "raw") if not layers[name]["available"]]
@@ -1471,23 +1501,57 @@ def _build_metrics(
     max_shares = {
         category: max(counts.values()) / sum(counts.values()) for category, counts in category_intents.items()
     }
-    intent_complete = bool(pack)
+    max_intent_share_source = targets.get("max_intent_share")
+    max_intent_share: float | None = None
+    if max_intent_share_source is not None:
+        if (
+            not isinstance(max_intent_share_source, (int, float))
+            or isinstance(max_intent_share_source, bool)
+            or not math.isfinite(float(max_intent_share_source))
+            or not 0.0 < float(max_intent_share_source) <= 1.0
+        ):
+            raise BiasAuditError(
+                "bias_targets.max_intent_share must be finite, greater than 0, "
+                "and at most 1"
+            )
+        max_intent_share = float(max_intent_share_source)
+    allowed_max_intent_share = (
+        min(1.0, max_intent_share + ABSOLUTE_MIX_TOLERANCE)
+        if max_intent_share is not None
+        else None
+    )
+    missing_intent_evidence = [
+        name
+        for available, name in (
+            (bool(pack), "pack task_templates.yaml"),
+            (max_intent_share is not None, "run_manifest.bias_targets.max_intent_share"),
+        )
+        if not available
+    ]
+    intent_complete = not missing_intent_evidence
     metrics.append(
         _metric(
             "B15",
             "intent_balance_score",
             intent_balance,
-            ">=0.65; orphan_intent_rate=0; max intent share <=0.50",
-            intent_balance >= 0.65 and not orphan_intents and all(value <= 0.50 for value in max_shares.values()),
+            ">=0.65; orphan_intent_rate=0; max intent share <= configured target +0.05",
+            intent_complete
+            and intent_balance >= 0.65
+            and not orphan_intents
+            and allowed_max_intent_share is not None
+            and all(value <= allowed_max_intent_share for value in max_shares.values()),
             {
                 "counts_by_category": {
                     category: dict(sorted(counts.items())) for category, counts in sorted(category_intents.items())
                 },
                 "single_intent_categories": sorted(set(category_intents) - set(multi_intent)),
                 "max_intent_share_by_category": max_shares,
+                "max_intent_share_target": max_intent_share,
+                "absolute_tolerance": ABSOLUTE_MIX_TOLERANCE,
+                "allowed_max_intent_share": allowed_max_intent_share,
                 "orphan_intents": orphan_intents,
                 "orphan_intent_rate": (len(orphan_intents) / len(declared_intents) if declared_intents else None),
-                **({} if intent_complete else {"missing_evidence": "pack task templates"}),
+                **({} if intent_complete else {"missing_evidence": missing_intent_evidence}),
             },
             ["published", "pack task_templates.yaml"],
             applicability=applicability["B15"],
@@ -1641,7 +1705,9 @@ def build_bias_audit_report(inputs: AuditInputs) -> dict[str, Any]:
                 for metric in metrics
             ),
             "failed_bias_ids": failed,
-            "approved_exception_bias_ids": sorted(set(failed) - set(unexcepted)),
+            "approved_exception_bias_ids": [
+                bias_id for bias_id in failed if bias_id not in unexcepted
+            ],
             "unexcepted_failure_bias_ids": unexcepted,
             "status": ("passed" if not failed else "passed_with_exceptions" if not unexcepted else "failed"),
         },

@@ -50,7 +50,7 @@ and approved exceptions.
 | B12 | `agnostic_portability_pass` | true |
 | B13 | `truth_creep_incidents` | =0 |
 | B14 | `negative_or_irrelevant_rate` | ≥0.10 plus failure-family floor |
-| B15 | `intent_balance_score` | ≥0.65, no orphan, per-category cap |
+| B15 | `intent_balance_score` | ≥0.65, no orphan, configured per-category target +0.05 |
 | B16 | `turn_mix_abs_error` | ≤0.05 |
 
 For B5, an applicable release must pin all three `tool_call_count_mix`
@@ -58,6 +58,12 @@ buckets in `run_manifest.bias_targets`. The auditor does not inject the generic
 design example after generation, because Stage 11 can only be audited against a
 target it actually consumed. A missing target therefore yields `value: null`,
 incomplete evidence, and a failed B5 verdict.
+
+For B15, an applicable release must likewise pin `max_intent_share` in
+`run_manifest.bias_targets`. The observed maximum within each category may
+exceed that target by at most five percentage points. The auditor does not
+invent the previous `0.50` design default when the manifest omits it; legacy
+releases need an approved exception or a regenerated manifest from a new run.
 
 An N/A record has a stable non-empty reason, `value: null`, and does not count
 as an applicable pass. An approved exception records `affected_metric`,
@@ -118,3 +124,22 @@ python -m nemotron.steps.byob.scripts.audit_bfcl_bias \
 Paths adjacent to the manifest are discovered when present. Exit status is `0`
 for passed or fully excepted reports, `1` for completed audits with unexcepted
 metric failures, and `2` for invalid, tampered, or unusable evidence.
+
+## Restoring a publication-trimmed rendered cache
+
+When a release retained `benchmark_raw.parquet` but omitted
+`stage_cache/rendered_conversations.parquet`, restore the stage projection
+without rerunning generation:
+
+```bash
+python -m nemotron.steps.byob.scripts.restore_bfcl_rendered_conversations \
+  --run-manifest /release/run_manifest.json \
+  --raw-benchmark /release/benchmark/benchmark_raw.parquet \
+  --output /release/stage_cache/rendered_conversations.parquet
+```
+
+The command verifies the raw-table hash and schema, reverses the lossless Stage
+12 message projection, writes with the canonical stage schema, and publishes
+the result only when its bytes reproduce the `rendered_conversations` hash
+already committed by the manifest. It never calls a model or modifies the
+frozen benchmark tables.

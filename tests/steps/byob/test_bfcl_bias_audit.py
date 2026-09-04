@@ -25,6 +25,17 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.bias_audit import (
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.export_contract import (
     export_content_hash,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import (
+    benchmark_schema,
+)
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
+    rendered_conversations_schema,
+    write_stage_table,
+)
+from nemotron.steps.byob.scripts.restore_bfcl_rendered_conversations import (
+    _rendered_row,
+    restore_rendered_conversations,
+)
 
 
 def _row(
@@ -207,6 +218,7 @@ def _write_fixture(root: Path) -> tuple[Path, Path]:
                 "2": 3 / 7,
                 "3+": 0.0,
             },
+            "max_intent_share": 0.50,
             "turn_mix": {"single_turn": 4 / 9, "multi_turn": 5 / 9},
         },
         "models": {"surface_judge": {"enabled": False}},
@@ -365,13 +377,82 @@ def test_applicable_b5_without_manifest_target_fails_closed(
     assert report["summary"]["status"] == "failed"
 
 
-def test_banking_gold_configs_pin_domain_specific_b5_target() -> None:
+def test_banking_gold_configs_pin_domain_specific_b5_and_b15_targets() -> None:
     config_root = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob" / "bfcl" / "config"
     expected = {"1": 0.60, "2": 0.30, "3+": 0.10}
 
     for name in ("banking_vn.gold.yaml", "banking_vn.gold.paraphrase.yaml"):
         document = yaml.safe_load((config_root / name).read_text(encoding="utf-8"))
         assert document["task_generation"]["tool_call_count_mix"] == expected
+        assert document["task_generation"]["max_intent_share"] == 0.50
+
+
+def test_b15_uses_manifest_target_with_five_point_tolerance_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    manifest, export = _write_fixture(tmp_path)
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["bias_applicability"]["B15"] = {"status": "applicable"}
+    document["bias_targets"]["max_intent_share"] = 0.95
+    manifest.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "manifest.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "paths": {
+                    "tools": "tools.json",
+                    "templates": "task_templates.yaml",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pack / "tools.json").write_text("[]\n", encoding="utf-8")
+    (pack / "task_templates.yaml").write_text(
+        yaml.safe_dump(
+            [
+                {"category": f"category_{index}", "intent": f"intent_{index}"}
+                for index in range(3)
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_bias_audit_report(
+        AuditInputs(
+            run_manifest=manifest,
+            output_dir=tmp_path / "audit",
+            published=export,
+            pack_manifest=pack / "manifest.yaml",
+        )
+    )
+    b15 = report["metrics"][14]
+    assert b15["primary_metric"]["passed"] is True
+    assert b15["supporting_diagnostics"]["allowed_max_intent_share"] == 1.0
+
+    del document["bias_targets"]["max_intent_share"]
+    manifest.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    report = build_bias_audit_report(
+        AuditInputs(
+            run_manifest=manifest,
+            output_dir=tmp_path / "audit-missing",
+            published=export,
+            pack_manifest=pack / "manifest.yaml",
+        )
+    )
+    b15 = report["metrics"][14]
+    assert b15["primary_metric"]["passed"] is False
+    assert b15["evidence_complete"] is False
+    assert b15["supporting_diagnostics"]["missing_evidence"] == [
+        "run_manifest.bias_targets.max_intent_share"
+    ]
 
 
 def test_reviewed_b10_and_b13_evidence_is_run_bound_and_seeded(
@@ -485,6 +566,7 @@ def test_approved_exception_preserves_failed_verdict_and_changes_status(
         "medium": 0.0,
         "hard": 0.0,
     }
+    del document["bias_targets"]["tool_call_count_mix"]
     manifest.write_text(
         json.dumps(document, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -499,6 +581,12 @@ def test_approved_exception_preserves_failed_verdict_and_changes_status(
                         "affected_metric": "B2",
                         "owner": "bias-review-board",
                         "rationale": "Approved synthetic golden-fixture deviation.",
+                        "approval_date": "2026-09-03",
+                    },
+                    {
+                        "affected_metric": "B5",
+                        "owner": "bias-review-board",
+                        "rationale": "Approved synthetic missing-target fixture.",
                         "approval_date": "2026-09-03",
                     }
                 ],
@@ -521,7 +609,7 @@ def test_approved_exception_preserves_failed_verdict_and_changes_status(
     assert b2["primary_metric"]["passed"] is False
     assert b2["exceptions"][0]["owner"] == "bias-review-board"
     assert report["summary"]["status"] == "passed_with_exceptions"
-    assert report["summary"]["approved_exception_bias_ids"] == ["B2"]
+    assert report["summary"]["approved_exception_bias_ids"] == ["B2", "B5"]
 
 
 def test_contamination_evidence_must_match_run_and_published_task_set(
@@ -725,3 +813,74 @@ def test_read_only_cli_writes_both_content_addressed_reports(
     assert result["report_hash"] == report["report_hash"]
     assert (output / "bias_audit_report.md").is_file()
     assert {path: path.read_bytes() for path in source_before} == source_before
+
+
+def test_rendered_cache_restores_only_when_it_matches_manifest(
+    tmp_path: Path,
+) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    raw_row = {
+        "task_id": "task-restored",
+        "template_id": "template-restored",
+        "variant_index": 1,
+        "messages": [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "A paraphrased request"},
+            {"role": "assistant", "content": "A response"},
+        ],
+        "expected_tool_calls": [],
+        "system_prompt_id": "sha256:system",
+        "paraphrase_model": "registry:model@sha256:" + "a" * 64,
+        "paraphrase_model_canonical": "registry:model@sha256:" + "a" * 64,
+        "metadata": json.dumps(
+            {
+                "language": "vi",
+                "base_task_id": "task-base",
+                "surface_source": "model",
+                "profile_hash": "sha256:" + "b" * 64,
+            }
+        ),
+    }
+    raw = tmp_path / "benchmark_raw.parquet"
+    pq.write_table(
+        pa.Table.from_pylist([raw_row], schema=benchmark_schema()),
+        raw,
+    )
+    expected_path = tmp_path / "expected.parquet"
+    write_stage_table(
+        expected_path,
+        [_rendered_row(pq.read_table(raw).to_pylist()[0])],
+        rendered_conversations_schema(),
+    )
+    rendered_hash = _sha256(expected_path)
+    expected_path.unlink()
+    manifest = tmp_path / "run_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "artifacts": {
+                    "benchmark_raw_parquet": {"content_hash": _sha256(raw)},
+                    "rendered_conversations": {"content_hash": rendered_hash},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    restored = tmp_path / "stage_cache" / "rendered_conversations.parquet"
+
+    assert (
+        restore_rendered_conversations(
+            run_manifest=manifest,
+            raw_benchmark=raw,
+            output=restored,
+        )
+        == restored
+    )
+    assert _sha256(restored) == rendered_hash
+    restored_row = pq.read_table(restored).to_pylist()[0]
+    assert json.loads(restored_row["turns"]) == [
+        {"content": "A paraphrased request", "kind": "user"},
+        {"content": "A response", "kind": "assistant_text"},
+    ]
