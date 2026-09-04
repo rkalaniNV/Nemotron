@@ -35,6 +35,7 @@ preamble: |
   #   uv run nemotron steps run optimize/modelopt/distill -c tiny --batch lepton_optimize_modelopt_distill
   #   uv run nemotron steps run optimize/modelopt/prune -c tiny --batch lepton_optimize_modelopt_prune
   #   uv run nemotron steps run eval/model_eval -c tiny_chat --batch lepton_eval_model_eval
+  #   uv run nemotron steps run eval/model_eval -c direct --batch lepton_eval_direct
   #   uv run nemotron steps run byob/mcq -c tiny --batch lepton_byob_cpu stage=all
   #   uv run nemotron steps run byob/mcq -c tiny --batch lepton_byob_full stage=all
   #   uv run nemotron steps run sdg/data_designer -c tiny --batch lepton_sdg_data_designer_tiny
@@ -63,6 +64,7 @@ checks:
     - lepton_optimize_modelopt_distill
     - lepton_optimize_modelopt_prune
     - lepton_eval_model_eval
+    - lepton_eval_direct
     - lepton_byob_cpu
     - lepton_byob_full
     - lepton_sdg_data_designer
@@ -354,7 +356,8 @@ sections:
     env_vars:
       OPTIM_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/optimize/prune
 
-  # eval/model_eval: lightweight profile for model evaluation steps.
+  # eval/model_eval (launcher mode, `-c default`): the launcher owns scheduling
+  # and can deploy a Megatron checkpoint itself, so this keeps the GPU base.
   lepton_eval_model_eval:
     extends: lepton_base
     nodes: 1
@@ -362,6 +365,56 @@ sections:
       - typer
       - rich
       - pydantic-settings
+      # omegaconf is imported at module scope by the step's runtime; without it
+      # the job dies with ModuleNotFoundError before doing any work.
+      - omegaconf
       - nemo-evaluator-launcher
     env_vars:
       EVAL_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/eval/model_eval
+
+  # eval/model_eval (direct mode, `-c direct`): the harness runs in THIS job
+  # against an endpoint you host yourself, so the job is CPU-only -- the GPUs
+  # are wherever the model is served.
+  #
+  # Two things deliberately absent:
+  #   container_image -- direct.yaml owns the harness image via
+  #     EVAL_HARNESS_IMAGE, and build_job_config() re-applies YAML-owned
+  #     resource keys after merging this file, so a profile image is ignored.
+  #   EVAL_HARNESS_IMAGE in env_vars -- profile env_vars merge OVER the
+  #     config's, so a default here would overwrite direct.yaml's
+  #     self-forwarding `EVAL_HARNESS_IMAGE: ${run.env.container_image}` and the
+  #     pod would resolve its own image to an empty string.
+  lepton_eval_direct:
+    extends: lepton_base
+    resource_shape: ${oc.env:LEPTON_CPU_SHAPE,cpu.large}
+    nodes: 1
+    gpus_per_node: 0
+    nprocs_per_node: 1
+    # lepton_base asks for 64 GB of /dev/shm, which no cpu.* shape can satisfy:
+    # Lepton rejects the submission with HTTP 400 before a job is ever created.
+    # Neither env.toml generation nor --dry-run catches this -- neither talks to
+    # the scheduler.
+    shared_memory_size: 8192
+    # The harness image ships nemo_evaluator and the benchmark venvs -- it is
+    # NOT a Nemotron image and has none of Nemotron's own runtime deps. This
+    # list is redeclared in full because pip_extras is a list: a child value
+    # REPLACES the parent's rather than extending it.
+    pip_extras:
+      - typer
+      - rich
+      - pydantic-settings
+      - omegaconf
+      - tomli
+      - wandb
+    # direct.yaml resolves these INSIDE the pod, so every one it reads must be
+    # forwarded here; exporting them in your shell only affects submission.
+    env_vars:
+      EVAL_ENDPOINT_URL: ${oc.env:EVAL_ENDPOINT_URL,''}
+      EVAL_MODEL_HANDLE: ${oc.env:EVAL_MODEL_HANDLE,''}
+      EVAL_RESULTS_DIR: ${oc.env:EVAL_RESULTS_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/eval/model_eval}
+      EVAL_ENDPOINT_TYPE: ${oc.env:EVAL_ENDPOINT_TYPE,completions}
+      EVAL_API_KEY_NAME: ${oc.env:EVAL_API_KEY_NAME,ENDPOINT_TOKEN}
+      EVAL_TOKENIZER: ${oc.env:EVAL_TOKENIZER,null}
+      EVAL_LIMIT_SAMPLES: ${oc.env:EVAL_LIMIT_SAMPLES,null}
+      # Prefer a Lepton platform secret over this; see the step's README.
+      ENDPOINT_TOKEN: ${oc.env:ENDPOINT_TOKEN,''}

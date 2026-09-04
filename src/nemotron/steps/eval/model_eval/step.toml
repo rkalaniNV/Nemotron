@@ -16,8 +16,8 @@
 id = "eval/model_eval"
 name = "Model Evaluation (NeMo Evaluator)"
 category = "eval"
-description = """Deploy a Megatron Bridge checkpoint behind an OpenAI-compatible endpoint, or evaluate an existing hosted endpoint, with NeMo Evaluator Launcher."""
-tags = ["eval", "benchmarks", "nemo-evaluator", "checkpoint", "launcher"]
+description = """Evaluate a model on benchmark suites. Two modes: `launcher` (default) deploys a Megatron Bridge checkpoint or targets a hosted endpoint via NeMo Evaluator Launcher; `direct` runs the harness inside this step's own job against an endpoint you host, so the backend is whichever runspec profile submits the step."""
+tags = ["eval", "benchmarks", "nemo-evaluator", "checkpoint", "launcher", "direct"]
 
 [[consumes]]
 type = "checkpoint_megatron"
@@ -30,8 +30,22 @@ description = "Benchmark metrics, artifacts, and evaluation summaries produced b
 
 [[parameters]]
 name = "evaluation.tasks"
-description = "Configured NeMo Evaluator Launcher task entries. Each entry uses an exact task ID from `nemo-evaluator-launcher ls tasks`."
+description = "Task entries to evaluate. In `launcher` mode each name must be a task ID from `nemo-evaluator-launcher ls tasks`. In `direct` mode the registry is whatever the selected harness image ships, so harness-only tasks (for example MILU in the sovereign container) are addressable too — check with `nemo-evaluator ls` inside that image. A task entry may carry its own `nemo_evaluator_config`, which is merged over the global params for that task."
 default = [{ name = "adlr_mmlu" }, { name = "hellaswag" }]
+
+[[parameters]]
+name = "mode"
+description = "`launcher` (default) hands the run to NeMo Evaluator Launcher and its executors. `direct` runs the harness in this step's own job against an endpoint you host — use it for backends the launcher has no executor for, or for a harness image whose tasks the launcher registry does not route."
+default = "launcher"
+
+[[parameters]]
+name = "output_dir"
+description = "Where results are written. Must be durable storage (a mount), not the container's ephemeral disk. Direct mode writes `<output_dir>/<task>/` plus `summary.json` (or `summary.dry-run.json` for a dry run)."
+
+[[parameters]]
+name = "overwrite"
+description = "Direct mode only. A non-empty task directory is refused by default, because eval_factory_metrics.json accumulates across runs and would blend a stale failure into fresh results. Set true to REPLACE those directories; the whole plan is validated before anything is deleted, and a dry run never deletes."
+default = false
 
 [[parameters]]
 name = "target.api_endpoint.url"
@@ -69,12 +83,12 @@ description = "Optional per-task sample limit. The default Megatron checkpoint c
 
 [[parameters]]
 name = "task_filters"
-description = "Optional task names passed to NeMo Evaluator Launcher to run a subset of configured tasks."
+description = "Task names to run, also settable per-invocation with `-t`. In `launcher` mode this selects a subset of the configured tasks. In `direct` mode the list is used EXACTLY as supplied — a name not present in `evaluation.tasks` is still run, so a harness-only task can be requested without editing the config. Names become directory names under `output_dir`, so they must be plain names (no separators, no `..`)."
 default = []
 
 [[parameters]]
 name = "dry_run"
-description = "Pass dry_run=true to NeMo Evaluator Launcher. This is different from nemotron steps run --dry-run, which only compiles the Nemotron job config."
+description = "Plan only, do not evaluate. In `launcher` mode this is passed to NeMo Evaluator Launcher. In `direct` mode it prints each resolved harness command, writes `summary.dry-run.json` (never overwriting a real `summary.json`), and makes no destructive change — a non-empty task directory is still reported so the problem surfaces before you spend GPU time. Distinct from `nemotron steps run --dry-run`, which only compiles the Nemotron job config."
 default = false
 
 [[strategies]]
@@ -99,8 +113,48 @@ then = "Use config/tiny_chat.yaml with a chat-compatible hosted endpoint; keep l
 skill = "src/nemotron/steps/eval/model_eval/README.md"
 
 [[strategies]]
-when = "You are selecting benchmark names"
+when = "You are choosing a backend for launcher mode"
+then = "Set `run.env.launcher_executor` (local, slurm or lepton) -- it is a SEPARATE field from `run.env.executor`, which the outer `--batch` profile sets. Keep the outer executor local and let the launcher submit: `run.env.launcher_executor=slurm run.env.account=<acct> run.env.partition=<part>`. Pointing both at one field makes the launcher submit again from inside the outer allocation. If you want the outer profile to be the only scheduler, use direct mode."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "You want to evaluate on Lepton or Run:ai"
+then = "Host the endpoint yourself and evaluate it with `-c direct`. Direct mode never creates or tears down an endpoint. Launcher-managed Lepton deployment is experimental: its executor does not accept the `generic` deployment type this step ships, created endpoints are not cleaned up, and a multi-task run can create one GPU endpoint per task. There is no launcher Run:ai executor at all."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "You are selecting benchmark names in launcher mode"
 then = "Use exact task IDs from `nemo-evaluator-launcher ls tasks` or `nemo-evaluator-launcher ls task <task_id>`; do not prepend harness names unless that exact dotted ID is listed."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "You are selecting benchmark names in direct mode"
+then = "The registry is whatever the selected harness image ships, not the launcher's. Discover with `nemo-evaluator ls` INSIDE that image (e.g. `docker run --rm <harness-image> nemo-evaluator ls`), and note that the same image family can differ by tag. This is how harness-only benchmarks the launcher does not route become addressable."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "You need to give the eval job an endpoint token on Lepton"
+then = "Store it as a platform secret (`lep secret create -n <name> -v <token>`) and map it in the profile with `secret_vars = { ENDPOINT_TOKEN = \"<name>\" }`. Values in `env_vars` are stored verbatim in the submitted job spec and are readable by anyone who can read the job. `EVAL_API_KEY_NAME` still names the variable; only the source of its value changes."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "You are about to publish or cite an eval number"
+then = "Take the provenance from `run_manifest.json` in the output directory: model id, redacted endpoint URL and type, harness image, whether that image was pinned by digest, harness package versions, the Nemotron version and git SHA under `code`, and the fully merged per-task parameters. If `harness.image_pinned_by_digest` is false the run is not reproducible -- re-run against a digest-pinned image before citing it. If `code.git_dirty` is true the SHA does not describe what ran."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "You want eval metrics in Weights & Biases"
+then = "Direct mode does not log to W&B by design -- it writes `run_manifest.json` and `summary.json` and needs no credentials, and the submission path no longer reads or forwards an ambient `wandb` login for configs that do not request W&B. Upload those two files yourself, or use launcher mode with `execution.auto_export.destinations: [wandb]` and an `export.wandb` section."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "You are running launcher mode on a Slurm cluster that cannot pull from your container registry"
+then = "Pre-squash the deployment and evaluation images to `.sqsh` yourself and reference those paths in the config. Automatic squashing does not run for this step: it is keyed to `run.env`, which the generic runner strips before invoking the step, so it returns immediately in any submitted run. Direct mode is unaffected -- its harness image is the step's own container, handled by the `--batch` profile."
+skill = "src/nemotron/steps/eval/model_eval/README.md"
+
+[[strategies]]
+when = "A direct-mode eval dies part-way through a large task while the endpoint looks healthy"
+then = "Check `use_caching` in `target.api_endpoint.adapter_config` before suspecting the model server. Without caching the harness buffers every request and response in memory and dies client-side past roughly 30k requests, on a large CPU shape, while the endpoint is still returning 200 to every call. `direct.yaml` enables it by default; `run_manifest.json` records the merged adapter_config per task so you can tell afterwards. If it is already on, bound the run with `EVAL_LIMIT_SAMPLES` -- a deterministic first-N, so the subset is identical across checkpoints and the scores stay comparable within an ablation."
 skill = "src/nemotron/steps/eval/model_eval/README.md"
 
 [[errors]]
@@ -118,6 +172,38 @@ recovery = "Point evaluation deployment at the specific iter_* checkpoint direct
 [[errors]]
 name = "framework_cli_not_found"
 recovery = "Install the evaluator extra with uv sync --extra evaluator and run through the same environment so Launcher task CLIs are on PATH."
+
+[[errors]]
+name = "lepton_results_missing_after_success"
+recovery = "The Lepton executor rewrites `--output_dir /results` but the lm-evaluation-harness template emits `--output_path /results`, so results are written to the container's ephemeral disk and are lost when Lepton reaps the job. Ship an `evaluation.post_cmd` that copies /results onto the mounted ${output_dir}. Direct mode is unaffected: it writes to ${output_dir} itself."
+
+[[errors]]
+name = "lepton_mount_is_empty"
+recovery = "Task mounts get /<invocation_id> appended to the host path for isolation, so they can never expose an existing directory. Mount checkpoints and tokenizers with a task-level `dataset_dir` + `dataset_mount_path` instead, which is verbatim."
+
+[[errors]]
+name = "lepton_eval_job_401"
+recovery = "The Lepton executor ignores `evaluation.env_vars`. Put the endpoint token in execution.lepton_platform.tasks.env_vars, ideally as {value_from: {secret_name_ref: <id>}}. Private Lepton secrets are stored as <NAME>.<user>, so use the id from `lep secret list`."
+
+[[errors]]
+name = "model_id_mismatch"
+recovery = "target.api_endpoint.model_id must exactly equal the endpoint's --served-model-name, otherwise every request 404s and the task exits 1 after retrying. Drive both from one variable."
+
+[[errors]]
+name = "container_image_is_required"
+recovery = "The Lepton executor treats task-key presence as an override, so `container: null` overrides the task registry with nothing. Omit the key to use the registry default, or set a real image (e.g. a sovereign registry mirror)."
+
+[[errors]]
+name = "job_or_endpoint_stuck_in_starting"
+recovery = "Usually GPU quota or node fragmentation, which `lep job list` does not show. Read GET /deployments/<name>/replicas -> readiness_issue. Use -cbp (preemptible) when guaranteed quota is exhausted."
+
+[[errors]]
+name = "tokenizer_class_does_not_exist"
+recovery = "NeMo tokenizer-extension exports declare tokenizer_class: TokenizersBackend, which stock transformers cannot import. Copy tokenizer.json/tokenizer_config.json/special_tokens_map.json aside, set tokenizer_class to PreTrainedTokenizerFast, drop auto_map, and mount that directory via dataset_dir."
+
+[[errors]]
+name = "endpoint_readiness_timeout_deletes_endpoint"
+recovery = "With deployment.type=vllm the launcher deletes the endpoint when it misses endpoint_readiness_timeout, destroying the logs. Under GPU contention prefer deployment.type=none against an endpoint you deploy and keep, or raise the timeout to cover queue time plus a cold model download."
 
 [reference]
 skill = "src/nemotron/steps/eval/model_eval/README.md"

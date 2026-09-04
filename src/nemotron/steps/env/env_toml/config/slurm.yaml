@@ -33,6 +33,7 @@ preamble: |
   #   uv run nemotron steps run optimize/modelopt/distill -c tiny --batch slurm_optimize_modelopt_distill
   #   uv run nemotron steps run optimize/modelopt/prune -c tiny --batch slurm_optimize_modelopt_prune
   #   uv run nemotron steps run eval/model_eval -c tiny_chat --batch slurm_eval_model_eval
+  #   uv run nemotron steps run eval/model_eval -c direct --batch slurm_eval_direct
   #   uv run nemotron steps run byob/mcq -c tiny --batch slurm_byob_cpu stage=all
   #   uv run nemotron steps run byob/mcq -c tiny --batch slurm_byob_full stage=all
   #   uv run nemotron steps run sdg/data_designer -c tiny --batch slurm_sdg_data_designer_tiny
@@ -61,6 +62,7 @@ checks:
     - slurm_optimize_modelopt_distill
     - slurm_optimize_modelopt_prune
     - slurm_eval_model_eval
+    - slurm_eval_direct
     - slurm_byob_cpu
     - slurm_byob_full
     - slurm_sdg_data_designer
@@ -372,10 +374,62 @@ sections:
     env_vars:
       OPTIM_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/lustre/${oc.env:USER}}/output/optimize/prune
 
-  # eval/model_eval: lightweight profile for model evaluation steps.
+  # eval/model_eval (launcher mode, `-c default`): the launcher owns scheduling
+  # and can deploy a Megatron checkpoint itself, so this keeps the GPU base.
   slurm_eval_model_eval:
     extends: slurm_base
     nodes: 1
     time: "02:00:00"
     env_vars:
       EVAL_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/lustre/${oc.env:USER}}/output/eval/model_eval
+
+  # eval/model_eval (direct mode, `-c direct`): the harness runs in THIS job
+  # against an endpoint you host yourself, so the job needs no GPU -- the GPUs
+  # are wherever the model is served.
+  #
+  # Two things deliberately absent:
+  #   container_image -- direct.yaml owns the harness image via
+  #     EVAL_HARNESS_IMAGE, and build_job_config() re-applies YAML-owned
+  #     resource keys after merging this file, so a profile image is ignored.
+  #   EVAL_HARNESS_IMAGE in env_vars -- profile env_vars merge OVER the
+  #     config's, so a default here would overwrite direct.yaml's
+  #     self-forwarding `EVAL_HARNESS_IMAGE: ${run.env.container_image}` and the
+  #     pod would resolve its own image to an empty string.
+  #
+  # On Slurm the endpoint is usually served in a separate allocation, or an
+  # existing one is reused; either way it is just a URL to this job.
+  slurm_eval_direct:
+    extends: slurm_base
+    partition: ${oc.env:SLURM_CPU_PARTITION,cpu}
+    build_partition: ${oc.env:SLURM_CPU_PARTITION,cpu}
+    build_include_gpus: false
+    build_gpus_per_node: 0
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 8
+    gpus_per_node: 0
+    # A bounded split of a large benchmark runs in tens of minutes; an
+    # unbounded one does not. Raise this before removing EVAL_LIMIT_SAMPLES.
+    time: "04:00:00"
+    # The harness image ships nemo_evaluator and the benchmark venvs -- it is
+    # NOT a Nemotron image and has none of Nemotron's own runtime deps. This
+    # list is redeclared in full because pip_extras is a list: a child value
+    # REPLACES the parent's rather than extending it.
+    pip_extras:
+      - typer
+      - rich
+      - pydantic-settings
+      - omegaconf
+      - tomli
+      - wandb
+    # direct.yaml resolves these INSIDE the job, so every one it reads must be
+    # forwarded here; exporting them in your shell only affects submission.
+    env_vars:
+      EVAL_ENDPOINT_URL: ${oc.env:EVAL_ENDPOINT_URL,''}
+      EVAL_MODEL_HANDLE: ${oc.env:EVAL_MODEL_HANDLE,''}
+      EVAL_RESULTS_DIR: ${oc.env:EVAL_RESULTS_DIR,${oc.env:NEMOTRON_WORKSPACE,/lustre/${oc.env:USER}}/output/eval/model_eval}
+      EVAL_ENDPOINT_TYPE: ${oc.env:EVAL_ENDPOINT_TYPE,completions}
+      EVAL_API_KEY_NAME: ${oc.env:EVAL_API_KEY_NAME,ENDPOINT_TOKEN}
+      EVAL_TOKENIZER: ${oc.env:EVAL_TOKENIZER,null}
+      EVAL_LIMIT_SAMPLES: ${oc.env:EVAL_LIMIT_SAMPLES,null}
+      ENDPOINT_TOKEN: ${oc.env:ENDPOINT_TOKEN,''}
