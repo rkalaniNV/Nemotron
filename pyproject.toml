@@ -63,6 +63,11 @@ audio = [
 # `--help` rendering; the recipe scripts themselves also work standalone via
 # `uv run --no-project` (they declare their own PEP 723 inline deps).
 data-sdg = ["data-designer>=0.5.6; python_version>='3.11' and python_version<'3.14'"]
+qasynth-sdg = [
+    "data-designer==0.5.9; python_version>='3.11' and python_version<'3.14'",
+    "sentence-transformers>=5.0.0,<6.0.0; python_version>='3.11' and python_version<'3.14'",
+    "torch>=2.10,<2.11; python_version>='3.11' and python_version<'3.14'",
+]
 byob = [
     # BYOB CPU/runtime dependencies. GPU semantic-dedup/outlier dependencies live in `byob-gpu`.
     "cosmos-xenna>=0.2,<0.3; python_version>='3.11' and python_version<'3.14'",
@@ -172,6 +177,9 @@ nemotron = "nemotron.__main__:main"
 
 [project.entry-points."fsspec.specs"]
 art = "nemo_runspec.filesystem:ArtifactFileSystem"
+
+[project.entry-points."data_designer.plugins"]
+qasynth-mcq = "nemotron.steps.sdg.plugins.qasynth.plugin:qasynth_mcq"
 
 [build-system]
 requires = ["hatchling"]

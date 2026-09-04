@@ -1,0 +1,72 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[step]
+id = "sdg/qasynth"
+name = "Persona QASynth SFT Generation"
+category = "sdg"
+description = "Generate, deduplicate, answer, vote, and export English/Hindi persona-grounded MCQ SFT data."
+tags = ["sdg", "data-designer", "qasynth", "mcq", "sft", "multilingual"]
+
+[[produces]]
+type = "synthetic_jsonl"
+description = "Aligned per-teacher OpenAI messages JSONL with optional assistant reasoning content."
+
+[[parameters]]
+name = "run.experiment_name"
+description = "Stable experiment namespace used for artifacts, checkpoints, config identity, and summaries."
+
+[[parameters]]
+name = "run.stages"
+description = "Ordered stages to run, or [all] for the complete pipeline."
+default = ["all"]
+
+[[parameters]]
+name = "question_models"
+description = "Models whose authored questions are pooled before deduplication."
+
+[[parameters]]
+name = "answer_models"
+description = "At least three teacher models used to answer every deduplicated question and vote."
+
+[[parameters]]
+name = "semantic_dedup.threshold"
+description = "Cosine-similarity threshold for multilingual-E5 near-duplicate removal."
+default = 0.965
+
+[[parameters]]
+name = "sft.agreement"
+description = "Vote threshold used when selecting SFT responses."
+default = "unanimous"
+choices = ["unanimous", "majority"]
+
+[[parameters]]
+name = "sampling.reasoning_off_fraction"
+description = "Deterministic fraction of final examples that omit reasoning_content."
+default = 0.1
+
+[[strategies]]
+when = "Validating wiring or model endpoints"
+then = "Use config/tiny.yaml and a fresh experiment_name before scaling record counts."
+
+[[strategies]]
+when = "Resuming after an endpoint or worker failure"
+then = "Keep the same experiment name and config with run.resume=true; failed answer rows remain retryable."
+
+[[errors]]
+name = "experiment_config_mismatch"
+recovery = "Choose a new experiment name or intentionally set run.overwrite=true; never combine incompatible stage artifacts."
+
+[[errors]]
+name = "persona_assets_missing"
+recovery = "Run data-designer download personas for every configured locale before question generation."
+
+[[errors]]
+name = "teacher_intersection_too_small"
+recovery = "Inspect voting and language-purity summaries, then reduce sampling.per_language or regenerate failed answers."
+
+[reference]
+skill = "src/nemotron/steps/sdg/qasynth/README.md"
+repo = "https://github.com/NVIDIA-NeMo/DataDesigner"
+source_plugin = "https://gitlab-master.nvidia.com/kanishks/sovereign-ai-playbook/-/tree/88afa6e30ff123dd0abeba3a77555e369600c036/sdg/data-designer-plugins/qasynth_plugin"
+source_pipeline = "https://gitlab-master.nvidia.com/kanishks/sovereign-ai-playbook/-/tree/88afa6e30ff123dd0abeba3a77555e369600c036/sdg/scripts/mcq_personas"

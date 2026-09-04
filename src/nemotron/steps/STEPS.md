@@ -75,6 +75,7 @@
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
 | [sdg/data_designer](sdg/data_designer/) | Build a NeMo Data Designer pipeline declaratively and generate synthetic data. Three recipes ship in config/: 'default' produces SFT chat data, 'customer_support_tools' produces tool-call SFT data, and 'rl_pref' produces preference pairs (chosen / rejected) for DPO.  Customisation lives in YAML — step.py just translates declarative column specs into the upstream DataDesignerConfigBuilder API. | training_jsonl (optional) | synthetic_jsonl |
+| [sdg/qasynth](sdg/qasynth/) | Generate, deduplicate, answer, vote, and export English/Hindi persona-grounded MCQ SFT data. | - | synthetic_jsonl |
 
 ## sft — Supervised Fine-Tuning
 
