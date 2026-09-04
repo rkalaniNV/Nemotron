@@ -27,9 +27,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, TypeVar
 
 import yaml
 from pydantic import ValidationError
@@ -704,70 +704,148 @@ def _resolve_scoring(data: Mapping[str, Any], base_dir: Path) -> EvalScoringConf
     return _model(EvalScoringConfig, payload, "scoring")
 
 
-def _resolve_candidates(data: Mapping[str, Any]) -> tuple[EvalCandidate, ...]:
+_T = TypeVar("_T")
+
+
+def _resolve_eval_settings(data: Mapping[str, Any]) -> EvalSettings:
+    modes = _section(data, "eval", _EVAL_KEYS)["mode"]
+    if isinstance(modes, str) or not isinstance(modes, Sequence):
+        raise EvalConfigSchemaError(
+            "eval.mode",
+            "must be a list of modes",
+            value=modes,
+            expected="a list such as [trace] or [trace, executable]",
+            recovery="write eval.mode as a YAML list, even for a single mode",
+        )
+    return _model(EvalSettings, {"modes": tuple(modes)}, "eval")
+
+
+def _resolve_held_out_eval(data: Mapping[str, Any]) -> HeldOutEvalConfig | None:
+    if "held_out_eval" not in data:
+        return None
+    return _model(
+        HeldOutEvalConfig,
+        _section(data, "held_out_eval", _HELD_OUT_EVAL_KEYS, optional=frozenset({"contract_version"})),
+        "held_out_eval",
+    )
+
+
+class _Violations:
+    """Run independent config sections and keep every refusal, not just the first.
+
+    A preflight sends no candidate request, so stopping at the first bad section
+    saved nothing and cost a round trip per problem. The first refusal in config
+    order is still the one raised, so a config with a single fault reports
+    exactly what it always did.
+    """
+
+    def __init__(self) -> None:
+        self.found: list[EvalConfigError] = []
+
+    def run(self, resolve: Callable[[], _T]) -> _T | None:
+        try:
+            return resolve()
+        except EvalConfigError as exc:
+            self.found.append(exc)
+            return None
+
+    def add(self, violation: EvalConfigError) -> None:
+        self.found.append(violation)
+
+    def raise_if_any(self) -> None:
+        if not self.found:
+            return
+        first, *rest = self.found
+        raise first.also_report(rest)
+
+
+def _resolve_candidates(data: Mapping[str, Any], violations: _Violations) -> tuple[EvalCandidate, ...]:
+    """Resolve every candidate, recording each one's fault rather than raising it.
+
+    One candidate's fault says nothing about the next one's. The caller owns the
+    single collector for the whole config, so the refusals stay in config order
+    and no collector nests inside another.
+    """
     raw = data.get("candidates")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-        raise EvalConfigSchemaError(
-            "candidates",
-            "must be a list of candidate mappings",
-            value=raw,
-            expected="a non-empty list",
-            recovery="declare one entry per model under evaluation",
+        violations.add(
+            EvalConfigSchemaError(
+                "candidates",
+                "must be a list of candidate mappings",
+                value=raw,
+                expected="a non-empty list",
+                recovery="declare one entry per model under evaluation",
+            )
         )
+        return ()
     candidates: list[EvalCandidate] = []
     for index, entry in enumerate(raw):
-        field = f"candidates[{index}]"
-        candidate = _require_mapping(entry, field, recovery="write each candidate as a mapping")
-        unknown = sorted(set(candidate) - _CANDIDATE_KEYS)
-        if unknown:
-            raise EvalConfigSchemaError(
-                field,
-                f"unknown key(s): {', '.join(unknown)}",
-                expected=f"only {', '.join(sorted(_CANDIDATE_KEYS))}",
-                recovery="remove the unknown key; decoding settings belong under inference",
-            )
-        missing = sorted(_CANDIDATE_KEYS - set(candidate))
-        if missing:
-            raise EvalConfigSchemaError(
-                field,
-                f"missing required key(s): {', '.join(missing)}",
-                expected=f"every one of {', '.join(sorted(_CANDIDATE_KEYS))}",
-                recovery="a candidate states its serving route and the weights it serves; run "
-                "resolve_bfcl_model_identity to fill model_identity in from the registry or the provider",
-            )
-        api = _section(candidate, "api", _API_KEYS, field=f"{field}.api")
-        identity = _section(
-            candidate,
-            "model_identity",
-            _IDENTITY_KEYS,
-            optional=_IDENTITY_OPTIONAL,
-            field=f"{field}.model_identity",
-        )
-        inference = _section(
-            candidate,
-            "inference",
-            _INFERENCE_KEYS,
-            optional=_INFERENCE_OPTIONAL,
-            field=f"{field}.inference",
-        )
-        candidates.append(
-            _model(
-                EvalCandidate,
-                {
-                    **{key: candidate[key] for key in ("alias", "model", "provider", "provider_api_version")},
-                    "api": _model(CandidateApi, api, f"{field}.api"),
-                    "model_identity": _model(CandidateModelIdentity, identity, f"{field}.model_identity"),
-                    "inference": _model(CandidateInference, inference, f"{field}.inference"),
-                },
-                field,
-            )
-        )
+        resolved = violations.run(lambda index=index, entry=entry: _resolve_candidate(entry, index))
+        if resolved is not None:
+            candidates.append(resolved)
     return tuple(candidates)
+
+
+def _resolve_candidate(entry: Any, index: int) -> EvalCandidate:
+    field = f"candidates[{index}]"
+    candidate = _require_mapping(entry, field, recovery="write each candidate as a mapping")
+    unknown = sorted(set(candidate) - _CANDIDATE_KEYS)
+    if unknown:
+        raise EvalConfigSchemaError(
+            field,
+            f"unknown key(s): {', '.join(unknown)}",
+            expected=f"only {', '.join(sorted(_CANDIDATE_KEYS))}",
+            recovery="remove the unknown key; decoding settings belong under inference",
+        )
+    missing = sorted(_CANDIDATE_KEYS - set(candidate))
+    if missing:
+        raise EvalConfigSchemaError(
+            field,
+            f"missing required key(s): {', '.join(missing)}",
+            expected=f"every one of {', '.join(sorted(_CANDIDATE_KEYS))}",
+            recovery="a candidate states its serving route and the weights it serves; run "
+            "resolve_bfcl_model_identity to fill model_identity in from the registry or the provider",
+        )
+    api = _section(candidate, "api", _API_KEYS, field=f"{field}.api")
+    identity = _section(
+        candidate,
+        "model_identity",
+        _IDENTITY_KEYS,
+        optional=_IDENTITY_OPTIONAL,
+        field=f"{field}.model_identity",
+    )
+    inference = _section(
+        candidate,
+        "inference",
+        _INFERENCE_KEYS,
+        optional=_INFERENCE_OPTIONAL,
+        field=f"{field}.inference",
+    )
+    try:
+        return _model(
+            EvalCandidate,
+            {
+                **{key: candidate[key] for key in ("alias", "model", "provider", "provider_api_version")},
+                "api": _model(CandidateApi, api, f"{field}.api"),
+                "model_identity": _model(CandidateModelIdentity, identity, f"{field}.model_identity"),
+                "inference": _model(CandidateInference, inference, f"{field}.inference"),
+            },
+            field,
+        )
+    except EvalConfigError as exc:
+        # The candidate models are built without any list context, so they name
+        # the field "candidates[]". Now that every candidate is reported in one
+        # pass, two faults would otherwise arrive under the same field path.
+        indexed = f"candidates[{index}]"
+        exc.field = exc.field.replace("candidates[]", indexed)
+        exc.args = (str(exc.args[0]).replace("candidates[]", indexed),)
+        raise
 
 
 def _refuse_capabilities_the_declared_schema_lacks(
     candidates: Sequence[EvalCandidate],
     schema_version: str,
+    violations: _Violations,
 ) -> None:
     """Hold a config to the version it declares, not to the newest one this build reads.
 
@@ -783,22 +861,26 @@ def _refuse_capabilities_the_declared_schema_lacks(
         field = f"candidates[{index}].model_identity"
         identity = candidate.model_identity
         if identity.assurance != "weights_pinned":
-            raise CandidateIdentityError(
-                field,
-                "neither revision nor weights_digest is set, and schema 1.1 required every candidate to pin "
-                "the weights it was scored on",
-                expected="revision (immutable) or weights_digest, under schema 1.1",
-                recovery='set schema_version: "1.2" to record a provider-managed candidate and accept a '
-                "non-publishable run, or pin the revision or digest the endpoint serves",
+            violations.add(
+                CandidateIdentityError(
+                    field,
+                    "neither revision nor weights_digest is set, and schema 1.1 required every candidate to "
+                    "pin the weights it was scored on",
+                    expected="revision (immutable) or weights_digest, under schema 1.1",
+                    recovery='set schema_version: "1.2" to record a provider-managed candidate and accept a '
+                    "non-publishable run, or pin the revision or digest the endpoint serves",
+                )
             )
         digest = identity.weights_digest
         if digest is not None and not digest.startswith("sha256:"):
-            raise CandidateIdentityError(
-                field,
-                f"weights_digest names the {digest.split(':', 1)[0]} scheme, which schema 1.1 cannot read",
-                expected="a sha256:<64 hex> digest under schema 1.1",
-                recovery=f'set schema_version: "1.2", which reads {WEIGHT_MANIFEST_DIGEST_SCHEME} digests, or '
-                "record the sha256 digest of the served weights",
+            violations.add(
+                CandidateIdentityError(
+                    field,
+                    f"weights_digest names the {digest.split(':', 1)[0]} scheme, which schema 1.1 cannot read",
+                    expected="a sha256:<64 hex> digest under schema 1.1",
+                    recovery=f'set schema_version: "1.2", which reads {WEIGHT_MANIFEST_DIGEST_SCHEME} digests, '
+                    "or record the sha256 digest of the served weights",
+                )
             )
 
 
@@ -891,45 +973,35 @@ def load_eval_config_mapping(
     _reject_placeholders(data)
     _reject_secrets(data)
 
-    source = _resolve_source(data, base_dir)
-    eval_section = _section(data, "eval", _EVAL_KEYS)
-    modes = eval_section["mode"]
-    if isinstance(modes, str) or not isinstance(modes, Sequence):
-        raise EvalConfigSchemaError(
-            "eval.mode",
-            "must be a list of modes",
-            value=modes,
-            expected="a list such as [trace] or [trace, executable]",
-            recovery="write eval.mode as a YAML list, even for a single mode",
+    # These sections constrain different things, so one being wrong says nothing
+    # about the rest. Reading all of them before refusing turns a config with
+    # three faults into one report instead of three runs.
+    violations = _Violations()
+    source = violations.run(lambda: _resolve_source(data, base_dir))
+    settings = violations.run(lambda: _resolve_eval_settings(data))
+    held_out_settings = violations.run(lambda: _resolve_held_out_eval(data))
+    scoring = violations.run(lambda: _resolve_scoring(data, base_dir))
+    limits = violations.run(lambda: _model(EvalLimits, _section(data, "limits", _LIMITS_KEYS), "limits"))
+    candidates = _resolve_candidates(data, violations)
+    _refuse_capabilities_the_declared_schema_lacks(candidates, str(schema_version), violations)
+    contamination = violations.run(
+        lambda: _model(
+            ContaminationPolicy,
+            _section(data, "contamination", _CONTAMINATION_KEYS),
+            "contamination",
         )
-    settings = _model(EvalSettings, {"modes": tuple(modes)}, "eval")
-    held_out_settings = None
-    if "held_out_eval" in data:
-        held_out_settings = _model(
-            HeldOutEvalConfig,
-            _section(
-                data,
-                "held_out_eval",
-                _HELD_OUT_EVAL_KEYS,
-                optional=frozenset({"contract_version"}),
-            ),
-            "held_out_eval",
+    )
+    publication = violations.run(
+        lambda: _model(
+            EvalPublicationPolicy,
+            _section(data, "publication", _PUBLICATION_KEYS),
+            "publication",
         )
-    scoring = _resolve_scoring(data, base_dir)
-    limits = _model(EvalLimits, _section(data, "limits", _LIMITS_KEYS), "limits")
-    candidates = _resolve_candidates(data)
-    _refuse_capabilities_the_declared_schema_lacks(candidates, str(schema_version))
-    contamination = _model(
-        ContaminationPolicy,
-        _section(data, "contamination", _CONTAMINATION_KEYS),
-        "contamination",
     )
-    publication = _model(
-        EvalPublicationPolicy,
-        _section(data, "publication", _PUBLICATION_KEYS),
-        "publication",
-    )
-    outputs = _resolve_outputs(data, base_dir, source)
+    # Outputs resolve against the source run, so a broken source has nothing to
+    # say here and the section is left to the next run.
+    outputs = violations.run(lambda: _resolve_outputs(data, base_dir, source)) if source is not None else None
+    violations.raise_if_any()
 
     return _model(
         BfclEvalConfig,
@@ -1097,5 +1169,12 @@ def describe_eval_config_error(exc: Exception) -> str:
     """One-line, secret-free summary for a CLI or a step report."""
     if isinstance(exc, EvalConfigError):
         report = exc.as_report()
-        return f"[{report['code']}] {report['field']}: {report['problem']}"
+        summary = f"[{report['code']}] {report['field']}: {report['problem']}"
+        # A one-line summary that named only the first violation would send the
+        # operator back for another run over problems already found. Fields are
+        # paths, so listing them adds no value the redaction rules exclude.
+        if exc.other_violations:
+            fields = ", ".join(other.field for other in exc.other_violations)
+            summary += f" (and {len(exc.other_violations)} more: {fields})"
+        return summary
     return f"[eval_config_invalid] {type(exc).__name__}: {redact_value(str(exc))}"
