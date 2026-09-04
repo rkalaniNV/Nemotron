@@ -70,15 +70,32 @@ class EvalConfigError(Exception):
         self.expected = expected
         self.recovery = recovery
         self.rendered_value = redact_value(value, secret=secret)
+        self.other_violations: tuple[EvalConfigError, ...] = ()
         message = (
             f"{field}: {problem} (got {self.rendered_value}); "
             f"expected {expected}. Fix: {recovery}"
         )
         super().__init__(message)
 
-    def as_report(self) -> dict[str, str]:
+    def also_report(self, others: Sequence[EvalConfigError]) -> EvalConfigError:
+        """Carry the independent violations found alongside this one.
+
+        Validation used to stop at the first refusal, so a config with three
+        unrelated problems cost three runs to learn about — and a preflight
+        makes no candidate request, so there was nothing to save by stopping.
+        This one stays the raised error, keeping its code and exit status, and
+        the rest ride along in the message and the report.
+        """
+        if not others:
+            return self
+        self.other_violations = (*self.other_violations, *others)
+        listed = "\n".join(f"  also: {other.args[0]}" for other in others)
+        self.args = (f"{self.args[0]}\n{listed}",)
+        return self
+
+    def as_report(self) -> dict[str, Any]:
         """Structured form for step reports, with the value already redacted."""
-        return {
+        report: dict[str, Any] = {
             "code": self.code,
             "field": self.field,
             "problem": self.problem,
@@ -86,6 +103,9 @@ class EvalConfigError(Exception):
             "expected": self.expected,
             "recovery": self.recovery,
         }
+        if self.other_violations:
+            report["other_violations"] = [other.as_report() for other in self.other_violations]
+        return report
 
 
 class EvalConfigSchemaError(EvalConfigError):

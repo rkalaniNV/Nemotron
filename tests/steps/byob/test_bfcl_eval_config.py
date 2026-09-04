@@ -1249,3 +1249,75 @@ def test_eval_inputs_stay_out_of_generation_lineage(tmp_path: Path) -> None:
 
     assert generation_payload(plain) == generation_payload(with_eval)
     assert resolved_payload(plain) == resolved_payload(with_eval)
+
+
+def test_independent_config_faults_are_all_reported_in_one_refusal(
+    valid_config: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """A preflight makes no candidate request, so stopping at the first fault only costs runs."""
+    _, data = valid_config
+    data["eval"]["mode"] = "trace"
+    data["limits"]["max_turns"] = 0
+    data["contamination"]["comparison_set"] = "whatever_survives"
+
+    with pytest.raises(EvalConfigSchemaError) as refusal:
+        _load(tmp_path, data, "many_faults.yaml")
+
+    message = str(refusal.value)
+    assert "eval.mode" in message
+    assert "limits" in message
+    assert "contamination" in message
+    reported = refusal.value.as_report()
+    assert [other["field"] for other in reported["other_violations"]] == [
+        "limits.max_turns",
+        "contamination.comparison_set",
+    ]
+
+
+def test_every_bad_candidate_is_reported_not_only_the_first(
+    valid_config: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    _, data = valid_config
+    data["candidates"].append(_second_candidate())
+    data["candidates"][0]["model_identity"]["revision"] = "main"
+    data["candidates"][1]["model_identity"]["revision"] = "main"
+
+    with pytest.raises(CandidateIdentityError) as refusal:
+        _load(tmp_path, data, "two_bad_candidates.yaml")
+
+    fields = [refusal.value.field, *(other["field"] for other in refusal.value.as_report()["other_violations"])]
+    assert [field.split(".")[0] for field in fields] == ["candidates[0]", "candidates[1]"]
+
+
+def test_a_config_with_one_fault_reports_exactly_what_it_always_did(
+    valid_config: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    _, data = valid_config
+    data["limits"]["max_turns"] = 0
+
+    with pytest.raises(EvalConfigSchemaError) as refusal:
+        _load(tmp_path, data, "one_fault.yaml")
+
+    assert refusal.value.other_violations == ()
+    assert "also:" not in str(refusal.value)
+    assert "other_violations" not in refusal.value.as_report()
+
+
+def test_the_one_line_summary_admits_the_violations_it_is_not_showing(
+    valid_config: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    _, data = valid_config
+    data["limits"]["max_turns"] = 0
+    data["contamination"]["comparison_set"] = "whatever_survives"
+
+    with pytest.raises(EvalConfigSchemaError) as refusal:
+        _load(tmp_path, data, "summary.yaml")
+
+    summary = describe_eval_config_error(refusal.value)
+    assert summary.count("\n") == 0
+    assert "and 1 more: contamination.comparison_set" in summary
+    assert "whatever_survives" not in summary

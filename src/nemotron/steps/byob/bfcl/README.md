@@ -954,7 +954,11 @@ environment variable, a literal key anywhere in the file is refused, validation
 diagnostics never echo string values, and a missing variable is an execution
 failure rather than a config error. A variable the endpoint rejects is the same
 kind of failure and stops the run on the first refusal rather than scoring the
-task set against a key that cannot work.
+task set against a key that cannot work. Validating the config itself is the one
+place that does not stop at the first refusal: the sections constrain unrelated
+things and a preflight sends no candidate request, so every independent violation
+is reported in one pass, the first in file order setting the exit status and the
+rest listed beneath it.
 
 `scoring.contract` points at
 [`../references/bfcl-eval-scoring-contract.md`](../references/bfcl-eval-scoring-contract.md)
