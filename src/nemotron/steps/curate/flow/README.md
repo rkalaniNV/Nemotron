@@ -23,31 +23,37 @@ second at preflight instead of at the point of use.
 
 ## Where To Start
 
-Four configs ship with the step, run by name:
+Five configs ship with the step, run by name:
 
 | `-c <name>` | For |
 |---|---|
 | `tiny` | ingest-only smoke, CPU, no downloads or language pack |
 | `default` | the shape, commented, to copy |
+| `en_c4` | English C4-shaped input; opts into the packaged English reference pack |
 | `vi_c4` | worked example: Vietnamese web corpus; requires your `./langpacks/vi` |
 | `hi_sangraha` | worked example: Hindi provenance; requires your `./langpacks/hi` |
 
 ```bash
 uv run nemotron steps run curate/flow -c tiny            # verify it runs
+uv run nemotron steps run curate/flow -c en_c4 \
+    corpus.input='./raw_jsonl/*.jsonl' output_root=./output/en
 uv run nemotron steps run curate/flow -c vi_c4 \
     corpus.input='./raw_jsonl/*.jsonl' corpus.langpack_dir=./langpacks \
     output_root=./output/vi
 ```
 
-Copy `vi_c4.yaml` next to your data and edit it — that is your config. Every
-number in it was measured on real documents, and the two examples differ on
-purpose: the Hindi one shows a pack that declares fewer capabilities, and a
-provenance column that changes which gate is safe.
+Copy the closest worked config next to your data and edit it — that is your
+config. The Vietnamese numbers were measured on real documents, and the
+non-English examples differ on purpose: the Hindi one shows a pack that
+declares fewer capabilities, and a provenance column that changes which gate is
+safe.
 
-Nemotron ships no production language packs. The language-specific data used by
-the test suite stays under private `x-test-*` fixtures and is not installed.
-Both profiling and an approved pack-backed policy require an explicit,
-reviewed `corpus.langpack_dir`.
+Nemotron ships one opt-in English reference pack sourced from Snowball and
+Unicode CLDR 48. `en_c4` selects its directory explicitly; defaults still select
+neither a language nor a pack root, and the pack supplies no thresholds.
+Other languages require a reviewed external `corpus.langpack_dir`. The
+language-specific data used by the test suite stays under private `x-test-*`
+fixtures and is not installed.
 
 ## Run It Twice, On Purpose
 

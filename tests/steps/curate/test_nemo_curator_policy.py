@@ -476,7 +476,7 @@ def test_a_pack_signal_without_an_explicit_pack_directory_is_refused(step) -> No
     pack = vietnamese_fixture()
     spec = {"language_tag": pack.language_tag, "content_hash": pack.content_hash}
 
-    with pytest.raises(langpack.LanguagePackNotFoundError, match="does not bundle"):
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="explicit langpack_dir"):
         step.policy_stages([{"signal": PACK_SIGNAL, "min": 0.05}], "text", "filter", spec)
 
 

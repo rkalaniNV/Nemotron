@@ -20,9 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thresholds, and language-pack content recorded in run manifests.
 - Curation manifests, ledgers, input discovery, and artifact handling now reject
   invalid accounting and stale-output states before they can appear successful.
-- Language-pack use now requires an explicit reviewed pack directory; the
-  language-specific validation data lives only under test fixtures and is not
-  shipped as a user default. Pack resources are normalized to NFC when loaded.
+- Language-pack use now requires an explicit pack directory. An opt-in English
+  reference pack sourced from Snowball and Unicode CLDR 48 ships with pinned
+  provenance and licenses, while other language data remains external and
+  private validation fixtures remain test-only. Pack resources are normalized
+  to NFC when loaded.
 - Release wheels exclude the curation `__local__` workspace so downloaded
   corpora, models, and prior run outputs cannot enter packages.
 - Ingest now commits shards only after validation and uses full SHA-256 minted

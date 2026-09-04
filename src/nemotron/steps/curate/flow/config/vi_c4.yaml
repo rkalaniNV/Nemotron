@@ -34,7 +34,8 @@ corpus:
   source_field: source
 
   language: vi
-  # Supply your reviewed pack root; no production language packs are bundled.
+  # Only an opt-in English reference pack is bundled; supply your reviewed
+  # Vietnamese pack root.
   langpack_dir: ./langpacks
   metadata_fields: [id, source, url]
 

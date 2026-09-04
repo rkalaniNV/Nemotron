@@ -64,10 +64,16 @@ A pack is data — word lists, a character set, boilerplate patterns, a fold map
 plus a declaration of what can meaningfully be measured for that language. See
 [../data/langpacks/SPEC.md](../data/langpacks/SPEC.md) to author one.
 
-Nemotron ships no production language packs. Set `langpack_dir` to a reviewed
-pack root owned by your corpus workflow. The `x-test-*` packs under
-`tests/steps/curate/fixtures/langpacks/` validate the implementation but are not
-installed, user defaults, or claims of supported languages.
+Nemotron ships one **opt-in English reference pack** under
+`../data/langpacks/en/`, sourced from Snowball and Unicode CLDR 48 with pinned
+content hashes and license texts. It supplies score inputs, not filtering
+thresholds, and neither the language nor its directory is selected by default.
+Run `-c en` to choose it explicitly. For another language, set `langpack_dir`
+to a reviewed pack root owned by your corpus workflow.
+
+The `x-test-*` packs under `tests/steps/curate/fixtures/langpacks/` validate the
+implementation but are not installed, user defaults, or claims of supported
+languages.
 
 The capability declaration does real work. Vietnamese tone marks strip to
 degraded but readable text, so a diacritic ratio measures something. Devanagari
@@ -122,7 +128,14 @@ before any figure is produced. A mismatch stops the run.
 
 ## Run It
 
-Profile the *unfiltered* input and supply the pack explicitly:
+Run the packaged English smoke profile with no model download:
+
+```bash
+uv run nemotron steps run curate/profile -c en
+```
+
+For your own corpus, profile the *unfiltered* input and supply the pack
+explicitly:
 
 ```bash
 uv run nemotron steps run curate/profile \

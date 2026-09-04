@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nemotron.steps.curate.runtime import policy
+from nemotron.steps.curate.runtime import langpack, policy
 from nemotron.steps.curate.runtime import registry as r
 from nemotron.steps.curate.scripts import run_profile
 
@@ -55,6 +55,18 @@ def test_language_is_declared_without_a_default() -> None:
     assert "language" in by_name
     assert "default" not in by_name["language"], "language must have no default"
     assert by_name["langpack_dir"]["default"] == "null"
+
+
+def test_named_english_profile_explicitly_selects_the_reference_pack() -> None:
+    cfg = yaml.safe_load((STEP_DIR / "config" / "en.yaml").read_text(encoding="utf-8"))
+    package_packs = STEP_DIR.parent / "data" / "langpacks"
+    pack = langpack.load("en", package_packs)
+
+    assert cfg["language"] == "en"
+    assert cfg["langpack_dir"].endswith("/steps/curate/data/langpacks")
+    assert cfg["models"] == {}
+    for signal_name in cfg["signals"]:
+        assert set(r.SIGNALS[signal_name].requires) <= set(pack.capabilities)
 
 
 def test_the_fixture_has_unequal_sources() -> None:

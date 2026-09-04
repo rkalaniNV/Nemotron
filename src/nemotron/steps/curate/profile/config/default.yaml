@@ -10,8 +10,8 @@ output_dir: ./output/profile
 # BCP-47 tag. Required: there is deliberately no default, because a wrong one
 # produces plausible numbers for the wrong language.
 language: null
-# Required path to your reviewed language-pack root. Nemotron ships no
-# production packs; repository-only validation fixtures are not user defaults.
+# Required explicit pack root. Use `-c en` for the opt-in packaged English
+# reference, or point this at your own reviewed language-pack directory.
 langpack_dir: null
 
 text_field: text

@@ -1,0 +1,72 @@
+# Worked example: English web corpus (C4-en shape) using the opt-in bundled
+# English reference pack. The pack defines signals, never thresholds.
+#
+#   uv run nemotron steps run curate/flow -c en_c4 \
+#     corpus.input='./raw_jsonl/*.jsonl' output_root=./output/en
+
+corpus:
+  input: ./raw_jsonl/*.jsonl
+  text_field: text
+
+  # C4 has no stable id. Ingest mints one from the URL and text.
+  id_field: id
+  id_fields: [url, text]
+  id_prefix: "c4en-"
+  source_field: source
+  source_value: c4_en
+
+  language: en
+  langpack_dir: ./src/nemotron/steps/curate/data/langpacks
+  metadata_fields: [url, timestamp]
+
+output_root: ./output/en
+
+steps:
+  ingest:
+    enabled: true
+    on_duplicate: refuse
+
+  profile:
+    enabled: true
+    signals:
+      - unicode_alpha_numeric
+      - script_ratio
+      - stopword_ratio
+      - sentence_end_ratio
+    max_total_docs: 200000
+    seed: 0
+
+  filter:
+    enabled: true
+    mode: both
+    language_codes: []
+    domains: []
+    quality_filters:
+      # Read only when language_codes is non-empty; kept visible so enabling
+      # language identification never inherits an unseen confidence gate.
+      min_langid_score: 0.3
+
+  audit:
+    enabled: true
+    mode: digest
+
+  subset:
+    enabled: false
+    token_budgets: [100000000, 500000000, 2000000000]
+    tokenizer:
+      name: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16
+      revision: 97ab8012882a655dc38df4fee47422aca9caca07
+    token_cache: ./cache/en/token_counts.json
+    quality_score_field: __stopword_ratio
+    length_bands: [128, 512, 2048, 8192]
+    seed: 0
+
+  decontamination:
+    enabled: false
+    holdout: ./data/holdout/*.jsonl
+    threshold: 0.8
+    skip_similarity: false
+
+# Run once with approve null. Read output/en/profile/profile_report.json, choose
+# only thresholds measured on this corpus, then disable profile and re-run.
+approve: null

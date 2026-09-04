@@ -63,7 +63,7 @@ choices = ["filter", "annotate", "both"]
 
 [[parameters]]
 name = "heuristic_filters"
-description = "Approved filtering policy. heuristic_filters.approved_policy names a promoted policy file; a candidate policy from curate/profile carries approved: false and is refused unless allow_unvalidated_policy is set. A policy using pack-backed signals also requires an explicit langpack_dir because no production packs are bundled. Signal names resolve through a closed allowlist, never an import path."
+description = "Approved filtering policy. heuristic_filters.approved_policy names a promoted policy file; a candidate policy from curate/profile carries approved: false and is refused unless allow_unvalidated_policy is set. A policy using pack-backed signals also requires an explicit langpack_dir because no reference or external pack is selected implicitly. Signal names resolve through a closed allowlist, never an import path."
 default = "null"
 
 [[parameters]]

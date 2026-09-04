@@ -45,7 +45,7 @@ description = "BCP-47 tag selecting the language pack. No default: a wrong defau
 
 [[parameters]]
 name = "langpack_dir"
-description = "Required directory holding reviewed language packs. Nemotron ships no production packs; language-specific repository fixtures are test-only."
+description = "Required explicit language-pack root. The named en config opts into the packaged English reference root; other languages use a reviewed external directory. No pack root is selected by default."
 default = "null"
 
 [[parameters]]
@@ -101,7 +101,7 @@ then = "Profile first, then hold the token budget fixed with curate/subset. Othe
 
 [[errors]]
 name = "language_pack_not_found"
-recovery = "Set langpack_dir to the reviewed external pack root and confirm it contains the requested BCP-47 tag. Nemotron ships no production packs; see data/langpacks/SPEC.md to author one."
+recovery = "Set langpack_dir explicitly and confirm it contains the requested BCP-47 tag. Use the named en config for the packaged English reference pack, or see data/langpacks/SPEC.md to author another."
 
 [[errors]]
 name = "language_pack_invalid"

@@ -26,8 +26,8 @@ corpus:
   language: null
 
   # Required when profile or an approved pack-backed policy is enabled.
-  # Nemotron ships no production packs; use a reviewed pack owned by this
-  # corpus workflow.
+  # `-c en_c4` opts into the packaged English reference pack. Other workflows
+  # point this at a reviewed pack they own.
   langpack_dir: null
 
   # Columns to carry through the reader. Anything omitted is dropped at the

@@ -54,9 +54,10 @@ machines, so it can never name an import path.
 Use `annotate` when you want to re-threshold later without re-reading the
 corpus, and `filter` to keep the historical column set exactly.
 
-Nemotron does not bundle production language packs. When a policy uses
-pack-backed signals, set `heuristic_filters.langpack_dir` to the reviewed pack
-root used by this run. The policy carries its content hash; the loaded word
+Nemotron bundles one opt-in English reference pack, but never selects its
+language or directory implicitly. When a policy uses pack-backed signals, set
+`heuristic_filters.langpack_dir` to the same reference or reviewed pack root
+used during profiling. The policy carries its content hash; the loaded word
 lists and character set must match that hash or the run stops.
 
 `heuristic_filters.langpack_content_hash` may additionally pin the expected

@@ -31,11 +31,18 @@ def load_fixture(language: str) -> langpack.LanguagePack:
     return langpack.load(f"x-test-{language}", FIXTURES)
 
 
-# -- private validation fixtures ----------------------------------------------
+# -- packaged reference and private validation fixtures -----------------------
 
 
-def test_no_production_language_packs_are_bundled() -> None:
-    assert not list(PACKAGE_PACKS.glob("*/pack.toml"))
+def test_only_the_opt_in_english_reference_pack_is_bundled() -> None:
+    assert langpack.available(PACKAGE_PACKS) == ["en"]
+
+    pack = langpack.load("en", PACKAGE_PACKS)
+    assert pack.pack_id == "en-reference-snowball-cldr48"
+    assert pack.language_tag == "en"
+    assert len(pack.stopwords) == 174
+    assert len(pack.charset) == 52
+    assert pack.capabilities == {"script_ratio", "stopword_ratio", "sentence_end_ratio"}
 
 
 @pytest.mark.parametrize("language", FIXTURE_LANGUAGES)
@@ -161,7 +168,7 @@ def test_an_unknown_tag_names_what_is_available() -> None:
 
 
 def test_a_pack_directory_is_required() -> None:
-    with pytest.raises(langpack.LanguagePackNotFoundError, match="does not bundle"):
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="explicit langpack_dir"):
         langpack.load("vi", None)
 
 
@@ -252,13 +259,29 @@ def test_language_fixtures_live_outside_the_package() -> None:
     assert PACKAGE_PACKS not in FIXTURES.parents
 
 
-def test_the_wheel_does_not_declare_language_pack_artifacts() -> None:
+def test_the_reference_pack_needs_no_artifact_escape_hatch() -> None:
+    """Tracked package data is included without admitting ignored local packs."""
     root = Path(__file__).resolve().parents[3]
     with (root / "pyproject.toml").open("rb") as fh:
         config = tomllib.load(fh)
 
     artifacts = config["tool"]["hatch"]["build"]["targets"]["wheel"].get("artifacts", [])
     assert not any("langpacks" in entry for entry in artifacts)
+
+
+def test_the_reference_pack_pins_sources_and_carries_licenses() -> None:
+    pack = langpack.load("en", PACKAGE_PACKS)
+    pack_dir = PACKAGE_PACKS / "en"
+
+    for name, source in pack.sources.items():
+        assert source.get("origin"), f"en/{name}: source declares no origin"
+        assert source.get("license"), f"en/{name}: source declares no license"
+        upstream_hash = source.get("upstream_sha256") or source.get("upstream_file_sha256")
+        assert isinstance(upstream_hash, str) and len(upstream_hash) == 64
+        assert (pack_dir / source["license_file"]).is_file()
+
+    assert not (pack_dir / "boilerplate.txt").exists()
+    assert "boilerplate_hits" not in pack.capabilities
 
 
 def test_the_wheel_excludes_local_curate_workspaces() -> None:
@@ -377,6 +400,16 @@ def test_diacritic_capability_requires_an_explicit_fold_map(tmp_path) -> None:
 
 
 # -- provenance ---------------------------------------------------------------
+
+
+def test_a_relative_pack_directory_loads(monkeypatch, tmp_path) -> None:
+    """Config examples use relative roots, so hashing must use one path basis."""
+    import shutil
+
+    shutil.copytree(FIXTURES / "x-test-hi", tmp_path / "x-test-hi")
+    monkeypatch.chdir(tmp_path)
+
+    assert langpack.load_pack("x-test-hi").language_tag == "x-test-hi"
 
 
 def test_the_content_hash_follows_the_contents_not_the_path(tmp_path) -> None:

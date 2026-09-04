@@ -523,9 +523,9 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
         pack_root = profile_cfg.config.get("langpack_dir")
         if pack_root is None or str(pack_root).strip() in {"", "bundled"}:
             problems.append(
-                "steps.profile requires an explicit langpack_dir. Nemotron ships no "
-                "production language packs; point corpus.langpack_dir or "
-                "steps.profile.langpack_dir at the reviewed pack used for this corpus."
+                "steps.profile requires an explicit langpack_dir. Nemotron never chooses "
+                "a pack root implicitly; point corpus.langpack_dir or steps.profile.langpack_dir "
+                "at the opt-in English reference root or the reviewed pack used for this corpus."
             )
 
     if "decontamination" in enabled:
@@ -669,9 +669,9 @@ def materialise_policy(
             if pack_signals and not pack_root_configured:
                 raise FlowConfigError(
                     f"the approved thresholds use language-pack signals {pack_signals}, but "
-                    "no langpack_dir is configured. Nemotron ships no production packs; set "
-                    "corpus.langpack_dir or steps.filter.heuristic_filters.langpack_dir to "
-                    "the reviewed pack root used during profiling."
+                    "no langpack_dir is configured. Nemotron never chooses a pack root implicitly; "
+                    "set corpus.langpack_dir or steps.filter.heuristic_filters.langpack_dir to "
+                    "the same reference or reviewed pack root used during profiling."
                 )
             if pack_root_configured:
                 block["langpack_dir"] = pack_root

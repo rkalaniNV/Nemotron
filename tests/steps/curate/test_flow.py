@@ -29,6 +29,7 @@ from .._step_helpers import assert_step_static, step_dir
 
 STEP_DIR = step_dir(__file__, "curate", "flow")
 LANGPACK_FIXTURES = Path(__file__).parent / "fixtures" / "langpacks"
+PACKAGE_PACKS = STEP_DIR.parent / "data" / "langpacks"
 
 
 def corpus_files(tmp_path: Path, n: int = 40) -> str:
@@ -716,7 +717,7 @@ def test_every_error_the_flow_raises_is_documented() -> None:
 # customer_support_tools. An example that stops parsing is worse than none: it
 # is the first thing a new user copies.
 
-EXAMPLE_CONFIGS = ("vi_c4", "hi_sangraha")
+EXAMPLE_CONFIGS = ("en_c4", "vi_c4", "hi_sangraha")
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
@@ -743,12 +744,27 @@ def test_the_worked_example_ships_unapproved(name) -> None:
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
-def test_the_worked_example_names_a_language_and_external_pack_root(name) -> None:
+def test_the_worked_example_names_a_language_and_explicit_pack_root(name) -> None:
     """Examples must not fall back to private test data or an implicit pack."""
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
 
     assert cfg["corpus"]["language"]
     assert cfg["corpus"]["langpack_dir"] not in (None, "", "bundled")
+
+
+def test_the_english_example_opts_into_the_packaged_reference_root() -> None:
+    cfg = yaml.safe_load((STEP_DIR / "config" / "en_c4.yaml").read_text(encoding="utf-8"))
+
+    assert cfg["corpus"]["language"] == "en"
+    assert cfg["corpus"]["langpack_dir"].endswith("/steps/curate/data/langpacks")
+    assert cfg["steps"]["ingest"]["enabled"] is True
+
+
+@pytest.mark.parametrize("name", ("vi_c4", "hi_sangraha"))
+def test_non_english_examples_require_an_external_pack_root(name) -> None:
+    cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
+
+    assert cfg["corpus"]["langpack_dir"] == "./langpacks"
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
@@ -763,7 +779,12 @@ def test_the_worked_example_only_names_signals_its_pack_supports(name) -> None:
     from nemotron.steps.curate.runtime import langpack
 
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
-    pack = langpack.load(f"x-test-{cfg['corpus']['language']}", LANGPACK_FIXTURES)
+    language = cfg["corpus"]["language"]
+    pack = (
+        langpack.load("en", PACKAGE_PACKS)
+        if language == "en"
+        else langpack.load(f"x-test-{language}", LANGPACK_FIXTURES)
+    )
     named = cfg["steps"]["profile"].get("signals") or []
 
     for signal_name in named:

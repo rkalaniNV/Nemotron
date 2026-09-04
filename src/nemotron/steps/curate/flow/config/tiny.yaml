@@ -1,6 +1,6 @@
 # CPU smoke config for the flow seam: ingest the packaged JSONL fixture without
 # a tokenizer download, GPU, Ray filter, policy, or language pack. Profiling is
-# disabled because production language packs are supplied by users, not bundled.
+# disabled so this smoke does not select even the opt-in English reference pack.
 
 corpus:
   input: /nemo_run/code/src/nemotron/steps/curate/profile/data/tiny/*.jsonl
