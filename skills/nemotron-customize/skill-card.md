@@ -1,5 +1,5 @@
 ## Description: <br>
-Plan, configure, and chain repo-native Nemotron customization steps into single-step or multi-step pipelines: curation, translation, SFT/PEFT (AutoModel or Megatron-Bridge), pretraining/CPT, RL alignment (DPO/RLVR/GRPO/RLHF), BYOB/MCQ benchmarks, checkpoint conversion, ModelOpt optimization, env profiles, and evaluation of trained checkpoints or existing/hosted endpoints. <br>
+Plan, configure, and chain repo-native Nemotron customization steps into single-step or multi-step pipelines: curation, translation, synthetic data generation (including persona-grounded QASynth SFT), SFT/PEFT (AutoModel or Megatron-Bridge), pretraining/CPT, RL alignment (DPO/RLVR/GRPO/RLHF), BYOB/MCQ benchmarks, checkpoint conversion, ModelOpt optimization, env profiles, and evaluation of trained checkpoints or existing/hosted endpoints. <br>
 
 This skill is ready for commercial/non-commercial use. <br>
 
@@ -9,7 +9,7 @@ NVIDIA <br>
 ### License/Terms of Use: <br>
 Apache 2.0 <br>
 ## Use Case: <br>
-Developers and ML engineers use this skill to plan, configure, and execute Nemotron model customization pipelines including data curation, fine-tuning, RL alignment, checkpoint conversion, optimization, and evaluation of trained or hosted endpoints. <br>
+Developers and ML engineers use this skill to plan, configure, and execute Nemotron model customization pipelines including data curation, synthetic data generation, fine-tuning, RL alignment, checkpoint conversion, optimization, and evaluation of trained or hosted endpoints. <br>
 
 ### Deployment Geography for Use: <br>
 Global <br>
@@ -71,7 +71,7 @@ Underlying evaluation signals used in this run: <br>
 | Efficiency | 8 | 63% (+37%) | 54% (+11%) |
 
 ## Skill Version(s): <br>
-0.1.1 (source: frontmatter) <br>
+0.1.2 (source: frontmatter metadata) <br>
 
 ## Ethical Considerations: <br>
 NVIDIA believes Trustworthy AI is a shared responsibility and we have established policies and practices to enable development for a wide array of AI applications. When downloaded or used in accordance with our terms of service, developers should work with their internal team to ensure this skill meets requirements for the relevant industry and use case and addresses unforeseen product misuse. <br>

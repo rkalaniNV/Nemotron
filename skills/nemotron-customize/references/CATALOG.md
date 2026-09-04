@@ -42,14 +42,12 @@ or runner behavior.
   `filtered_jsonl`, so any upstream producing translation-ready JSONL (curation,
   SDG, or a user corpus) satisfies it; insert an upstream step only when the
   input is not yet translation-ready.
-- HARD GUARD (overrides artifact composition): MCQ, multiple-choice, or any
-  benchmark/evaluation dataset routes to `byob/mcq` for BOTH creation and
-  translation — never `translate/nemo_curator`, even when the user says
-  "translate". `translate/nemo_curator` is for plain training corpora only; it
-  flattens MCQ structure (question/options/answer_index) and breaks the
-  benchmark. Trigger on: "MCQ", "multiple choice", "benchmark", "eval set",
-  "questions and options", or any `answer`/`answer_index` schema. When unsure
-  whether data is a benchmark, ask before routing.
+- HARD GUARD (overrides artifact composition): MCQ benchmark/evaluation data
+  routes to `byob/mcq` for both creation and translation — never
+  `translate/nemo_curator`, which flattens MCQ structure. Persona-grounded
+  MCQ-shaped examples intended for SFT training route to `sdg/qasynth` instead.
+  When the intended use (training vs held-out evaluation) is unclear, ask before
+  routing.
 - Insert conversion only when adjacent stages disagree on checkpoint type.
 - Bookend quality-changing stages with `eval/model_eval`.
 
@@ -61,6 +59,7 @@ or runner behavior.
 | `curate/nemo_curator` | Filter raw/local/HF JSONL before translation, SFT prep, or pretrain prep; use for light Curator smoke tests and cleaned local JSONL output. | `raw_jsonl` | `filtered_jsonl` | `default`, `tiny` | Start with `dataset=null`, `language_codes=[]`, `domains=[]`, and `quality_filters={}` until reader/writer IO and schema are verified. |
 | `translate/nemo_curator` | Translate plain JSONL/Parquet training corpora or chat messages. NOT for MCQ/benchmark/eval datasets -> those go to `byob/mcq`. | `filtered_jsonl` | `translated_jsonl` | `default` | Require source/target language, input/output paths, format, `text_field`, backend, and auth env-var names. Preserve user-provided globs exactly. Use `messages.*.content` with `reconstruct_messages=true` for chat. |
 | `sdg/data_designer` | Generate synthetic SFT, tool-call SFT, or DPO preference data from seeds and declarative columns. | optional `training_jsonl` | `synthetic_jsonl` | `default`, `customer_support_tools`, `rl_pref`, `tiny` | Use preview/tiny before scale. `default` emits OpenAI messages, `customer_support_tools` emits tool-call records, `rl_pref` emits DPO preference rows. |
+| `sdg/qasynth` | Generate persona-grounded English/Hindi MCQ-shaped SFT training data with deduplication and multi-teacher voting. NOT for held-out benchmarks -> those go to `byob/mcq`. | - | `synthetic_jsonl` | `default`, `tiny` | Requires Data Designer persona assets and configured question/answer endpoints. Use a fresh experiment name for smoke runs; outputs are aligned per-teacher OpenAI messages JSONL. |
 | `data_prep/sft_packing` | Pack chat JSONL for Megatron-Bridge SFT/PEFT. | `training_jsonl` | `packed_parquet` | `default`, `tiny` | `tokenizer`, `pack_size`, `chat_template`, split ratios, shard counts. `pack_size` must match downstream seq length. |
 | `data_prep/pretrain_prep` | Tokenize text blends into Megatron bin/idx shards and `blend.json`. | `filtered_jsonl` | `binidx` | `default`, `tiny` | `blend_path`, tokenizer, shards, splits, `text_field`. Rebuild if tokenizer changes. |
 | `data_prep/rl_prep` | Resolve HF references and shard prompt/preference data for RL. | `training_jsonl` | `training_jsonl` | `default`, `tiny` | Validate DPO chosen/rejected ordering and RLVR verifier fields before training. |
