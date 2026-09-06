@@ -380,12 +380,19 @@ def threshold_bounds(signal: Any, entry: dict) -> tuple[float, ...]:
 
     present = tuple(key for key in ("min", "max") if key in entry)
     if not present:
-        if not signal.curator_default:
-            raise ValueError(
-                f"{signal.name} sets neither min nor max and has no shipped default, so there "
-                "is no threshold to apply. Give it an explicit bound."
-            )
-        return tuple(float(value) for value in signal.curator_default)
+        # Deliberately no fallback to signal.curator_default. Those defaults are
+        # Curator's, tuned on English, and 15 of the 24 signals carry one; for
+        # non_alpha_numeric it is 0.25, the ASCII-regex threshold that retains
+        # 1.40% of a Vietnamese corpus. Substituting it for a bound the author
+        # forgot to write turns one missing line of YAML into a run that deletes
+        # 98.6% of the data and reports success. The value stays on the signal
+        # and is still reported by curate/profile, where a person can see it and
+        # decide; it is just never applied on their behalf.
+        raise ValueError(
+            f"{signal.name} names a threshold but sets neither min nor max, so there is no "
+            "bound to apply. Give it an explicit min or max — a shipped default would be "
+            "Curator's English-tuned value, which is not a decision this policy made."
+        )
 
     wrong = [key for key in present if key not in expected]
     if wrong:
@@ -1023,6 +1030,25 @@ def emit_manifest(
         completed_at=run_manifest.utc_now() if completed else None,
         declared=declared,
     )
+    # Say whether a person approved the thresholds that produced this corpus.
+    # The output directory is called filtered_jsonl whether or not a policy was
+    # applied, so on a first run — where there is nothing to approve yet, by
+    # design — the artifact looks exactly like a released one. Naming the state
+    # is cheaper than renaming the directory and does not disturb the paths the
+    # flow derives for the steps downstream.
+    thresholds, _, _ = resolve_policy(cfg)
+    document["policy"] = {
+        "status": "approved" if thresholds else "unapproved",
+        "thresholds_applied": len(thresholds),
+        "note": (
+            "Thresholds from an approved policy, checked against a fingerprint of the "
+            "corpus they were measured on."
+            if thresholds
+            else "No approved policy was applied. Any filtering came from configuration "
+            "written by hand, which carries no record of the corpus it was measured on. "
+            "Treat this corpus as a measurement, not as a release."
+        ),
+    }
     run_manifest.write_manifest(path, document)
 
 

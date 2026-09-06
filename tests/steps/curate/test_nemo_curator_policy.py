@@ -572,8 +572,12 @@ def test_pipeline_refuses_inverted_interval_bounds(step) -> None:
         )
 
 
-def test_a_signal_with_no_bound_and_no_default_is_refused(step) -> None:
-    with pytest.raises(ValueError, match="no shipped default"):
+def test_a_signal_with_no_bound_is_refused(step) -> None:
+    """This once said "no bound AND no shipped default", because a signal that
+    shipped one silently used it. Now the bound is required whether or not
+    Curator has an opinion, so the test applies to every signal rather than to
+    the nine that happened to declare an empty default."""
+    with pytest.raises(ValueError, match="neither min nor max"):
         step.policy_stages([{"signal": "token_count"}], "text", "filter", {"tokenizer": "m"})
 
 
@@ -675,3 +679,68 @@ def test_resolve_policy_carries_the_config_tokenizer_and_pack_dir(step, tmp_path
 
     assert spec["tokenizer"] == "some/model"
     assert spec["langpack_dir"] == "/somewhere/packs"
+
+
+def test_a_threshold_without_a_bound_is_refused_not_defaulted() -> None:
+    """A missing bound must fail, not silently become Curator's English default.
+
+    15 of the 24 signals ship a curator_default. For non_alpha_numeric it is
+    0.25 — the ASCII-regex threshold this work exists to replace, which retains
+    1.40% of a Vietnamese corpus. Substituting it for a bound the policy author
+    forgot to write turns one missing line of YAML into a run that deletes 98.6%
+    of the corpus and reports success.
+    """
+    from nemotron.steps.curate.nemo_curator import step
+    from nemotron.steps.curate.runtime import registry
+
+    signal = registry.SIGNALS["non_alpha_numeric"]
+    assert signal.curator_default, "fixture assumes this signal ships a default"
+
+    with pytest.raises(ValueError, match="neither min nor max"):
+        step.threshold_bounds(signal, {"signal": "non_alpha_numeric"})
+
+
+def test_the_shipped_default_is_still_reported_just_never_applied() -> None:
+    """Removing the fallback must not remove the value.
+
+    curate/profile reports curator_default so a person can see what Curator would
+    have used and decide for themselves. That is the whole difference between
+    informing a decision and making it.
+    """
+    from nemotron.steps.curate.runtime import registry
+
+    assert registry.SIGNALS["non_alpha_numeric"].curator_default == (0.25,)
+
+
+def test_the_manifest_says_whether_a_person_approved_the_thresholds(step, tmp_path) -> None:
+    """The output directory is named filtered_jsonl either way.
+
+    A first run has nothing to approve — that is the design, not a mistake — but
+    its output sits in a directory with the same name as a released corpus and
+    carries the same schema. Seven real runs produced exactly that: every
+    flow_report.json recorded policy_applied false while the corpus sat in
+    filtered_jsonl. The manifest now states the difference.
+    """
+    import json
+
+    corpus = tmp_path / "in"
+    corpus.mkdir()
+    (corpus / "part.jsonl").write_text(
+        '{"id": "a", "text": "one"}\n{"id": "b", "text": "two"}\n', encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "part.jsonl").write_text('{"id": "a", "text": "one"}\n', encoding="utf-8")
+
+    manifest = tmp_path / "run_manifest.json"
+    step.emit_manifest(
+        {"input_glob": str(corpus / "*.jsonl"), "output_dir": str(out), "id_field": "id"},
+        str(manifest),
+        "2026-09-04T00:00:00Z",
+        completed=True,
+    )
+
+    policy = json.loads(manifest.read_text(encoding="utf-8"))["policy"]
+    assert policy["status"] == "unapproved"
+    assert policy["thresholds_applied"] == 0
+    assert "not as a release" in policy["note"]
