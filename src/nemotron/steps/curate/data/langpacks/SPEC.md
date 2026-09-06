@@ -78,6 +78,35 @@ something real. Devanagari matras are obligatory vowels; stripping them yields
 nonsense, so the `hi` pack declares neither `diacritic_ratio` nor
 `stopword_ratio_folded`. That absence is the correct answer, not a gap to fill.
 
+### Worked example: declining `stopword_ratio`
+
+Every signal here tokenises on whitespace, so a language that does not delimit
+words that way cannot support the ones that count tokens. Measured on 20,000 C4
+documents per language:
+
+| Language | Score exactly zero | Of those, correct native script |
+|---|---|---|
+| Japanese | 93.7% | 87.9% |
+| Thai | 53.1% | 90.1% |
+
+A "token" is a whole run of text and never matches a stopword. This is not an
+undercount to be corrected with a lower threshold: the signal cannot distinguish
+"not Japanese" from "Japanese, written normally", which is the one distinction it
+exists to make. Declaring it would produce a clean-looking distribution over
+nothing.
+
+Record the measurement in the pack, in a key beside `supports`, so the omission
+reads as a decision rather than an oversight:
+
+```toml
+stopword_ratio_not_declared = """Measured on 20,000 C4-ja documents: 93.7% score
+EXACTLY zero, and 87.9% of those are correct Japanese (script_ratio > 0.5)."""
+```
+
+A morphological tokeniser — MeCab for Japanese, pythainlp for Thai — would change
+this, but it is a runtime change rather than a pack change. When one exists the
+capability can be declared.
+
 ## `fold_map`
 
 Only for marks the language treats as removable. The runtime already drops
