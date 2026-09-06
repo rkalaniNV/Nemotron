@@ -121,7 +121,7 @@ Run a step on its own when you want one stage, or chain steps together when you 
 
 The catalog covers the full training lifecycle.
 
-- Data curation and preparation with `curate/*` and `data_prep/*`.
+- Data curation and preparation with `curate/*` ([docs](docs/curate/index.md)) and `data_prep/*`.
 - Synthetic data generation (SDG) with `sdg/*`.
 - Corpus translation with `translate/*`.
 - Bring-your-own benchmark generation with `byob/*`.

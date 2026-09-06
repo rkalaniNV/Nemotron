@@ -13,13 +13,25 @@ content:
 (curate-index)=
 # About Data Curation With NeMo Curator
 
-The `nemotron steps run curate/nemo_curator` command reads JSONL data, optionally materializes a Hugging Face dataset snapshot, applies lightweight NeMo Curator filters, and writes filtered JSONL shards for downstream translation or training data preparation.
+The `curate/*` steps turn a raw corpus into a filtered one you can account for. `curate/nemo_curator` is the filter itself; six further steps prepare the corpus, measure it before you gate it, and check what came out. `curate/flow` runs them from a single config.
 
-Use this step when you already have JSONL records and need a small, repeatable curation pass before a later step such as `translate/nemo_curator`, `data_prep/pretrain_prep`, or `data_prep/sft_packing`.
+| Step | Use it to |
+|---|---|
+| `curate/ingest` | Read raw parquet or JSONL, mint a stable document id, write curatable JSONL. |
+| `curate/profile` | Measure the corpus and report what a candidate threshold would do to it. |
+| `curate/nemo_curator` | Apply language, word-count, domain and approved-policy filters. |
+| `curate/audit` | Check the output against what the producing step declared. |
+| `curate/subset` | Draw nested subsets at fixed token budgets, for ablations. |
+| `curate/decontamination` | Remove training documents that overlap a held-out split. |
+| `curate/flow` | Run the above from one config, with the gates enforced. |
+
+Start with **[the curate/flow README](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/curate/flow/README.md)**, which carries the run guide: the shipped example configs, the two-run threshold workflow, and the output layout. Note that `-c tiny` is an ingest-only smoke test, not a working curation config.
+
+Language packs are supplied by you. Nemotron ships one opt-in English reference pack; every other language needs a reviewed pack under `corpus.langpack_dir`.
 
 ## When to Use
 
-Use `curate/nemo_curator` when you need:
+Use `curate/nemo_curator` on its own when you need:
 
 - A local JSONL reader and writer path using NeMo Curator.
 - Optional FastText language identification and language filtering.
@@ -28,30 +40,60 @@ Use `curate/nemo_curator` when you need:
 - Optional Hugging Face dataset snapshot download before the Curator reader runs.
 
 ```{note}
-This step is intentionally lightweight.
-It does not crawl web pages, extract Common Crawl WARC files, or run large deduplication workflows.
-Use a dedicated Curator recipe for those jobs before this step, or add a separate step when that behavior is needed.
+`curate/nemo_curator` is intentionally lightweight: it does not crawl web pages or extract Common Crawl WARC files. Use a dedicated Curator recipe for those jobs before this step.
+
+Near-duplicate removal against a held-out split does live in this category, in `curate/decontamination`, behind the `nemotron[curate-gpu]` extra.
 ```
 
 ## Pipeline Summary
 
-```{mermaid}
-flowchart LR
-    A[Optional Hugging Face snapshot] --> B[JSONL files]
-    C[Local JSONL files] --> B
-    B --> D[JsonlReader]
-    D --> E{Language filter enabled?}
-    E -->|yes| F[FastText language ID]
-    E -->|no| G{Word-count filter enabled?}
-    F --> G
-    G -->|yes| H[WordCountFilter]
-    G -->|no| I{Domain filter enabled?}
-    H --> I
-    I -->|yes| J[MultilingualDomainClassifier]
-    I -->|no| K[JsonlWriter]
-    J --> K
-    K --> L[Filtered JSONL shards]
+The category, and where the human decision sits. A plain fence is used so this
+renders both on the documentation site and on GitHub.
+
+```mermaid
+flowchart TB
+    RawCorpus[/"Raw corpus: parquet or JSONL"/]
+    Ingest["curate/ingest<br/>stable document ids"]
+    Profile["curate/profile<br/>measures, proposes nothing executable"]
+    Statistics[/"profile_summary.md<br/>candidate thresholds, commented out"/]
+    Person(["A person chooses the thresholds"])
+    Filter["curate/nemo_curator<br/>the only step that drops rows"]
+    Corpus[/"filtered corpus + manifest + ledger"/]
+    Audit["curate/audit"]
+    Subset["curate/subset"]
+    Decontamination["curate/decontamination"]
+
+    RawCorpus --> Ingest --> Profile --> Statistics --> Person
+    Ingest --> Filter
+    Person -->|"writes the approve block"| Filter
+    Filter --> Corpus
+    Corpus --> Audit
+    Corpus --> Subset
+    Corpus --> Decontamination
+
+    style Person fill:#fff3cd,stroke:#856404,stroke-width:2px
+    style Filter fill:#f8d7da,stroke:#721c24
 ```
+
+The two runs are deliberate: the candidate thresholds do not exist until the
+profile has read your corpus, so there is nothing to approve on the first run.
+The profile writes them out ready to paste, commented, with the retention each
+one buys — the copying is automated, the choice is not.
+
+### Inside curate/nemo_curator
+
+```mermaid
+flowchart LR
+    Read[JsonlReader] --> LanguageScore[FastText language ID]
+    LanguageScore --> LanguageCode[language code gate]
+    LanguageCode --> WordCount[WordCountFilter]
+    WordCount --> Domain[MultilingualDomainClassifier]
+    Domain --> Policy[approved-policy thresholds]
+    Policy --> Write[JsonlWriter]
+```
+
+Every gate is conditional on configuration. A key left out means the stage is not
+built, not that it is built with a default.
 
 ## Documentation Series
 
