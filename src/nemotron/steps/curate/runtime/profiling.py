@@ -531,4 +531,68 @@ def summarise(report: Mapping[str, Any]) -> str:
             )
             lines.append("")
 
+    lines.extend(approve_block(report))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def approve_block(report: Mapping[str, Any]) -> list[str]:
+    """A paste-ready ``approve:`` block, commented out, with retention per line.
+
+    Transcribing thresholds by hand is where the typos come from: the numbers are
+    swept grid points like 0.015873015873015872, and a mistyped one is a policy
+    nobody measured. So the block is written out in full, already valid YAML,
+    with the retention each threshold buys on the same line.
+
+    Every line is commented. Nothing here is executable until a person deletes
+    the ``#`` characters, and the approver and evidence fields are left empty so
+    the run is refused until they are filled. That keeps the decision where it
+    belongs while removing the copying.
+
+    The value offered is the most permissive grid point that still meets the
+    highest retention level in the gate table -- the least aggressive gate the
+    measurement supports. It is a starting point chosen mechanically, not a
+    recommendation, and the block says so.
+    """
+    rows: list[tuple[str, str, float, float]] = []
+    for entry in report.get("signals") or []:
+        if entry.get("retention_suppressed") or not (entry.get("health") or {}).get("documents_scored"):
+            continue
+        direction = entry.get("direction")
+        if direction not in ("min", "max"):
+            # An interval signal's retention is a surface, so there is no single
+            # threshold to offer and guessing one would misrepresent the shape.
+            continue
+        table = gate_table(entry)
+        if not table:
+            continue
+        threshold, retained, _level = table[0]
+        rows.append((str(entry.get("signal", "?")), direction, threshold, retained))
+
+    if not rows:
+        return []
+
+    width = max(len(name) for name, _, _, _ in rows)
+    out = ["", "## Approve block", ""]
+    out.append("Copy this into your config for run 2 and remove the `#` from every line you")
+    out.append("want. The numbers are measured grid points, so they are correct as written --")
+    out.append("but which one is right is your decision, not a measurement. Change any of")
+    out.append("them. approver and evidence are empty on purpose: the run is refused until")
+    out.append("a person fills them in.")
+    out.append("")
+    out.append("```yaml")
+    out.append("# approve:")
+    out.append("#   thresholds:")
+    for name, direction, threshold, retained in rows:
+        pad = " " * (width - len(name))
+        out.append(
+            f"#     - {{signal: {name},{pad} {direction}: {threshold!r}}}"
+            f"   # keeps {retained * 100:.2f}%"
+        )
+    out.append("#   approver:")
+    out.append("#   date:")
+    out.append("#   method: manual")
+    out.append("#   evidence: >-")
+    out.append("#     Why these thresholds, on this corpus. What you looked at.")
+    out.append("```")
+    out.append("")
+    return out

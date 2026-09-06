@@ -441,3 +441,70 @@ def test_report_level_notes_reach_the_summary() -> None:
     text = p.summarise(_report(_entry(), notes=["cooccurrence not computed"]))
 
     assert "cooccurrence not computed" in text
+
+
+def _report_with_a_curve() -> dict:
+    points = [{"threshold": i / 63, "retained": 1.0 - i / 200} for i in range(64)]
+    return {
+        "signals": [
+            {
+                "signal": "symbol_to_word",
+                "direction": "max",
+                "units": "ratio",
+                "health": {"documents_scored": 1000, "scoring_failures": 0},
+                "retention": {"kind": "curve", "points": points},
+            }
+        ]
+    }
+
+
+def test_the_approve_block_is_inert_until_a_person_edits_it() -> None:
+    """The block removes the transcription, not the decision.
+
+    Thresholds are swept grid points like 0.015873015873015872; copying one by
+    hand is where a policy nobody measured comes from. So the block is emitted
+    ready to paste — and every line is commented, so nothing is executable until
+    a person deletes the hashes, with approver and evidence left empty so the run
+    is refused until they are filled.
+    """
+    block = p.approve_block(_report_with_a_curve())
+
+    body = [ln for ln in block if ln.startswith("#") or ln.startswith("#   ")]
+    assert body, "the block must be emitted"
+    yaml_lines = block[block.index("```yaml") + 1 : block.index("```")]
+    assert all(ln.startswith("#") for ln in yaml_lines), "every YAML line must be commented"
+    assert any(ln.strip() == "#   approver:" for ln in yaml_lines), "approver must be present and empty"
+    assert any(ln.strip() == "#   evidence: >-" for ln in yaml_lines)
+
+
+def test_the_approve_block_keeps_full_precision_and_states_the_cost() -> None:
+    """A rounded grid point is a threshold nobody measured, and a threshold with
+    no retention beside it is a number with no consequence attached."""
+    block = p.approve_block(_report_with_a_curve())
+    line = next(ln for ln in block if "symbol_to_word" in ln)
+
+    assert "keeps " in line and "%" in line
+    value = line.split("max: ")[1].split("}")[0]
+
+    grid = {pt["threshold"] for pt in _report_with_a_curve()["signals"][0]["retention"]["points"]}
+    assert float(value) in grid, "the offered value is not one of the measured points"
+    # repr round-trips exactly; a rounded value would not reproduce its own text.
+    assert value == repr(float(value)), f"grid point was rounded: {value}"
+
+
+def test_a_two_sided_signal_is_not_given_a_single_threshold() -> None:
+    """An interval signal's retention is a surface. Offering one number for it
+    would misrepresent the shape, so it is left out rather than guessed."""
+    report = _report_with_a_curve()
+    report["signals"][0]["direction"] = "interval"
+
+    assert p.approve_block(report) == []
+
+
+def test_a_suppressed_signal_is_never_offered() -> None:
+    """A signal the profiler withheld for scoring too few documents has no
+    measured retention, so it must not appear as something to approve."""
+    report = _report_with_a_curve()
+    report["signals"][0]["retention_suppressed"] = "scored 12% of the sample"
+
+    assert p.approve_block(report) == []
