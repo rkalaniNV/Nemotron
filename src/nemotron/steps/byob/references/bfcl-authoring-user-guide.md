@@ -206,11 +206,7 @@ python -m nemotron.steps.byob.scripts.revoke_authoring_release --help
   [bfcl-adapter-authoring-certification-guide.md](bfcl-adapter-authoring-certification-guide.md)
 - MCP transport:
   [bfcl-mcp-oracle-contract.md](bfcl-mcp-oracle-contract.md)
-- Held-out and model exposure:
-  [bfcl-unified-authoring-plan.md](bfcl-unified-authoring-plan.md)
 - Release:
   [bfcl-authoring-release-v2.md](bfcl-authoring-release-v2.md)
-- Multi-domain rollout evidence:
-  [bfcl-authoring-broader-evaluation.md](bfcl-authoring-broader-evaluation.md)
 - Workflow acceptance criteria and their owning tests:
   [bfcl-workflow-acceptance-matrix.md](bfcl-workflow-acceptance-matrix.md)

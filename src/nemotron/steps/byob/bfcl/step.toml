@@ -139,7 +139,7 @@ skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
 when = "You need BFCL JSONL or a NeMo Evaluator input bundle beside the published parquet"
-then = "Enable exports.bfcl_json and/or exports.nemo_evaluator_bundle. Stage 12 derives both from one canonical projection, reads them back, writes exports/export_validation_report.json, and publishes run_manifest.json last. The NeMo bundle is W5 adapter input, not a standalone Launcher task registration."
+then = "Enable exports.bfcl_json and/or exports.nemo_evaluator_bundle. Stage 12 derives both from one canonical projection, reads them back, writes exports/export_validation_report.json, and publishes run_manifest.json last. The NeMo bundle is native adapter input, not a standalone Launcher task registration."
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]
@@ -326,7 +326,7 @@ recovery = "run_manifest.json is the commit marker. If it is absent, benchmark p
 
 [[errors]]
 name = "nemo_evaluator_adapter_required"
-recovery = "evaluator.yaml inside nemo_evaluator_bundle is a W5 adapter contract, not a standalone NeMo Evaluator Launcher config. Native function calling needs an installed/containerized harness with task registration plus a tool resource service; do not pass the bundle directory directly to the 0.2.x Launcher."
+recovery = "evaluator.yaml inside nemo_evaluator_bundle is a native adapter contract, not a standalone NeMo Evaluator Launcher config. Native function calling needs an installed/containerized harness with task registration plus a tool resource service; do not pass the bundle directory directly to the 0.2.x Launcher."
 
 [[errors]]
 name = "eval_config_schema_invalid"

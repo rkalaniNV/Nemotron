@@ -1,6 +1,6 @@
 # BFCL MCP Integration — Threat Model
 
-Task: `MCP-006`. Scope: an MCP server used as a BFCL oracle or as an authoring
+Scope: an MCP server used as a BFCL oracle or as an authoring
 intake source, through the gateway described in `bfcl-mcp-architecture-decision.md`.
 
 Two assets are worth more than availability here. The first is the **Gold verdict**:

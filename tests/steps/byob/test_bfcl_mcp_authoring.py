@@ -546,7 +546,7 @@ def test_the_bundle_tags_untrusted_text_and_names_what_it_cannot_know(
 def test_injected_prose_inside_an_output_schema_is_flagged_for_review(
     tmp_path: Path,
 ) -> None:
-    # Epic 1 only checks function.description, so this sentence reaches a drafting prompt
+    # Discovery only checks function.description, so this sentence reaches a drafting prompt
     # unexamined today. It is the quiet half of TM-01.
     tools = _tools()
     tools[1]["outputSchema"]["properties"]["name"]["description"] = (

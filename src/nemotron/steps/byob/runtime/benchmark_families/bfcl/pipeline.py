@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """BFCL benchmark-family orchestration.
 
 The generic CLI dispatcher lives in `nemotron.steps.byob.scripts.runtime`.
@@ -176,8 +191,8 @@ def _unsupported_requests(config: BfclConfig) -> list[str]:
     # Asking for work a disabled stage would have done. Reading these is what keeps
     # "refuse, do not ignore" true for the whole config and not just the gate flags.
     # Evaluation is a separate run over a published benchmark: the eval config is
-    # parsed and hashed by bfcl.eval, and generation refuses it until the W5 runner
-    # is wired rather than accepting a config no stage of this run will honor.
+    # parsed and hashed by bfcl.eval, so generation refuses it rather than accepting
+    # a config no stage of this run will honor.
     if config.eval_config_path is not None:
         requested.append("eval_config_path")
     if config.inline_eval is not None:

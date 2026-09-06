@@ -426,7 +426,7 @@ def test_mode_c_requires_a_named_boundary_for_a_snapshot() -> None:
     assert verdict.publishable is False
 
 
-# --- Endpoint config pinning (MCP-401) ---------------------------------------------------
+# --- Endpoint config pinning -------------------------------------------------------------
 
 
 def _write_endpoint_config(root: Path, **overrides: Any) -> Path:
@@ -481,7 +481,7 @@ def test_a_malformed_attestation_pin_is_refused_at_load(
         load_endpoint_config(path, allowed_roots=(tmp_path,))
 
 
-# --- The Gold Gate check (MCP-403, 409, 410) ---------------------------------------------
+# --- The Gold Gate check -----------------------------------------------------------------
 
 
 class _Config:

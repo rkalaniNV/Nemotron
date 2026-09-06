@@ -28,9 +28,6 @@ fail-closed rollout flag. “Unimplemented” is a target, not usable behavior.
 | Authoring cache retention | supported | Reference-aware dry-run and reviewed execute | [`test_bfcl_authoring_retention.py`](../../../../../tests/steps/byob/test_bfcl_authoring_retention.py) |
 | Release revoke and supersede | supported | Signed registry required at enforcement boundary | [`test_bfcl_release_revocation.py`](../../../../../tests/steps/byob/test_bfcl_release_revocation.py) |
 | Dynamically installed third-party adapters | unimplemented | Built-in registry remains static | unimplemented |
-| Signed independent domain review | supported | Reviewer key is trusted by the publisher, never by the operator's manifest | [`test_bfcl_mcp_ablation_rollout.py`](../../../../../tests/steps/byob/test_bfcl_mcp_ablation_rollout.py) |
-| Immutable evaluator pin for rollout evidence | supported | Validated through the evaluation config contract; absence is recorded, not assumed | [`test_bfcl_mcp_ablation_rollout.py`](../../../../../tests/steps/byob/test_bfcl_mcp_ablation_rollout.py) |
-| Multi-domain causal rollout claim | unimplemented | Two domains have no live runs and no target route is pinned | unimplemented |
 
 Detailed MCP transport behavior is in
 [bfcl-mcp-support-matrix.md](bfcl-mcp-support-matrix.md). Contract and operator

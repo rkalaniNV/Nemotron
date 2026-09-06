@@ -16,8 +16,7 @@ reviewed local Python source + domain brief + probe plan
   -> candidate evaluation
 ```
 
-This is Flow C, identified as `llm_backend` in the onboarding ablation. The
-shipped runnable example uses a deterministic library source and the
+The shipped runnable example uses a deterministic library source and the
 `local_python` adapter, because local Python has a verified publication adapter.
 An HTTP package can currently reach intake, drafting, review, and freeze, but
 publication is intentionally refused until its publication adapter exists.

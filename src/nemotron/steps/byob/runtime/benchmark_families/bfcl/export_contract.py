@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Versioned contract for BFCL Stage 12 publication and compatibility exports.
 
 An export is a re-encoding of the published benchmark, never a second source of
@@ -915,7 +930,7 @@ class NemoEvaluatorReplayStep(BaseModel):
 class NemoEvaluatorRecord(BaseModel):
     """One dataset row of the ``nemo_evaluator_bundle`` export.
 
-    This is the input contract for the W5 evaluator adapter, not a launcher task
+    This is the input contract for the native evaluator adapter, not a launcher task
     registration. It separates answer-free seed messages from the gold reference
     trace and leaves descriptor-level concerns to :class:`NemoEvaluatorBundle`.
     """
@@ -1072,7 +1087,7 @@ class NemoEvaluatorSource(BaseModel):
 class NemoEvaluatorBundle(BaseModel):
     """The descriptor published beside the evaluator dataset file.
 
-    The future W5 adapter binds a task id to this dataset, so the bundle names both
+    The native adapter binds a task id to this dataset, so the bundle names both
     and pins the dataset's hash. This descriptor deliberately does not claim to be
     a NeMo Evaluator Launcher run config: that also needs a registered environment,
     solver/resource service, and candidate endpoint.

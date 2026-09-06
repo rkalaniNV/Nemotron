@@ -229,7 +229,7 @@ Artifacts are written to `output_dir/expt_name/`:
 - `benchmark.parquet`: published benchmark rows.
 - `run_manifest.json`: lineage, fingerprints, stage counts, and artifact hashes.
 - `exports/bfcl_json/`: optional BFCL question/answer JSONL pair.
-- `exports/nemo_evaluator_bundle/`: optional six-file W5 adapter input bundle.
+- `exports/nemo_evaluator_bundle/`: optional six-file native adapter input bundle.
 - `exports/export_validation_report.json`: read-back equivalence evidence when
   at least one compatibility export is enabled.
 - `stage_cache/`: normalized inputs and one table per generation stage, keyed by
@@ -684,13 +684,13 @@ format's `content_hash` covers file names together with bytes, so a renamed file
 or a swapped question/answer pair changes the digest.
 
 The `nemo_evaluator_bundle` writer turns the same projection into six files under
-`exports/nemo_evaluator_bundle/`: `bundle.json` (the W5 adapter descriptor, which
+`exports/nemo_evaluator_bundle/`: `bundle.json` (the native adapter descriptor, which
 names the other files and pins the dataset's hash and record count),
 `dataset.jsonl` in publication order, `dataset.schema.json`, `metadata.json`,
 `evaluator.yaml`, and `system_prompts.json`. Three decisions differ from
 `bfcl_json`. `seed_messages` is the only model-input field and contains only
 leading system messages plus the first user turn. Gold assistant actions remain in
-`reference_trace`; `replay_steps` lets the W5 adapter release recorded tool results
+`reference_trace`; `replay_steps` lets the native adapter release recorded tool results
 only after the candidate produced the corresponding expected call, then release
 the next user turn. This prevents a generic chat adapter from forwarding a full
 gold trace as the prompt. The dataset schema is generated from the record model
@@ -705,11 +705,11 @@ gets a deterministic hash suffix to avoid collisions. The verbatim `pack_id`
 remains in `metadata.json` and `bundle.json`.
 
 `evaluator.yaml` is an adapter input contract, not a standalone NeMo Evaluator
-Launcher run config. It explicitly declares that W5 must provide a registered
+Launcher run config. It explicitly declares that the adapter must provide a registered
 environment, candidate endpoint, and tool resource service. Publishing a dataset
 bundle does not pretend those execution dependencies already exist.
 
-W5.10 closes that boundary with native adapter contract `1.2`, pinned to
+The native adapter contract `1.2` closes that boundary, pinned to
 `nemo-evaluator==0.2.8` and `nemo-evaluator-launcher==0.2.6`.
 `NemoNativeAdapterConfig` binds an immutable six-file bundle tree hash to one
 resolved BFCL eval config, one candidate alias, a separate native result

@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Deterministic review packets and the human approval gate for an MCP pack.
 
 Review is not a boolean attached to whatever files happen to be present. The packet pins every
@@ -318,7 +333,7 @@ def build_review_packet(
     source_bundle_path: Path | None = None,
     migration_record_path: Path | None = None,
 ) -> ReviewPacket:
-    """MCP-501: assemble every fact a domain reviewer must accept or reject."""
+    """Assemble every fact a domain reviewer must accept or reject."""
     evidence = load_evidence_bundle(
         evidence_path,
         certification_report_path=certification_report_path,
@@ -635,7 +650,7 @@ def build_review_approval(
     acknowledged_risks: list[str],
     note: str | None = None,
 ) -> ReviewApproval:
-    """MCP-502: approve one exact, unblocked packet with every checklist item."""
+    """Approve one exact, unblocked packet with every checklist item."""
     packet.verify_digest()
     if packet.document.get("status") != "ready_for_approval":
         blockers = [item.get("id") for item in packet.document.get("blockers") or []]

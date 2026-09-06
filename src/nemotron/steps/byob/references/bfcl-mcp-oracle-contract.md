@@ -1,7 +1,7 @@
 # BFCL MCP Oracle Contract
 
-Tasks: `MCP-002` (profile), `MCP-003` (`mcp_oracle.yaml` schema), `MCP-004` (tool
-normalization), `MCP-005` (result and error mapping).
+Scope: the profile, the `mcp_oracle.yaml` schema, tool normalization, and result and
+error mapping.
 
 Profile id: `bfcl-mcp-oracle-v1`.
 Read with `bfcl-oracle-pack.md`, which defines the pack, backend, and endpoint
@@ -76,7 +76,7 @@ its exact artifact digest enters effective identity instead (§9).
 
 The gateway exposes BFCL Oracle HTTP v1 and its provider-neutral conformance
 extension, and nothing else. Execution routes and payloads are fixed by
-`EndpointOracleClient`; Epic 4 adds only the read-only conformance route and client
+`EndpointOracleClient`; conformance adds only the read-only route and client
 method. `protocol_version` remains the literal `bfcl-oracle-http-v1`, which names the
 execution contract and is unrelated to the MCP version.
 
@@ -431,7 +431,7 @@ document changed after discovery. This prevents a caller from editing `status`,
 evidence, or checks while leaving a stale digest that appears to attest the edited
 content.
 
-For MCP-backed endpoints, Epic 4 extends the provider-neutral endpoint config with
+For MCP-backed endpoints, conformance extends the provider-neutral endpoint config with
 one optional block. Existing Python packs and endpoints that do not claim conformance
 remain valid:
 
@@ -809,9 +809,9 @@ error case is declared. `not_applicable` does not claim coverage. The attestatio
 contains the per-tool paths actually observed, so `P11` cannot be read as a universal
 claim about outputs no test exercised.
 
-### 10.1 Epic 2 executable gateway boundary
+### 10.1 Executable gateway boundary
 
-The initial Epic 2 implementation is the **mode-A, L1-capable gateway MVP**. It lives
+The gateway implementation is **mode-A and L1-capable**. It lives
 under `runtime/mcp/gateway/` and exposes the six execution routes in §3 through a
 Starlette adapter while keeping the session lifecycle in a transport-neutral service.
 `scripts/run_mcp_gateway.py` is the operator entry point and must run in the isolated
@@ -850,7 +850,7 @@ The gateway fails startup for either mode instead of silently approximating rese
 state behavior. Mode A now supports the P4–P11 evidence handoff described below; Modes B
 and C remain non-executable rather than inheriting Mode A's result.
 
-### 10.2 Epic 3 authoring intake boundary
+### 10.2 Authoring intake boundary
 
 Intake lives under `runtime/mcp/authoring/` and runs in the same isolated `bfcl-mcp`
 environment as discovery, for a reason worth stating plainly: Data Designer requires MCP
@@ -896,7 +896,7 @@ phase. Fixtures, task templates, validation cases, and assertions are listed as 
 rather than emitted as stubs, since a stub turns a missing input into a file that looks
 authored.
 
-### 10.3 Epic 3 drafting phase
+### 10.3 Drafting boundary
 
 Drafting lives under `runtime/pack_authoring/` and reads one file: the evidence bundle. Two
 gates stand in front of the model. The bundle digest is recomputed from the bytes on disk, so
@@ -943,7 +943,7 @@ they have would not exist. Drafts are therefore written to a `drafts/` directory
 pack rather than into it, because a `task_templates.yaml` inside a pack directory is loaded by
 the pipeline as though a human had authored it.
 
-### 10.4 Epic 4 trust spine
+### 10.4 Trust spine
 
 `GET /v1/conformance` exists, and so does the verification in front of it. The producer lives
 in `runtime/mcp/gateway/conformance.py`, the verifier in
@@ -1001,10 +1001,10 @@ the sealed P9 gateway report, and supplies both to `A1`. The verifier hashes bot
 fresh probe list with the attestation, validates every P9 timeout/poisoning/cleanup property,
 and only then permits effective `L2`.
 
-### 10.5 Epic 5 review boundary
+### 10.5 Review boundary
 
-`runtime/mcp/release/review.py` implements the first handoff boundary. MCP-501 does not produce
-an informal summary: it builds a canonical, content-addressed packet that pins the evidence
+`runtime/mcp/release/review.py` implements the first handoff boundary. The review packet is not
+an informal summary: it is a canonical, content-addressed packet that pins the evidence
 bundle, intake and draft provenance, live gateway attestation, validation report, reviewed MCP
 profile, complete canonical pack fingerprint, and optional held-out policy. The canonical
 manifest, tools, fixtures, templates, validation cases, assertion source, endpoint config, and
@@ -1029,7 +1029,7 @@ Oracle validation now writes this object for attested endpoint packs. Completene
 any declared executable case raises, returns a non-object, or lacks its before/after state pair;
 review therefore cannot silently treat a partial log as complete evidence.
 
-MCP-502 records a second, domain-level approval distinct from the earlier approval to let a
+Approval records a second, domain-level decision distinct from the earlier approval to let a
 model read an intake bundle. The reviewer must name themselves, provide a timezone-qualified
 timestamp, pin one exact review packet digest, acknowledge every risk ID, and explicitly accept
 semantics, control mapping, descriptions and snapshots, held-out policy, assumptions, and
@@ -1043,7 +1043,7 @@ an MCP release is endpoint-backed rather than `backend.py`; every other pack req
 Gold Gate's decision, because a freeze that re-litigates those rules becomes a second gate free to
 drift from the first.
 
-`runtime/mcp/release/freeze.py` implements MCP-503 and MCP-504. Freeze accepts only a canonical
+`runtime/mcp/release/freeze.py` implements sealing and fingerprinting. Freeze accepts only a canonical
 endpoint pack whose fingerprint is in an approved packet and whose approval covers exactly that
 packet. It refuses symbolic links, special files, external declared pack paths, reserved release
 paths, source drift during copying, and an existing destination. Files are opened with
@@ -1056,7 +1056,7 @@ digest inside the pack. Because the manifest sits outside the fingerprinted tree
 release recomputes the lineage, review-packet, and approval digests from the sealed files instead
 of trusting the manifest's own word for them.
 
-MCP-505 and MCP-506 live in `runtime/mcp/release/handoff.py`. The supplied BFCL config must
+Handoff and its re-validation live in `runtime/mcp/release/handoff.py`. The supplied BFCL config must
 resolve to the frozen tree and exact final fingerprint. Handoff forces a new oracle validation
 rather than accepting the same-process memoized verdict, requires freshly derived Gold plus an
 independently verified publishable `L2`, verifies the freeze again, and then calls the existing
@@ -1064,7 +1064,7 @@ BFCL prepare/generate implementation. There is no MCP generator. Publication mus
 `benchmark.parquet`, `benchmark_raw.parquet`, and `run_manifest.json`, and all three are checked
 before success is returned.
 
-For MCP-507, freeze writes `provenance/mcp_lineage.json` inside the fingerprinted pack.
+For origin lineage, freeze writes `provenance/mcp_lineage.json` inside the fingerprinted pack.
 `origin_provenance.py` validates it against `endpoint_config.yaml` and projects only non-secret
 origin fields into `run_manifest.json`: provider/profile/mode, frozen and pre-freeze pack
 fingerprints, effective content, conformance, catalog, lineage, review-packet, and approval

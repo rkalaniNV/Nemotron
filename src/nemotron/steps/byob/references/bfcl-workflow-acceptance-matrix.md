@@ -1,17 +1,14 @@
 # BFCL workflow acceptance matrix
 
-This file transcribes the acceptance criteria of the product workflow document into the
-repository so that each one can name a test. Without the transcription the criteria live
-only in a binary outside version control, and "backed by a named test" cannot be checked.
+This file transcribes the production-readiness acceptance criteria for assisted authoring
+into the repository so that each one can name a test. Without the transcription the
+criteria live outside version control, and "backed by a named test" cannot be checked.
 
-Source document: `BFCL_LLM_Generated_Workflow_Overview.docx`, section 13,
-"Production-Readiness Acceptance Criteria (Pending Until Proven)".
 Transcribed digest: `sha256:a0b5630aafdcb8184447f4737ec0e28dcff0b73872ce11579a3c8ee9d4fa1e1e`.
 
-The digest identifies the revision this matrix was transcribed from. When the document
-changes, recompute it, re-read section 13, and update the rows below. The digest is
-recorded as provenance only; the document is not in this repository, so no test can
-verify it.
+The digest identifies the requirements revision this matrix was transcribed from. When
+those requirements change, recompute it and update the rows below. The digest is recorded
+as provenance only; the source is not in this repository, so no test can verify it.
 
 ## How this file is enforced
 
@@ -21,7 +18,7 @@ function that does not exist in `tests/steps/byob/`. Owning tests are listed as
 `file.py::test_name`. A criterion may not be marked as owned by a file alone.
 
 Ownership means the named test fails if the criterion is violated. It does not mean the
-criterion is fully proven; the plan's `## Definition of done for the whole plan` section
+criterion is fully proven; [bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md)
 records where coverage is still partial.
 
 ## Criteria
@@ -38,4 +35,3 @@ records where coverage is still partial.
 | AC-8 | Nondeterminism, timeout, identity drift, evidence mismatch, unsafe probing, schema/oracle mismatch, and unclear business meaning fail closed. | `test_bfcl_authoring_revisions.py::test_resume_refuses_source_identity_drift`, `test_bfcl_authoring_revisions.py::test_resume_refuses_bound_artifact_drift`, `test_bfcl_authoring_refusals.py::test_refused_session_can_create_revision_only_with_bound_authorization` |
 | AC-9 | Human approval binds exact source evidence, validation report, adapter identity, pack fingerprint, and freeze inputs; stale approval cannot authorize changed bytes. | `test_bfcl_authoring_revisions.py::test_resume_refuses_stale_approval`, `test_bfcl_authoring_generalized_review.py::test_generalized_review_verifies_common_trust_records_for_every_adapter`, `test_bfcl_authoring_generalized_review.py::test_review_refuses_a_validation_report_the_bound_config_did_not_write` |
 | AC-10 | A generated tiny reference pack completes the existing stage=all workflow and produces verified final artifacts. | `test_bfcl_authoring_e2e.py::test_real_local_guided_publication_runs_stage_all` |
-| AC-11 | The nine-run pilot is retained as descriptive rollout evidence; target-model evaluation and broader-domain replication remain required for causal or default-UX claims. | `test_bfcl_mcp_ablation_rollout.py::test_descriptive_protocol_cannot_be_promoted_to_causal`, `test_bfcl_mcp_ablation_rollout.py::test_missing_runs_force_descriptive_decision` |

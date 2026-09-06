@@ -18,7 +18,6 @@ AUTHORING_DOCS = (
     REFERENCE_ROOT / "bfcl-authoring-user-guide.md",
     REFERENCE_ROOT / "bfcl-authoring-cache-retention.md",
     REFERENCE_ROOT / "bfcl-authoring-revocation.md",
-    REFERENCE_ROOT / "bfcl-authoring-broader-evaluation.md",
     REFERENCE_ROOT / "bfcl-mcp-user-guide.md",
 )
 SUPPORT_MATRICES = (
@@ -33,19 +32,10 @@ SMOKE_BLOCK = re.compile(
 SHELL_BLOCK = re.compile(r"```(?:bash|shell)\n.*?\n```", re.DOTALL)
 TEST_LINK = re.compile(r"\((?P<path>\.\./[^)\s]*test_[^)\s]*\.py)\)")
 
-PLAN = REFERENCE_ROOT / "bfcl-unified-authoring-plan.md"
 ACCEPTANCE_MATRIX = REFERENCE_ROOT / "bfcl-workflow-acceptance-matrix.md"
 ACCEPTANCE_ROW = re.compile(r"^\| (?P<id>AC-\d+) \| (?P<criterion>.+?) \| (?P<tests>.+?) \|$")
 OWNING_TEST = re.compile(r"`(?P<file>test_bfcl_[a-z0-9_]+\.py)::(?P<name>test_[a-z0-9_]+)`")
 TEST_ROOT = Path(__file__).resolve().parent
-PLAN_TASK = re.compile(r"^- \*\*(UA-\d{3,4}) ", re.MULTILINE)
-OWNERSHIP_SECTION = re.compile(
-    r"^Minimum named test ownership:\n(?P<body>.*?)\n\n",
-    re.DOTALL | re.MULTILINE,
-)
-OWNED_TEST_FILE = re.compile(r"`(test_bfcl_[a-z0-9_]+\.py)`")
-OWNED_TASK = re.compile(r"UA-\d{3,4}")
-OWNED_RANGE = re.compile(r"(UA-\d{3,4}) through (UA-\d{3,4})")
 
 
 def test_every_authoring_cli_example_is_an_executable_smoke_case() -> None:
@@ -109,49 +99,6 @@ def test_documentation_test_links_resolve() -> None:
         for match in TEST_LINK.finditer(path.read_text(encoding="utf-8")):
             target = (path.parent / match["path"]).resolve()
             assert target.is_file(), f"broken test link in {path.name}: {match['path']}"
-
-
-def _ownership_bullets() -> list[str]:
-    section = OWNERSHIP_SECTION.search(PLAN.read_text(encoding="utf-8"))
-    assert section is not None, "the plan must keep a named test ownership section"
-    bullets: list[str] = []
-    for line in section["body"].splitlines():
-        if line.startswith("- "):
-            bullets.append(line[2:])
-        elif line.strip() and bullets:
-            bullets[-1] += " " + line.strip()
-    return bullets
-
-
-def _claimed_tasks(bullet: str) -> set[str]:
-    tasks = set(OWNED_TASK.findall(bullet))
-    for start, end in OWNED_RANGE.findall(bullet):
-        first, last = int(start.removeprefix("UA-")), int(end.removeprefix("UA-"))
-        tasks.update(f"UA-{number}" for number in range(first, last + 1))
-    return tasks
-
-
-def test_every_plan_task_is_owned_by_an_existing_named_test() -> None:
-    """Each UA task must name a test file that exists, or the claim is unverifiable."""
-    bullets = _ownership_bullets()
-    owners: dict[str, set[str]] = {}
-    for bullet in bullets:
-        files = set(OWNED_TEST_FILE.findall(bullet))
-        for task in _claimed_tasks(bullet):
-            owners.setdefault(task, set()).update(files)
-
-    missing_files = sorted(
-        name
-        for names in owners.values()
-        for name in names
-        if not (TEST_ROOT / name).is_file()
-    )
-    assert not missing_files, f"plan names tests that do not exist: {missing_files}"
-
-    declared = set(PLAN_TASK.findall(PLAN.read_text(encoding="utf-8")))
-    assert declared, "the plan must declare UA tasks"
-    unowned = sorted(task for task in declared if not owners.get(task))
-    assert not unowned, f"plan tasks without a named existing test: {unowned}"
 
 
 def test_workflow_acceptance_criteria_are_backed_by_named_tests() -> None:

@@ -6,8 +6,8 @@ support, the drafts plus reviewed semantics become a candidate pack, and the pac
 validated, reviewed, frozen, published into a benchmark, and scored by a real evaluation
 run. It exists so the lane can be watched, not so anything can be claimed: every gate it
 crosses is owned by a test named in
-[bfcl-unified-authoring-plan.md](bfcl-unified-authoring-plan.md), and the demo is evidence
-of nothing on its own.
+[bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md), and the demo is
+evidence of nothing on its own.
 
 For setup, live-model configuration, per-stage artifacts, an intentionally
 failing scorer run, and evaluation against an independent candidate endpoint,

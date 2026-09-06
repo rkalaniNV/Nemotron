@@ -22,7 +22,7 @@ artifacts plus `run_manifest.json`.
 Set `exports.bfcl_json` and/or `exports.nemo_evaluator_bundle` to emit optional
 compatibility trees from the published parquet. Stage 12 reads them back for
 equivalence and writes `exports/export_validation_report.json` before committing
-`run_manifest.json`; the NeMo bundle remains input for the W5 native-tool adapter.
+`run_manifest.json`; the NeMo bundle remains input for a native-tool adapter.
 
 To evaluate candidate models on the result, write a separate `eval_config.yaml`
 from `bfcl/config/eval.default.yaml`. It points at the run's `run_manifest.json`

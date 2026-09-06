@@ -1,6 +1,6 @@
 # BFCL MCP Integration — Architecture Decision
 
-Task: `MCP-001`. Status: accepted for implementation of Epic 1–6.
+Status: accepted.
 Supersedes nothing. Superseded by nothing.
 
 ## Decision
@@ -167,7 +167,7 @@ reader can tell a decision from an oversight.
 ## Follow-on contracts
 
 - `bfcl-mcp-oracle-contract.md` — profile, `mcp_oracle.yaml` schema, tool
-  normalization, and result mapping (`MCP-002` … `MCP-005`).
-- `bfcl-mcp-threat-model.md` — trust boundaries and required controls (`MCP-006`).
+  normalization, and result mapping.
+- `bfcl-mcp-threat-model.md` — trust boundaries and required controls.
 - `bfcl-oracle-pack.md` — the pack, backend, and endpoint contracts this decision
   deliberately leaves unchanged.

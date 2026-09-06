@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """The ``nemo_evaluator_bundle`` writer: canonical projection to a launcher bundle.
 
 The bundle prepares evaluation input and nothing else. It does not run a candidate
@@ -17,7 +32,7 @@ Six files, all under one directory so the bundle can be moved or archived whole:
 ``metadata.json``
     Pack, run, and shape descriptors a report can slice on.
 ``evaluator.yaml``
-    The W5 adapter input contract and scoring policy. It is intentionally not a
+    The native adapter input contract and scoring policy. It is intentionally not a
     standalone Launcher run config: endpoint, registered environment, and tool
     resource service belong to model evaluation rather than dataset publication.
 ``system_prompts.json``
@@ -244,7 +259,7 @@ def evaluator_config(
     task_name: str,
     scoring: NemoEvaluatorScoring,
 ) -> dict[str, Any]:
-    """Build the input contract a W5 NeMo Evaluator adapter must implement.
+    """Build the input contract a native NeMo Evaluator adapter must implement.
 
     ``prompt.source`` names the answer-free seed explicitly. The complete trace is
     retained for audit and scoring under ``reference_trace`` but is forbidden as
@@ -258,7 +273,6 @@ def evaluator_config(
             "direct_launcher_config": False,
             "requires_registered_environment": True,
             "requires_tool_resource_service": True,
-            "implemented_in_stage": "W5",
         },
         "task": {
             "name": task_name,

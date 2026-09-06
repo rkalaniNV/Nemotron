@@ -126,7 +126,7 @@ semantic_deduplication_config:
 
 exports:
   # Both formats are derived from benchmark.parquet, read back for equivalence,
-  # and recorded in run_manifest.json. The NeMo bundle still requires a W5
-  # native-function-calling adapter; evaluator.yaml is not a Launcher run config.
+  # and recorded in run_manifest.json. The NeMo bundle still requires a native
+  # function-calling adapter; evaluator.yaml is not a Launcher run config.
   bfcl_json: false
   nemo_evaluator_bundle: false

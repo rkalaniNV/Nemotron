@@ -1,6 +1,6 @@
 # BFCL transport-neutral intake
 
-UA-805 gives `local_python`, `http_package`, and `mcp_mode_a` one trust spine.
+`local_python`, `http_package`, and `mcp_mode_a` share one trust spine.
 Transport code may collect identity and raw observations, but it cannot issue a tier,
 sign certification, construct the final evidence digest, or authorize model exposure.
 
@@ -76,7 +76,7 @@ a separately supplied authorization against that exact subject.
 
 ## Shared contract suite
 
-UA-806 runs one parameterized trust-contract matrix against `local_python`,
+The suite runs one parameterized trust-contract matrix against `local_python`,
 `http_package`, and the MCP compatibility path. Every fixture is reloaded through
 `SourceEvidenceDocument`; the suite then independently verifies certification input
 binding and signature, domain-brief source/report binding, held-out proof, exposure

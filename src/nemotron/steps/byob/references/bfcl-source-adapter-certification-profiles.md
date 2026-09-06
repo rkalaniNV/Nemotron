@@ -71,8 +71,8 @@ digest-bound evidence. Missing observations become `probe_missing`; they never b
 - Maximum summed probe timeout: 100 seconds.
 - Per-probe timeout and cleanup timeout: 10 seconds.
 - Cleanup boundary: none for static A0 inspection; worker process for A1/A2.
-- A0 identity includes the reviewed source closure and runtime identity. UA-802 uses a
-  digest-distinct descriptor and process worker for A1/A2.
+- A0 identity includes the reviewed source closure and runtime identity. A1/A2 use a
+  digest-distinct descriptor and a process worker.
 
 ### `http_package` / `http-package-v1`
 

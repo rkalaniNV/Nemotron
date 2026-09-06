@@ -209,34 +209,4 @@ only when produced from MCP discovery, review, and freeze records. To migrate:
 6. freeze a new release; and
 7. retain the old endpoint pack as a separate lineage.
 
-## Running the three-flow ablation
-
-Do not compare onboarding paths from ad hoc notes. Protocol v2 requires exactly three independent
-repetitions of each `manual`, `llm_backend`, and `llm_mcp` flow: nine runs total. Every observation
-records its repetition, randomized execution `sequence`, unique run digest, human effort,
-validation pass rate, tool coverage, replay stability, row count, and optional evaluation score.
-The experiment pins one domain artifact, evaluator configuration, and held-out policy. Scores
-must be present for all nine runs or omitted for all nine; partial scoring is refused.
-
-<!-- doc-smoke: mcp-ablation-help -->
-```shell
-python -m nemotron.steps.byob.scripts.compare_bfcl_onboarding_flows --help
-```
-
-Run the comparison with this operator template:
-
-```text
-python -m nemotron.steps.byob.scripts.compare_bfcl_onboarding_flows \
-  --input three_flow_observations.json \
-  --output three_flow_ablation_report.json
-```
-
-The report is deterministic, retains every raw repetition, and reports mean deltas against the
-manual baseline. Its quality index is descriptive only; it deliberately sets
-`causal_claim: false` and cannot replace benchmark scores or uncertainty analysis. Real
-observations are required—the harness does not generate favorable placeholder results.
-
-For the first real collection, follow the pinned
-[tiny_library pilot protocol](bfcl-mcp-ablation-tiny-pilot.md).
-
 See [bfcl-mcp-support-matrix.md](bfcl-mcp-support-matrix.md) for supported and deferred behavior.

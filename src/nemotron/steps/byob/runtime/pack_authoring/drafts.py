@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """The four authoring calls, each validated against the evidence before it is believed.
 
 Every generator has the same shape: build the fenced payload, make one cached structured
@@ -134,7 +149,7 @@ def _call(
 def draft_coverage_plan(
     context: DraftingContext,
 ) -> tuple[CoveragePlan, ModelCallRecord]:
-    """MCP-305: what the benchmark should exercise, for every published tool."""
+    """What the benchmark should exercise, for every published tool."""
     plan, record = _call(
         context,
         stage="mcp_coverage_plan",
@@ -150,7 +165,7 @@ def draft_validation_cases(
     context: DraftingContext,
     coverage: CoveragePlan,
 ) -> tuple[ValidationCasePlan, ModelCallRecord]:
-    """MCP-306: probes proving each tool behaves as the pack will claim."""
+    """Probes proving each tool behaves as the pack will claim."""
     plan, record = _call(
         context,
         stage="mcp_validation_cases",
@@ -169,7 +184,7 @@ def draft_task_templates(
     context: DraftingContext,
     coverage: CoveragePlan,
 ) -> tuple[TaskTemplatePlan, ModelCallRecord]:
-    """MCP-307: the multi-turn tasks, their ordering, and their milestones."""
+    """The multi-turn tasks, their ordering, and their milestones."""
     plan, record = _call(
         context,
         stage="mcp_task_templates",
@@ -188,7 +203,7 @@ def draft_assertion_specs(
     context: DraftingContext,
     coverage: CoveragePlan,
 ) -> tuple[AssertionSpecPlan, ModelCallRecord]:
-    """MCP-308: declarative predicates over result, state, and trace."""
+    """Declarative predicates over result, state, and trace."""
     plan, record = _call(
         context,
         stage="mcp_assertion_specs",

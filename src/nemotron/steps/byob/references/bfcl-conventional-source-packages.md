@@ -30,10 +30,10 @@ The effective identity binds the closure paths and bytes, reviewed catalog, cano
 fixtures, dependency lock, interpreter implementation/version/cache tag, platform
 ABI/SOABI, and machine architecture. Unreferenced files do not affect it.
 
-UA-801's descriptor declares only `describe_tools` and `pin_identity`, uses
-`identity_only` probe safety, and requires no process cleanup. UA-802 must issue a new,
-digest-distinct descriptor before any observe/reset capability or A1/A2 result can be
-certified.
+The static-inspection descriptor declares only `describe_tools` and `pin_identity`, uses
+`identity_only` probe safety, and requires no process cleanup. Live probing must issue a
+new, digest-distinct descriptor before any observe/reset capability or A1/A2 result can
+be certified.
 
 ### Local probe plan
 

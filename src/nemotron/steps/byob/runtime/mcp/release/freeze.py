@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Freeze one approved canonical pack into a sealed, content-addressed release.
 
 The release is a directory rather than an archive so the existing BFCL loader can consume it
@@ -377,7 +392,7 @@ def _make_read_only(root: Path) -> None:
 
 
 def freeze_canonical_pack(inputs: FreezeInputs, output_root: Path) -> FrozenRelease:
-    """MCP-503/504: atomically seal an approved pack and its final lineage."""
+    """Atomically seal an approved pack and its final lineage."""
     if inputs.pack_root.is_symlink():
         raise FreezeError("canonical pack root must not be a symbolic link")
     source = inputs.pack_root.resolve()

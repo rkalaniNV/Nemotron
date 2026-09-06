@@ -683,7 +683,7 @@ order, tool definitions, expected calls, ordering policy, and content hashes, an
 writes `exports/export_validation_report.json`. `run_manifest.json` records every
 format as enabled or disabled and pins the report and export hashes.
 
-The NeMo bundle is input for the W5 native-function-calling adapter. Its
+The NeMo bundle is input for the native function-calling adapter. Its
 `evaluator.yaml` describes seed/replay/scoring semantics but is not a standalone
 NeMo Evaluator 0.2.x task registration or Launcher config. Native tool calls need
 an installed/containerized harness plus a tool resource service.

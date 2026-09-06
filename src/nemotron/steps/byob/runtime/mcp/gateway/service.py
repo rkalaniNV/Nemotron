@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Mode A MCP episode lifecycle behind the BFCL Oracle HTTP v1 contract."""
 
 from __future__ import annotations
@@ -148,8 +163,8 @@ class GatewayService:
             if self.config.mode != "A":
                 raise unavailable(
                     "mcp_mode_not_executable",
-                    "Epic 2 gateway MVP executes cooperative mode A only; "
-                    "mode B shim and mode C snapshot mechanics remain deferred",
+                    "the gateway executes cooperative mode A only; "
+                    "mode B shim and mode C snapshot mechanics remain unimplemented",
                 )
             report = await discover_mcp_oracle(
                 self.loaded,
