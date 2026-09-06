@@ -82,7 +82,7 @@ The helper commands under `nemotron.steps.byob.scripts` — the pack validator, 
 
 The distinction between `1` and `2` is what makes these commands safe to automate: retry on `1`, because a crash may be transient; never retry on `2`, because the verdict will not change until a human changes the inputs.
 
-The evaluator is the exception. `nemotron steps run byob/bfcl` with `stage=eval` publishes a wider taxonomy — `2` through `7` — because an operator needs to know whether to edit a config, fix a candidate endpoint, or investigate a contamination finding. See [Run an Evaluation](../how-to/run-evaluation.md).
+The evaluator is the exception. `nemotron steps run byob/bfcl` with `stage=eval` publishes a wider taxonomy — `2` through `7` — because an operator needs to know whether to edit a config, fix a candidate endpoint, or investigate a contamination finding. See {doc}`../how-to/run-evaluation`.
 
 ## Normative Contracts
 
