@@ -908,3 +908,46 @@ def test_a_file_occupying_a_task_path_exits_cleanly(tmp_path):
     (out / "hellaswag").write_text("not a directory")
     with pytest.raises(SystemExit, match="not a directory"):
         run_direct(_cfg(output_dir=str(out)), task_filters=["hellaswag"])
+
+
+# --- lock and root-level artifact lifecycle ----------------------------------
+
+
+def test_the_claim_is_released_when_a_task_crashes(tmp_path, monkeypatch):
+    """Releasing only on the normal path meant a Popen failure left the claim
+    behind and blocked every retry until someone deleted it by hand."""
+    import subprocess
+
+    def _explode(*a, **k):
+        raise OSError("cannot spawn")
+
+    monkeypatch.setattr(subprocess, "Popen", _explode)
+    out = tmp_path / "results"
+    cfg = _cfg(output_dir=str(out))
+    cfg.dry_run = False
+    with pytest.raises(OSError, match="cannot spawn"):
+        run_direct(cfg, task_filters=["hellaswag"])
+    assert not (out / ".nemotron-eval.lock").exists()
+
+
+def test_a_stale_failures_file_is_cleared_by_a_clean_rerun(tmp_path, monkeypatch):
+    """A previous run's failures.txt beside a clean summary.json reads as a
+    failure that did not happen."""
+    import subprocess
+
+    class _Ok:
+        stdout = io.BytesIO(b"")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _Ok())
+    out = tmp_path / "results"
+    out.mkdir()
+    (out / "failures.txt").write_text("===== hellaswag =====\nolder run blew up")
+
+    cfg = _cfg(output_dir=str(out))
+    cfg.dry_run = False
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert not (out / "failures.txt").exists()
+    assert json.loads((out / "summary.json").read_text())["hellaswag"] == "ok"

@@ -174,7 +174,7 @@ def _validate_launcher_schema(launcher_cfg: DictConfig) -> None:
         except ValueError as exc:
             raise SystemExit(f"launcher config is invalid:\n{exc}") from exc
         except Exception:  # noqa: BLE001 - an unexpected internal error must not block
-            return
+            continue  # skip only this check, not the ones after it
 
 
 def _passthrough_args(overrides: list[str]) -> list[str]:
@@ -404,10 +404,50 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
     # run's IN-PROGRESS results and only then discover that run holds the lock:
     # the destruction happened before the check meant to prevent it.
     lock = _claim_output_dir(out_root, dry_run=dry_run, overwrite=overwrite)
+    try:
+        _execute(
+            plan=plan,
+            plan_context=(plain, out_root, dry_run, overwrite),
+            to_clear=to_clear,
+            planned_params=planned_params,
+            planned_adapter=planned_adapter,
+            secrets_by_task=secrets_by_task,
+            child_env=child_env,
+            url=str(url),
+            model_id=str(model_id),
+            model_type=model_type,
+            api_key_name=str(api_key_name) if api_key_name else None,
+            summary_name="summary.dry-run.json" if dry_run else "summary.json",
+        )
+    finally:
+        # Released on ANY exit. Removing it only on the normal path meant a
+        # Popen failure, an unwritable log, or any other exception left the
+        # claim behind and blocked every subsequent run until someone deleted
+        # it by hand.
+        if lock is not None:
+            lock.unlink(missing_ok=True)
+
+
+def _execute(
+    *,
+    plan: list[tuple[str, Path, list[str]]],
+    plan_context: tuple[dict, Path, bool, bool],
+    to_clear: list[Path],
+    planned_params: dict[str, dict],
+    planned_adapter: dict[str, dict],
+    secrets_by_task: dict[str, set[str]],
+    child_env: dict[str, str],
+    url: str,
+    model_id: str,
+    model_type: str,
+    api_key_name: str | None,
+    summary_name: str,
+) -> None:
+    """Run the planned tasks. Split out so the caller can release the claim."""
+    plain, out_root, dry_run, overwrite = plan_context
     for stale in to_clear:
         shutil.rmtree(stale)
 
-    summary_name = "summary.dry-run.json" if dry_run else "summary.json"
     # Written BEFORE the tasks run. A job that is preempted or OOM-killed
     # mid-suite still leaves a record of what it was running and against what;
     # per-task outcomes are summary.json's job, not this file's.
@@ -433,6 +473,7 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
     )
     print(f"eval_manifest: {manifest_path}")
 
+    summary_path = out_root / summary_name
     summary: dict[str, str] = {}
     failures: dict[str, str] = {}
     for task, task_out, cmd in plan:
@@ -462,28 +503,34 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
                 sys.stdout.flush()
             returncode = proc.wait()
         summary[task] = "ok" if returncode == 0 else f"failed({returncode})"
+        # Rewritten after every task. Written once at the end, a job preempted
+        # during task 3 of 4 left a manifest and three logs but no summary --
+        # the one file the tooling reads. Preemption is an expected path, not
+        # an exotic one: it is what a preemptible queue does.
+        summary_path.write_text(json.dumps(summary, indent=2))
         if returncode != 0:
             print(f"[{task}] FAILED with exit {returncode}; log: {log_path}", file=sys.stderr)
             failures[task] = _log_tail(log_path)
 
-    # A dry run must not clobber a real summary.json from a previous run.
-    summary_path = out_root / summary_name
+    # Final write: dry runs never entered the loop, and a completed run gets a
+    # last consistent flush. `summary_name` keeps a dry run from clobbering a
+    # real summary.json from a previous run.
     summary_path.write_text(json.dumps(summary, indent=2))
+    failures_path = out_root / "failures.txt"
     if failures:
         # One small file with every failure's tail. Otherwise the cause is
         # buried in a per-task harness.log that, on a cluster whose job logs
         # are unreadable after termination, costs a whole extra job to reach.
-        failures_path = out_root / "failures.txt"
         failures_path.write_text("\n\n".join(f"===== {task} =====\n{tail}" for task, tail in failures.items()))
         print(f"eval_failures: {failures_path}", file=sys.stderr)
+    else:
+        # A previous run's failures.txt beside a clean summary.json reads as a
+        # failure that did not happen.
+        failures_path.unlink(missing_ok=True)
     print(f"eval_results: {out_root}")
     print(f"eval_summary: {summary_path}")
     for task, state in summary.items():
         print(f"  {task}: {state}")
-    if lock is not None:
-        # Best effort: a reaped pod leaves it behind, and the message the next
-        # run prints explains how to clear it.
-        lock.unlink(missing_ok=True)
     if any(v.startswith("failed") for v in summary.values()):
         raise SystemExit(1)
 
@@ -717,6 +764,29 @@ def _run_manifest(
     }
 
 
+def _describe_claim(lock: Path) -> str:
+    """Describe the holder of a claim, including its age.
+
+    A preempted pod leaves its claim behind, and every retry then fails until
+    someone deletes it by hand. The payload already records when the run
+    started, so say so: a claim hours old on a preemptible queue is almost
+    certainly stale, and the reader can decide without guessing.
+    """
+    try:
+        raw = lock.read_text().strip()
+    except OSError:
+        return "<unreadable>"
+    try:
+        held = json.loads(raw)
+        started = _dt.datetime.fromisoformat(str(held["started_at"]))
+        age = _dt.datetime.now(_dt.timezone.utc) - started
+        hours = age.total_seconds() / 3600
+        note = " -- likely stale, no eval runs this long" if hours >= 24 else ""
+        return f"pid {held.get('pid')} on {held.get('host')}, started {started.isoformat()} ({hours:.1f}h ago){note}"
+    except Exception:  # noqa: BLE001 - a malformed claim must still be reported
+        return raw
+
+
 def _claim_output_dir(out_root: Path, *, dry_run: bool, overwrite: bool) -> Path | None:
     """Take an exclusive claim on ``out_root`` for the duration of the run.
 
@@ -743,10 +813,7 @@ def _claim_output_dir(out_root: Path, *, dry_run: bool, overwrite: bool) -> Path
     try:
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     except FileExistsError:
-        try:
-            held = lock.read_text().strip()
-        except OSError:
-            held = "<unreadable>"
+        held = _describe_claim(lock)
         if overwrite:
             # `overwrite` is about replacing stale RESULTS, not about racing a
             # live job. Say so rather than silently proceeding.
