@@ -318,6 +318,25 @@ interrupted cache sequence is not silently completed with a new sample. A
 cancelled call is an interruption of the run, never an observation of the model,
 so it is never scored as one.
 
+Transient means exactly one set: request timeouts, connection failures, `408`,
+`429`, and selected `5xx` responses, attempted within `limits.max_retries` and
+the logical candidate deadline. Backoff jitter is derived from the request hash
+rather than from a clock, and a `Retry-After` header is honored only inside that
+deadline. Response bodies are streamed under a fixed size bound. An envelope
+failure under HTTP 200 is model output rather than a transport error, so it is
+not retried. Provider-only request fields may enter only through the namespace
+matching the candidate's `provider` and `provider_api_version`, and may never
+replace a standard field. Credentials are read from `api.api_key_env` only after
+the cache lookup misses, which is what lets a replay run without any secret, and
+no credential value enters a request hash, a diagnostic, or an artifact.
+
+Each cache record is verified once, when it first appears, and a completion cites
+its attempts by hash, so one response body is stored once however many records
+refer to it. Cancelling a run records the abandoned attempt but never a
+completion, so a resumed run cannot read an interruption as the model's answer,
+and a credential the endpoint rejected leaves no completion either, so a rerun
+with a working key contacts the endpoint instead of replaying the refusal.
+
 ## How the conversation advances
 
 A multi-turn task is replayed rather than simulated. The prompt opens as the
@@ -374,6 +393,31 @@ observation. The record retains `finish_reason`; an explicit truncation, content
 filter, or max-token finish cannot be converted into a complete answer by
 re-scoring. Every number is derived from that record, so re-scoring never re-asks
 the model.
+
+The driver applies that same rule while the episode is still running. A provider
+finish that explicitly means truncation or filtering — `length`,
+`content_filter`, or a provider's max-token variant — never advances a turn, even
+when the partial payload otherwise matches the trace, because the turn the model
+meant to take is not the turn that arrived. A terminal turn must likewise carry
+non-empty plain or structured text.
+
+The episode is built from a conversation script, and the script selects its row
+and conversation plan from a canonical projection only after the projection's
+content hash, row count, and complete task sequence match the verified source, so
+no caller-supplied identity can stamp a stale row as current and every candidate
+replays the identical source-bound conversation. Immediately before a turn is
+sent, the candidate's canonical weights identity must still equal the identity the
+contamination plan authorized; reusing an alias for different weights is refused
+rather than scored.
+
+Driving returns rather than raises for everything the model can cause. A wrong
+tool, wrong arguments, unparseable arguments, a call with no id, an unreachable
+endpoint, a malformed envelope, and an exhausted turn or episode budget each
+become a distinct terminal status on the recorded episode, alongside the ordered
+events and every observed turn. An unauthorized task, or a row that is not a
+replayable conversation, raises instead: those are defects in the run rather than
+facts about the model, and recording them as episodes would put them into a
+metric. Cancellation propagates without producing an episode at all.
 
 ## Argument matching
 
@@ -603,6 +647,39 @@ report whose aggregates mix scopes is refused. A trace-only artifact set never
 stands in for an executable one, and an executable config handed to the trace
 runner is refused rather than measured with fewer gates.
 
+## Private held-out generalization
+
+`eval.mode: [held_out_eval]` enables held-out contract `1.0`. It is executable
+evaluation, so it requires the frozen, hash-verified source publication and the
+exact oracle pack. Its `held_out_eval` section pins the normalized `held_out.yaml`
+policy hash, the canonical fixture references, the template ids, the policy seed,
+the pack version, and a deterministic per-template cap.
+
+The three selection cases are explicit rather than inferred. A fixture-only policy
+uses ordinary templates and requires at least one declared held-out fixture
+binding. A template-only policy uses the declared templates while excluding
+held-out fixture rows. A policy declaring both evaluates the set union with
+duplicates removed. Private tasks receive full SHA-256 ids, and the ordered slice
+receives its own content hash, so a private run can be cited without naming its
+tasks.
+
+For a private fixture slice the evaluator deliberately opens the full verified
+fixture inventory, even when the public runtime policy used
+`fixtures_in_backend_state: false`. Without that override the run would measure
+`not_found` behavior instead of held-out generalization. The override exists only
+in the ephemeral private process and never alters the pack or the publication.
+
+Held-out mode may publish only aggregate diagnostics. `outputs.write_task_results`,
+`outputs.cache_candidate_responses`, and `outputs.cache_tool_results` must all be
+false, and the loader refuses any configuration that could persist private tasks,
+prompts, tool traces, or candidate responses. The aggregate report carries the seen
+and private success rates, 95% Wilson intervals for each, matched
+applicable-tool and turn-policy strata, and
+`held_out_generalization_gap = seen_success_rate - held_out_success_rate` with a
+conservative Newcombe 95% interval. Reporting the gap with an interval rather than
+as a point estimate is what keeps a small private slice from reading as a
+measured regression.
+
 ## NeMo Evaluator native adapter
 
 Native adapter contract `1.2` targets `nemo-evaluator==0.2.8` and
@@ -648,7 +725,12 @@ and BFCL report. Existing output is accepted only when byte-identical.
 `native_framework_definition(...)` and `install_native_framework(...)` build an
 immutable NeMo namespace package without mutating global site-packages;
 `launcher_task_entry(...)` validates the task entry against the pinned Launcher
-model in an isolated process. The evaluation image and mounts
+model in an isolated process. Building writes no `.pth` and changes nothing
+already installed, so the generated package must be installed explicitly in the
+Launcher environment or baked into its image; a build is not an install. The two
+dependencies sit on opposite sides of that boundary: the evaluation container
+needs `nemo-evaluator`, while `nemo-evaluator-launcher` remains a host and
+control-plane dependency. The evaluation image and mounts
 must provide the Nemotron package and every absolute path named by the adapter
 and BFCL configs. Missing mounts or a moving package/API version are setup
 failures, not candidate failures.
@@ -822,10 +904,15 @@ score asserts that the candidate had not seen these rows, and an unresolved
 comparison cannot support that assertion. Pinning `weights_digest` on both sides
 resolves it.
 
+Every candidate is compared before any candidate is refused, so one run names all
+of the collisions an operator has to resolve rather than surfacing them one rerun
+at a time.
+
 **What the score is then taken over.** Under the pinned settings, a publishable
 run has no collision at all — the alternative is refusal, not adjustment. The
-debug paths are `exclude_row`, which drops exactly the exposed rows and reports
-the reduced set, and `per_candidate`, which lets each candidate keep its own
-eligible rows. Both are reported with the task-id hash of what was actually
-scored, and neither is publishable: a number over a task set chosen per candidate
-is not comparable to a number over the benchmark.
+debug paths are `exclude_row`, which drops exactly the exposed rows and records
+the reduced set as `contamination.excluded_rows:<alias>`, and `per_candidate`,
+which lets each candidate keep its own eligible rows. Both are reported with the
+task-id hash of what was actually scored, and neither is publishable: a number
+over a task set chosen per candidate is not comparable to a number over the
+benchmark.

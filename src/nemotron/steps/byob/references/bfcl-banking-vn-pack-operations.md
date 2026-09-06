@@ -49,7 +49,8 @@ python -m nemotron.steps.byob.scripts.run \
 Validation exits zero only after schema, direct probes, deterministic replay,
 assertions, reset, and confirmation safety pass. Inspect
 `oracle_validation_report.json`, stage reports, both Parquet files, and
-`run_manifest.json` beneath `/tmp/bfcl/banking_vn_validation/`.
+`run_manifest.json` beneath the `output_dir` the config declares, which is
+`/tmp/bfcl/smoke_validation/` unless you change it.
 
 The deterministic Gold profile targets 232 tasks in each of six categories:
 
@@ -77,14 +78,12 @@ artifact and cannot be scored against the old one.
 ## Reference release
 
 The scale claims in the pack's `README.md` are not projections. This pack
-produced a gold release on 2026-09-01 under `publication.paraphrase.example.yaml`,
-and a local snapshot of it is kept at
-`BFCL/releases/banking-vn-gold-v1-1392/` alongside this checkout. Read that
-snapshot rather than regenerating when you need the numbers a statement there
-depends on.
+produced a gold release under `publication.paraphrase.example.yaml`, and the
+figures below were read from that run's `run_manifest.json`.
 
-The release identifies itself by content, not by path, so the snapshot is
-verifiable wherever it is mounted:
+The release identifies itself by content rather than by path, so a copy of it is
+verifiable wherever it is mounted. The identity is recorded here so that a run
+you produce from these files can be compared against it:
 
 | Identity | Value |
 | --- | --- |
@@ -94,16 +93,23 @@ verifiable wherever it is mounted:
 | `benchmark_raw.parquet` | `sha256:e988c246dccbafbf5a2c3638f2204a8de1c10da97f85160bffb3ddbc01ae1d94` |
 | `generation_config_hash` | `sha256:9dec917235992be2b2d888016ca27ecf9daab7a1f141abf530b7522ad577be48` |
 
-The pack `content_hash` is the one that matters for reading the snapshot as
-evidence about the pack files: the manifest recorded it from the eight pack
-files that generation actually loaded, so it is what ties those rows to that
-directory rather than to a copy that had drifted from it. Those eight files
-still hash to that value, and they do so only as long as the directory is left
-alone — which is why this document is not in it.
+The pack in this checkout has since received documentation-only edits, so it no
+longer hashes to the value above. That is the fingerprint working as designed
+rather than a defect: the mechanism cannot distinguish a comment from a policy
+the backend reads, so it treats every byte in the directory as significant.
+Scoring the release identified above therefore requires the pack bytes from the
+revision that produced it, which remain available in version control.
 
-Every count below comes from `run_manifest.json` in that snapshot, which is
-retained in full — `stage_counts` for the funnel and
-`semantic_deduplication.report.actual_counts` for the realized mixes.
+The pack `content_hash` is the one that matters when reading these numbers as
+evidence about the pack files: the manifest recorded it from the eight pack
+files that generation actually loaded, so it ties those rows to that directory
+rather than to a copy that had drifted from it. Those eight files still hash to
+that value, and they do so only as long as the directory is left alone — which
+is why this document is not in it.
+
+Every count below comes from that run's `run_manifest.json`: `stage_counts` for
+the funnel and `semantic_deduplication.report.actual_counts` for the realized
+mixes.
 
 Stage 4 supplied 2,824 canonical candidates, one guarded Vietnamese variant was
 requested for each eligible binding (2,568 requested, 2,542 accepted, 26
@@ -117,10 +123,35 @@ the pack's `README.md` makes. The realized `turn_policy` counts are
 something other than a plain lookup. Difficulty landed at 348 easy, 418 medium,
 and 626 hard, turns at 974 single and 418 multi, and all six categories at 232.
 
+A release of this pack is archived as a snapshot rather than as a full run
+directory, conventionally `banking-vn-gold-v1-1392/`, and reading one is the
+quickest way to see what each artifact actually contains before committing to a
+generation run. A snapshot keeps the published data and its manifest and nothing
+else, so its layout is flatter than the `output_dir/expt_name/` layout a live run
+writes: `benchmark/` holds both parquets, `run_manifest.json` sits at the top
+level because everything else is traceable to it, and `exports/` holds the
+`bfcl_json` question/answer pair, the six-file `nemo_evaluator_bundle`, and
+`export_validation_report.json`.
+
+The `stage_cache` tables, the separate stage reports, and the evaluation
+artifacts are absent by choice. They are working state, and the manifest already
+carries the parts of them a reader needs: `stage_counts` holds the full
+generation funnel and `semantic_deduplication.report.actual_counts` holds the
+realized category, difficulty, turn, and policy mixes, so the numbers a release
+claim rests on survive without the tables that produced them.
+
+What remains is enough to verify the published data offline. Both parquets are
+byte-identical to the hashes recorded above, so `shasum -a 256
+benchmark/*.parquet` is a complete integrity check that needs no network and no
+pipeline. Verifying the *oracle* behind the rows is the separate question the
+pack fingerprint answers, and it requires the pack bytes from the revision that
+produced the release. A snapshot is a generation artifact either way, so it
+demonstrates nothing about scoring on its own; reproducing the recorded score
+means re-running the evaluation against its `benchmark.parquet`.
+
 The release has also been scored end to end rather than only for trace
 plausibility, which is the point of shipping an executable pack: `gpt-oss-120b`
 reached 53.4% task success (744 of 1,392) in combined `trace` and `executable`
-mode on 2026-09-01. Treat that figure as a recorded result, not as something the
-local snapshot proves — the eval artifacts are deliberately not kept here, so
-reproducing or auditing it means re-running the eval against
-`benchmark.parquet`.
+mode. Treat that as a recorded result rather than a reproducible claim. The
+evaluation artifacts are not kept in this repository, so auditing the figure
+means re-running the evaluation against `benchmark.parquet` yourself.

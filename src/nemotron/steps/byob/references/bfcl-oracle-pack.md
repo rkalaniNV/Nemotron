@@ -444,6 +444,230 @@ not stand in for booleans or integers, and an empty list does not stand in for a
 empty mapping. Timeout values must be positive finite numbers; YAML `NaN` and
 infinities are rejected before they can reach deadline arithmetic.
 
+### Surface Quality Validation
+
+Optional Stage 10 runs between replay and final output under versioned contract
+`1.1`. It filters publication rows and records its report and artifact hashes in
+`run_manifest.json`. The contract is six checks with fixed ownership: Python owns
+`surface_shape`, `semantic_preservation`, and `leakage`, and the optional surface
+judge owns `language_locale`, `fluency_naturalness`, and `clarity_coherence`.
+
+The judge contract is surface-only. A judge cannot label tool correctness, change
+arguments, inspect oracle results, or rewrite benchmark truth, and its responses
+carry only a controlled reason code rather than free text. It sees only the
+language, the user-facing turns, the style hints, and the surface rubric. The
+deterministic stage may run without a judge; `drop_authority: true` requires one.
+
+A complete quality result carries exactly one verdict per check. Python checks are
+`passed` or `failed`. A judged check may additionally be `not_applicable` when the
+task's turn policy intentionally permits the observed condition, `not_run` when the
+judge is skipped, or `error` when the judge call fails. None of those three is a
+quality failure and none is counted as a pass. Turn-policy applicability is applied
+when the six results are assembled, so intentional ambiguity in a `clarify_only`
+task is recorded as `not_applicable` rather than as a fluency failure.
+
+Python owns its three checks by mapping the render and paraphrase guards already
+defined above — `must_preserve`, `must_omit`, `must_not_mention`, `novel_literal`,
+`expected_result_leakage`, and `semantic_shape` — onto the contract. A canonical
+template surface never fails `unchanged_surface`. Under `semantic_shape` a model
+variant is dropped when it returns the canonical wording
+(`unchanged_surface`) or repeats another variant of the same binding
+(`duplicate_variant_surface`), because neither adds a surface. Expected-result and
+novel-literal values remain private guard diagnostics and are never copied into
+quality-record evidence.
+
+Drop authority is deliberately asymmetric. A Python failure always drops the row,
+because those three checks are what protect semantics and leakage. A judge failure
+drops the row only under `drop_authority: true`, and is otherwise recorded as an
+advisory observation that changes nothing. A judge *error* never decides anything:
+an advisory run records it and continues, while an authoritative run refuses to
+publish, since a gate that could not answer was never enforced. If the policy drops
+every replay survivor, final output refuses to stamp an empty benchmark as gold.
+
+Stage 10 writes `stage_cache/surface_validated_tasks.parquet` with one row per
+task: identity, contract version, keep/drop authority, the six queryable statuses,
+and canonical JSON check detail. Nested detail stays JSON text so that
+pack-specific evidence cannot mutate the Arrow schema.
+
+The judge input/output cache is shared and append-only, so the manifest does not
+hash that changing file as though it belonged to one run. Instead
+`surface_judge_cache_usage.json` records only the request, input, and observed
+response hashes this run used — including an empty request list when Python
+rejected every surface first — and the manifest hashes that per-run usage file.
+
+### Semantic Deduplication And Balancing
+
+Optional Stage 11 runs under versioned contract `1.0`. It requires exactly one
+decision for every Stage-10 survivor, preserves input order, and restricts its
+balancing reports to eight generic dimensions: `intent`, `category`,
+`required_tools`, `tools_present`, `difficulty`, `turn_class`, `tool_call_count`,
+and `turn_policy`. Controlled drop reasons distinguish semantic duplicates,
+balance quotas, and hard turn or call limits. A selected row cannot carry drop
+detail, and every selected row carries `selection_rank` `0..k-1` exactly once, so
+publication order is total.
+
+Deduplication may only collapse tasks that share one coverage bucket, so every
+cluster holds exactly one representative and never mixes `language`,
+`turn_policy`, or pack-defined `edge_signatures`. A representative may itself be
+dropped on quota only when every member of its cluster is dropped. Validation
+preserves at least one selected row for every complete input coverage bucket, not
+merely each language, policy, and edge value independently. Bucket keys and task
+identifiers are normalized, because bucket identity is string equality and an
+untrimmed variant would otherwise become a phantom bucket.
+
+Stage 11 embeds a text projection rather than the published row. The projection
+keeps only user-authored turns, in conversation order, each prefixed with a
+`[user]` marker; assistant milestones, tool-call payloads, and oracle results
+never reach it. Turn whitespace is collapsed, and every literal the pack bound
+into the task, corrections included, is masked to `<slot_name>`, so two tasks that
+differ only in a bound id project the same text. Masking matches whole tokens and
+longest literals first, so a short value cannot corrupt a word that merely
+contains it, and a literal two slots share is masked under one deterministic slot
+name. Correction aliases are masked as well as canonical slot keys.
+
+Embedding runs through the shared Curator semantic-deduplication workflow, with
+`task_id` as the id and the projected text as the embedded field. `n_clusters` is
+capped so that non-trivial inputs retain an average of at least two rows per
+partition, because setting k equal to the row count would turn pairwise
+deduplication into a collection of singletons; the effective value is reported. A
+set of fewer than two rows never reaches the embedding backend: one surface cannot
+duplicate anything and zero surfaces have nothing to embed. `eps` is constrained
+to `(0, 1)`, matching Curator's cosine-similarity threshold and keeping singleton
+sentinels below it.
+
+Both duplicate flags and cluster membership come from one Curator run. Stage 11
+consumes Curator's K-means-partitioned pairwise artifact: each row crossing
+`1 - eps` is linked to the predecessor Curator ranked for it, and those links form
+the duplicate clusters. It also requires that the official Curator duplicate
+artifact names exactly the same ids. This avoids a second similarity
+implementation, comparisons across Curator's candidate partitions, and an extra
+global quadratic pass. The run records the settings hash, the projected-input
+hash, and a signature over the embeddings themselves, so a deduplication decision
+can be traced to the exact model, settings, and vectors that produced it. A
+backend result is rejected before it can decide anything if it fails to cover the
+embedded ids, if Curator's pairwise and duplicate artifacts disagree, or if a
+cluster does not carry exactly one non-duplicate representative. Embeddings decide
+duplication only; nothing a model produces reaches a task's text, calls,
+arguments, or assertions.
+
+Curator clusters are then partitioned by the complete
+`(language, turn_policy, edge_signatures)` coverage bucket and by a hash of the
+task's generic executable capabilities: `required_tools`, `tools_present`, the
+assertion contract, the mutation flag, and the call-order policy. A Curator
+representative in one partition therefore cannot erase the final survivor of
+another. Each resulting multi-row partition selects exactly one representative
+using, in order: eligibility under the run's `max_turns` and `max_tool_calls`
+limits, no judge error or advisory failure, applicable-check status, coverage
+rarity, the configured surface-source preference, a seeded hash, and `task_id`.
+The default source preference is `template` before `model`; a run may reverse it
+explicitly. Metadata retains the original Curator cluster, duplicate flag,
+predecessor, similarity score, final cluster, capability signature, coverage
+bucket, and every deterministic rank component.
+
+Balancing then projects every candidate onto the eight locked dimensions. Here
+“candidate” means a replay-valid Stage-10 survivor, never a model response.
+`max_turns` and `max_tool_calls` are hard filters, and removing the final survivor
+of a coverage bucket aborts rather than weakening the lock. One representative per
+complete coverage bucket is selected before quotas. Category caps and the
+configured `difficulty_mix`, `turn_mix`, `tool_call_count_mix`, and `policy_mix`
+targets are then applied without cloning rows, with fractional targets allocated
+by deterministic largest remainder.
+
+Selection is a deterministic binary optimization. Coverage, representative
+lineage, and the repetition caps below are hard constraints, while category-cap
+overflow, then cross-dimension target deviation, then stable rank order are
+minimized in that order. The priority is exact rather than weighted: each
+objective is minimized, pinned at its optimum, and the next is minimized against
+it, so no solver tolerance can trade a real category overflow for a cheaper mix,
+or a real deviation for a cheaper row order. This avoids both greedy local optima
+and a cubic exchange pass, so a feasible mix is not reported unmet merely because
+of the order rows were picked in. Minimal environments use an exact bounded
+fallback; production BYOB environments use PuLP with CBC. A target that inventory
+or a locked coverage survivor genuinely prevents is returned with explicit
+inventory, target, actual, and reason metadata rather than silently claimed as
+met.
+
+Three optional caps — `max_exact_surface_reuse`, `max_execution_case_reuse`, and
+`max_rows_per_intent` — are one mechanism applied to three different projections
+of a row: its masked wording, its executable case, and its intent. Each is a hard
+cap on how many published rows may share that value, each shrinks the feasible
+publication budget by `sum(min(group_size, cap))`, and each carries its own
+shortfall reason so a report says which kind of repetition ran out.
+`max_execution_case_reuse: 1` is the strongest statement a release can make: no
+two published rows call the same tools with the same arguments against the same
+state, so a candidate cannot earn credit twice for one behavior.
+`max_rows_per_intent` is what stops one broad intent — typically a refusal or
+out-of-scope intent with cheap inventory — from owning a disproportionate share of
+the benchmark.
+
+Stage 11 therefore reports three separate signals: exact masked-surface diversity,
+embedding-based surface similarity, and executable-case diversity. A model
+paraphrase intentionally keeps the executable-case hash of its canonical task,
+while different fixture bindings, call policies, assertions, or distractor sets do
+not. Keeping the three apart is what stops repeated wording and repeated
+executable meaning from being read as the same failure mode.
+
+Model surface calls are batched, and a failed call is an infrastructure event: it
+stays out of the immutable cache so that a repaired endpoint can be retried, and
+the rejection report records what produced nothing. A failed batch is retried one
+request at a time, so a single refused request costs its own variant rather than
+the variants of everything batched with it.
+
+Stage 11 writes `stage_cache/balanced_tasks.parquet` with one row for every
+Stage-10 survivor, carrying Curator lineage, final cluster and representative ids,
+the duplicate and selection verdict, drop detail, the total publication rank, the
+locked coverage bucket, and all eight balancing dimensions. It also writes
+`stage_cache/dedup_balancing_report.json` with pre- and post-counts, grouped
+selection and drop statistics, target and actual mixes, unmet targets, hard-limit
+drops, rare-edge preservation, and the semantic, config, and artifact hashes
+needed to audit the decision. Both files are replaced atomically.
+
+`remove_duplicates` controls whether duplicate rows must be dropped or may be
+retained as annotations. Under `false`, semantic similarity alone never drops a
+row; the hard limits and balancing quotas still apply and keep their own drop
+reasons.
+
+Stage 11 is fail-closed. An embedding or Curator error propagates, and no final
+parquet or manifest is written. Missing Stage-11 artifacts stop final output, and
+an empty selected set cannot become an empty gold benchmark. Infeasible soft
+targets are always recorded without inventing rows. `unmet_target_policy: abort`
+leaves the diagnostic Stage-11 artifacts but stops before publication;
+`publish_non_gold` permits publication only after setting both the manifest and
+every row's `gold_eligible` to false and recording `stage_eleven_unmet_targets` as
+the reason. Enabling Stage 11 requires Stage 10 and every Stage-11 model and
+clustering setting to be present, so deduplication never admits an unvalidated or
+under-specified run. The manifest embeds the Stage-11 report, model identifier,
+settings hash, embedding signature, stage counts, and hashes of both Stage-11
+artifacts.
+
+### Held-Out Enforcement
+
+A pack that references `held_out.yaml` from its manifest is enforced under
+versioned contract `1.0` at two points.
+
+Stage 4 never binds a reserved template or fixture row. The reservation is applied
+while slot candidates are collected, so a reserved row cannot enter a task at all.
+A slot whose every matching row is reserved, a category that falls short of
+`tasks_per_category` once reservations are honored, and a policy that reserves
+every template each stop generation with an explicit error rather than quietly
+publishing a smaller or differently mixed set. Stage 4 records what it examined
+and withheld in `stage_cache/held_out_bindings.json`.
+
+Stage 12 re-scans every executable row against the same policy before anything is
+written, comparing the canonical JSON `[collection, primary_id]` references
+expansion recorded and the template each row came from. The scan writes
+`stage_cache/held_out_scan.json` and stamps `held_out_hit` on published rows, so
+that column reports a checked result rather than the null a policy-free run
+publishes.
+
+Enforcement is fail-closed and abort-only. A single hit stops the run before
+`benchmark_raw.parquet`, `benchmark.parquet`, or the manifest exists, because
+Stage 11 has already fixed the publication set and silently dropping a row would
+break the balance the manifest reports. Missing or mismatched Stage-4 evidence
+stops publication for the same reason. The manifest carries the policy lineage,
+the scan counters, the Stage-4 counters, and hashes of both artifacts, and marks
+bias-audit dimension `B7` `na` when a declared policy reserves nothing.
+
 ### Slot Sources And Filters
 
 A slot's `source` is `<kind>:<rest>`, and a bare value means `fixture`:
@@ -684,10 +908,98 @@ order, tool definitions, expected calls, ordering policy, and content hashes, an
 writes `exports/export_validation_report.json`. `run_manifest.json` records every
 format as enabled or disabled and pins the report and export hashes.
 
-The NeMo bundle is input for the native function-calling adapter. Its
+Exports are specified by versioned export contract `1.0`, and `bfcl_json` and
+`nemo_evaluator_bundle` each carry their own `schema_version`. The BFCL adapter
+pins the upstream `BFCL_v4_multi_turn` question/function and separate
+ground-truth JSONL envelopes, while Nemotron metadata retains the assertions,
+parallel groups, ordering policy, and provenance that upstream BFCL does not
+represent. This is data-format compatibility, not a claim that an arbitrary
+oracle pack provides BFCL's own domain-specific executable classes.
+
+`export_projection` (`1.0`) is the single decode path both writers read.
+`benchmark.parquet` is read once, its schema is checked against the published
+schema, and every row becomes a canonical export object. Tool definitions decode
+from canonical JSON text and each argument decodes from its own canonical JSON
+value in the Arrow map, then re-encodes byte for byte, so the contract
+distinguishes `"1"`, `1`, `true`, and `1.0`. A writer receives the projection and
+never a path, so no format can decode the parquet its own way, and the projection
+is deeply immutable. `project_published_benchmark` optionally binds the projection
+to the content hash and publication order the manifest reports, which stops an
+export built from a parquet that was replaced after Stage 12 verified it. The
+contract requires row-count and truth-field equivalence, source benchmark and
+validation-report hashes, and complete NeMo bundle references for the dataset
+schema, metadata, evaluator config, and system-prompt catalog.
+
+The projection also derives, once, the structure a writer would otherwise
+reconstruct. Each assistant message that issues tool calls becomes one call group,
+checked against the rendered `messages` by name and argument: a group is parallel
+exactly when that message issues more than one call, its `turn_index` is the
+ordinal of the assistant message, and `user_turn_index` is the request it answers.
+`calls_by_user_turn` keeps an empty slot for a clarifying turn that triggers no
+call, so BFCL's per-user-turn ground truth cannot shift answers onto the wrong
+request. Projection-level provenance — pack, version, tier, prompts, languages,
+turn policies — is derived from every row rather than read off the first, so rows
+that disagree stop the export instead of being silently labelled after row zero.
+
+The `bfcl_json` writer turns that projection into two JSONL files under
+`exports/bfcl_json/`: the questions, and beside them in `possible_answer/` the
+expected calls, joined by `id`. Four format decisions are fixed there. JSONL
+rather than a JSON array, so a harness can stream the benchmark and retry a single
+task rather than a whole file. Two files rather than one, because a record that
+carries its own answer invites a runner to prompt the model with it. Parallel
+calls stay grouped in the Nemotron extension, since upstream's per-turn answer
+list is flat and cannot tell two simultaneous calls from two sequential ones. And
+the expected calls are the only answer exported: the recorded oracle results stay
+under `x-nemotron.messages` as provenance and never appear in `question` or
+`ground_truth`, so a scorer re-executes tools instead of diffing a model's output
+against a snapshot of one backend revision. Provenance likewise lives only in the
+extension, so rendering `question` cannot leak a pack version or a seed into the
+prompt. Bytes are deterministic — sorted keys, no incidental whitespace, `\n`
+endings, UTF-8 left unescaped so a non-Latin surface stays readable — and the
+format's `content_hash` covers file names together with bytes, so a renamed file
+or a swapped question/answer pair changes the digest.
+
+The NeMo bundle is input for the native function-calling adapter, written as six
+files under `exports/nemo_evaluator_bundle/`: `bundle.json` (the descriptor, which
+names the other files and pins the dataset's hash and record count),
+`dataset.jsonl` in publication order, `dataset.schema.json`, `metadata.json`,
+`evaluator.yaml`, and `system_prompts.json`. Its
 `evaluator.yaml` describes seed/replay/scoring semantics but is not a standalone
 NeMo Evaluator 0.2.x task registration or Launcher config. Native tool calls need
 an installed/containerized harness plus a tool resource service.
+
+Three of the bundle's decisions differ from `bfcl_json`. `seed_messages` is the
+only model-input field and contains only the leading system messages plus the
+first user turn; gold assistant actions remain in `reference_trace`, and
+`replay_steps` lets the adapter release a recorded tool result only after the
+candidate produced the corresponding expected call, then release the next user
+turn. That separation is what prevents a generic chat adapter from forwarding a
+full gold trace as the prompt. The dataset schema is generated from the record
+model rather than written by hand, so it cannot drift from the records beside it.
+And the declared metrics stop at `tool_selection` and `arguments`, plus
+`call_ordering` only when some task expects more than one call: `results` and
+`task_success` would need the pack's tools re-executed against oracle state, which
+no bundle file provides, and an ordering metric over single-call tasks would
+report a perfect score for something it never measured. The adapter task id is
+derived from `pack_id`; lossy normalization, including an entirely non-ASCII id,
+receives a deterministic hash suffix to avoid collisions, while the verbatim
+`pack_id` remains in `metadata.json` and `bundle.json`.
+
+Which formats can be written is declared once, as the writer registry Stage 12
+dispatches through. Config validation reads the same registry, so a format named
+in the contract but never wired to a writer is refused at startup instead of
+silently producing no file. The whole bundle is encoded, digested, and validated
+in memory before any file is created, so a projection that cannot be
+expressed — an unresolvable prompt id, a row no evaluator record represents —
+leaves nothing behind to be mistaken for a bundle. The `exports/` tree is removed
+before writing, because a file this run did not write would otherwise travel
+inside a bundle whose digest never covered it, and the bytes on disk are
+re-digested afterwards so a truncated write cannot publish a descriptor nobody
+re-checks. `content_hash` and `files` are bundle-relative like the descriptor, so
+archiving the directory elsewhere does not invalidate it. A writer that fails
+takes the export tree and both parquet files with it, since a reader cannot tell a
+partial bundle from a complete one, and any later abort in Stage 12 discards the
+tree for the same reason.
 
 Stage 12 writes into `.stage12-*`, validates all payloads, then promotes parquet
 and exports before moving `run_manifest.json` last. Treat the manifest as the
@@ -823,6 +1135,12 @@ obtain one without verification:
   Verification and use are separated in time, and that gap is where a source gets
   replaced — a regeneration into the same directory, a pack edited to make a
   failing task pass.
+
+None of those checks is a reimplementation. Publication semantics come from
+`publication_contract`, row decoding from `export_projection`, the pack file set
+and fingerprint from `pack_loader`, and endpoint identity from `endpoint`. A
+verifier that re-derived any of them could disagree with the pipeline that wrote
+the artifact, and then the disagreement itself would be the defect.
 
 A verified source says which benchmark is being scored. `evaluate_contamination()`
 then decides who may answer which rows of it, and returns the second handle a
