@@ -47,6 +47,10 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _parser()
     args = parser.parse_args()
+
+    # A failing audit and an audit that could not run are different outcomes, so
+    # they get different exit codes: automation that retries on a crash must not
+    # also retry on a verdict it should report to a human instead.
     try:
         report = build_bias_audit_report(
             AuditInputs(
@@ -68,8 +72,21 @@ def main() -> None:
             args.output_dir,
         )
     except (BiasAuditError, OSError, ValueError) as exc:
-        print(f"bias_audit_failed: {exc}", file=sys.stderr)
-        raise SystemExit(2) from exc
+        print(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "fail",
+                    "error_type": type(exc).__name__,
+                    "reason": str(exc),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
 
     print(
         json.dumps(
@@ -85,7 +102,7 @@ def main() -> None:
         )
     )
     if report["summary"]["status"] == "failed":
-        raise SystemExit(1)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -70,6 +70,20 @@ The step ships runnable configurations under `src/nemotron/steps/byob/bfcl/confi
 | `eval.launcher.yaml` | Launcher evaluation envelope. |
 | `translate.yaml` | Localization of an already published benchmark. |
 
+## Command-line Conventions
+
+The helper commands under `nemotron.steps.byob.scripts` — the pack validator, the bias auditor, the release archiver, the authoring and MCP release commands — share one exit contract, so a wrapper can branch on the status alone:
+
+| Status | Meaning | Output |
+| --- | --- | --- |
+| `0` | The command ran and the answer was yes: the pack is Gold-eligible, the audit passed, the artifact was written. | The result document on stdout. |
+| `1` | The command could not reach an answer. A path was missing, a file would not parse, an invariant was violated. | A JSON failure envelope on stderr with `status`, `error_type`, and `reason`. |
+| `2` | The command ran and the answer was no. The pack is not Gold-eligible, the audit found an unexcepted failure, the review packet is blocked. | The full verdict document on stdout, so you can see which check said no. |
+
+The distinction between `1` and `2` is what makes these commands safe to automate: retry on `1`, because a crash may be transient; never retry on `2`, because the verdict will not change until a human changes the inputs.
+
+The evaluator is the exception. `nemotron steps run byob/bfcl` with `stage=eval` publishes a wider taxonomy — `2` through `7` — because an operator needs to know whether to edit a config, fix a candidate endpoint, or investigate a contamination finding. See [Run an Evaluation](../how-to/run-evaluation.md).
+
 ## Normative Contracts
 
 These pages describe the operator-facing surface. The normative contracts live in the source tree, beside the code that enforces them:

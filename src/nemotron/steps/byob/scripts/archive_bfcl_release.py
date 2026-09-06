@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import io
 import json
+import sys
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,7 +146,21 @@ def main() -> None:
             bundle_name=args.bundle_name,
         )
     except (OSError, ReleaseArchiveError) as exc:
-        raise SystemExit(f"release_archive_failed: {exc}") from exc
+        print(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "fail",
+                    "error_type": type(exc).__name__,
+                    "reason": str(exc),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
     print(
         json.dumps(
             {

@@ -152,8 +152,21 @@ def main() -> None:
             output=args.output,
         )
     except (OSError, json.JSONDecodeError, RestoreRenderedConversationsError) as exc:
-        print(f"restore_rendered_conversations_failed: {exc}", file=sys.stderr)
-        raise SystemExit(2) from exc
+        print(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "fail",
+                    "error_type": type(exc).__name__,
+                    "reason": str(exc),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
     print(json.dumps({"output": str(output), "content_hash": _hash(output)}))
 
 
