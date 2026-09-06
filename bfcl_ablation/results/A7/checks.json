@@ -1,0 +1,1062 @@
+[
+  {
+    "arm": "global",
+    "caveats": [],
+    "check_id": "G-ARTIFACTS",
+    "ci95": null,
+    "claim": "All required A0-A6 artifacts are readable",
+    "denominator": 12,
+    "detail": "12/12 required artifacts are readable",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": 12,
+    "source_paths": [
+      "bfcl_ablation/results/A0/metrics.json",
+      "bfcl_ablation/results/A1/metrics.json",
+      "bfcl_ablation/results/A1/vs_a0_equivalence.json",
+      "bfcl_ablation/results/A2/metrics.json",
+      "bfcl_ablation/results/A3/metrics.json",
+      "bfcl_ablation/results/A4/metrics.json",
+      "bfcl_ablation/results/A4/trials.json",
+      "bfcl_ablation/results/A5/metrics.json",
+      "bfcl_ablation/results/A5/trials.json",
+      "bfcl_ablation/results/A6/metrics.json",
+      "bfcl_ablation/results/A6/trials.json",
+      "bfcl_ablation/results/A6/triage.json"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "global",
+    "caveats": [],
+    "check_id": "G-EVIDENCE-STUDY_VALIDITY",
+    "ci95": null,
+    "claim": "The evidence bundle is complete enough for the requested decision",
+    "denominator": null,
+    "detail": "All required artifacts are present",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [],
+    "status": "PASS",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "global",
+    "caveats": [],
+    "check_id": "G-EVIDENCE-RELEASE_READINESS",
+    "ci95": null,
+    "claim": "The evidence bundle is complete enough for the requested decision",
+    "denominator": null,
+    "detail": "All required artifacts are present",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [],
+    "status": "PASS",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "global",
+    "caveats": [],
+    "check_id": "G-METRIC-VERSION",
+    "ci95": null,
+    "claim": "Every compared arm uses the same metric contract",
+    "denominator": null,
+    "detail": "Observed versions: {'a0': '1.0', 'a1': '1.0', 'a2': '1.0', 'a3': '1.0', 'a4': '1.0', 'a5': '1.0', 'a6': '1.0'}",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A0/metrics.json:metrics_version",
+      "A1/metrics.json:metrics_version",
+      "A2/metrics.json:metrics_version",
+      "A3/metrics.json:metrics_version",
+      "A4/metrics.json:metrics_version",
+      "A5/metrics.json:metrics_version",
+      "A6/metrics.json:metrics_version"
+    ],
+    "status": "PASS",
+    "threshold": "1.0",
+    "value": {
+      "a0": "1.0",
+      "a1": "1.0",
+      "a2": "1.0",
+      "a3": "1.0",
+      "a4": "1.0",
+      "a5": "1.0",
+      "a6": "1.0"
+    }
+  },
+  {
+    "arm": "global",
+    "caveats": [],
+    "check_id": "G-ARM-TAGS",
+    "ci95": null,
+    "claim": "Each metrics artifact identifies the arm encoded by its path",
+    "denominator": null,
+    "detail": "All arm tags agree",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A0/metrics.json:arm",
+      "A1/metrics.json:arm",
+      "A2/metrics.json:arm",
+      "A3/metrics.json:arm",
+      "A4/metrics.json:arm",
+      "A5/metrics.json:arm",
+      "A6/metrics.json:arm"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "global",
+    "caveats": [],
+    "check_id": "G-VERSION-ENFORCEMENT",
+    "ci95": null,
+    "claim": "Metric-version compatibility is enforced before cross-arm comparison",
+    "denominator": null,
+    "detail": "A7 enforces it, but A0-A6 runners only record the version",
+    "dimension": "study_validity",
+    "gating": false,
+    "numerator": null,
+    "source_paths": [
+      "results/METRICS.md:metrics_version"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a0",
+    "caveats": [],
+    "check_id": "A0-ACCOUNTING",
+    "ci95": null,
+    "claim": "A0 policy counts reconcile with expanded tasks",
+    "denominator": null,
+    "detail": "Policy total 33; expanded 33",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A0/metrics.json:distribution.policy_task_counts",
+      "A0/metrics.json:funnel.expanded"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "expanded": 33,
+      "policy_total": 33
+    }
+  },
+  {
+    "arm": "a0",
+    "caveats": [],
+    "check_id": "A0-TOOL-COVERAGE",
+    "ci95": null,
+    "claim": "Every declared tool is exercised by an expected trace",
+    "denominator": null,
+    "detail": "All declared tools are called",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A0/metrics.json:coverage.tools_never_called"
+    ],
+    "status": "PASS",
+    "threshold": 0,
+    "value": 0
+  },
+  {
+    "arm": "a0",
+    "caveats": [],
+    "check_id": "A0-SURFACE-BASELINE",
+    "ci95": null,
+    "claim": "A0 has one slot-masked opening per template",
+    "denominator": 17,
+    "detail": "17 masked surfaces across 17 templates",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": 17,
+    "source_paths": [
+      "A0/metrics.json:surface.overall.distinct_masked",
+      "A0/metrics.json:authoring_friction.template_count"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a0",
+    "caveats": [],
+    "check_id": "A0-PUBLISH-IS-THROUGHPUT",
+    "ci95": null,
+    "claim": "Publish rate is interpreted only as pipeline throughput",
+    "denominator": null,
+    "detail": "Publish rate is 100.0%; it supplies no content-quality evidence",
+    "dimension": "study_validity",
+    "gating": false,
+    "numerator": null,
+    "source_paths": [
+      "A0/metrics.json:funnel.publish_rate",
+      "results/METRICS.md:Publish funnel"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": null,
+    "value": 1.0
+  },
+  {
+    "arm": "a0",
+    "caveats": [],
+    "check_id": "A0-FIXTURE-COVERAGE",
+    "ci95": null,
+    "claim": "Fixture coverage is reported with its reachability caveat",
+    "denominator": 50,
+    "detail": "17/50 fixture entities are bound; the denominator includes backend-only rows",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": 17,
+    "source_paths": [
+      "A0/metrics.json:coverage.fixture_entities_bound"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a0",
+    "caveats": [],
+    "check_id": "A0-BUDGET-SWEEP",
+    "ci95": null,
+    "claim": "Increasing task budget does not itself increase wording diversity",
+    "denominator": null,
+    "detail": "Tasks by budget: {6: 33, 12: 55, 24: 91}; distinct surfaces: {6: 17, 12: 17, 24: 17}",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "budget_sweep.json"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "surfaces": {
+        "12": 17,
+        "24": 17,
+        "6": 17
+      },
+      "tasks": {
+        "12": 55,
+        "24": 91,
+        "6": 33
+      }
+    }
+  },
+  {
+    "arm": "a1",
+    "caveats": [],
+    "check_id": "A1-EQUIVALENCE",
+    "ci95": null,
+    "claim": "A1's equivalence verdict follows all five declared gates",
+    "denominator": null,
+    "detail": "Gates {'task_ids': True, 'expected_tool_calls': True, 'conversation_plans': True, 'validation_coverage': True, 'opening_turn': True}; metrics='EQUIVALENT'; proof='EQUIVALENT'",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A1/metrics.json:equivalence",
+      "A1/vs_a0_equivalence.json"
+    ],
+    "status": "PASS",
+    "threshold": "all true",
+    "value": {
+      "conversation_plans": true,
+      "expected_tool_calls": true,
+      "opening_turn": true,
+      "task_ids": true,
+      "validation_coverage": true
+    }
+  },
+  {
+    "arm": "a1",
+    "caveats": [],
+    "check_id": "A1-LOC",
+    "ci95": null,
+    "claim": "A1 line savings reconcile with authored-pack totals",
+    "denominator": null,
+    "detail": "1642 - 1412 = 230",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A1/metrics.json:simplification"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "baseline": 1642,
+      "candidate": 1412,
+      "saved": 230
+    }
+  },
+  {
+    "arm": "a1",
+    "caveats": [],
+    "check_id": "A1-DIALOGUE-SCOPE",
+    "ci95": null,
+    "claim": "Equivalence does not overclaim byte-identical full conversations",
+    "denominator": null,
+    "detail": "0 opening turns and 8 complete conversations changed",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A1/metrics.json:equivalence.surface"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": null,
+    "value": {
+      "dialogues_changed": 8,
+      "opening_changed": 0
+    }
+  },
+  {
+    "arm": "a2",
+    "caveats": [
+      "task IDs and expected calls do not depend on opening-turn wording"
+    ],
+    "check_id": "A2-FROZEN-SCOPE",
+    "ci95": null,
+    "claim": "The recorded FROZEN verdict matches its two structural predicates",
+    "denominator": null,
+    "detail": "12 rungs checked; FROZEN is not treated as semantic equivalence",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A2/metrics.json:budgets.*.rungs"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": 12
+  },
+  {
+    "arm": "a2",
+    "caveats": [],
+    "check_id": "A2-FROZEN-NOT-SEMANTIC",
+    "ci95": null,
+    "claim": "A2's FROZEN headline is limited to declared structural fields",
+    "denominator": null,
+    "detail": "Semantic preservation requires independent human labels",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "bfcl_ablation/run_a2.py:FROZEN",
+      "A2/metrics.json:intent_check"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a2",
+    "caveats": [],
+    "check_id": "A2-POOL-COVERAGE",
+    "ci95": null,
+    "claim": "Every authored template has a paraphrase pool",
+    "denominator": null,
+    "detail": "All templates have pools",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A2/metrics.json:generation.templates_without_pool"
+    ],
+    "status": "PASS",
+    "threshold": 0,
+    "value": 0
+  },
+  {
+    "arm": "a2",
+    "caveats": [
+      "the maximum combines paraphrase fan-out with a larger task budget"
+    ],
+    "check_id": "A2-DIVERSITY",
+    "ci95": null,
+    "claim": "A2 increases slot-masked surface diversity",
+    "denominator": null,
+    "detail": "Maximum 77 surfaces at budget=24 N=20",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A2/metrics.json:budgets.*.rungs.distinct_masked_surfaces"
+    ],
+    "status": "PASS",
+    "threshold": ">17",
+    "value": 77
+  },
+  {
+    "arm": "a2",
+    "caveats": [
+      "generator and checker use the same model family"
+    ],
+    "check_id": "A2-LLM-CHECKER",
+    "ci95": null,
+    "claim": "The same-family intent checker is diagnostic, not semantic ground truth",
+    "denominator": null,
+    "detail": "shift recall=94.1%, canonical false alarm=5.9%, substitution flags=2.2%",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A2/metrics.json:intent_check"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": {
+      "max_canonical_false_alarm": 0.1,
+      "max_llm_substitution_rate": 0.05,
+      "min_shift_recall": 0.9
+    },
+    "value": {
+      "canonical_false_alarm": 0.0588,
+      "shift_recall": 0.9412,
+      "substitution_rate": 0.0217
+    }
+  },
+  {
+    "arm": "a2",
+    "caveats": [],
+    "check_id": "A2-GENERATION-DENOMINATOR",
+    "ci95": null,
+    "claim": "A2 rejection rate states which candidate population it divides by",
+    "denominator": 328,
+    "detail": "5/328 examined candidates=1.52%; this is not all candidates returned because quota overflow was not inspected",
+    "dimension": "study_validity",
+    "gating": false,
+    "numerator": 5,
+    "source_paths": [
+      "A2/metrics.json:generation"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a2",
+    "caveats": [],
+    "check_id": "A2-HUMAN-SEMANTICS-STUDY_VALIDITY",
+    "ci95": null,
+    "claim": "Independent reviewers confirm wording-only semantic preservation",
+    "denominator": 0,
+    "detail": "Human prevalence labels complete for 0/51 required pairs",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": 0,
+    "source_paths": [
+      "A7/human_labels.yaml"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": {
+      "max_rate": 0.01,
+      "max_upper_ci95": 0.05
+    },
+    "value": null
+  },
+  {
+    "arm": "a2",
+    "caveats": [],
+    "check_id": "A2-HUMAN-SEMANTICS-RELEASE_READINESS",
+    "ci95": null,
+    "claim": "Independent reviewers confirm wording-only semantic preservation",
+    "denominator": 0,
+    "detail": "Human prevalence labels complete for 0/51 required pairs",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": 0,
+    "source_paths": [
+      "A7/human_labels.yaml"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": {
+      "max_rate": 0.01,
+      "max_upper_ci95": 0.05
+    },
+    "value": null
+  },
+  {
+    "arm": "a2",
+    "caveats": [],
+    "check_id": "A2-HUMAN-CONTROLS",
+    "ci95": null,
+    "claim": "Human review detects known intent-shift controls",
+    "denominator": 0,
+    "detail": "Misses 0/0; required controls 17",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": 0,
+    "source_paths": [
+      "A7/human_labels.yaml"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": 0.05,
+    "value": null
+  },
+  {
+    "arm": "a3",
+    "caveats": [],
+    "check_id": "A3-PROPOSAL-ACCOUNTING",
+    "ci95": null,
+    "claim": "Accepted and dropped A3 proposals reconcile with requested proposals",
+    "denominator": null,
+    "detail": "20 accepted + 36 dropped = 56 requested",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A3/metrics.json:proposal"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "accepted": 20,
+      "dropped": 36,
+      "requested": 56
+    }
+  },
+  {
+    "arm": "a3",
+    "caveats": [
+      "this identifies stack-level survivorship bias, not an LLM-only causal effect"
+    ],
+    "check_id": "A3-SKEW-FINDING",
+    "ci95": null,
+    "claim": "The proposal-plus-validation stack is skewed toward weakly falsifiable tasks",
+    "denominator": null,
+    "detail": "Unfalsifiable share=70.0%; tools never called=5",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A3/metrics.json:selection_bias",
+      "A3/metrics.json:coverage"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "tools_never_called": [
+        "create_dispute",
+        "create_transfer",
+        "get_transfer_fee",
+        "get_vietqr_payment_status",
+        "list_recent_transactions"
+      ],
+      "unfalsifiable_share": 0.7
+    }
+  },
+  {
+    "arm": "a3",
+    "caveats": [],
+    "check_id": "A3-CANDIDATE-COVERAGE",
+    "ci95": null,
+    "claim": "The A3-generated candidate meets falsifiability and tool-coverage policy",
+    "denominator": null,
+    "detail": "Unfalsifiable share=70.0%; never-called tools=['create_dispute', 'create_transfer', 'get_transfer_fee', 'get_vietqr_payment_status', 'list_recent_transactions']",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A3/metrics.json:selection_bias.vacuous_gold",
+      "A3/metrics.json:coverage"
+    ],
+    "status": "FAIL",
+    "threshold": {
+      "max_tools_never_called": 0,
+      "max_unfalsifiable_share": 0.3
+    },
+    "value": {
+      "tools_never_called": 5,
+      "unfalsifiable_share": 0.7
+    }
+  },
+  {
+    "arm": "a3",
+    "caveats": [
+      "other a3f/a3g/a3h runs exist without a recorded selection rationale"
+    ],
+    "check_id": "A3-PROVENANCE",
+    "ci95": null,
+    "claim": "The exact generated pack behind A3 metrics remains available",
+    "denominator": null,
+    "detail": "Recorded pack '/localhome/local-hndo/Nemotron/bfcl_ablation/_generated/packs/a3_full' exists=False",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A3/metrics.json:pack"
+    ],
+    "status": "CONDITIONAL",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a3",
+    "caveats": [],
+    "check_id": "A3-HUMAN-SEMANTICS",
+    "ci95": null,
+    "claim": "Independent reviewers confirm no-tool policy labels and answerability",
+    "denominator": null,
+    "detail": "The current artifact does not preserve a complete blinded A3 review queue",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A3/metrics.json:selection_bias.vacuous_gold"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a4",
+    "caveats": [],
+    "check_id": "A4-TRIAL-RECONCILIATION",
+    "ci95": null,
+    "claim": "A4 strict class totals are reproducible from trial rows",
+    "denominator": null,
+    "detail": "Recomputed totals: {'argument_level': {'false_accept': 86, 'trials': 141}, 'call_level': {'false_accept': 41, 'trials': 108}, 'state_level': {'false_accept': 0, 'trials': 6}}",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A4/trials.json:human",
+      "A4/metrics.json:arms.human.by_class_strict"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "argument_level": {
+        "false_accept": 86,
+        "trials": 141
+      },
+      "call_level": {
+        "false_accept": 41,
+        "trials": 108
+      },
+      "state_level": {
+        "false_accept": 0,
+        "trials": 6
+      }
+    }
+  },
+  {
+    "arm": "a4",
+    "caveats": [],
+    "check_id": "A4-ARGUMENT_LEVEL-FAR",
+    "ci95": [
+      0.5275,
+      0.6865
+    ],
+    "claim": "Human assertions bound strict argument_level false acceptance",
+    "denominator": 141,
+    "detail": "False acceptance=61.0%; policy maximum=5.0%",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": 86,
+    "source_paths": [
+      "A4/metrics.json:arms.human.by_class_strict.argument_level"
+    ],
+    "status": "FAIL",
+    "threshold": 0.05,
+    "value": 0.6099
+  },
+  {
+    "arm": "a4",
+    "caveats": [],
+    "check_id": "A4-CALL_LEVEL-FAR",
+    "ci95": [
+      0.2937,
+      0.4738
+    ],
+    "claim": "Human assertions bound strict call_level false acceptance",
+    "denominator": 108,
+    "detail": "False acceptance=38.0%; policy maximum=5.0%",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": 41,
+    "source_paths": [
+      "A4/metrics.json:arms.human.by_class_strict.call_level"
+    ],
+    "status": "FAIL",
+    "threshold": 0.05,
+    "value": 0.3796
+  },
+  {
+    "arm": "a4",
+    "caveats": [],
+    "check_id": "A4-STATE_LEVEL-FAR",
+    "ci95": [
+      0.0,
+      0.3903
+    ],
+    "claim": "Human assertions bound strict state_level false acceptance",
+    "denominator": 6,
+    "detail": "False acceptance=0.0%; policy maximum=0.0%",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": 0,
+    "source_paths": [
+      "A4/metrics.json:arms.human.by_class_strict.state_level"
+    ],
+    "status": "PASS",
+    "threshold": 0.0,
+    "value": 0.0
+  },
+  {
+    "arm": "a4",
+    "caveats": [],
+    "check_id": "A4-HUMAN-WEAKNESS-FINDING",
+    "ci95": null,
+    "claim": "A4 supports the claim that human assertions miss material corruptions",
+    "denominator": null,
+    "detail": "Strict FAR by class: {'argument_level': 0.6099, 'call_level': 0.3796, 'state_level': 0.0}",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A4/metrics.json:arms.human.by_class_strict",
+      "A4/trials.json:human"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "argument_level": 0.6099,
+      "call_level": 0.3796,
+      "state_level": 0.0
+    }
+  },
+  {
+    "arm": "a4",
+    "caveats": [],
+    "check_id": "A4-GOLD-FLOOR",
+    "ci95": null,
+    "claim": "Assertions retain uncorrupted gold episodes",
+    "denominator": 34,
+    "detail": "Gold pass rate=100.0%",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": 34,
+    "source_paths": [
+      "A4/metrics.json:arms.human.gold"
+    ],
+    "status": "PASS",
+    "threshold": 0.99,
+    "value": 1.0
+  },
+  {
+    "arm": "a4",
+    "caveats": [],
+    "check_id": "A4-FEEDBACK-GENERALIZATION",
+    "ci95": null,
+    "claim": "LLM-feedback assertion gains generalize to held-out mutations",
+    "denominator": null,
+    "detail": "Feedback assertions were authored and scored on the same mutation plans",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A4/metrics.json:arms.llm_feedback",
+      "bfcl_ablation/run_a4.py"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a5",
+    "caveats": [],
+    "check_id": "A5-PAIR-RECONCILIATION",
+    "ci95": null,
+    "claim": "A5 paired counts are reproducible from trial rows",
+    "denominator": null,
+    "detail": "Recomputed: {'ast_match': {'n': 33, 'a0_correct': 32, 'a2_correct': 30, 'a0_only': 2, 'a2_only': 0, 'discordant': 2}, 'assertion': {'n': 33, 'a0_correct': 32, 'a2_correct': 32, 'a0_only': 0, 'a2_only': 0, 'discordant': 0}}",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A5/trials.json",
+      "A5/metrics.json:paired"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "assertion": {
+        "a0_correct": 32,
+        "a0_only": 0,
+        "a2_correct": 32,
+        "a2_only": 0,
+        "discordant": 0,
+        "n": 33
+      },
+      "ast_match": {
+        "a0_correct": 32,
+        "a0_only": 2,
+        "a2_correct": 30,
+        "a2_only": 0,
+        "discordant": 2,
+        "n": 33
+      }
+    }
+  },
+  {
+    "arm": "a5",
+    "caveats": [
+      "both observed flips belong to one template"
+    ],
+    "check_id": "A5-BEHAVIORAL-FLIPS",
+    "ci95": null,
+    "claim": "A5 supports the existence of wording-sensitive call-set behavior",
+    "denominator": 33,
+    "detail": "AST discordant=2/33; assertion discordant=0/33",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": 2,
+    "source_paths": [
+      "A5/metrics.json:paired",
+      "A5/trials.json"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a5",
+    "caveats": [],
+    "check_id": "A5-EFFECT-ESTIMATE",
+    "ci95": null,
+    "claim": "A5 has enough paired evidence to estimate a wording effect",
+    "denominator": null,
+    "detail": "n=33 (minimum 100); discordant=2 (minimum 25); McNemar p=0.5",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A5/metrics.json:paired.ast_match"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": {
+      "min_discordant_pairs": 25,
+      "min_paired_tasks": 100
+    },
+    "value": {
+      "discordant": 2,
+      "mcnemar_p": 0.5,
+      "n": 33
+    }
+  },
+  {
+    "arm": "a5",
+    "caveats": [
+      "statistical significance is not required to treat observed release regressions as blockers"
+    ],
+    "check_id": "A5-RELEASE-STABILITY",
+    "ci95": null,
+    "claim": "Canonical and paraphrased wording meet the release stability policy",
+    "denominator": null,
+    "detail": "Observed AST score delta=-6.1%; allowed absolute delta=2.0%",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A5/metrics.json:paired.ast_match.delta"
+    ],
+    "status": "FAIL",
+    "threshold": 0.02,
+    "value": -0.0606
+  },
+  {
+    "arm": "a5",
+    "caveats": [],
+    "check_id": "A5-EXTERNAL-VALIDITY",
+    "ci95": null,
+    "claim": "Wording stability generalizes across model families and multiple wording sets",
+    "denominator": null,
+    "detail": "The stored experiment uses one model family and one selected A2 wording",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A5/metrics.json:target_model",
+      "A5/metrics.json:wordings"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": {
+      "min_model_families": 2,
+      "min_wordings": 2
+    },
+    "value": null
+  },
+  {
+    "arm": "a5",
+    "caveats": [],
+    "check_id": "A5-HUMAN-DISAGREEMENT",
+    "ci95": null,
+    "claim": "Humans adjudicate whether assertion-lenient extra calls violate the benchmark contract",
+    "denominator": 0,
+    "detail": "Reviewed 0/2; rejected as unacceptable=0",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": 0,
+    "source_paths": [
+      "A7/human_labels.yaml",
+      "A5/metrics.json:verdict_disagreement"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": null,
+    "value": null
+  },
+  {
+    "arm": "a6",
+    "caveats": [],
+    "check_id": "A6-TRIAGE-PARTITION",
+    "ci95": null,
+    "claim": "Every raw A6 survivor has exactly one triage classification",
+    "denominator": null,
+    "detail": "metrics survived=48; trial survivors=48; triage partition=48; verdict rows=48",
+    "dimension": "integrity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A6/metrics.json:by_layer.survived",
+      "A6/trials.json",
+      "A6/triage.json"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "L1_validation_cases": 47,
+      "L2_expected_traces": 45,
+      "L3_assertions": 11,
+      "survived": 48
+    }
+  },
+  {
+    "arm": "a6",
+    "caveats": [
+      "raw metrics.blind_rate=45/103 is not an all-layer measurement"
+    ],
+    "check_id": "A6-BLIND-BOUNDS",
+    "ci95": null,
+    "claim": "A6 measures all-shipped-layer blind rate without skipping L4/L5",
+    "denominator": 107,
+    "detail": "Current evidence bounds blind mutants at 4/107–49/107 (3.7%–45.8%); 45 L2 rows lack L4/L5 outcomes",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": 49,
+    "source_paths": [
+      "A6/trials.json",
+      "A6/triage.json",
+      "bfcl_ablation/run_a6.py"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": 0.05,
+    "value": {
+      "lower_count": 4,
+      "lower_rate": 0.0374,
+      "observable": 107,
+      "upper_count": 49,
+      "upper_rate": 0.4579
+    }
+  },
+  {
+    "arm": "a6",
+    "caveats": [],
+    "check_id": "A6-RELEASE-BLIND-RATE",
+    "ci95": null,
+    "claim": "Backend blind rate is below the release-policy maximum",
+    "denominator": null,
+    "detail": "Allowed ≤5.0%; observed interval 3.7%–45.8%",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A6/trials.json",
+      "A6/triage.json"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": 0.05,
+    "value": {
+      "lower_count": 4,
+      "lower_rate": 0.0374,
+      "observable": 107,
+      "upper_count": 49,
+      "upper_rate": 0.4579
+    }
+  },
+  {
+    "arm": "a6",
+    "caveats": [],
+    "check_id": "A6-REAL-GAPS",
+    "ci95": null,
+    "claim": "A6 supports the existence of concrete backend contract gaps",
+    "denominator": null,
+    "detail": "Triaged real gaps=4; high/critical real gaps=0",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A6/triage.json"
+    ],
+    "status": "PASS",
+    "threshold": null,
+    "value": {
+      "critical_real_gaps": 0,
+      "real_gaps": 4
+    }
+  },
+  {
+    "arm": "a6",
+    "caveats": [],
+    "check_id": "A6-CRITICAL-GAPS",
+    "ci95": null,
+    "claim": "No high-severity real gap remains in the reviewed A6 triage",
+    "denominator": null,
+    "detail": "High/critical real gaps=0",
+    "dimension": "release_readiness",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A6/triage.json"
+    ],
+    "status": "PASS",
+    "threshold": 0,
+    "value": 0
+  },
+  {
+    "arm": "a6",
+    "caveats": [],
+    "check_id": "A6-HUMAN-TRIAGE",
+    "ci95": null,
+    "claim": "Independent human review confirms the four reported real-gap classifications",
+    "denominator": null,
+    "detail": "Reviewed 0/4; classification agreements=0",
+    "dimension": "study_validity",
+    "gating": true,
+    "numerator": null,
+    "source_paths": [
+      "A7/human_labels.yaml",
+      "A6/triage.json"
+    ],
+    "status": "INCONCLUSIVE",
+    "threshold": null,
+    "value": null
+  }
+]

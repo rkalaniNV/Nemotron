@@ -1,0 +1,689 @@
+{
+  "by_kind": {
+    "model_disagreement": {
+      "complete": 0,
+      "required": 2
+    },
+    "mutant_triage": {
+      "complete": 0,
+      "required": 4
+    },
+    "paraphrase_pair": {
+      "complete": 0,
+      "required": 74
+    }
+  },
+  "complete": false,
+  "critical_errors": 0,
+  "disagreements_unadjudicated": 0,
+  "intent_shift_controls": {
+    "misses": 0,
+    "required": 17,
+    "reviewed": 0
+  },
+  "issues": [
+    "no human label file supplied"
+  ],
+  "items": [
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-00639685026fdf90",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-01c6c668ec8ad914",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-047d8bcdf2a986eb",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-04b2f9d1f6366c09",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-05cd5ec11c473d20",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-062f0e7c515c4cbc",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-09c2088ec0473239",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-0a92a828fc360f5d",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-0dd2adc85a1c523c",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-11309cd4b4d0b8a0",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-1531517e1537bec8",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "checker_disagreement_diagnostic"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-169a01f197aee2ad",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "checker_disagreement_diagnostic"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-17c666bd2571a523",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-195eef01010ece7a",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "checker_disagreement_diagnostic"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-1c069bc2d420e93f",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-1d5fa4e3ddea0026",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-243f43861abc41aa",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-27ff947e3280500d",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-2a7a81f892cb832a",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-4477c1f65861ac0f",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-44dadbbff2b34d90",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-46c3972ccdef3640",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-4760816a41d2bfe1",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-486260325e1fced8",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-4ae62521635d4702",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-4ddf9715c4baa190",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-54564f49fb255aab",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-5c3ab85e3c2d0cfe",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-5c697e568327f13e",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-6b51c8ad10e4fc8c",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-732d940594a0a677",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-7611d09a5f1c6b38",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-780487f7ed51c16d",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-793cef6cf88d3bc6",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-7a49f912c5d2c624",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-7abd6700a831d0f7",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-7b5a5427bfc51699",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "checker_disagreement_diagnostic"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-7e52af181f16df30",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-805004ca201be92f",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-81ad09f15756a28f",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-8f7845f832321f92",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-9acc8aed965e4c7d",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-9c10f490bfc516e5",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-a4196bafab313983",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-a5c6c70f7aad7cec",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-ab8d1df8844d7a58",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-ac541f7b140a6a4b",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-ae85fc1604d9a8e6",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-afd46821b6e45c2b",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-b004763b72baef90",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-b1992f4970f01238",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-b2796ec2a6d90d8b",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-b27a029557085d68",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-b2c67ef0de4d5805",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-b5434840399eb00a",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-b8919ad980fab3b5",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-bab9bdc93ce72309",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-bae451d96a6fc8a9",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-bc676a70fbb23238",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "checker_disagreement_diagnostic"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-bc992f3c4aad8109",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-c01f32e62030f9b9",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-c29a1cd473c0171c",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-c72609a7d4110c99",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-d2714c7dcdad4898",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-d9235687381f2f51",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-da81f841e95bdb1f",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-dc5c936cc61eb0ca",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-dc8365a2f259f3dd",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "checker_disagreement_diagnostic"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-dd04f4ce72d9273f",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-dd7fa90eade6a9b0",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-e62bfd05e31bc360",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-f2ea2f28ee6b30cb",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-f4ea8bbcb6e1b448",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "deterministic_prevalence"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "surface-fb0e958fcbe2cac6",
+      "kind": "paraphrase_pair",
+      "labels": 0,
+      "sampling_stratum": "intent_shift_control"
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "a5-lenient-banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1",
+      "kind": "model_disagreement",
+      "labels": 0,
+      "sampling_stratum": null
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "a5-lenient-banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8",
+      "kind": "model_disagreement",
+      "labels": 0,
+      "sampling_stratum": null
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "a6-real-gap-m0096",
+      "kind": "mutant_triage",
+      "labels": 0,
+      "sampling_stratum": null
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "a6-real-gap-m0142",
+      "kind": "mutant_triage",
+      "labels": 0,
+      "sampling_stratum": null
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "a6-real-gap-m0143",
+      "kind": "mutant_triage",
+      "labels": 0,
+      "sampling_stratum": null
+    },
+    {
+      "adjudicated": false,
+      "complete": false,
+      "item_id": "a6-real-gap-m0150",
+      "kind": "mutant_triage",
+      "labels": 0,
+      "sampling_stratum": null
+    }
+  ],
+  "items_complete": 0,
+  "items_required": 80,
+  "min_reviewers_per_item": 2,
+  "model_disagreements": {
+    "rejected": 0,
+    "required": 2,
+    "reviewed": 0
+  },
+  "mutant_triage": {
+    "agreements": 0,
+    "required": 4,
+    "reviewed": 0
+  },
+  "prevalence_sample": {
+    "errors": 0,
+    "required": 51,
+    "reviewed": 0
+  },
+  "reviewers_declared": 0,
+  "schema_version": "1.0"
+}

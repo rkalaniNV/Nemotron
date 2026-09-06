@@ -2,10 +2,12 @@
 
 How much of an Oracle Pack can be removed without weakening the benchmark?
 
-This directory implements seven rungs of the ablation ladder plus one control. Every one
-runs the **unmodified** production pipeline (`runtime/benchmark_families/bfcl`). An arm is
-defined by the pack and config it feeds in, never by a patch to the generator — a
-patched generator would measure the patch instead of the pack.
+This directory implements seven rungs of the ablation ladder, one reproduction control,
+and an independent A7 quality gate. A0–A6 run the **unmodified** production pipeline
+(`runtime/benchmark_families/bfcl`) or audit its oracle. An arm is defined by the pack
+and config it feeds in, never by a patch to the generator — a patched generator would
+measure the patch instead of the pack. A7 is not another optimization rung: it audits
+whether the frozen A0–A6 evidence supports the study's claims and a public release.
 
 ```
 A0  human baseline               measure the current state         no model
@@ -15,12 +17,18 @@ A3  LLM task generation           semantics                        gpt-oss-120b
 A4  LLM assertions                last                             gpt-oss-120b
 A5  target-model evaluation       does a conclusion survive A2?     gpt-oss-120b
 A6  backend mutation gate         is the oracle falsifiable?        no model
+A7  independent quality gate      audit frozen A0-A6 evidence       no model
 ```
 
 A0–A4 measure the benchmark's *content*. **A5 is the only arm that measures a model on it**,
 and it closes a loop: A2 showed wording can change without ground truth moving, and A5 asks
 whether the *score* moves anyway. **A6 turns the question on the oracle itself** — it corrupts
 `backend.py` and asks whether anything in the pack notices.
+
+**A7 separates study validity from release readiness.** It recomputes denominators
+from stored trials where possible, imports versioned human labels for semantic claims,
+and returns `INCONCLUSIVE` rather than inventing evidence when labels or full-layer
+outcomes are missing.
 
 `results/A2_rerun/` is a **control**, not a rung: A2 re-executed to show it reproduces, and to
 show that every one of its known defects reproduces with it. See
@@ -50,6 +58,7 @@ PYTHONPATH=src python3 bfcl_ablation/run_a3.py     # sampled cells + LLM task pr
 PYTHONPATH=src python3 bfcl_ablation/run_a4.py     # mutation gate + LLM assertions, ~8 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a5.py     # target model on A0 vs A2 wording, ~5 min cold
 PYTHONPATH=src python3 bfcl_ablation/run_a6.py     # 151 backend mutants through every check, ~35 min
+PYTHONPATH=src:. python3 bfcl_ablation/run_a7.py   # artifact-only meta-audit, no model/pipeline
 ```
 
 `run_a2.py` has a hard dependency on `sweep_budget.py`: it needs the budget-24 baseline at
@@ -68,6 +77,18 @@ A0's `stage_cache`, so `run_a0.py` has to have run first.
 `run_a1.py` exits non-zero if A1 is not equivalent to A0, so it works as a CI
 regression test on auto-derivation.
 
+`run_a7.py` reads `results/A0` through `results/A6`; it does not rerun an arm. Generate
+the human-review queue with:
+
+```bash
+PYTHONPATH=src:. python3 bfcl_ablation/run_a7.py \
+  --emit-label-template bfcl_ablation/results/A7/human_labels.template.yaml
+```
+
+Without `--labels`, semantic checks remain `INCONCLUSIVE`. The default command is
+report-only and exits zero after a successful audit; `--strict` exits non-zero unless
+artifact integrity and release readiness both pass.
+
 Reports land in `results/` as Markdown and JSON. Generated packs, configs and run
 artifacts land in `_generated/` and are disposable.
 
@@ -81,6 +102,7 @@ propose/             A3 — coverage spec + controlled sampler, backend result p
 mutate/              A4 — mutation operators, the assertion gate, LLM assertion authoring
 target/              A5 — tool-calling client, model rollout loop, paired scoring
 backend_gate/        A6 — backend mutation operators and the kill ladder
+quality_gate/        A7 — artifact audit, human-label contract, thresholds and report
 results/             per-arm reports
 ```
 

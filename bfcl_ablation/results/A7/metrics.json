@@ -1,0 +1,215 @@
+{
+  "arm": "a7",
+  "artifacts": {
+    "a0_metrics": {
+      "arm": "a0",
+      "metrics_version": "1.0",
+      "path": "bfcl_ablation/results/A0/metrics.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "e03997e5c50f5989ac75ef4c0265873177d1f1fe39c4231f37aa009cf022fb9c"
+    },
+    "a1_equivalence": {
+      "path": "bfcl_ablation/results/A1/vs_a0_equivalence.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "df2fa6963c93af2fbfb0030c6c6766bd781cd04d12b3376139121b4aa6424855"
+    },
+    "a1_metrics": {
+      "arm": "a1",
+      "metrics_version": "1.0",
+      "path": "bfcl_ablation/results/A1/metrics.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "dadc946878e938fcb76a2de7366a353bd33bbe13d087b695786ee0bef120b369"
+    },
+    "a2_metrics": {
+      "arm": "a2",
+      "metrics_version": "1.0",
+      "path": "bfcl_ablation/results/A2/metrics.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "41a62cf49b9f6f1ee363eb6a6e3eefd5640a2e7c3766343ad27ffc24e6294204"
+    },
+    "a3_metrics": {
+      "arm": "a3",
+      "metrics_version": "1.0",
+      "path": "bfcl_ablation/results/A3/metrics.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "6493dced19cde6907f1f843210bf2c4f1d2484fd256d7b0185f3d60c8f71bb0b"
+    },
+    "a4_metrics": {
+      "arm": "a4",
+      "metrics_version": "1.0",
+      "path": "bfcl_ablation/results/A4/metrics.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "54e8b6cc81d2421cefcd0e19b3b44c1e099d16d328d765e0914600cc9b92259f"
+    },
+    "a4_trials": {
+      "path": "bfcl_ablation/results/A4/trials.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "5c15c10e9f47ad3816203ad9238fffd29f4ce3c47f877de4c93035e7d7038e41"
+    },
+    "a5_metrics": {
+      "arm": "a5",
+      "metrics_version": "1.0",
+      "path": "bfcl_ablation/results/A5/metrics.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "0a1e5dbfb9dae26618ba8b584ad845d827b3257b89d362ca919ce500186b66d6"
+    },
+    "a5_trials": {
+      "path": "bfcl_ablation/results/A5/trials.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "ed053c7d801c8afe18a430c75b64a9ddbd790f29c56eb01af77128a1d8dba026"
+    },
+    "a6_metrics": {
+      "arm": "a6",
+      "metrics_version": "1.0",
+      "path": "bfcl_ablation/results/A6/metrics.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "4acb21bf7eb0760054bb5137a1f5f2a864081bff28dc8514e059ce6b3780d783"
+    },
+    "a6_triage": {
+      "path": "bfcl_ablation/results/A6/triage.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "dfdc9a58e94032e3716001f73d40f628e9d99afc4ddfe228b266ed0c12c270ae"
+    },
+    "a6_trials": {
+      "path": "bfcl_ablation/results/A6/trials.json",
+      "present": true,
+      "required": true,
+      "schema_valid": true,
+      "sha256": "467f2a1f73a2dbc8a40258f92c087bce0935bc127ad4b64daa051ffa923d5bbb"
+    },
+    "budget_sweep": {
+      "path": "bfcl_ablation/results/budget_sweep.json",
+      "present": true,
+      "required": false,
+      "schema_valid": true,
+      "sha256": "f5816043e262476a2b3e240060e576ac0709fe450b27738be67ab976fbc9acc0"
+    }
+  },
+  "audited_arms": [
+    "a0",
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6"
+  ],
+  "by_arm": {
+    "a0": {
+      "integrity": "PASS",
+      "release_readiness": "CONDITIONAL",
+      "study_validity": "PASS"
+    },
+    "a1": {
+      "integrity": "PASS",
+      "release_readiness": "CONDITIONAL",
+      "study_validity": "PASS"
+    },
+    "a2": {
+      "integrity": "PASS",
+      "release_readiness": "INCONCLUSIVE",
+      "study_validity": "INCONCLUSIVE"
+    },
+    "a3": {
+      "integrity": "PASS",
+      "release_readiness": "FAIL",
+      "study_validity": "INCONCLUSIVE"
+    },
+    "a4": {
+      "integrity": "PASS",
+      "release_readiness": "FAIL",
+      "study_validity": "INCONCLUSIVE"
+    },
+    "a5": {
+      "integrity": "PASS",
+      "release_readiness": "FAIL",
+      "study_validity": "INCONCLUSIVE"
+    },
+    "a6": {
+      "integrity": "PASS",
+      "release_readiness": "INCONCLUSIVE",
+      "study_validity": "INCONCLUSIVE"
+    }
+  },
+  "check_counts": {
+    "CONDITIONAL": 8,
+    "FAIL": 4,
+    "INCONCLUSIVE": 11,
+    "PASS": 25
+  },
+  "definitions": {
+    "CONDITIONAL": "the claim is supported only within an explicitly limited scope",
+    "INCONCLUSIVE": "required independent evidence is missing or the design cannot identify the claim",
+    "release_readiness": "whether the produced benchmark or variant meets the selected publication policy",
+    "study_validity": "whether an arm's stated conclusion is supported by its stored evidence"
+  },
+  "derived": {
+    "a2_human_semantic_ci95": null,
+    "a5_assertion_accuracy": 0.9697,
+    "a6_all_gate_blind_bounds": {
+      "lower_count": 4,
+      "lower_rate": 0.0374,
+      "observable": 107,
+      "upper_count": 49,
+      "upper_rate": 0.4579
+    }
+  },
+  "env": {
+    "cwd": "/localhome/local-hndo/Nemotron",
+    "python": "3.12.7",
+    "repo_root": "/localhome/local-hndo/Nemotron"
+  },
+  "gate_contract_version": "1.0",
+  "headline_warnings": [
+    "A0/A3 publish and gold rates are throughput, not content-quality evidence.",
+    "A2 FROZEN checks task IDs and expected calls; it is not semantic equivalence.",
+    "A4 must be read per strict operator class; aggregate false acceptance hides the weakness.",
+    "A5 assertion agreement is 100%, but assertion accuracy is 32/33 on each wording.",
+    "A6 raw blind_rate is not an all-layer result; current evidence bounds it at 3.7%-45.8%."
+  ],
+  "human_labels": {
+    "complete": false,
+    "issues": [
+      "no human label file supplied"
+    ],
+    "items_complete": 0,
+    "items_required": 80,
+    "path": null,
+    "schema_version": "1.0"
+  },
+  "metrics_version": "1.0",
+  "publication_decision": "NOT_READY",
+  "rollup": {
+    "integrity": "PASS",
+    "release_readiness": "FAIL",
+    "study_validity": "INCONCLUSIVE"
+  },
+  "threshold_policy": {
+    "canonical_sha256": "84dcbf3377fe63f7940d8dd46fea7e56208cde06525bcef23ef1852b4b7b1c74",
+    "contract_version": "1.0",
+    "path": "bfcl_ablation/quality_gate/defaults.yaml",
+    "sha256": "f1e9f1b1643a4aee8b30e3d3c73b84feb50422969422671a28c43ef3cdd9886b"
+  }
+}

@@ -1,0 +1,35 @@
+contract_version: "1.0"
+
+# These are release-policy defaults, not universal scientific constants. Override
+# them with --thresholds and preserve the selected policy hash in the A7 result.
+human:
+  min_reviewers_per_item: 2
+  max_semantic_error_rate: 0.01
+  max_semantic_error_upper_ci95: 0.05
+  max_control_miss_rate: 0.05
+
+a2:
+  min_shift_recall: 0.90
+  max_canonical_false_alarm: 0.10
+  max_llm_substitution_rate: 0.05
+
+a3:
+  max_unfalsifiable_share: 0.30
+  max_tools_never_called: 0
+
+a4:
+  max_argument_false_acceptance: 0.05
+  max_call_false_acceptance: 0.05
+  max_state_false_acceptance: 0.00
+  min_gold_pass_rate: 0.99
+
+a5:
+  max_absolute_score_delta: 0.02
+  min_paired_tasks: 100
+  min_discordant_pairs: 25
+  min_model_families: 2
+  min_wordings: 2
+
+a6:
+  max_all_gate_blind_rate: 0.05
+  max_critical_real_gaps: 0

@@ -1,0 +1,1021 @@
+schema_version: '1.0'
+rubric_version: '1.0'
+pack_id: banking_vn
+language: vi
+reviewers: []
+items:
+- item_id: surface-00639685026fdf90
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:00639685026fdf90
+  template_id: bn_txn_status_unknown_id
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch {transaction_id} của mình hiện thế nào rồi?
+  candidate_text: Giao dịch {transaction_id} của mình hiện đang sao?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-01c6c668ec8ad914
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:01c6c668ec8ad914
+  template_id: bn_out_of_scope_service
+  task_id: null
+  variant_index: null
+  reference_text: Mình muốn đăng ký {service} thì làm thủ tục thế nào?
+  candidate_text: Mình muốn biết số tiền còn lại có thể chi tiêu trên thẻ {service} là bao nhiêu?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-047d8bcdf2a986eb
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:047d8bcdf2a986eb
+  template_id: bn_balance_withheld_account
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản của mình với.
+  candidate_text: Xin kiểm tra số dư tài khoản cho mình.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-04b2f9d1f6366c09
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:04b2f9d1f6366c09
+  template_id: bn_transfer_fee_single
+  task_id: null
+  variant_index: null
+  reference_text: Phí chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail} là bao nhiêu?
+  candidate_text: Xin vui lòng cho tôi biết trạng thái của giao dịch thanh toán VietQR với mã tham chiếu {amount_vnd} từ tài
+    khoản {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-05cd5ec11c473d20
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:05cd5ec11c473d20
+  template_id: bn_transfer_fee_single
+  task_id: null
+  variant_index: null
+  reference_text: Phí chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail} là bao nhiêu?
+  candidate_text: Mức phí chuyển {amount_vnd}đ từ tài khoản {from_account_id} sang số {to_account_number} tại ngân hàng {to_bank_code}
+    qua kênh {rail} là bao nhiêu?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-062f0e7c515c4cbc
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:062f0e7c515c4cbc
+  template_id: bn_latest_txn_status_dependent
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch gần nhất của tài khoản {account_id} hiện thế nào?
+  candidate_text: Tài khoản {account_id} giao dịch gần nhất hiện ra sao?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-09c2088ec0473239
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:09c2088ec0473239
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Bạn có thể mở tra soát giao dịch {transaction_id} với lý do {reason} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-0a92a828fc360f5d
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:0a92a828fc360f5d
+  template_id: bn_clarify_lookup_target
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình kiểm tra {subject} với.
+  candidate_text: Bạn có thể giúp mình xem {subject} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-0dd2adc85a1c523c
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:0dd2adc85a1c523c
+  template_id: bn_dispute_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Hồ sơ tra soát {dispute_id} đang ở trạng thái nào?
+  candidate_text: Bạn cho mình biết trạng thái của hồ sơ {dispute_id} được không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-11309cd4b4d0b8a0
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:11309cd4b4d0b8a0
+  template_id: bn_list_recent_single
+  task_id: null
+  variant_index: null
+  reference_text: Liệt kê vài giao dịch gần đây của tài khoản {account_id}.
+  candidate_text: Xin vui lòng cho tôi xem các giao dịch gần nhất của tài khoản {account_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-1531517e1537bec8
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:1531517e1537bec8
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Tôi cần tra soát giao dịch {transaction_id} vì {reason}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-169a01f197aee2ad
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:169a01f197aee2ad
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: 'Vui lòng kiểm tra lại giao dịch {transaction_id}, lý do: {reason}.'
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-17c666bd2571a523
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:17c666bd2571a523
+  template_id: bn_txn_status_unknown_id
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch {transaction_id} của mình hiện thế nào rồi?
+  candidate_text: Bạn có thể cho mình biết giao dịch {transaction_id} đã tới đâu chưa?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-195eef01010ece7a
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:195eef01010ece7a
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Xin hỗ trợ tra soát giao dịch {transaction_id} vì {reason}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-1c069bc2d420e93f
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:1c069bc2d420e93f
+  template_id: bn_balance_single
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id}.
+  candidate_text: Xin kiểm tra số dư tài khoản {account_id} cho mình nhé.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-1d5fa4e3ddea0026
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:1d5fa4e3ddea0026
+  template_id: bn_create_transfer_single
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển ngay {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail}.
+  candidate_text: Xin chuyển {amount_vnd}đ từ tài khoản {from_account_id} tới số {to_account_number} ngân hàng {to_bank_code}
+    qua kênh {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-243f43861abc41aa
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:243f43861abc41aa
+  template_id: bn_txn_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Kiểm tra giao dịch {transaction_id} đã thành công chưa.
+  candidate_text: Xin hỏi, giao dịch {transaction_id} đã hoàn tất chưa?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-27ff947e3280500d
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:27ff947e3280500d
+  template_id: bn_balance_and_card_parallel
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id} và hạn mức thẻ {card_id} luôn nhé.
+  candidate_text: Mình muốn kiểm tra số dư tài khoản {account_id} và hạn mức thẻ {card_id} ạ.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-2a7a81f892cb832a
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:2a7a81f892cb832a
+  template_id: bn_transfer_short_of_funds
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}
+    giúp mình.
+  candidate_text: Mình muốn xem lịch sử giao dịch gần đây của tài khoản {from_account_id}, vui lòng cung cấp chi tiết. Các
+    thông tin {amount_vnd}, {to_account_number}, {to_bank_code}, {rail} chỉ để giữ nguyên định dạng.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-4477c1f65861ac0f
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:4477c1f65861ac0f
+  template_id: bn_txn_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Kiểm tra giao dịch {transaction_id} đã thành công chưa.
+  candidate_text: Mình muốn biết giao dịch {transaction_id} có được xử lý thành công không.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-44dadbbff2b34d90
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:44dadbbff2b34d90
+  template_id: bn_create_transfer_single
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển ngay {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail}.
+  candidate_text: Xin vui lòng cho tôi biết số tiền {amount_vnd}đ còn lại trong hạn mức chi tiêu của thẻ, liên quan đến tài
+    khoản {from_account_id}, số thẻ {to_account_number}, ngân hàng {to_bank_code} qua kênh {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-46c3972ccdef3640
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:46c3972ccdef3640
+  template_id: bn_card_limit_single
+  task_id: null
+  variant_index: null
+  reference_text: Hạn mức còn lại của thẻ {card_id} là bao nhiêu?
+  candidate_text: Bạn cho mình biết hạn mức còn lại của thẻ {card_id} được không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-4760816a41d2bfe1
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:4760816a41d2bfe1
+  template_id: bn_create_transfer_single
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển ngay {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail}.
+  candidate_text: Mời chuyển {amount_vnd}đ từ {from_account_id} sang tài khoản {to_account_number} tại ngân hàng {to_bank_code}
+    bằng kênh {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-486260325e1fced8
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:486260325e1fced8
+  template_id: bn_transfer_short_of_funds
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}
+    giúp mình.
+  candidate_text: Bạn giúp mình chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code}
+    qua {rail} được không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-4ae62521635d4702
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:4ae62521635d4702
+  template_id: bn_transfer_fee_single
+  task_id: null
+  variant_index: null
+  reference_text: Phí chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail} là bao nhiêu?
+  candidate_text: Phí giao dịch khi chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} - {to_bank_code} qua
+    {rail} là bao nhiêu?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-4ddf9715c4baa190
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:4ddf9715c4baa190
+  template_id: bn_balance_withheld_account
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản của mình với.
+  candidate_text: Cho mình kiểm tra tình trạng của vụ tranh chấp thanh toán đã nộp trước đây nhé.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-54564f49fb255aab
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:54564f49fb255aab
+  template_id: bn_latest_txn_status_dependent
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch gần nhất của tài khoản {account_id} hiện thế nào?
+  candidate_text: Bạn có thể cho biết giao dịch mới nhất của tài khoản {account_id} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-5c3ab85e3c2d0cfe
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:5c3ab85e3c2d0cfe
+  template_id: bn_card_limit_single
+  task_id: null
+  variant_index: null
+  reference_text: Hạn mức còn lại của thẻ {card_id} là bao nhiêu?
+  candidate_text: Thẻ {card_id} còn lại bao nhiêu hạn mức?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-5c697e568327f13e
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:5c697e568327f13e
+  template_id: bn_balance_withheld_account
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản của mình với.
+  candidate_text: Bạn cho mình xem số dư tài khoản nhé.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-6b51c8ad10e4fc8c
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:6b51c8ad10e4fc8c
+  template_id: bn_card_limit_single
+  task_id: null
+  variant_index: null
+  reference_text: Hạn mức còn lại của thẻ {card_id} là bao nhiêu?
+  candidate_text: Mình muốn biết số tiền còn lại trong hạn mức thẻ {card_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-732d940594a0a677
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:732d940594a0a677
+  template_id: bn_clarify_lookup_target
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình kiểm tra {subject} với.
+  candidate_text: Cho mình xem {subject} một chút.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-7611d09a5f1c6b38
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:7611d09a5f1c6b38
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Mong muốn kiểm tra lại giao dịch {transaction_id} vì {reason}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-780487f7ed51c16d
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:780487f7ed51c16d
+  template_id: bn_transfer_fee_single
+  task_id: null
+  variant_index: null
+  reference_text: Phí chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail} là bao nhiêu?
+  candidate_text: Bạn cho mình biết phí chuyển {amount_vnd}đ từ {from_account_id} tới {to_account_number} ngân hàng {to_bank_code}
+    bằng {rail} được không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-793cef6cf88d3bc6
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:793cef6cf88d3bc6
+  template_id: bn_txn_status_unknown_id
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch {transaction_id} của mình hiện thế nào rồi?
+  candidate_text: Mình muốn biết tình trạng của giao dịch {transaction_id} nhé?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-7a49f912c5d2c624
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:7a49f912c5d2c624
+  template_id: bn_transfer_amount_corrected
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}.
+  candidate_text: 'Bạn có thể cho tôi biết hạn mức chi tiêu còn lại của thẻ không? Thông tin giao dịch tham chiếu: {amount_vnd}đ
+    từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}.'
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-7abd6700a831d0f7
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:7abd6700a831d0f7
+  template_id: bn_out_of_scope_service
+  task_id: null
+  variant_index: null
+  reference_text: Mình muốn đăng ký {service} thì làm thủ tục thế nào?
+  candidate_text: Bạn có thể hướng dẫn mình cách đăng ký {service} được không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-7b5a5427bfc51699
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:7b5a5427bfc51699
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Xin kiểm tra lại giao dịch {transaction_id} do {reason}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-7e52af181f16df30
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:7e52af181f16df30
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Xin cho tôi biết trạng thái thanh toán VietQR với mã tham chiếu {transaction_id}, lý do {reason}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-805004ca201be92f
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:805004ca201be92f
+  template_id: bn_list_recent_single
+  task_id: null
+  variant_index: null
+  reference_text: Liệt kê vài giao dịch gần đây của tài khoản {account_id}.
+  candidate_text: Mong muốn biết các giao dịch gần đây của tài khoản {account_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-81ad09f15756a28f
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:81ad09f15756a28f
+  template_id: bn_dispute_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Hồ sơ tra soát {dispute_id} đang ở trạng thái nào?
+  candidate_text: Mình muốn biết tình trạng hiện tại của hồ sơ {dispute_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-8f7845f832321f92
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:8f7845f832321f92
+  template_id: bn_card_limit_single
+  task_id: null
+  variant_index: null
+  reference_text: Hạn mức còn lại của thẻ {card_id} là bao nhiêu?
+  candidate_text: Tôi muốn chuyển tiền nội địa từ thẻ {card_id} và muốn nhận xác nhận trước khi giao dịch được thực hiện.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-9acc8aed965e4c7d
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:9acc8aed965e4c7d
+  template_id: bn_out_of_scope_service
+  task_id: null
+  variant_index: null
+  reference_text: Mình muốn đăng ký {service} thì làm thủ tục thế nào?
+  candidate_text: Mình muốn biết thủ tục đăng ký {service} như thế nào?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-9c10f490bfc516e5
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:9c10f490bfc516e5
+  template_id: bn_balance_single
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id}.
+  candidate_text: Bạn có thể cho mình số dư tài khoản {account_id} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-a4196bafab313983
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:a4196bafab313983
+  template_id: bn_transfer_short_of_funds
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}
+    giúp mình.
+  candidate_text: Mình muốn chuyển {amount_vnd}đ từ tài khoản {from_account_id} sang số {to_account_number} tại ngân hàng
+    {to_bank_code} qua kênh {rail} nhé.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-a5c6c70f7aad7cec
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:a5c6c70f7aad7cec
+  template_id: bn_balance_and_card_parallel
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id} và hạn mức thẻ {card_id} luôn nhé.
+  candidate_text: Mình muốn xem các giao dịch gần đây của tài khoản {account_id}, và nếu có thể, thông tin thẻ {card_id} cũng
+    được.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-ab8d1df8844d7a58
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:ab8d1df8844d7a58
+  template_id: bn_vietqr_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Mã VietQR {payment_ref} đã trừ tiền chưa?
+  candidate_text: Số VietQR {payment_ref} đã bị trừ tiền chưa?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-ac541f7b140a6a4b
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:ac541f7b140a6a4b
+  template_id: bn_vietqr_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Mã VietQR {payment_ref} đã trừ tiền chưa?
+  candidate_text: Mã QR Viet {payment_ref} đã được trừ tiền chưa?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-ae85fc1604d9a8e6
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:ae85fc1604d9a8e6
+  template_id: bn_vietqr_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Mã VietQR {payment_ref} đã trừ tiền chưa?
+  candidate_text: Tôi muốn chuyển tiền nội địa, dùng mã tham chiếu {payment_ref} và muốn được xác nhận trước khi giao dịch.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-afd46821b6e45c2b
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:afd46821b6e45c2b
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Xin mở tra soát cho giao dịch {transaction_id} do {reason}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-b004763b72baef90
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:b004763b72baef90
+  template_id: bn_txn_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Kiểm tra giao dịch {transaction_id} đã thành công chưa.
+  candidate_text: Tôi muốn thực hiện một chuyển tiền nội địa và cần xác nhận trước khi giao dịch được hoàn tất, mã tham chiếu
+    là {transaction_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-b1992f4970f01238
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:b1992f4970f01238
+  template_id: bn_transfer_amount_corrected
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}.
+  candidate_text: Mời chuyển {amount_vnd}đ từ tài khoản {from_account_id} sang số {to_account_number} tại ngân hàng {to_bank_code}
+    qua kênh {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-b2796ec2a6d90d8b
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:b2796ec2a6d90d8b
+  template_id: bn_transfer_amount_corrected
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}.
+  candidate_text: Xin chuyển {amount_vnd} đồng từ {from_account_id} tới {to_account_number} - {to_bank_code} bằng {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-b27a029557085d68
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:b27a029557085d68
+  template_id: bn_list_recent_single
+  task_id: null
+  variant_index: null
+  reference_text: Liệt kê vài giao dịch gần đây của tài khoản {account_id}.
+  candidate_text: Bạn có thể liệt kê một vài giao dịch gần đây của tài khoản {account_id} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-b2c67ef0de4d5805
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:b2c67ef0de4d5805
+  template_id: bn_txn_status_unknown_id
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch {transaction_id} của mình hiện thế nào rồi?
+  candidate_text: Vui lòng cho mình biết tình trạng thanh toán VietQR với mã tham chiếu {transaction_id} hiện tại?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-b5434840399eb00a
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:b5434840399eb00a
+  template_id: bn_vietqr_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Mã VietQR {payment_ref} đã trừ tiền chưa?
+  candidate_text: Tiền đã được trừ từ mã VietQR {payment_ref} chưa?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-b8919ad980fab3b5
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:b8919ad980fab3b5
+  template_id: bn_txn_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Kiểm tra giao dịch {transaction_id} đã thành công chưa.
+  candidate_text: Bạn kiểm tra giúp mình xem giao dịch {transaction_id} đã thành công chưa?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-bab9bdc93ce72309
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:bab9bdc93ce72309
+  template_id: bn_latest_txn_status_dependent
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch gần nhất của tài khoản {account_id} hiện thế nào?
+  candidate_text: Mình muốn biết giao dịch gần đây nhất của tài khoản {account_id} như thế nào.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-bae451d96a6fc8a9
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:bae451d96a6fc8a9
+  template_id: bn_balance_single
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id}.
+  candidate_text: Cho mình xem các giao dịch gần đây của tài khoản {account_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-bc676a70fbb23238
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:bc676a70fbb23238
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Mong muốn tra soát giao dịch {transaction_id} vì {reason}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-bc992f3c4aad8109
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:bc992f3c4aad8109
+  template_id: bn_dispute_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Hồ sơ tra soát {dispute_id} đang ở trạng thái nào?
+  candidate_text: Hồ sơ tranh chấp {dispute_id} hiện đang ở mức nào?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-c01f32e62030f9b9
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:c01f32e62030f9b9
+  template_id: bn_out_of_scope_service
+  task_id: null
+  variant_index: null
+  reference_text: Mình muốn đăng ký {service} thì làm thủ tục thế nào?
+  candidate_text: Làm sao để mình đăng ký {service} ạ?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-c29a1cd473c0171c
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:c29a1cd473c0171c
+  template_id: bn_dispute_status_single
+  task_id: null
+  variant_index: null
+  reference_text: Hồ sơ tra soát {dispute_id} đang ở trạng thái nào?
+  candidate_text: Tôi muốn mở một tranh chấp cho giao dịch {dispute_id}, bạn có thể xác nhận lại trước khi thực hiện không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-c72609a7d4110c99
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:c72609a7d4110c99
+  template_id: bn_latest_txn_status_dependent
+  task_id: null
+  variant_index: null
+  reference_text: Giao dịch gần nhất của tài khoản {account_id} hiện thế nào?
+  candidate_text: Bạn có thể cho tôi biết số dư khả dụng hiện tại của tài khoản {account_id} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-d2714c7dcdad4898
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:d2714c7dcdad4898
+  template_id: bn_clarify_lookup_target
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình kiểm tra {subject} với.
+  candidate_text: Mình muốn kiểm tra {subject} nhé.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-d9235687381f2f51
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:d9235687381f2f51
+  template_id: bn_balance_single
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id}.
+  candidate_text: Mình muốn biết số dư của tài khoản {account_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-da81f841e95bdb1f
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:da81f841e95bdb1f
+  template_id: bn_transfer_amount_corrected
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}.
+  candidate_text: Bạn giúp mình chuyển {amount_vnd}đ từ {from_account_id} sang tài khoản {to_account_number} ngân hàng {to_bank_code}
+    qua {rail} nhé.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-dc5c936cc61eb0ca
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:dc5c936cc61eb0ca
+  template_id: bn_balance_and_card_parallel
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id} và hạn mức thẻ {card_id} luôn nhé.
+  candidate_text: Cho mình xem số dư tài khoản {account_id} và hạn mức thẻ {card_id} nhé.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-dc8365a2f259f3dd
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:dc8365a2f259f3dd
+  template_id: bn_create_dispute_single
+  task_id: null
+  variant_index: null
+  reference_text: Mở tra soát cho giao dịch {transaction_id}, lý do {reason}.
+  candidate_text: Có thể giúp tôi tra soát giao dịch {transaction_id} vì {reason} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-dd04f4ce72d9273f
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:dd04f4ce72d9273f
+  template_id: bn_create_transfer_single
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển ngay {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh
+    {rail}.
+  candidate_text: Vui lòng chuyển {amount_vnd}đ từ {from_account_id} đến {to_account_number} ngân hàng {to_bank_code} qua
+    {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-dd7fa90eade6a9b0
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:dd7fa90eade6a9b0
+  template_id: bn_balance_withheld_account
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản của mình với.
+  candidate_text: Mình muốn biết số tiền còn lại trong tài khoản.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-e62bfd05e31bc360
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:e62bfd05e31bc360
+  template_id: bn_balance_and_card_parallel
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình xem số dư tài khoản {account_id} và hạn mức thẻ {card_id} luôn nhé.
+  candidate_text: Bạn có thể cho mình biết số dư của tài khoản {account_id} cùng hạn mức thẻ {card_id} không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-f2ea2f28ee6b30cb
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:f2ea2f28ee6b30cb
+  template_id: bn_list_recent_single
+  task_id: null
+  variant_index: null
+  reference_text: Liệt kê vài giao dịch gần đây của tài khoản {account_id}.
+  candidate_text: Vui lòng cho tôi biết hạn mức chi tiêu còn lại của thẻ gắn với tài khoản {account_id}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-f4ea8bbcb6e1b448
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:f4ea8bbcb6e1b448
+  template_id: bn_transfer_short_of_funds
+  task_id: null
+  variant_index: null
+  reference_text: Chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} ngân hàng {to_bank_code} qua kênh {rail}
+    giúp mình.
+  candidate_text: Xin chuyển {amount_vnd} đồng từ {from_account_id} tới {to_account_number} ngân hàng {to_bank_code} dùng
+    {rail}.
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: surface-fb0e958fcbe2cac6
+  kind: paraphrase_pair
+  source_arm: a2
+  source_ref: surface:fb0e958fcbe2cac6
+  template_id: bn_clarify_lookup_target
+  task_id: null
+  variant_index: null
+  reference_text: Cho mình kiểm tra {subject} với.
+  candidate_text: Cho mình xem số dư khả dụng của {subject} được không?
+  context: {}
+  labels: []
+  adjudication: null
+- item_id: a5-lenient-banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1
+  kind: model_disagreement
+  source_arm: a5
+  source_ref: model-output:c7f55e1b5f11f027
+  template_id: bn_create_transfer_single
+  task_id: banking_vn__bn_create_transfer_single__97e3d31fdcc1c1d1
+  variant_index: null
+  reference_text: null
+  candidate_text: Mong chuyển 200000đ từ ACC-001 sang 9876543210 tại 970436 qua kênh napas.
+  context:
+    observed_calls:
+    - - get_transfer_fee
+      - '{"amount_vnd": 200000, "from_account_id": "ACC-001", "rail": "napas", "to_account_number": "9876543210", "to_bank_code":
+        "970436"}'
+    - - create_transfer
+      - '{"amount_vnd": 200000, "confirm": true, "from_account_id": "ACC-001", "rail": "napas", "to_account_number": "9876543210",
+        "to_bank_code": "970436"}'
+  labels: []
+  adjudication: null
+- item_id: a5-lenient-banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8
+  kind: model_disagreement
+  source_arm: a5
+  source_ref: model-output:f5718eb874937eae
+  template_id: bn_create_transfer_single
+  task_id: banking_vn__bn_create_transfer_single__b8c7c69191a5c8c8
+  variant_index: null
+  reference_text: null
+  candidate_text: Mong chuyển 200000đ từ ACC-002 sang 9876543210 tại 970436 qua kênh napas.
+  context:
+    observed_calls:
+    - - get_transfer_fee
+      - '{"amount_vnd": 200000, "from_account_id": "ACC-002", "rail": "napas", "to_account_number": "9876543210", "to_bank_code":
+        "970436"}'
+    - - create_transfer
+      - '{"amount_vnd": 200000, "confirm": true, "from_account_id": "ACC-002", "rail": "napas", "to_account_number": "9876543210",
+        "to_bank_code": "970436"}'
+  labels: []
+  adjudication: null
+- item_id: a6-real-gap-m0096
+  kind: mutant_triage
+  source_arm: a6
+  source_ref: triage.verdicts:index=96
+  template_id: null
+  task_id: null
+  variant_index: null
+  reference_text: null
+  candidate_text: null
+  context:
+    mutant_index: 96
+    lineno: 106
+    operator: delete_state_write
+  labels: []
+  adjudication: null
+- item_id: a6-real-gap-m0142
+  kind: mutant_triage
+  source_arm: a6
+  source_ref: triage.verdicts:index=142
+  template_id: null
+  task_id: null
+  variant_index: null
+  reference_text: null
+  candidate_text: null
+  context:
+    mutant_index: 142
+    lineno: 313
+    operator: drop_result_key
+  labels: []
+  adjudication: null
+- item_id: a6-real-gap-m0143
+  kind: mutant_triage
+  source_arm: a6
+  source_ref: triage.verdicts:index=143
+  template_id: null
+  task_id: null
+  variant_index: null
+  reference_text: null
+  candidate_text: null
+  context:
+    mutant_index: 143
+    lineno: 313
+    operator: drop_result_key
+  labels: []
+  adjudication: null
+- item_id: a6-real-gap-m0150
+  kind: mutant_triage
+  source_arm: a6
+  source_ref: triage.verdicts:index=150
+  template_id: null
+  task_id: null
+  variant_index: null
+  reference_text: null
+  candidate_text: null
+  context:
+    mutant_index: 150
+    lineno: 445
+    operator: drop_result_key
+  labels: []
+  adjudication: null

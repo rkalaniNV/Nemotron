@@ -1,0 +1,40 @@
+schema_version: "1.0"
+rubric_version: "1.0"
+pack_id: banking_vn
+language: vi
+reviewers:
+  - reviewer_id: reviewer-1
+    display_name: Reviewer 1
+  - reviewer_id: reviewer-2
+    display_name: Reviewer 2
+items:
+  - item_id: a2-bn-transfer-fee-v1
+    kind: paraphrase_pair
+    source_arm: a2
+    source_ref: intent_check.rows.paraphrase:bn_transfer_fee_single:1
+    template_id: bn_transfer_fee_single
+    task_id: null
+    variant_index: 1
+    reference_text: "Phí chuyển {amount_vnd}đ từ {from_account_id} sang {to_account_number} là bao nhiêu?"
+    candidate_text: "Giao dịch chuyển {amount_vnd}đ này sẽ mất bao nhiêu phí?"
+    context: {}
+    labels:
+      - reviewer_id: reviewer-1
+        intent_preserved: true
+        acceptable_for_benchmark: true
+        required_tools:
+          - get_transfer_fee
+        turn_policy: single_turn
+        mutant_classification: null
+        severity: none
+        notes: null
+      - reviewer_id: reviewer-2
+        intent_preserved: true
+        acceptable_for_benchmark: true
+        required_tools:
+          - get_transfer_fee
+        turn_policy: single_turn
+        mutant_classification: null
+        severity: none
+        notes: null
+    adjudication: null

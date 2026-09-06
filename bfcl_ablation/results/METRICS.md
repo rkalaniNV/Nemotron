@@ -225,6 +225,44 @@ the ~25 the approximation needs. A non-significant p at this n means *not detect
 
 ---
 
+## A7 independent quality gate
+
+A7 is a meta-evaluation of frozen A0–A6 artifacts, not an eighth optimization rung. It
+does not run the production pipeline or call a model. Its own `gate_contract_version`
+versions check semantics and release policy separately from this metric contract.
+
+Every A7 check records:
+
+- `dimension`: artifact `integrity`, `study_validity`, or `release_readiness`
+- `status`: `PASS`, `CONDITIONAL`, `FAIL`, or `INCONCLUSIVE`
+- numerator, denominator, and a Wilson 95% interval when the observation is binomial
+- the selected threshold, source JSON paths, caveats, and artifact hashes
+
+`study_validity` asks whether an arm's stated conclusion is supported. A deliberately
+bad A3 candidate can therefore support the selection-bias finding while failing
+`release_readiness`. Missing independent evidence is always `INCONCLUSIVE`; it is never
+converted to a pass by an LLM proxy.
+
+Human review uses a strict versioned YAML contract. Completeness is measured against a
+deterministically emitted queue, labels require declared reviewers, and disagreements
+require adjudication. The prevalence sample is selected independently of A2's checker;
+checker-disagreement examples are a separate diagnostic stratum and do not inflate the
+prevalence estimate.
+
+Three headline values are explicitly non-gating:
+
+- A0/A3 publish and gold rates are throughput.
+- A2 `FROZEN` covers task IDs and expected calls, not semantic preservation.
+- A6 `blind_rate` is not an all-shipped-layer measurement. The 45 mutants stopped at
+  L2 were not run through L4/L5, so current evidence bounds the all-layer blind count at
+  4/107 through 49/107 (3.7%–45.8%) until a non-short-circuit run exists.
+
+Thresholds in `quality_gate/defaults.yaml` are a versioned publication policy, not
+universal scientific constants. A7 stores both the file hash and its canonical-content
+hash so a decision can be reproduced with the same policy.
+
+---
+
 ## Changelog
 
 | version | change |
