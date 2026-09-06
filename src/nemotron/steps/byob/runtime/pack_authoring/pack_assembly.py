@@ -536,7 +536,10 @@ def _manifest_document(
     if confirmation is not None:
         manifest["confirmation"] = dict(sorted(confirmation.items()))
     if supplement.system_prompt is not None:
-        manifest["system_prompt_path"] = supplement.system_prompt
+        # Stated inline rather than as a path: nothing copies a sidecar prompt file into
+        # the pack, and a pack whose render language is not the default prompt's cannot
+        # publish a gold row without its own prompt.
+        manifest["system_prompt"] = supplement.system_prompt
     return manifest
 
 

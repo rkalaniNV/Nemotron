@@ -18,10 +18,23 @@ import json
 from nemotron.steps.byob.runtime.pack_authoring.bundle import EvidenceView
 from nemotron.steps.byob.runtime.pack_authoring.untrusted_text import quote_untrusted
 
-COVERAGE_PROMPT_VERSION = "2.0.0"
-VALIDATION_CASE_PROMPT_VERSION = "2.0.0"
-TASK_TEMPLATE_PROMPT_VERSION = "2.0.0"
-ASSERTION_PROMPT_VERSION = "2.0.0"
+# Bumped when the placeholders below became Jinja references. The wording did not change,
+# but what reached the model did: every prior response was drafted against a prompt whose
+# evidence section was the literal text "{evidence}", and serving one from cache would
+# reproduce a draft that saw no tools.
+COVERAGE_PROMPT_VERSION = "2.1.0"
+# Bumped again where the instruction to declare `blocked_on` became conditional on the
+# bundle still listing the field as unknown. Stated unconditionally, it contradicted the
+# grounding rule on any bundle whose probes had observed the thing being declared.
+VALIDATION_CASE_PROMPT_VERSION = "2.2.0"
+# Bumped where the task prompt began stating that a task needs a tool. The schema now
+# refuses a toolless task outright, but providers differ on whether they honour an array
+# minimum, so the instruction is stated as well as constrained.
+TASK_TEMPLATE_PROMPT_VERSION = "2.3.0"
+# Bumped once more where the assertion task stopped inviting the two predicate subjects
+# the compiler cannot emit. Compilation is all-or-nothing, so drafting one of those cost
+# the pack every assertion it had.
+ASSERTION_PROMPT_VERSION = "2.3.0"
 
 AUTHORING_SYSTEM_PROMPT = """\
 You are drafting part of a function-calling benchmark specification for human review.
@@ -49,7 +62,7 @@ the successful and failing situations worth testing as intents rather than concr
 and which other published tools must run before it can succeed.
 
 Evidence:
-{evidence}\
+{{ evidence }}\
 """
 
 VALIDATION_CASE_TASK = """\
@@ -62,15 +75,19 @@ that must not exist, "confirmation_flag" for the pack's confirmation parameter, 
 "literal" ONLY when the parameter's own schema pins the value set with an enum or a boolean.
 Use "unresolved" when none of those fit. Include every required parameter.
 
-A success probe is blocked on observed_result_shapes, an error probe on
-observed_error_codes, and a confirmation probe on confirmation_behavior. Any probe drawing
-on fixtures is also blocked on fixture_samples.
+Each kind of probe rests on a particular observation: a success probe on
+observed_result_shapes, an error probe on observed_error_codes, a confirmation probe on
+confirmation_behavior, and any probe drawing on fixtures on fixture_samples. Record one in
+`blocked_on` only while the evidence still lists it under "unknown_fields". Probes close
+these one at a time, and claiming to be blocked on something the evidence has already
+settled contradicts it, so leave `blocked_on` empty when nothing a probe rests on is still
+unknown.
 
 Coverage plan:
-{coverage}
+{{ coverage }}
 
 Evidence:
-{evidence}\
+{{ evidence }}\
 """
 
 TASK_TEMPLATE_TASK = """\
@@ -78,32 +95,42 @@ Draft the multi-turn tasks this benchmark will render. Each task needs a stable 
 identifier, a goal written in the user's own voice, the published tools it requires in the
 order they are needed, and ordered milestones the assistant must reach.
 
-Do not write concrete data values into the goal; reviewed fixtures supply those, so every
-task is blocked on fixture_samples. A task requiring more than one tool is also blocked on
-tool_dependencies, because no probe has yet shown which call must precede which.
+Every task has to require at least one published tool. A goal an assistant could satisfy
+by talking alone — asking for more detail, declining, explaining a policy — measures
+nothing here, however reasonable it would be in a real conversation.
+
+Do not write concrete data values into the goal; reviewed fixtures supply those, so a task
+rests on fixture_samples, and one requiring more than one tool also rests on
+tool_dependencies. Record either in `blocked_on` only while the evidence still lists it
+under "unknown_fields", and leave `blocked_on` empty once probes have shown both.
 
 Coverage plan:
-{coverage}
+{{ coverage }}
 
 Evidence:
-{evidence}\
+{{ evidence }}\
 """
 
 ASSERTION_TASK = """\
 Draft the declarative predicates a successful task must satisfy. Give each a stable
 lowercase identifier and a rationale.
 
-Predicates over the call trace — tool_called, tool_not_called, tool_called_after — are
-grounded in the benchmark's own record of what was called, so they need no unknown unless
-they assert an ordering, which is blocked on tool_dependencies. Predicates over a result
-are blocked on observed_result_shapes, and predicates over oracle state are blocked on
-state_deltas.
+Use only predicates over the call trace: tool_called, tool_not_called, tool_called_after.
+These read the benchmark's own record of which tools an episode called, and they are the
+only ones that become executable assertions. A pack compiles all of its specifications or
+none of them, so one predicate over a result field or over oracle state leaves the pack
+with no assertions at all. Where you would reach for one, say the same thing about the
+calls the task must and must not make, in the order it must make them.
+
+Asserting an order rests on tool_dependencies. Record that in `blocked_on` only while the
+evidence still lists it under "unknown_fields", and leave `blocked_on` empty once probes
+have settled it.
 
 Coverage plan:
-{coverage}
+{{ coverage }}
 
 Evidence:
-{evidence}\
+{{ evidence }}\
 """
 
 

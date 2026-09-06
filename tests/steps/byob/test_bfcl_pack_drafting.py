@@ -3,12 +3,16 @@ from __future__ import annotations
 import ast
 import copy
 import json
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
+import jinja2
+import jinja2.meta
 import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from pydantic import ValidationError
 
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_json,
@@ -29,6 +33,7 @@ from nemotron.steps.byob.runtime.pack_authoring.bundle import (
     load_evidence_bundle,
 )
 from nemotron.steps.byob.runtime.pack_authoring.compile_assertions import (
+    COMPILABLE_PREDICATES,
     CompilationError,
     compile_assertions,
 )
@@ -41,7 +46,13 @@ from nemotron.steps.byob.runtime.pack_authoring.grounding import (
     validate_validation_cases,
 )
 from nemotron.steps.byob.runtime.pack_authoring.model_client import AuthoringModel
-from nemotron.steps.byob.runtime.pack_authoring.prompts import build_evidence_payload
+from nemotron.steps.byob.runtime.pack_authoring.prompts import (
+    ASSERTION_TASK,
+    COVERAGE_TASK,
+    TASK_TEMPLATE_TASK,
+    VALIDATION_CASE_TASK,
+    build_evidence_payload,
+)
 from nemotron.steps.byob.runtime.pack_authoring.provenance import DraftProvenance
 from nemotron.steps.byob.runtime.pack_authoring.questions import (
     AnswerDomain,
@@ -60,9 +71,12 @@ from nemotron.steps.byob.runtime.pack_authoring.runner import (
     run_drafting,
 )
 from nemotron.steps.byob.runtime.pack_authoring.schemas import (
+    AssertionSpecDraft,
     AssertionSpecPlan,
     CoveragePlan,
+    TaskTemplateDraft,
     TaskTemplatePlan,
+    UnknownField,
     ValidationCasePlan,
 )
 from nemotron.steps.byob.runtime.source_adapters.certification import (
@@ -752,6 +766,8 @@ class _FakeCaller:
     def __init__(self) -> None:
         self.stages: list[str] = []
         self.prompts: dict[str, str] = {}
+        self.templates: dict[str, str] = {}
+        self.model_configs: dict[str, dict[str, Any]] = {}
         self.responses = {
             "mcp_coverage_plan": _coverage_response(),
             "mcp_validation_cases": {"cases": [_case()]},
@@ -759,9 +775,11 @@ class _FakeCaller:
             "mcp_assertion_specs": {"assertions": [_trace_spec()]},
         }
 
-    def __call__(self, run_dir, *, stage_name, requests, prompt, **_kwargs):
+    def __call__(self, run_dir, *, stage_name, requests, prompt, model_config, **_kwargs):
         self.stages.append(stage_name)
         self.prompts[stage_name] = json.dumps(requests[0], sort_keys=True)
+        self.templates[stage_name] = prompt
+        self.model_configs[stage_name] = model_config
         return {stage_name: self.responses[stage_name]}
 
 
@@ -813,6 +831,171 @@ def test_a_full_drafting_run_writes_drafts_provenance_and_compiled_assertions(
         "tool_dependencies",
     ]
     assert [call["served_from_cache"] for call in record["calls"]] == [False] * 4
+
+
+def test_a_toolless_task_is_refused_by_the_schema_the_model_is_given() -> None:
+    # Grounding refuses a task that requires no tool, so the schema must not offer one.
+    # The refusal arrives after a whole plan has been drafted and costs the run, whereas
+    # the constraint travels to the model as part of the output format it is held to.
+    with pytest.raises(ValidationError):
+        TaskTemplateDraft(
+            template_id="ask_for_more_detail",
+            user_goal="Tôi cần hỗ trợ về tài khoản của mình.",
+            required_tools=[],
+        )
+
+    schema = TaskTemplatePlan.model_json_schema()
+    definition = schema["$defs"]["TaskTemplateDraft"]["properties"]["required_tools"]
+    assert definition["minItems"] == 1
+    # And it has to be asked for rather than defaulted, or a draft omitting it would
+    # arrive empty and be refused for a field the model was never told to fill.
+    assert "required_tools" in schema["$defs"]["TaskTemplateDraft"]["required"]
+
+
+def test_the_length_an_identifier_is_judged_by_is_stated_where_the_model_reads() -> None:
+    # Grounding refuses an identifier longer than 64 characters. A descriptive name for a
+    # negative case reaches that length easily, and the model can only avoid the bound if
+    # it is told it, so every identifier field must carry the limit in its description.
+    overlong = "invalid_recent_transactions_request_skips_list_recent_transactions"
+    assert len(overlong) > 64
+    plan = AssertionSpecPlan.model_validate(
+        {"assertions": [_trace_spec(assertion_id=overlong)]}
+    )
+    with pytest.raises(GroundingError, match="3 to 64 characters"):
+        validate_assertion_specs(_grounding(), plan)
+
+    for plan_type, draft in (
+        (ValidationCasePlan, "ValidationCaseDraft"),
+        (TaskTemplatePlan, "TaskTemplateDraft"),
+        (AssertionSpecPlan, "AssertionSpecDraft"),
+    ):
+        properties = plan_type.model_json_schema()["$defs"][draft]["properties"]
+        identifier = next(name for name in properties if name.endswith("_id"))
+        assert "3 to 64" in properties[identifier]["description"], draft
+
+    # And the sentence has to describe the bound actually enforced, so that tightening one
+    # without the other cannot go unnoticed.
+    accepted = AssertionSpecPlan.model_validate(
+        {"assertions": [_trace_spec(assertion_id="a" * 64)]}
+    )
+    assert validate_assertion_specs(_grounding(), accepted) is accepted
+
+
+def test_the_assertion_prompt_asks_only_for_predicates_the_compiler_can_emit() -> None:
+    # Compilation is all-or-nothing per pack, so a single predicate the compiler will not
+    # emit costs the pack every assertion it drafted. A prompt that describes those
+    # predicates as available is therefore an invitation to lose the lot, and the two sets
+    # have to be kept in step by something other than memory.
+    available = frozenset(get_args(AssertionSpecDraft.model_fields["predicate"].annotation))
+    refused = available - COMPILABLE_PREDICATES
+    assert refused, "the compiler accepts every predicate; this guard has nothing to hold"
+
+    for predicate in COMPILABLE_PREDICATES:
+        assert predicate in ASSERTION_TASK, f"{predicate} compiles but is never offered"
+    for predicate in sorted(refused):
+        assert predicate not in ASSERTION_TASK, f"{predicate} is offered but never compiles"
+
+
+def test_no_task_prompt_orders_a_draft_to_block_on_something_probes_may_have_settled(
+) -> None:
+    # Grounding reads `blocked_on` as exactly the open unknowns a draft rests on: it
+    # refuses a missing one and equally refuses one the bundle has resolved. A prompt that
+    # names a blocker unconditionally is therefore an instruction to fail against any
+    # bundle whose probes observed that field, which is every bundle at the tier gold
+    # requires. Naming the field is fine; naming it without naming the condition is not.
+    for name, task in (
+        ("coverage", COVERAGE_TASK),
+        ("validation_cases", VALIDATION_CASE_TASK),
+        ("task_templates", TASK_TEMPLATE_TASK),
+        ("assertions", ASSERTION_TASK),
+    ):
+        blockers = sorted(
+            field for field in get_args(UnknownField) if field in task
+        )
+        if not blockers:
+            continue
+        assert "unknown_fields" in task, f"{name} names {blockers} unconditionally"
+
+
+def test_a_call_deadline_reaches_the_client_without_reopening_approved_drafts(
+    tmp_path: Path,
+) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    patient = replace(MODEL, request_timeout_s=600)
+
+    caller = _FakeCaller()
+    run_drafting(
+        bundle_path,
+        approval_path,
+        tmp_path / "deadline",
+        patient,
+        caller=caller,
+        allow_legacy_v1_model_exposure=True,
+    )
+
+    # The client's own default assumes one short completion, so the deadline has to arrive.
+    for stage in caller.stages:
+        assert caller.model_configs[stage]["inference_parameters"]["timeout"] == 600
+
+    run_drafting(
+        bundle_path,
+        approval_path,
+        tmp_path / "shared",
+        MODEL,
+        caller=_FakeCaller(),
+        allow_legacy_v1_model_exposure=True,
+    )
+    rerun = _FakeCaller()
+    second = run_drafting(
+        bundle_path,
+        approval_path,
+        tmp_path / "shared",
+        patient,
+        caller=rerun,
+        allow_legacy_v1_model_exposure=True,
+    )
+
+    # Raising a deadline says nothing about what the model would answer, so it must not
+    # re-ask a question already answered, nor appear among the settings a reviewer
+    # approved the draft under.
+    assert rerun.stages == []
+    assert all(call["served_from_cache"] for call in second.provenance.document["calls"])
+    assert second.provenance.document["model"]["inference_parameters"] == {
+        "temperature": 0.0
+    }
+
+
+def test_every_task_template_hands_its_columns_to_the_rendering_engine(
+    tmp_path: Path,
+) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    caller = _FakeCaller()
+    run_drafting(
+        bundle_path,
+        approval_path,
+        tmp_path / "out",
+        MODEL,
+        caller=caller,
+        allow_legacy_v1_model_exposure=True,
+    )
+
+    # Nothing in this repo substitutes these placeholders; the structured column renders
+    # the prompt with Jinja. A template written for str.format names no Jinja variable, so
+    # the seed column is built, sent, and never read: the model is asked to cover a tool
+    # catalogue it was never shown, and answers that it was given none. Only a live call
+    # revealed that, because a fake caller is handed the columns directly.
+    for stage in caller.stages:
+        columns = json.loads(caller.prompts[stage])
+        template = caller.templates[stage]
+        supplied = set(columns) - {"request_id"}
+        referenced = jinja2.meta.find_undeclared_variables(
+            jinja2.Environment(autoescape=False).parse(template)
+        )
+        assert referenced == supplied, stage
+
+        rendered = jinja2.Template(template, autoescape=False).render(columns)
+        for name in supplied:
+            assert columns[name] in rendered, f"{stage}: {name} never reached the prompt"
 
 
 def test_legacy_v1_cannot_reach_model_without_explicit_compatibility_opt_in(

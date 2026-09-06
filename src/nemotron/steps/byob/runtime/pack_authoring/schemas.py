@@ -13,9 +13,24 @@ expectation looks finished.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# One definition of what an identifier is, because two parties rely on it: the validator
+# refuses a draft that breaks it, and the model only learns it from the field description
+# below. Stated twice they drift, and a draft is then refused for a bound nobody told the
+# model about.
+IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9_]{2,63}$"
+IDENTIFIER_DESCRIPTION = (
+    "Stable identifier, unique in the pack: 3 to 64 characters, lowercase letters, digits and underscores only"
+)
+
+
+def _identifier() -> Any:
+    """A fresh field each time, since Pydantic annotates the one it is given."""
+    return Field(description=IDENTIFIER_DESCRIPTION)
+
 
 # The unknown field names a draft may declare itself blocked on. Kept as a closed set so a
 # typo becomes an error instead of a blocker nobody will ever resolve.
@@ -89,14 +104,12 @@ class ArgumentPlan(_Draft):
 class ValidationCaseDraft(_Draft):
     """One probe proving a tool behaves as the pack claims."""
 
-    case_id: str = Field(description="Stable lowercase identifier, unique in the pack")
+    case_id: str = _identifier()
     tool: str
     kind: Literal["success", "error", "confirmation_pending"]
     intent: str = Field(description="What this probe demonstrates")
     arguments: list[ArgumentPlan] = Field(default_factory=list)
-    expectation: str = Field(
-        description="The observable outcome, in words; codes and shapes come from probes"
-    )
+    expectation: str = Field(description="The observable outcome, in words; codes and shapes come from probes")
     blocked_on: list[UnknownField] = Field(default_factory=list)
 
 
@@ -108,20 +121,20 @@ class MilestoneDraft(_Draft):
     """One thing the assistant must accomplish, in order."""
 
     description: str
-    tool: str | None = Field(
-        default=None, description="Tool the milestone requires, when it requires one"
-    )
+    tool: str | None = Field(default=None, description="Tool the milestone requires, when it requires one")
     requires_confirmation: bool = False
 
 
 class TaskTemplateDraft(_Draft):
     """One multi-turn task the benchmark will render."""
 
-    template_id: str = Field(description="Stable lowercase identifier, unique in the pack")
+    template_id: str = _identifier()
     user_goal: str = Field(description="What the user wants, in the user's voice")
-    required_tools: list[str] = Field(
-        default_factory=list, description="Published tool names, in the order needed"
-    )
+    # At least one, because grounding refuses a task that requires no tool and the
+    # structured schema is the cheapest place to say so: stated here it reaches the model
+    # as a constraint on what it may emit, rather than as a refusal after it has spent a
+    # whole plan's worth of output.
+    required_tools: list[str] = Field(min_length=1, description="Published tool names, in the order needed")
     milestones: list[MilestoneDraft] = Field(default_factory=list)
     policies: list[str] = Field(default_factory=list)
     blocked_on: list[UnknownField] = Field(default_factory=list)
@@ -134,7 +147,7 @@ class TaskTemplatePlan(_Draft):
 class AssertionSpecDraft(_Draft):
     """One declarative predicate a successful task must satisfy."""
 
-    assertion_id: str = Field(description="Stable lowercase identifier, unique in the pack")
+    assertion_id: str = _identifier()
     subject: Literal["result", "state", "trace"]
     predicate: Literal[
         "field_present",
@@ -144,12 +157,8 @@ class AssertionSpecDraft(_Draft):
         "tool_called_after",
         "tool_not_called",
     ]
-    target: str = Field(
-        description="Result field path, state collection, or published tool name"
-    )
-    argument: str | None = Field(
-        default=None, description="Argument name, for predicates that compare to an input"
-    )
+    target: str = Field(description="Result field path, state collection, or published tool name")
+    argument: str | None = Field(default=None, description="Argument name, for predicates that compare to an input")
     tool: str | None = Field(default=None, description="Published tool name when relevant")
     rationale: str
     blocked_on: list[UnknownField] = Field(default_factory=list)
