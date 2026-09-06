@@ -161,8 +161,9 @@ What remains is enough to verify the published data offline. Both parquets are
 byte-identical to the hashes recorded above, so `shasum -a 256
 benchmark/*.parquet` is a complete integrity check that needs no network and no
 pipeline. Verifying the *oracle* behind the rows is the separate question the
-pack fingerprint answers, and it requires the pack bytes from the revision that
-produced the release. A snapshot is a generation artifact either way, so it
+pack fingerprint answers, and the pack directory in this checkout is still the
+revision that produced the release. A snapshot is a generation artifact either
+way, so it
 demonstrates nothing about scoring on its own; reproducing the recorded score
 means re-running the evaluation against its `benchmark.parquet`.
 

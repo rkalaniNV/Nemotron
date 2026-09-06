@@ -1188,9 +1188,12 @@ canonical projection whose hash, row count, and complete task sequence match the
 verified source, then replays the episode the pack's turn policy described. The
 model is asked one assistant turn at a time, and a tool result your pack's replay
 recorded is handed back only after a type=`function` call with a unique id matches
-the trace, addressed to that candidate id. An intermediate text turn must equal
-the published assistant text before the next user request is released. This
-fail-closed rule is what makes a `missing_slot` or `ask_confirm` policy safe: a
+the trace, addressed to that candidate id. Where the trace has an intermediate
+text turn, the candidate must answer in words that say something, rather than
+call a tool or return nothing, before the next user request is released; it is
+not required to reproduce the published sentence, which is only one phrasing of
+that behavior. This fail-closed rule is what makes a `missing_slot` or
+`ask_confirm` policy safe: a
 model that calls straight through or emits unrelated prose never receives the
 slot value it failed to ask for. Nothing else from the row enters a prompt. The
 driver releases recorded results only; it executes no tool and derives no score.

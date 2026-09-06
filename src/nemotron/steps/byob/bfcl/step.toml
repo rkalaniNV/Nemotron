@@ -498,7 +498,7 @@ recovery = "scoring asks for a verdict a trace score cannot produce: allow_llm_r
 
 [[errors]]
 name = "unsupported_eval_mode"
-recovery = "eval.mode is a non-empty list drawn from [trace, executable] with no repeats; the canonical order is trace then executable. Executable mode needs a source run whose manifest declares an oracle."
+recovery = "eval.mode is a non-empty list drawn from [trace, executable, held_out_eval] with no repeats; the canonical order is trace then executable. Executable mode needs a source run whose manifest declares an oracle. held_out_eval is the private generalization path and must be paired with an eval.held_out_eval block, which is refused when the mode is absent."
 
 [[errors]]
 name = "eval_candidate_provider_extension_invalid"
