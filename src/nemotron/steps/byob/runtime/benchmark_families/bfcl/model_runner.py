@@ -12,6 +12,21 @@ from pydantic import BaseModel
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
 
 
+def read_structured_responses(dataset_path: Path) -> list[dict[str, Any]]:
+    """Read the rows a structured column wrote, without pandas' Arrow conversion.
+
+    A struct field that is null in every row — a trace predicate names no argument, a
+    draft blocked on nothing has an empty list — becomes a null-typed child that pandas'
+    Arrow backend sizes to one element instead of the struct's length, so iterating the
+    DataFrame Data Designer returns raises instead of yielding the rows. The parquet
+    itself is well formed, which is why this reads the file rather than that frame.
+    """
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(dataset_path, columns=["request_id", "response"])
+    return table.to_pylist()
+
+
 def run_structured_model(
     config: BfclConfig,
     *,
@@ -69,16 +84,19 @@ def run_structured_model(
             artifact_path=str(run_dir / "artifacts" / "data_designer")
         )
         designer.validate(builder)
-        result = designer.create(
+        created = designer.create(
             config_builder=builder,
             num_records=len(rows),
-        ).load_dataset()
+        )
+        records = read_structured_responses(
+            created.artifact_storage.final_dataset_path
+        )
     finally:
         if seed_path is not None:
             seed_path.unlink(missing_ok=True)
 
     responses: dict[str, dict[str, Any]] = {}
-    for row in result.to_dict(orient="records"):
+    for row in records:
         request_id = row.get("request_id")
         response = row.get("response")
         if isinstance(response, BaseModel):

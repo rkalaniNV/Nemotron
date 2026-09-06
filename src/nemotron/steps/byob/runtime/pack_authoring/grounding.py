@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from nemotron.steps.byob.runtime.pack_authoring.bundle import EvidenceView, ToolEvidence
 from nemotron.steps.byob.runtime.pack_authoring.schemas import (
+    IDENTIFIER_PATTERN,
     ArgumentPlan,
     AssertionSpecPlan,
     CoveragePlan,
@@ -32,7 +33,7 @@ from nemotron.steps.byob.runtime.pack_authoring.schemas import (
 )
 from nemotron.steps.byob.runtime.pack_authoring.untrusted_text import blocking, scan_text
 
-_IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9_]{2,63}$")
+_IDENTIFIER = re.compile(IDENTIFIER_PATTERN)
 
 
 class GroundingError(Exception):
@@ -88,9 +89,7 @@ def _check_prose(where: str, texts: Iterable[str]) -> list[str]:
 
 def _check_identifier(value: str, where: str) -> list[str]:
     if _IDENTIFIER.match(value) is None:
-        return [
-            f"{where}: {value!r} is not a lowercase identifier of 3 to 64 characters"
-        ]
+        return [f"{where}: {value!r} is not a lowercase identifier of 3 to 64 characters"]
     return []
 
 
@@ -101,10 +100,7 @@ def _check_unique(values: Sequence[str], where: str) -> list[str]:
 
 def _check_tool(grounding: Grounding, name: str, where: str) -> list[str]:
     if name not in grounding.tool_names:
-        return [
-            f"{where}: {name!r} is not a published tool in the evidence bundle "
-            f"({sorted(grounding.tool_names)})"
-        ]
+        return [f"{where}: {name!r} is not a published tool in the evidence bundle ({sorted(grounding.tool_names)})"]
     return []
 
 
@@ -123,9 +119,7 @@ def _check_blocked_on(
             )
     for field in declared:
         if not grounding.requires(field):
-            violations.append(
-                f"{where}: blocked_on {field!r} is not an open unknown in this bundle"
-            )
+            violations.append(f"{where}: blocked_on {field!r} is not an open unknown in this bundle")
     return violations
 
 
@@ -138,9 +132,7 @@ def validate_coverage_plan(grounding: Grounding, plan: CoveragePlan) -> Coverage
         where = f"coverage.tools[{entry.tool}]"
         violations.extend(_check_tool(grounding, entry.tool, where))
         for dependency in entry.depends_on:
-            violations.extend(
-                _check_tool(grounding, dependency, f"{where}.depends_on")
-            )
+            violations.extend(_check_tool(grounding, dependency, f"{where}.depends_on"))
             if dependency == entry.tool:
                 violations.append(f"{where}.depends_on: a tool cannot depend on itself")
         tool = grounding.tool(entry.tool)
@@ -207,33 +199,20 @@ def validate_validation_cases(
                         f"confirmation parameter {grounding.confirmation_parameter!r}"
                     )
                 if not tool.requires_confirmation:
-                    violations.append(
-                        f"{slot}: {case.tool!r} is not confirmation gated"
-                    )
+                    violations.append(f"{slot}: {case.tool!r} is not confirmation gated")
                 continue
             if argument.name not in tool.parameter_names:
-                violations.append(
-                    f"{slot}: {case.tool!r} declares no such parameter "
-                    f"({sorted(tool.parameter_names)})"
-                )
+                violations.append(f"{slot}: {case.tool!r} declares no such parameter ({sorted(tool.parameter_names)})")
                 continue
             if argument.source == "literal":
                 violations.extend(_check_literal(tool, argument, slot))
             elif argument.source in {"fixture", "absent_id"}:
                 required.append("fixture_samples")
         if tool is not None:
-            omitted = [
-                name
-                for name in tool.required_parameters
-                if name not in argument_names
-            ]
+            omitted = [name for name in tool.required_parameters if name not in argument_names]
             if omitted:
-                violations.append(
-                    f"{where}.arguments: omits required parameter(s) {omitted}"
-                )
-        violations.extend(
-            _check_blocked_on(grounding, case.blocked_on, set(required), where)
-        )
+                violations.append(f"{where}.arguments: omits required parameter(s) {omitted}")
+        violations.extend(_check_blocked_on(grounding, case.blocked_on, set(required), where))
     if violations:
         raise GroundingError("validation cases", violations)
     return plan
@@ -272,15 +251,11 @@ def validate_task_templates(
 ) -> TaskTemplatePlan:
     """Templates may plan an ordering, but their slot values still come from fixtures."""
     violations: list[str] = []
-    violations.extend(
-        _check_unique([template.template_id for template in plan.templates], "templates")
-    )
+    violations.extend(_check_unique([template.template_id for template in plan.templates], "templates"))
     for template in plan.templates:
         where = f"templates[{template.template_id}]"
         violations.extend(_check_identifier(template.template_id, f"{where}.template_id"))
-        violations.extend(
-            _check_prose(where, [template.user_goal, *template.policies])
-        )
+        violations.extend(_check_prose(where, [template.user_goal, *template.policies]))
         if not template.required_tools:
             violations.append(f"{where}: a task with no required tool tests nothing")
         for name in template.required_tools:
@@ -291,27 +266,16 @@ def validate_task_templates(
             if milestone.tool is None:
                 continue
             if milestone.tool not in template.required_tools:
-                violations.append(
-                    f"{slot}: tool {milestone.tool!r} is not in required_tools"
-                )
+                violations.append(f"{slot}: tool {milestone.tool!r} is not in required_tools")
                 continue
             tool = grounding.tool(milestone.tool)
-            if (
-                tool is not None
-                and milestone.requires_confirmation
-                and not tool.requires_confirmation
-            ):
-                violations.append(
-                    f"{slot}: the reviewed profile does not gate {milestone.tool!r} on "
-                    "confirmation"
-                )
+            if tool is not None and milestone.requires_confirmation and not tool.requires_confirmation:
+                violations.append(f"{slot}: the reviewed profile does not gate {milestone.tool!r} on confirmation")
         # Slots need values, and ordering across tools needs an observed dependency.
         required = {"fixture_samples"}
         if len(template.required_tools) > 1:
             required.add("tool_dependencies")
-        violations.extend(
-            _check_blocked_on(grounding, template.blocked_on, required, where)
-        )
+        violations.extend(_check_blocked_on(grounding, template.blocked_on, required, where))
     if violations:
         raise GroundingError("task templates", violations)
     return plan
@@ -328,9 +292,7 @@ def validate_assertion_specs(
 ) -> AssertionSpecPlan:
     """Trace predicates are grounded in BFCL's own record; result and state ones are not."""
     violations: list[str] = []
-    violations.extend(
-        _check_unique([spec.assertion_id for spec in plan.assertions], "assertions")
-    )
+    violations.extend(_check_unique([spec.assertion_id for spec in plan.assertions], "assertions"))
     for spec in plan.assertions:
         where = f"assertions[{spec.assertion_id}]"
         violations.extend(_check_identifier(spec.assertion_id, f"{where}.assertion_id"))
@@ -343,8 +305,7 @@ def validate_assertion_specs(
         }[spec.predicate]
         if spec.subject != expected_subject:
             violations.append(
-                f"{where}: predicate {spec.predicate!r} applies to the {expected_subject}, "
-                f"not the {spec.subject}"
+                f"{where}: predicate {spec.predicate!r} applies to the {expected_subject}, not the {spec.subject}"
             )
 
         required: set[str] = set()
@@ -364,22 +325,15 @@ def validate_assertion_specs(
             else:
                 violations.extend(_check_tool(grounding, spec.tool, f"{where}.tool"))
                 if spec.tool == spec.target:
-                    violations.append(
-                        f"{where}: a tool cannot be required to run after itself"
-                    )
+                    violations.append(f"{where}: a tool cannot be required to run after itself")
         if spec.predicate == "field_equals_argument":
             if spec.argument is None or spec.tool is None:
-                violations.append(
-                    f"{where}: field_equals_argument needs both tool and argument"
-                )
+                violations.append(f"{where}: field_equals_argument needs both tool and argument")
             else:
                 violations.extend(_check_tool(grounding, spec.tool, f"{where}.tool"))
                 tool = grounding.tool(spec.tool)
                 if tool is not None and spec.argument not in tool.parameter_names:
-                    violations.append(
-                        f"{where}.argument: {spec.tool!r} declares no parameter "
-                        f"{spec.argument!r}"
-                    )
+                    violations.append(f"{where}.argument: {spec.tool!r} declares no parameter {spec.argument!r}")
         violations.extend(_check_blocked_on(grounding, spec.blocked_on, required, where))
     if violations:
         raise GroundingError("assertion specifications", violations)

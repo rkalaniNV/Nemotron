@@ -272,6 +272,34 @@ def test_assembly_binds_the_pack_to_the_certified_source_and_compiled_drafts(
     assert record["record_digest"] == sha256_json(unsigned)
 
 
+def test_assembly_carries_a_reviewed_system_prompt_into_the_pack(
+    session: Session,
+    tmp_path: Path,
+) -> None:
+    prompt = "Bạn là trợ lý ngân hàng sử dụng công cụ."
+
+    assembled = _assemble(
+        session,
+        tmp_path,
+        supplement=_supplement(tmp_path / "prompted.yaml", system_prompt=prompt),
+    )
+
+    manifest = yaml.safe_load(assembled.manifest_path.read_text(encoding="utf-8"))
+    # The prompt has to be readable from the manifest alone, because assembly copies no
+    # file the certified source did not publish, so a path here would name nothing.
+    assert manifest["system_prompt"] == prompt
+    assert "system_prompt_path" not in manifest
+    assert set(assembled.record["pack_files"]) == {
+        "backend.py",
+        "tools.json",
+        "fixtures.json",
+        "assertions.py",
+        "task_templates.yaml",
+        "validation_cases.yaml",
+        "manifest.yaml",
+    }
+
+
 def test_assembly_refuses_a_source_tree_that_changed_after_certification(
     session: Session,
     tmp_path: Path,

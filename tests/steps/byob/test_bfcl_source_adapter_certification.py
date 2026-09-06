@@ -203,6 +203,29 @@ def test_published_profiles_are_complete_bounded_and_transport_specific() -> Non
     } == {probe: CleanupKind.SESSION for probe in CertificationProbe}
 
 
+def test_per_case_local_probes_are_bounded_by_their_own_call_budget() -> None:
+    profile = local_python_reference_profile()
+    policies = {
+        requirement.probe: requirement.execution for requirement in profile.probes
+    }
+
+    # These two open one isolated episode per reviewed case, so a source is bounded by
+    # the size of its own catalogue rather than by a deadline sized for a single call.
+    for probe in (
+        CertificationProbe.EXECUTABLE_OBSERVATION,
+        CertificationProbe.STRUCTURED_ERROR_SHAPE,
+    ):
+        assert policies[probe].timeout_s == policies[probe].max_calls * 4.0
+        # Cleanup is one operation however many episodes ran.
+        assert policies[probe].cleanup_timeout_s == 10.0
+
+    other = set(CertificationProbe) - {
+        CertificationProbe.EXECUTABLE_OBSERVATION,
+        CertificationProbe.STRUCTURED_ERROR_SHAPE,
+    }
+    assert {policies[probe].timeout_s for probe in other} == {10.0}
+
+
 def test_profile_budget_and_registry_fail_closed() -> None:
     document = local_python_reference_profile().model_dump(mode="json")
     document["max_total_calls"] = 1

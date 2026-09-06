@@ -47,14 +47,22 @@ class AuthoringModel:
     canonical_id: str
     seed: int = 0
     inference_parameters: Mapping[str, Any] = field(default_factory=dict)
+    # How long one call may take, which is not a decoding setting: it cannot change the
+    # answer, only whether one arrives. It is kept out of `inference_parameters` for that
+    # reason, because those feed the request hash and the published provenance, and a
+    # deadline raised for a slow route would otherwise orphan every approved draft.
+    request_timeout_s: int | None = None
 
     def as_model_config(self) -> dict[str, Any]:
+        parameters = dict(self.inference_parameters)
+        if self.request_timeout_s is not None:
+            parameters["timeout"] = self.request_timeout_s
         return {
             "alias": self.alias,
             "provider": self.provider,
             "model": self.model,
             "canonical_id": self.canonical_id,
-            "inference_parameters": dict(self.inference_parameters),
+            "inference_parameters": parameters,
         }
 
     def as_provenance(self) -> dict[str, Any]:

@@ -72,6 +72,16 @@ def _parser() -> argparse.ArgumentParser:
         default=0.0,
         help="Authoring defaults to greedy decoding so a rerun reproduces the draft",
     )
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=600,
+        help=(
+            "Seconds one drafting call may take. Each of the four calls emits a whole plan "
+            "covering every published tool, so the answer grows with the reviewed surface "
+            "while the client's own default assumes a single short completion"
+        ),
+    )
     return parser
 
 
@@ -88,6 +98,7 @@ def main() -> None:
         canonical_id=args.model_canonical_id,
         seed=args.seed,
         inference_parameters={"temperature": args.temperature},
+        request_timeout_s=args.request_timeout,
     )
     try:
         result = run_drafting(

@@ -1032,6 +1032,7 @@ def _execution_policy(
     a0_cleanup: CleanupKind | None,
     timeout_s: float,
     max_call_overrides: Mapping[CertificationProbe, int],
+    timeout_overrides: Mapping[CertificationProbe, float],
 ) -> ProbeExecutionPolicy:
     tier = _PROBE_TIER[probe]
     selected_cleanup = a0_cleanup if tier is AdapterTier.A0 and a0_cleanup else cleanup
@@ -1058,7 +1059,10 @@ def _execution_policy(
         outcome_schema=PROBE_OUTCOME_VERSION,
         safety=safety,
         max_calls=max_calls,
-        timeout_s=timeout_s,
+        # A probe that opens one isolated episode per reviewed case costs as much wall
+        # time as its own call budget allows, so those probes carry their own deadline.
+        # Cleanup stays on the base deadline: it is one operation however many ran.
+        timeout_s=timeout_overrides.get(probe, timeout_s),
         cleanup=selected_cleanup,
         cleanup_timeout_s=timeout_s,
     )
@@ -1074,6 +1078,7 @@ def _reference_profile(
     max_total_calls: int = 24,
     a0_cleanup: CleanupKind | None = None,
     max_call_overrides: Mapping[CertificationProbe, int] | None = None,
+    timeout_overrides: Mapping[CertificationProbe, float] | None = None,
 ) -> CertificationProfile:
     return CertificationProfile(
         schema_version=CERTIFICATION_PROFILE_VERSION,
@@ -1091,6 +1096,7 @@ def _reference_profile(
                     a0_cleanup=a0_cleanup,
                     timeout_s=timeout_s,
                     max_call_overrides=max_call_overrides or {},
+                    timeout_overrides=timeout_overrides or {},
                 ),
                 requirement=(
                     "conditional" if probe in _MCP_NOT_APPLICABLE else "required"
@@ -1140,8 +1146,17 @@ _LOCAL_PYTHON_REFERENCE_PROFILE = _reference_profile(
     cleanup=CleanupKind.PROCESS,
     a0_cleanup=CleanupKind.NONE,
     timeout_s=10.0,
-    max_wall_time_s=100.0,
+    # Ten seconds still bounds every probe that reads identity or reuses one episode.
+    # The two probes below open a fresh spawned interpreter per reviewed case, so their
+    # cost follows the reviewed surface: a nine-tool source needs nine observation
+    # episodes, and ten seconds would fail it for the size of its catalogue rather than
+    # for misbehaving. Each is allowed four seconds per call its own budget admits.
+    max_wall_time_s=180.0,
     max_total_calls=128,
+    timeout_overrides={
+        CertificationProbe.EXECUTABLE_OBSERVATION: 64.0,
+        CertificationProbe.STRUCTURED_ERROR_SHAPE: 32.0,
+    },
     max_call_overrides={
         CertificationProbe.EXECUTABLE_OBSERVATION: 16,
         CertificationProbe.STRUCTURED_ERROR_SHAPE: 8,
