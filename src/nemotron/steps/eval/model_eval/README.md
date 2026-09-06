@@ -57,7 +57,7 @@ override anything with `-t` or a dotted key.
 | `base_en` | completions | `adlr_arc_challenge_llama_25_shot`, `hellaswag`, `gsm8k` |
 | `mmlu_prox` | completions | `mmlu_prox_completions`, one language per run |
 | `milu` | completions | `milu_Hindi`, `milu_English` — sovereign image |
-| `instruct_en` | chat | `ifeval`, `mmlu_instruct`, `gsm8k_cot_instruct`, `humaneval_instruct` |
+| `instruct_en` | chat | `ifeval`, `mmlu_instruct`, `gsm8k_cot_instruct` (+ opt-in code benchmark) |
 | `mmlu_prox_chat` | chat | `mmlu_prox_chat`, one language per run |
 | `tiny_chat` | chat | one task, one sample — plumbing smoke test |
 

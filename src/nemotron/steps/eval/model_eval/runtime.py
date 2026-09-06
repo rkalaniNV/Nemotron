@@ -332,7 +332,11 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
                 f"results would be written into one directory"
             )
         claimed[resolved] = task
-        occupied = task_out.exists() and any(task_out.iterdir())
+        if task_out.exists() and not task_out.is_dir():
+            # iterdir() would raise NotADirectoryError and bypass the clean
+            # SystemExit every other preflight failure uses.
+            raise SystemExit(f"refusing to use {task_out}: exists and is not a directory")
+        occupied = task_out.is_dir() and any(task_out.iterdir())
         if occupied:
             if overwrite:
                 # A dry run reports the plan but never deletes.
@@ -382,7 +386,8 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
         if adapter and not _is_set(adapter.get("endpoint_type")):
             adapter["endpoint_type"] = model_type
         overrides = _direct_overrides(params, adapter)
-        secrets_by_task[task] = _secret_values(params)
+        # Adapter settings can carry credentials as readily as params can.
+        secrets_by_task[task] = _secret_values(params) | _secret_values(adapter)
         if overrides:
             cmd += ["--overrides", overrides]
         plan.append((task, task_out, cmd))
@@ -391,14 +396,16 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
 
     # ---- EXECUTE -------------------------------------------------------------
     out_root.mkdir(parents=True, exist_ok=True)
+
+    # Claim the directory BEFORE deleting anything. Two submissions racing on
+    # the SAME fresh output_dir both clear the not-empty check above -- it only
+    # catches a directory that already has results in it. With the claim taken
+    # after the rmtree, a resubmit with overwrite=true would delete the first
+    # run's IN-PROGRESS results and only then discover that run holds the lock:
+    # the destruction happened before the check meant to prevent it.
+    lock = _claim_output_dir(out_root, dry_run=dry_run, overwrite=overwrite)
     for stale in to_clear:
         shutil.rmtree(stale)
-
-    # Two submissions racing on the SAME fresh output_dir both clear the
-    # not-empty check above -- it only catches a directory that already has
-    # results in it. They then interleave writes into one directory and the
-    # summary reports whichever finished last. Claim the directory instead.
-    lock = _claim_output_dir(out_root, dry_run=dry_run, overwrite=overwrite)
 
     summary_name = "summary.dry-run.json" if dry_run else "summary.json"
     # Written BEFORE the tasks run. A job that is preempted or OOM-killed
@@ -696,7 +703,12 @@ def _run_manifest(
                 # Fully merged (global + per-task), i.e. what the task actually ran with.
                 "params": _redact_params(planned_params.get(task, {})),
                 "adapter_config": _redact_params(planned_adapter.get(task, {})),
-                "command": _safe_cmd(cmd, url, _secret_values(planned_params.get(task, {}))),
+                "command": _safe_cmd(
+                    cmd,
+                    url,
+                    # Both namespaces: a credential is as likely in adapter_config.
+                    _secret_values(planned_params.get(task, {})) | _secret_values(planned_adapter.get(task, {})),
+                ),
             }
             for task, task_out, cmd in plan
         },

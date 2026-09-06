@@ -836,3 +836,75 @@ def test_no_failures_file_when_everything_passes(tmp_path, monkeypatch):
     cfg.dry_run = False
     run_direct(cfg, task_filters=["hellaswag"])
     assert not (out / "failures.txt").exists()
+
+
+# --- claim before destroy ----------------------------------------------------
+
+
+def test_a_live_claim_blocks_before_any_deletion(tmp_path):
+    """A resubmit with overwrite=true used to rmtree the first run's
+    IN-PROGRESS results and only then discover that run held the lock -- the
+    destruction happened before the check meant to prevent it."""
+    out = tmp_path / "results"
+    task_dir = out / "hellaswag"
+    task_dir.mkdir(parents=True)
+    (task_dir / "partial.jsonl").write_text("run A is still writing this")
+    (out / ".nemotron-eval.lock").write_text('{"pid": 999, "host": "other"}')
+
+    cfg = _cfg(output_dir=str(out))
+    cfg.dry_run = False
+    cfg.overwrite = True
+    with pytest.raises(SystemExit, match="does not override a live claim"):
+        run_direct(cfg, task_filters=["hellaswag"])
+
+    assert (task_dir / "partial.jsonl").read_text() == "run A is still writing this"
+
+
+def test_overwrite_still_clears_when_no_one_holds_the_claim(tmp_path, monkeypatch):
+    import subprocess
+
+    class _Ok:
+        stdout = io.BytesIO(b"")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _Ok())
+    out = tmp_path / "results"
+    task_dir = out / "hellaswag"
+    task_dir.mkdir(parents=True)
+    (task_dir / "stale.jsonl").write_text("old")
+    cfg = _cfg(output_dir=str(out))
+    cfg.dry_run = False
+    cfg.overwrite = True
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert not (task_dir / "stale.jsonl").exists()
+
+
+# --- adapter credentials -----------------------------------------------------
+
+
+def test_a_credential_in_adapter_config_is_scrubbed(tmp_path, capsys):
+    """`_secret_values` scanned params only, so a token in adapter_config
+    reached the recorded command and the job log intact."""
+    out = tmp_path / "results"
+    cfg = _cfg(output_dir=str(out))
+    cfg.evaluation.nemo_evaluator_config.target = {
+        "api_endpoint": {"adapter_config": {"use_caching": True, "api_key": "adapter-secret"}}
+    }
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert "adapter-secret" not in capsys.readouterr().out
+    assert "adapter-secret" not in (out / "run_manifest.dry-run.json").read_text()
+
+
+# --- a file where a directory belongs ----------------------------------------
+
+
+def test_a_file_occupying_a_task_path_exits_cleanly(tmp_path):
+    """iterdir() would raise NotADirectoryError and bypass the clean SystemExit
+    every other preflight failure uses."""
+    out = tmp_path / "results"
+    out.mkdir()
+    (out / "hellaswag").write_text("not a directory")
+    with pytest.raises(SystemExit, match="not a directory"):
+        run_direct(_cfg(output_dir=str(out)), task_filters=["hellaswag"])

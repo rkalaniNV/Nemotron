@@ -33,4 +33,15 @@ evaluation:
     - name: ifeval              # instruction following
     - name: mmlu_instruct       # broad knowledge
     - name: gsm8k_cot_instruct  # grade-school maths, chain of thought
-    - name: humaneval_instruct  # code
+
+    # Code benchmarks EXECUTE model-generated code in the eval job. lm-eval
+    # refuses to run them unless you say so, so `humaneval_instruct` is opt-in
+    # rather than shipped enabled -- it would otherwise fail 1 of 4 tasks out of
+    # the box. Uncomment once you are content to run untrusted code here:
+    #
+    # - name: humaneval_instruct
+    #   nemo_evaluator_config:
+    #     config:
+    #       params:
+    #         extra:
+    #           args: '--confirm_run_unsafe_code'

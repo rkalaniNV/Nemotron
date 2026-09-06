@@ -173,6 +173,11 @@ then = "Pin the subset with `evaluation.nemo_evaluator_config.config.params.task
 skill = "src/nemotron/steps/eval/model_eval/REFERENCE.md"
 
 [[errors]]
+error = "lm-eval refuses a code benchmark without confirm_run_unsafe_code"
+cause = "Code benchmarks (humaneval, mbpp and relatives) EXECUTE model-generated code inside the eval job. lm-evaluation-harness will not run them unless you explicitly accept that."
+recovery = "Pass the flag through the harness argument passthrough: `extra.args: '--confirm_run_unsafe_code'` on that task. Decide first whether running untrusted code in that job is acceptable -- it is why the shipped instruct suite leaves the code benchmark commented out."
+
+[[errors]]
 error = "Results are on a cluster mount you cannot read, and the job's logs are gone"
 cause = "EVAL_RESULTS_DIR must be durable storage, which on a cluster is usually a mount the submitting workstation cannot see. Many schedulers discard a job's logs once it terminates, so the output that would explain a failure is gone with it."
 recovery = "Run a small CPU job on the same backend that mounts the same storage and prints summary.json, run_manifest.json and failures.txt, keeping the job alive long enough to read its output. Those three answer most questions without touching per-task harness.log. Better: point EVAL_RESULTS_DIR at storage you can already read, or export results to a tracker."
