@@ -50,6 +50,7 @@ import sys
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from glob import iglob
 from pathlib import Path
 from typing import Any, cast
 
@@ -339,6 +340,25 @@ def _stale_corpus_warnings(paths: dict[str, str]) -> list[str]:
     return []
 
 
+def _any_match(pattern: str | list[str]) -> bool:
+    """Whether a pattern matches at least one file, stopping at the first.
+
+    ``integrity.expand_inputs`` walks a directory tree, filters by extension and
+    sorts the result. Preflight only needs to know whether anything is there, and
+    it runs before every step, so it asks the cheaper question.
+    """
+    patterns = [pattern] if isinstance(pattern, str) else list(pattern)
+    for item in patterns:
+        candidate = Path(item)
+        if candidate.is_dir():
+            return any(candidate.iterdir())
+        if candidate.exists():
+            return True
+        if next(iglob(item, recursive=True), None) is not None:
+            return True
+    return False
+
+
 def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> list[str]:
     """Refuse everything refusable before the first step does any work.
 
@@ -356,7 +376,13 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
     # reads two different corpora, or none. Refuse here, naming both halves of
     # the ambiguity, rather than at whichever step happens to read it first.
     corpus_input = (cfg.get("corpus") or {}).get("input")
-    if corpus_input and not integrity.expand_inputs(corpus_input):
+    # Not when something will create the corpus during the run. curate/nemo_curator
+    # calls snapshot_download before it resolves its input glob (step.py), so a
+    # corpus materialised from a Hugging Face snapshot legitimately does not exist
+    # yet at preflight. `dataset` is not a flow key, but derive passes authored
+    # keys through to the step, so a config can still ask for one.
+    materialised_at_runtime = bool(((cfg.get("steps") or {}).get("filter") or {}).get("dataset"))
+    if corpus_input and not materialised_at_runtime and not _any_match(corpus_input):
         problems.append(
             f"corpus.input matched no files: {corpus_input}\n"
             + textwrap.indent(integrity.explain_no_match(corpus_input), "    ")

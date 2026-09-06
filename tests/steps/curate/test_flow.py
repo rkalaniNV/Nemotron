@@ -1339,3 +1339,18 @@ def test_an_unmatched_corpus_names_the_directory_it_looked_in(tmp_path, monkeypa
     assert "corpus.input matched no files" in message
     assert str(tmp_path) in message, "the working directory it resolved against must be named"
     assert "not against the directory holding the config" in message
+
+
+def test_a_corpus_the_run_will_download_is_not_refused_for_being_absent(tmp_path) -> None:
+    """curate/nemo_curator calls snapshot_download before it resolves its input
+    glob, so a corpus materialised from a Hugging Face snapshot legitimately does
+    not exist when preflight runs. Refusing it would block a working config."""
+    cfg = {
+        "corpus": {"input": str(tmp_path / "never" / "*.jsonl"), "text_field": "text"},
+        "output_root": str(tmp_path / "out"),
+        "steps": {"filter": {"enabled": True, "dataset": {"repo_id": "x/y", "repo_type": "dataset"}}},
+    }
+
+    resolved, _, _ = run_flow.plan(cfg, dry_run=True)
+
+    assert any(r.plan.key == "filter" and r.enabled for r in resolved)
