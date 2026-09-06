@@ -55,13 +55,21 @@ def test_standalone_validator_accepts_a_scaffolded_python_pack(
     assert json.loads(report_paths[0].read_text(encoding="utf-8")) == report
 
 
-def test_standalone_validator_reports_invalid_config_as_failure(
+def test_standalone_validator_reports_invalid_config_as_an_error_envelope(
     tmp_path: Path,
 ) -> None:
+    """An unusable config exits 1 with a machine-readable envelope, not a traceback.
+
+    Exit 1 is reserved for "the validator could not reach a verdict". A pack that
+    was validated and refused Gold exits 2, so a caller can tell the two apart.
+    """
     config = tmp_path / "invalid.yaml"
     config.write_text("[]\n", encoding="utf-8")
 
     completed = _run(config, tmp_path / "validation")
 
-    assert completed.returncode != 0
-    assert "Config must be a YAML mapping" in completed.stderr
+    assert completed.returncode == 1, completed.stderr
+    envelope = json.loads(completed.stdout)
+    assert envelope["status"] == "fail"
+    assert envelope["error_type"] == "ValueError"
+    assert "Config must be a YAML mapping" in envelope["reason"]

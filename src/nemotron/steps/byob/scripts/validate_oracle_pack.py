@@ -35,15 +35,34 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.output_dir is None:
-        with tempfile.TemporaryDirectory() as tmp:
-            report = _run(args.config.resolve(), Path(tmp))
-    else:
-        report = _run(args.config.resolve(), args.output_dir.resolve())
+    # A non-Gold pack and a validator that could not run are different outcomes, so
+    # they get different exit codes: automation that retries on a crash must not
+    # also retry on a verdict it should report to a human instead.
+    try:
+        if args.output_dir is None:
+            with tempfile.TemporaryDirectory() as tmp:
+                report = _run(args.config.resolve(), Path(tmp))
+        else:
+            report = _run(args.config.resolve(), args.output_dir.resolve())
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        print(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "fail",
+                    "error_type": type(exc).__name__,
+                    "reason": str(exc),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        raise SystemExit(1) from exc
 
     print(json.dumps(report, indent=2, sort_keys=True))
     if not report.get("gold_eligible"):
-        raise SystemExit(1)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
