@@ -15,10 +15,9 @@
 # Direct mode — the harness runs in THIS job; Nemotron's runspec executors do
 # the scheduling. Backend-agnostic by construction.
 #
-#   local   uv run nemotron steps run eval/model_eval -c direct   (see note)
-#   slurm   uv run nemotron steps run eval/model_eval -c direct --batch slurm_profile
-#   lepton  uv run nemotron steps run eval/model_eval -c direct --batch lepton_profile
-#   run:ai  uv run nemotron steps run eval/model_eval -c direct --batch dgxcloud_profile
+#   uv run nemotron steps run eval/model_eval -c direct --batch <profile>
+#
+# The profile decides the backend; the step does not care which.
 #
 # Why this exists: NeMo Evaluator Launcher's own executors cover local/slurm/
 # lepton only — there is no Run:ai backend — and its cloud executors carry
@@ -37,9 +36,9 @@
 #        run.env.container_image=nvcr.io/nvidia/eval-factory/lm-evaluation-harness:26.03
 #      or a nemo-evaluator variant (:latest-lm-eval, :latest-gym, :latest-full).
 #   2. The model is reached over HTTP:
-#        Lepton / Run:ai — host the endpoint separately, set EVAL_ENDPOINT_URL
-#        Slurm          — bring the server up in the same allocation, or point
-#                         at an existing one; either way it is just a URL here.
+#        Host it separately and set EVAL_ENDPOINT_URL, or bring the server up
+#        in the same allocation where the backend allows it. Either way it is
+#        just a URL here.
 #   3. Results are written to output_dir, which must be on storage that
 #      outlives the job (a mount), not the container's ephemeral disk.
 #

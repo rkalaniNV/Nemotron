@@ -781,12 +781,17 @@ def test_the_null_sentinel_counts_as_unset(tmp_path, capsys):
     assert "no tokenizer configured" in capsys.readouterr().err
 
 
-def test_chat_endpoints_are_not_warned(tmp_path, capsys):
-    """Chat endpoints tokenize server-side."""
+def test_chat_endpoints_are_warned_too(tmp_path, capsys):
+    """`local-chat-completions` loads a tokenizer as well -- ifeval,
+    mmlu_instruct and gsm8k_cot_instruct all ship `extra.tokenizer`. Gating
+    this on `type == completions` meant it could never fire on an instruct
+    run, which is exactly where it was needed."""
     cfg = _cfg(output_dir=str(tmp_path / "r"))
     cfg.target.api_endpoint.type = "chat"
-    run_direct(cfg, task_filters=["hellaswag"])
-    assert "no tokenizer configured" not in capsys.readouterr().err
+    run_direct(cfg, task_filters=["ifeval"])
+    err = capsys.readouterr().err
+    assert "no tokenizer configured" in err
+    assert "chat endpoint" in err
 
 
 # --- failures.txt ------------------------------------------------------------

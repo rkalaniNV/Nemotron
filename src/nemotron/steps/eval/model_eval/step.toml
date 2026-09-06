@@ -128,7 +128,7 @@ then = "Set `run.env.launcher_executor` (local, slurm or lepton) -- it is a SEPA
 skill = "src/nemotron/steps/eval/model_eval/REFERENCE.md"
 
 [[strategies]]
-when = "You want to evaluate on Lepton or Run:ai"
+when = "You want to evaluate on a backend the launcher has no executor for"
 then = "Host the endpoint yourself and evaluate it with `-c direct`. Direct mode never creates or tears down an endpoint. Launcher-managed Lepton deployment is experimental: its executor does not accept the `generic` deployment type this step ships, created endpoints are not cleaned up, and a multi-task run can create one GPU endpoint per task. There is no launcher Run:ai executor at all."
 skill = "src/nemotron/steps/eval/model_eval/REFERENCE.md"
 
@@ -143,7 +143,7 @@ then = "The registry is whatever the selected harness image ships, not the launc
 skill = "src/nemotron/steps/eval/model_eval/README.md"
 
 [[strategies]]
-when = "You need to give the eval job an endpoint token on Lepton"
+when = "You need to give the eval job an endpoint token without putting it in the job spec"
 then = "Store it as a platform secret (`lep secret create -n <name> -v <token>`) and map it in the profile with `secret_vars = { ENDPOINT_TOKEN = \"<name>\" }`. Values in `env_vars` are stored verbatim in the submitted job spec and are readable by anyone who can read the job. `EVAL_API_KEY_NAME` still names the variable; only the source of its value changes."
 skill = "src/nemotron/steps/eval/model_eval/REFERENCE.md"
 
@@ -173,8 +173,18 @@ then = "Pin the subset with `evaluation.nemo_evaluator_config.config.params.task
 skill = "src/nemotron/steps/eval/model_eval/REFERENCE.md"
 
 [[errors]]
+error = "Results are on a cluster mount you cannot read, and the job's logs are gone"
+cause = "EVAL_RESULTS_DIR must be durable storage, which on a cluster is usually a mount the submitting workstation cannot see. Many schedulers discard a job's logs once it terminates, so the output that would explain a failure is gone with it."
+recovery = "Run a small CPU job on the same backend that mounts the same storage and prints summary.json, run_manifest.json and failures.txt, keeping the job alive long enough to read its output. Those three answer most questions without touching per-task harness.log. Better: point EVAL_RESULTS_DIR at storage you can already read, or export results to a tracker."
+
+[[errors]]
+error = "Generative benchmarks (IFEval, HumanEval, GSM8K-CoT) score plausibly badly on a reasoning model"
+cause = "The endpoint was served without a reasoning parser, so the reasoning trace is returned as ordinary content and is scored as the answer. The endpoint returns 200 throughout, so nothing looks broken."
+recovery = "Serve with `--reasoning-parser <parser>` (nemotron_v3 for the Nemotron 3.5 family), and `--tool-call-parser` for tool-use benchmarks. Read one raw completion before trusting a smoke test -- a 200 is not evidence the response is scoreable. Log-likelihood tasks are unaffected."
+
+[[errors]]
 error = "RepositoryNotFoundError / 404 for a repo id that is actually your served-model-name"
-cause = "No client-side tokenizer was configured. lm-evaluation-harness's local-completions builds log-likelihood requests itself, so it calls AutoTokenizer.from_pretrained; with `extra.tokenizer` unset it falls back to the `model=` value, which is the endpoint's served-model-name, not an HF repo."
+cause = "No client-side tokenizer was configured. lm-evaluation-harness calls AutoTokenizer.from_pretrained for BOTH local-completions and local-chat-completions; with `extra.tokenizer` unset it falls back to the `model=` value, which is the endpoint's served-model-name, not an HF repo. A chat endpoint does not exempt you -- ifeval, mmlu_instruct and gsm8k_cot_instruct all ship `extra.tokenizer`."
 recovery = "Set EVAL_TOKENIZER (or evaluation.nemo_evaluator_config.config.params.extra.tokenizer) to the model's HF repo id or a local snapshot path. Direct mode now warns before submitting. A tokenizer-extended checkpoint MUST use its own tokenizer -- the base one would mis-tokenize every prompt and score silently wrong."
 
 [[errors]]

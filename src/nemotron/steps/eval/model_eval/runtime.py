@@ -754,30 +754,34 @@ def _claim_output_dir(out_root: Path, *, dry_run: bool, overwrite: bool) -> Path
 
 
 def _warn_if_tokenizer_missing(plain: dict, *, model_id: str, model_type: str) -> None:
-    """Warn when a completions run has no client-side tokenizer configured.
+    """Warn when no client-side tokenizer is configured, for any endpoint type.
 
-    lm-evaluation-harness's ``local-completions`` model builds log-likelihood
-    requests itself, so it loads a tokenizer with
-    ``AutoTokenizer.from_pretrained``. When none is given it falls back to the
+    lm-evaluation-harness constructs a tokenizer with
+    ``AutoTokenizer.from_pretrained`` and, when none is given, falls back to the
     ``model=`` value -- which here is the endpoint's served-model-name, not an
     HF repo. The result is a ``RepositoryNotFoundError`` naming your
     served-model-name as a missing repo, tens of lines into a Hub traceback,
     with nothing to connect it to the tokenizer setting you left unset.
 
-    A warning rather than an error: not every harness needs a client-side
-    tokenizer, and chat endpoints generally do not.
+    This is NOT limited to completions. `local-chat-completions` loads a
+    tokenizer too: `ifeval`, `mmlu_instruct` and `gsm8k_cot_instruct` all ship
+    `extra.tokenizer` and thread it through their command templates. An earlier
+    version of this check returned early for chat endpoints and so could never
+    fire on the runs that needed it most.
+
+    A warning rather than an error: a harness that needs no client-side
+    tokenizer is possible, and refusing to run would be worse than saying so.
     """
-    if model_type != "completions":
-        return
     params = (((plain.get("evaluation") or {}).get("nemo_evaluator_config") or {}).get("config") or {}).get(
         "params"
     ) or {}
     if _is_set((params.get("extra") or {}).get("tokenizer")):
         return
     print(
-        f"Warning: no tokenizer configured (extra.tokenizer / EVAL_TOKENIZER is unset).\n"
-        f"  lm-evaluation-harness builds log-likelihood requests client-side and will fall\n"
-        f"  back to loading '{model_id}' as a HuggingFace repo, which fails with\n"
+        f"Warning: no tokenizer configured (extra.tokenizer / EVAL_TOKENIZER is unset)\n"
+        f"  for a {model_type} endpoint. lm-evaluation-harness loads a tokenizer\n"
+        f"  client-side for chat AND completions tasks, and with none given it falls\n"
+        f"  back to loading '{model_id}' as a HuggingFace repo -- which fails with\n"
         f"  RepositoryNotFoundError unless that happens to be a real repo id.\n"
         f"  Set EVAL_TOKENIZER to the model's HF repo id or a local snapshot path.\n"
         f"  A tokenizer-extended checkpoint MUST use its own tokenizer, not the base one.",

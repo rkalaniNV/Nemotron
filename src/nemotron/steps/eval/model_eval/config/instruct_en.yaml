@@ -6,7 +6,10 @@
 # the model's reply. Point EVAL_ENDPOINT_URL at /v1/chat/completions and set
 # EVAL_ENDPOINT_TYPE=chat (this config does the latter for you).
 #
-# EVAL_TOKENIZER is not required here: a chat endpoint tokenizes server-side.
+# EVAL_TOKENIZER IS required. lm-evaluation-harness loads a tokenizer
+# client-side for chat tasks too -- ifeval, mmlu_instruct and
+# gsm8k_cot_instruct all ship `extra.tokenizer` -- and with none set it
+# tries to load your served-model-name as an HF repo and 404s.
 #
 # These are generative, so they cost far more output tokens than the
 # log-likelihood suites -- serve with enough context and smoke first.

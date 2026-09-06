@@ -58,79 +58,44 @@ yourself — see *Standing the endpoint up yourself* below — and pass
 
 ## Standing the endpoint up yourself
 
-Direct mode needs a URL. Any OpenAI-compatible server will do; these are the two
-shapes that come up most.
+Direct mode needs a URL. Any OpenAI-compatible server will do, hosted however
+your platform hosts things — that part is yours. What the endpoint has to
+satisfy for this step:
 
-**Lepton.** One endpoint per checkpoint:
+| Requirement | Why |
+|---|---|
+| OpenAI-compatible `/v1/completions` or `/v1/chat/completions` | the harness speaks nothing else |
+| `--served-model-name` **equals** `EVAL_MODEL_HANDLE` | otherwise every request 404s and `summary.json` shows only `failed(N)` |
+| a reasoning parser, for a reasoning model | without it the reasoning trace is returned as content and generative benchmarks score the model thinking out loud — IFEval and HumanEval come back *plausibly* bad, so nothing looks wrong |
+| a tool-call parser, for tool-use benchmarks | same failure mode, for tool calls |
+| context length ≥ the longest prompt a task builds | few-shot prompts are longer than they look |
+| reachable from wherever the eval job runs | direct mode only sends HTTP |
 
-```bash
-lep endpoint create -n my-ckpt \
-  --resource-shape gpu.a100-80gb \
-  --node-group <node-group-name> \
-  --container-image vllm/vllm-openai:latest \
-  --container-port 8000 \
-  --mount <storage_path>:<mount_path>:<mount_from> \
-  --min-replicas 1 --max-replicas 1 \
-  --tokens "$ENDPOINT_TOKEN" \
-  -e HF_HOME=<mount_path>/hf \
-  --container-command "vllm serve <mount_path>/<hf-export> \
-    --served-model-name my-ckpt --port 8000 \
-    --tensor-parallel-size 1 --gpu-memory-utilization 0.94 \
-    --max-model-len 8192 --trust-remote-code"
-
-lep endpoint get -n my-ckpt        # wait for Ready; read the URL and api token
-```
-
-Reading that URL back in a script needs care: `lep endpoint get` embeds the
-container command verbatim, newlines and all, so its JSON carries raw control
-characters and `json.loads` rejects it. Grepping the pretty-printed output for
-`external_endpoint` is unreliable too.
-
-```python
-d = json.loads(raw[raw.find("{"):], strict=False)      # strict=False matters
-url = d["status"]["endpoint"]["external_endpoint"]
-```
-
-Three flag names bite here (verified against `lep` 0.26.7): it is
-`--container-image` / `--container-port` / `--container-command`, **not**
-`--image` / `--port` / `--command` — those fail with `No such option`. And
-`--mount` is `STORAGE_PATH:MOUNT_PATH:MOUNT_FROM`, e.g.
-`/my-workspace:/mnt/shared:node-nfs:my-fs`, which is a different key order from
-the mount block in a job spec.
-
-Then `EVAL_ENDPOINT_URL=https://my-ckpt.<your-domain>/v1/completions` and
-`EVAL_MODEL_HANDLE=my-ckpt`. **`--served-model-name` and `EVAL_MODEL_HANDLE`
-must match exactly** — if they differ, every request 404s and `summary.json`
-reports only `failed(N)`.
-
-Deployments take the node-group **ID**; jobs take its **name**. Set
-`--min-replicas 0` when you are done rather than deleting, so the endpoint can
-be scaled back up for a re-run:
+A minimal vLLM server, whatever you wrap it in:
 
 ```bash
-lep endpoint update -n my-ckpt --min-replicas 0 --max-replicas 0
+vllm serve <model-path-or-repo-id> \
+  --served-model-name my-ckpt --port 8000 \
+  --tensor-parallel-size <n> --max-model-len 8192 \
+  --trust-remote-code \
+  --reasoning-parser <parser>        # reasoning models only
 ```
 
-**Run:ai / DGX Cloud.** The launcher has no Run:ai executor at all, so this is
-the only way to evaluate there. Serve with a normal inference workload and
-expose it as a service:
+Then `EVAL_ENDPOINT_URL=<url>/v1/completions` and `EVAL_MODEL_HANDLE=my-ckpt`.
+
+**Verify before you evaluate.** A 200 is not evidence the response is
+scoreable — read one raw completion:
 
 ```bash
-runai submit my-ckpt --image vllm/vllm-openai:latest --gpu 1 \
-  --pvc <claim>:<mount_path> --service-type nodeport --port 8000:8000 \
-  --command -- vllm serve <mount_path>/<hf-export> \
-    --served-model-name my-ckpt --port 8000 --trust-remote-code
+curl -sS -H "Authorization: Bearer $ENDPOINT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"my-ckpt","prompt":"The capital of France is","max_tokens":16}' \
+  <url>/v1/completions
 ```
 
-then point `EVAL_ENDPOINT_URL` at the resulting service address and submit the
-eval with `--batch <dgxcloud_profile>`.
-
-> The Lepton block above is transcribed from an endpoint spec that has served
-> evaluations in this repo. The Run:ai block is the standard `runai submit`
-> shape and has **not** been run as written — check it against your cluster's
-> service and PVC conventions before relying on it.
-
-Whichever you use, smoke with `EVAL_LIMIT_SAMPLES=5` before the full split.
+Coherent continuation, no reasoning trace leaking into `text`, model id as
+expected. That check costs seconds and catches the parser mistake above, which
+otherwise surfaces as a bad score rather than an error.
 
 ## Several checkpoints, several benchmarks
 
@@ -313,6 +278,35 @@ login on the submitting host is neither read nor forwarded. To publish results,
 upload `run_manifest.json` and `summary.json` yourself, or use launcher mode
 with `execution.auto_export` and `export.wandb` enabled.
 
+## What a run writes
+
+Everything lands under `EVAL_RESULTS_DIR`. Reading it back is a property of your
+platform, not of this step — point it at durable storage and retrieve it however
+you normally would.
+
+```
+<output_dir>/
+├── summary.json          per task: "ok" or "failed(<exit code>)"
+├── run_manifest.json     what ran: model, endpoint (redacted), harness image
+│                         and whether it was digest-pinned, merged per-task
+│                         params and adapter config, Nemotron version + git SHA
+├── failures.txt          written only on failure: the tail of each failed
+│                         task's harness.log, so one file explains the run
+└── <task>/
+    ├── harness.log       the harness's own stdout and stderr
+    ├── results_*.json    scores
+    ├── samples_*.jsonl   per-sample requests and responses
+    ├── run_config.yml    the config the harness resolved
+    └── adapter/          proxy cache and request/response logs
+```
+
+A dry run writes `summary.dry-run.json` and `run_manifest.dry-run.json` so it
+cannot overwrite a real one.
+
+**Start with the three top-level files.** `summary.json` says what failed,
+`failures.txt` says why, `run_manifest.json` says what ran. They are small and
+answer most questions; reach into a task directory only when they do not.
+
 ## Reproducibility: pin the harness by digest
 
 A harness image is the source of truth for task definitions, prompt formatting
@@ -346,87 +340,31 @@ A direct-mode profile ships for each backend, so there is nothing to author:
 All three are **CPU-only** — the harness drives an endpoint you host yourself,
 so the GPUs are wherever the model is served.
 
-> **These profiles will not exist in an `env.toml` you already have.** `env.toml`
-> is generated once by `steps/env/env_toml` and then gitignored, so profiles
-> added to `config/{lepton,slurm,dgxcloud}.yaml` do not appear in a file that is
-> already on disk — an older one can share almost no profile names with the
-> current source. Check with `grep '^\[lepton_eval_direct\]' env.toml`.
->
-> Copy the profile out of `config/lepton.yaml` into your `env.toml` by hand —
-> it is a dozen lines, and `env.toml` is your file to edit. Express it against
-> whichever base your file actually has (an older one may use `lepton_cpu_base`
-> rather than `lepton_prep_base`).
->
-> Regenerating instead (`nemotron steps run env/env_toml -c lepton force=true`)
-> **overwrites the whole file** and discards site values — `node_group`,
-> mounts, workspace paths — so back it up first if you go that way.
->
-> A missing profile now reports the file it consulted, that file's generation
-> date, and this fix.
+> **A profile you already have an `env.toml` for will not gain these.**
+> `env.toml` is generated once by `steps/env/env_toml` and then gitignored, so
+> profiles added to the template do not reach a file already on disk. Check with
+> `grep '^\[lepton_eval_direct\]' env.toml`; if it is missing, copy the profile
+> across from `steps/env/env_toml/config/<backend>.yaml`. Regenerating with
+> `force=true` rewrites the whole file and discards site values.
 
-If you write your own, direct mode resolves its config **inside the job**, so
-the profile must forward every `${oc.env:...}` the config reads — exporting them
-in your shell only affects submission:
+If you write your own, the one rule that is ours: direct mode resolves its
+config **inside the job**, so the profile must forward every `${oc.env:...}` the
+config reads. Exporting a variable in your shell only affects submission.
 
 ```toml
 [my_direct_profile]
-executor = "<your backend>"                 # local, slurm, lepton, dgxcloud
-# No container_image here: `direct.yaml` owns it (see below).
+executor = "<your backend>"
+# No container_image: direct.yaml owns the harness image (see below).
 # The harness image is not a Nemotron image and ships none of its deps.
 pip_extras = ["typer", "rich", "pydantic-settings", "omegaconf", "tomli", "wandb"]
-env_vars = { EVAL_ENDPOINT_URL = "${oc.env:EVAL_ENDPOINT_URL,''}", EVAL_MODEL_HANDLE = "${oc.env:EVAL_MODEL_HANDLE,''}", EVAL_RESULTS_DIR = "${oc.env:EVAL_RESULTS_DIR,''}", EVAL_ENDPOINT_TYPE = "${oc.env:EVAL_ENDPOINT_TYPE,completions}", EVAL_API_KEY_NAME = "${oc.env:EVAL_API_KEY_NAME,ENDPOINT_TOKEN}", EVAL_LIMIT_SAMPLES = "${oc.env:EVAL_LIMIT_SAMPLES,null}", EVAL_TOKENIZER = "${oc.env:EVAL_TOKENIZER,null}", HF_HOME = "${oc.env:HF_HOME,/tmp/hf}" }
+env_vars = { EVAL_ENDPOINT_URL = "...", EVAL_MODEL_HANDLE = "...", EVAL_RESULTS_DIR = "...", EVAL_ENDPOINT_TYPE = "...", EVAL_API_KEY_NAME = "...", EVAL_LIMIT_SAMPLES = "...", EVAL_TOKENIZER = "...", HF_HOME = "..." }
 ```
 
-On Lepton, a CPU-only profile must also override the base's
-`shared_memory_size: 65536` (say, `8192`): no `cpu.*` shape can satisfy 64 GB of
-`/dev/shm`, and Lepton rejects the submission with HTTP 400 before a job is
-created. Neither `env.toml` generation nor `--dry-run` catches that — neither
-talks to the scheduler.
-
-Note what is **not** in `env_vars`: the token. Values placed there are stored
-verbatim in the submitted job spec, so anyone who can read the job can read the
-token. On Lepton, store it once as a platform secret and reference it by name:
-
-```bash
-lep secret create -n eval-endpoint-token -v <token>
-```
-
-```toml
-# ENV_VAR_NAME = "<lepton-secret-name>"; the value is injected by the platform
-# and never appears in the profile, the job spec, or `lep job get` output.
-secret_vars = { ENDPOINT_TOKEN = "eval-endpoint-token" }
-```
-
-`EVAL_API_KEY_NAME` still names the *variable* (`ENDPOINT_TOKEN`) — only where
-its value comes from changes. On backends without a secret store, keep the token
-in the submitting shell and forward it through `env_vars`, and treat the job
-spec as sensitive.
-
-**`EVAL_HARNESS_IMAGE` is the image selector, not the profile.** A profile's
-`container_image` has no effect here: `build_job_config()` re-applies
-YAML-owned resource keys (`container_image`, `nodes`, `gpus_per_node`, …) after
-merging `env.toml`, so a config that sets `container_image` — as `direct.yaml`
-does — always wins. Pick the image with `EVAL_HARNESS_IMAGE`, or per-run on the
-command line:
-
-```bash
-uv run nemotron steps run eval/model_eval -c direct --batch lepton_eval_direct \
-  run.env.container_image=<image>@sha256:<digest>
-```
-
-CLI overrides land in the YAML before the profile is merged, so those do win.
-
-`EVAL_HARNESS_IMAGE` is also absent from the profile's `env_vars` on purpose:
-`direct.yaml` forwards it into the job from `run.env.container_image`, so
-`run_manifest.json` records the image the executor was actually given. Without
-that forwarding the manifest would record the *default tag* — the config is
-serialised unresolved, so an `${oc.env:...}` image reference is re-evaluated
-inside the container, where a variable you exported on the submitting host does
-not exist.
-
-Add whatever mounts your backend needs so that `EVAL_RESULTS_DIR` is durable
-storage — results written to a container's ephemeral disk are lost when the job
-is reaped.
+Resource sizing is yours, with one trap worth knowing: a CPU-only profile that
+inherits a GPU base may also inherit a shared-memory request no CPU shape can
+satisfy, and the scheduler rejects the submission before a job exists. Neither
+config generation nor `--dry-run` catches that, because neither talks to the
+scheduler.
 
 ## What `--dry-run` does and does not prove
 

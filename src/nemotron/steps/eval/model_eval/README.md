@@ -35,9 +35,9 @@ a config file.
 - `EVAL_ENDPOINT_URL`: OpenAI-compatible URL, e.g. `https://host/v1/completions`.
 - `EVAL_MODEL_HANDLE`: must equal the server's `--served-model-name`, or every
   request 404s.
-- `EVAL_TOKENIZER`: HF repo id or local path. **Required for completions** —
-  the harness tokenizes client-side and otherwise tries to load your
-  served-model-name as an HF repo.
+- `EVAL_TOKENIZER`: HF repo id or local path. **Required** — the harness
+  tokenizes client-side for chat and completions alike, and otherwise tries to
+  load your served-model-name as an HF repo and 404s.
 - `EVAL_RESULTS_DIR`: durable storage, not container disk.
 - `EVAL_API_KEY_NAME` / the variable it names: the endpoint token.
 - `EVAL_HARNESS_IMAGE`: the image whose tasks you want. Pin by digest for
@@ -68,9 +68,9 @@ MMLU_PROX_LANG=hi uv run nemotron steps run eval/model_eval \
   -c mmlu_prox --batch <profile>
 ```
 
-Base models want the completions suites and need `EVAL_TOKENIZER`; instruct
-models want the chat suites and do not, because a chat endpoint tokenizes
-server-side. Reach for [`gym_eval`](gym_eval/README.md) when a benchmark is
+Base models want the completions suites, instruct models the chat suites.
+**Both need `EVAL_TOKENIZER`** — lm-evaluation-harness loads a tokenizer
+client-side either way. Reach for [`gym_eval`](gym_eval/README.md) when a benchmark is
 Gym-only, or when it needs tool-call or reasoning-trace parsing.
 
 ## Finding A Benchmark

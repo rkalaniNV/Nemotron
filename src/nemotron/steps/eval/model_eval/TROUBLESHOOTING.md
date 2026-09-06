@@ -8,6 +8,10 @@ See [README.md](README.md) for installation and normal use.
 
 ## Lepton executor: field notes
 
+Where this step's assumptions meet the launcher's Lepton executor. Backend
+specific, and it assumes you already know your cluster — on Slurm or Run:ai
+skip to *Harness containers*, which applies to any backend.
+
 Everything here was hit in practice while evaluating CPT checkpoints. The
 symptoms are mostly silent — jobs report success, or hang with no logs — so
 check this list before debugging from first principles.
@@ -36,14 +40,11 @@ patches in this repository; direct mode does not use that code path.
 | Job "succeeds", no results anywhere | Executor rewrites `--output_dir /results`, but the lm-eval template emits `--output_path /results`; results land on ephemeral disk and vanish when Lepton reaps the job | ship a `post_cmd` that copies `/results` to the mounted `${output_dir}` |
 | Mounted dir is empty inside the container | Task mounts get `/<invocation_id>` appended to the **host** path for isolation | use `dataset_dir` for a verbatim mount (checkpoints, tokenizers) |
 | Endpoint returns 401 for every request | The executor ignores `evaluation.env_vars`; the job gets no environment | put env in `execution.lepton_platform.tasks.env_vars` |
-| `secret <NAME> does not exist` | Private Lepton secrets are stored as `<NAME>.<user>` | use the id from `lep secret list`, not the name you passed to `create` |
 | `container image is required` | Lepton executor treats task-key **presence** as an override, so `container: null` overrides the registry with nothing | omit the key, or set a real image string |
 | All requests 404 / model not found | `target.api_endpoint.model_id` must equal the endpoint's `--served-model-name` | keep them in one variable |
-| Job or endpoint sits in `Starting` forever, no logs | GPU quota exhausted or node fragmentation — invisible in `lep job list` | `GET /deployments/<n>/replicas` → `readiness_issue`; use `-cbp` (preemptible) when non-preemptible quota is full |
 | `container.command.2 not a string` | The Lepton executor ignores `deployment.command`/`base_command` and builds argv from `deployment.checkpoint_path` | put the model in `checkpoint_path`; put `--trust-remote-code` etc. in `extra_args` |
-| Node group rejected | **Deployments take the node-group ID, jobs take the name** | `LEPTON_NODE_GROUP_ID` vs `LEPTON_NODE_GROUP` |
 
-### Harness containers: quirks that are not the step's fault
+## Harness containers: quirks that are not the step's fault
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -83,7 +84,7 @@ places carry the detail:
   **accumulates across runs** if a directory is reused; direct mode refuses a
   non-empty task directory for that reason (`overwrite=true` replaces it).
 
-### Checkpoint tokenizers
+## Checkpoint tokenizers
 
 HF exports produced by the NeMo tokenizer-extension pipeline declare
 `"tokenizer_class": "TokenizersBackend"`, which stock `transformers` cannot
@@ -94,7 +95,7 @@ exist"*. Copy `tokenizer.json` / `tokenizer_config.json` /
 The vocabulary is unchanged; only the loader class differs. Fixing this in the
 export step would make the checkpoints portable to any harness container.
 
-### Coverage
+## Coverage
 
 `nemo-evaluator-launcher ls tasks` is the source of truth for **launcher** mode
 (421 tasks, 23 harness containers). It does not list NeMo **Gym** benchmarks —
