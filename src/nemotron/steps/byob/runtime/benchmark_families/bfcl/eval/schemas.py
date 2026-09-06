@@ -620,11 +620,37 @@ class CandidateInference(_Strict):
     """
 
     temperature: Annotated[FiniteFloat, Field(ge=0)]
-    top_p: Annotated[FiniteFloat, Field(gt=0, le=1)]
+    top_p: Annotated[FiniteFloat, Field(gt=0, le=1)] | None
     max_tokens: PositiveInt
     seed: StrictInt | None = None
     tool_choice: Literal["auto", "required", "none"]
     provider_extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _nucleus_sampling_is_unset_only_where_it_cannot_matter(self) -> CandidateInference:
+        """Let ``top_p`` be null at temperature 0, and only there.
+
+        Some providers refuse a request that carries both fields; every Anthropic
+        model does, on Bedrock and on Azure alike. Without a way to omit one, that
+        whole family cannot be evaluated at all.
+
+        Omitting it is safe exactly when the decode is greedy: at temperature 0 the
+        distribution is a point mass, so no nucleus cutoff can change the token that
+        is chosen, and a provider default this config never saw cannot influence the
+        result either. Above 0 the default would decide real sampling behaviour, which
+        is the drift this class exists to prevent, so the field stays mandatory there.
+
+        ``top_p`` is nullable but has no default: a config must still say which case
+        it is in, and ``null`` is recorded in the semantic payload, so the hash tells
+        an omitted top_p apart from any pinned value.
+        """
+        if self.top_p is None and self.temperature != 0:
+            raise ValueError(
+                "top_p may only be null when temperature is 0, where a greedy decode makes nucleus "
+                f"sampling inert; at temperature {self.temperature} an unset top_p would inherit a "
+                "provider default that decides sampling behaviour. Pin top_p, or pin temperature to 0."
+            )
+        return self
 
     @field_validator("provider_extensions")
     @classmethod

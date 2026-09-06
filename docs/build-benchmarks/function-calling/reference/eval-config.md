@@ -121,7 +121,7 @@ them apart is what makes a score comparable after an endpoint is renamed.
 | `model_identity.source`, `model_identity.model` | lowercase token, string | Where the weights come from, for example `huggingface`, and their identifier at that source. |
 | `model_identity.revision` | string or `null` | An immutable revision, meaning 40 to 64 hexadecimal characters. Branch and tag names such as `main` or `refs/heads/*` are refused rather than downgraded. |
 | `model_identity.weights_digest` | string or `null` | `sha256:<64 hex>` over the weight bytes, or `bfcl-weight-manifest-v1:<64 hex>` over a manifest of a served directory. |
-| `inference.temperature`, `inference.top_p` | number ≥ 0, number in (0, 1] | Decoding temperature and nucleus sampling. |
+| `inference.temperature`, `inference.top_p` | number ≥ 0, number in (0, 1] or `null` | Decoding temperature and nucleus sampling. `top_p` must still be stated, but may be `null` when `temperature` is 0: the field is then omitted from the request instead of sent. Some endpoints, including every Anthropic model, refuse a request carrying both fields, and at temperature 0 the decode is greedy, so a nucleus cutoff cannot change the token chosen. Above 0 a value is required, because an omitted one would inherit a provider default that decides real sampling behaviour. |
 | `inference.max_tokens`, `inference.seed` | integer > 0, integer or `null` | Response bound and optional decoding seed. |
 | `inference.tool_choice` | `auto`, `required`, or `none` | Tool-choice policy. |
 | `inference.provider_extensions` | mapping | Optional; keys are versioned namespaces such as `nvidia.v1`, and an extension may not replace a standard request field. |

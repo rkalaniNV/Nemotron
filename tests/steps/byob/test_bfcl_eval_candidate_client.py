@@ -58,7 +58,11 @@ TOOLS = [
 ]
 
 
-def _candidate(*, extensions: dict[str, Any] | None = None) -> EvalCandidate:
+def _candidate(
+    *,
+    extensions: dict[str, Any] | None = None,
+    top_p: float | None = 1.0,
+) -> EvalCandidate:
     return EvalCandidate(
         alias="candidate_a",
         model="candidate-route",
@@ -75,7 +79,7 @@ def _candidate(*, extensions: dict[str, Any] | None = None) -> EvalCandidate:
         ),
         inference=CandidateInference(
             temperature=0.0,
-            top_p=1.0,
+            top_p=top_p,
             max_tokens=512,
             seed=42,
             tool_choice="auto",
@@ -155,6 +159,40 @@ def test_request_contains_native_tools_and_every_pinned_inference_parameter() ->
     }
     assert request.request_hash.startswith("sha256:")
     assert request.request_body_hash.startswith("sha256:")
+
+
+def test_an_unset_nucleus_cutoff_leaves_the_field_out_instead_of_sending_a_null() -> None:
+    """Providers that refuse the pair refuse it on presence, null included.
+
+    Every Anthropic model rejects a request carrying both temperature and top_p, so a
+    null that reaches the wire fails the run exactly as a number would. The field has
+    to be absent, and the two bodies must stay distinguishable by hash so provenance
+    cannot confuse an omitted cutoff with a pinned one.
+    """
+    request = _request(_candidate(top_p=None))
+
+    body = thaw_json(request.body)
+    assert "top_p" not in body
+    assert body["temperature"] == 0.0
+    assert body["seed"] == 42
+    assert request.request_body_hash != _request(_candidate(top_p=1.0)).request_body_hash
+
+
+def test_nucleus_sampling_may_only_go_unpinned_where_the_decode_is_greedy() -> None:
+    """The escape hatch is bounded by the reason it is safe.
+
+    At temperature 0 the distribution is a point mass, so no cutoff changes the chosen
+    token and omitting the field pins nothing away. Above 0 an absent top_p would hand
+    real sampling behaviour to a provider default this config never recorded, which is
+    the drift the pinned-inference contract exists to prevent.
+    """
+    greedy = CandidateInference(temperature=0.0, top_p=None, max_tokens=512, tool_choice="auto")
+    assert greedy.top_p is None
+    # null is recorded rather than dropped, so the hash states which case this is.
+    assert greedy.semantic_payload()["top_p"] is None
+
+    with pytest.raises(ValidationError, match="only be null when temperature is 0"):
+        CandidateInference(temperature=0.7, top_p=None, max_tokens=512, tool_choice="auto")
 
 
 def test_only_the_matching_provider_extension_is_sent() -> None:

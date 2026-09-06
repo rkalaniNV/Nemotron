@@ -113,9 +113,14 @@ def build_candidate_request(
         "tools": tool_list,
         "tool_choice": candidate.inference.tool_choice,
         "temperature": candidate.inference.temperature,
-        "top_p": candidate.inference.top_p,
         "max_tokens": candidate.inference.max_tokens,
     }
+    # A null top_p is omitted rather than sent as null: providers that reject the pair
+    # reject it on presence, and a null would also read as a value the endpoint should
+    # interpret. The schema only permits null at temperature 0, where the decode is
+    # greedy and the field cannot change the chosen token.
+    if candidate.inference.top_p is not None:
+        body["top_p"] = candidate.inference.top_p
     if candidate.inference.seed is not None:
         body["seed"] = candidate.inference.seed
     body.update(_provider_extensions(candidate))
