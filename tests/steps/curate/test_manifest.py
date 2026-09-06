@@ -307,3 +307,4 @@ def test_writing_leaves_no_temp_file(tmp_path) -> None:
     m.write_manifest(path, _valid())
 
     assert [p.name for p in tmp_path.iterdir()] == ["run_manifest.json"]
+
