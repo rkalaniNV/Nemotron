@@ -1,14 +1,12 @@
 # BFCL workflow acceptance matrix
 
-This file transcribes the production-readiness acceptance criteria for assisted authoring
-into the repository so that each one can name a test. Without the transcription the
-criteria live outside version control, and "backed by a named test" cannot be checked.
+This file states the production-readiness acceptance criteria for assisted authoring and
+binds each one to the test that would fail if it were violated. The point of keeping the
+criteria in the repository is that "backed by a named test" becomes a checkable claim
+rather than an assertion in a review thread.
 
-Transcribed digest: `sha256:a0b5630aafdcb8184447f4737ec0e28dcff0b73872ce11579a3c8ee9d4fa1e1e`.
-
-The digest identifies the requirements revision this matrix was transcribed from. When
-those requirements change, recompute it and update the rows below. The digest is recorded
-as provenance only; the source is not in this repository, so no test can verify it.
+Add a row when you add a criterion, and give it the next `AC-` number. A criterion with
+no owning test is not a criterion; it is an intention.
 
 ## How this file is enforced
 
@@ -23,7 +21,7 @@ records where coverage is still partial.
 
 ## Criteria
 
-| ID | Criterion (section 13, verbatim) | Owning tests |
+| ID | Criterion | Owning tests |
 | --- | --- | --- |
 | AC-1 | Existing manual Oracle Packs and generation tests remain unchanged and passing. | `test_bfcl_stages.py::test_manual_oracle_packs_require_no_flow_two_adapter_metadata`, `test_bfcl_stages.py::test_manual_gold_tier_ignores_adapter_and_certification_fields` |
 | AC-2 | The LLM authoring pipeline emits only canonical pack files accepted by `load_pack()`. | `test_bfcl_mcp_release_review.py::test_freeze_atomically_seals_the_canonical_pack_and_lineage`, `test_bfcl_authoring_e2e.py::test_real_local_guided_publication_runs_stage_all` |

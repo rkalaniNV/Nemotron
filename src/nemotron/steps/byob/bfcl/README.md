@@ -142,7 +142,7 @@ flowchart TB
 Disabled optional stages are bypassed, not run as no-ops. `stage=all` covers
 Stages 1–12; the LLM-assisted authoring steps happen before that command.
 Translation and evaluation are separate post-publication runs. For the detailed
-Flow 2 command sequence and authorization boundaries, see the
+assisted authoring command sequence and authorization boundaries, see the
 [assisted-authoring user guide](../references/bfcl-authoring-user-guide.md).
 
 `skip_until=<stage>` resumes by running the named stage and every later enabled

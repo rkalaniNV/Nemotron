@@ -343,7 +343,7 @@ For a live-authoring run, replace `BFCL_LLM_DEMO_ROOT` above with
 
 If a benchmark was already generated and published, skip Sections 5–10. The
 evaluation path is the same regardless of whether its Oracle Pack was authored
-manually or through the LLM-generated lane. A usable publication must include
+manually or through assisted authoring. A usable publication must include
 the original `run_manifest.json`, `benchmark.parquet`, and
 `benchmark_raw.parquet`; a standalone parquet file is not an evaluation source.
 

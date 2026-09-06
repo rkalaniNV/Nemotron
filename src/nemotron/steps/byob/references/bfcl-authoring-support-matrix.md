@@ -1,12 +1,12 @@
 # BFCL assisted-authoring support matrix
 
-This matrix is the support source for Flow 2. “Supported” means the behavior has a
+This matrix is the support source for assisted authoring. “Supported” means the behavior has a
 named executable test. “Experimental” is implemented and tested but remains behind a
 fail-closed rollout flag. “Unimplemented” is a target, not usable behavior.
 
 | Surface | Status | Boundary | Evidence |
 | --- | --- | --- | --- |
-| Manual Oracle Pack generation | supported | Unchanged by Flow 2 | [`test_bfcl_stages.py`](../../../../../tests/steps/byob/test_bfcl_stages.py) |
+| Manual Oracle Pack generation | supported | Unchanged by assisted authoring | [`test_bfcl_stages.py`](../../../../../tests/steps/byob/test_bfcl_stages.py) |
 | `local_python` static identity | supported | Reviewed package and import closure | [`test_bfcl_local_authoring_adapter.py`](../../../../../tests/steps/byob/test_bfcl_local_authoring_adapter.py) |
 | `local_python` A1/A2 probes | supported | Least-privilege process worker | [`test_bfcl_source_intake.py`](../../../../../tests/steps/byob/test_bfcl_source_intake.py) |
 | `http_package` reviewed intake | supported | Reviewed schema plus live identity and attestation | [`test_bfcl_http_authoring_adapter.py`](../../../../../tests/steps/byob/test_bfcl_http_authoring_adapter.py) |

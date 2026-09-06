@@ -1,6 +1,6 @@
 # Authoring and certifying a BFCL source adapter
 
-This is the implementation checklist for a new built-in Flow 2 source adapter.
+This is the implementation checklist for a new built-in assisted-authoring source adapter.
 Runtime installation of third-party adapters is **unimplemented**; the registry is a
 static allowlist
 ([`test_bfcl_source_adapter_registry.py`](../../../../../tests/steps/byob/test_bfcl_source_adapter_registry.py)).

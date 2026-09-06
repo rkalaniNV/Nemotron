@@ -1,10 +1,10 @@
 # BFCL assisted-authoring user guide
 
-This guide covers Flow 2: producing a reviewed Oracle Pack from one source declaration
+This guide covers assisted authoring: producing a reviewed Oracle Pack from one source declaration
 and one domain brief. The manual Oracle Pack path remains unchanged and is documented in
 [bfcl-oracle-pack.md](bfcl-oracle-pack.md). Current adapter and publication status is
 test-linked in [bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md). To
-watch the whole lane run once before reading it step by step, see
+watch the whole flow run once before reading it step by step, see
 [bfcl-llm-generated-demo.md](bfcl-llm-generated-demo.md).
 
 ## Install and inspect the CLI

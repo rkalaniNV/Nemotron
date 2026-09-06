@@ -102,14 +102,14 @@ def test_documentation_test_links_resolve() -> None:
 
 
 def test_workflow_acceptance_criteria_are_backed_by_named_tests() -> None:
-    """Every transcribed workflow criterion must name a test function that exists."""
+    """Every workflow acceptance criterion must name a test function that exists."""
     rows = [
         match
         for line in ACCEPTANCE_MATRIX.read_text(encoding="utf-8").splitlines()
         if (match := ACCEPTANCE_ROW.match(line)) is not None
     ]
     identifiers = [row["id"] for row in rows]
-    assert identifiers, "the acceptance matrix must transcribe at least one criterion"
+    assert identifiers, "the acceptance matrix must declare at least one criterion"
     assert len(identifiers) == len(set(identifiers)), "criterion IDs must be unique"
     assert identifiers == [f"AC-{number}" for number in range(1, len(rows) + 1)], (
         "criterion IDs must be a gapless AC-1..AC-N sequence"

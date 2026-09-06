@@ -1,13 +1,15 @@
-# Walking the LLM-generated lane end to end
+# Walking the assisted authoring flow end to end
 
-`scripts/bfcl_llm_generated_demo.py` runs the whole Flow 2 lane in one command: a reviewed
-source package is certified by live probes, an authoring model drafts what that source can
-support, the drafts plus reviewed semantics become a candidate pack, and the pack is
-validated, reviewed, frozen, published into a benchmark, and scored by a real evaluation
-run. It exists so the lane can be watched, not so anything can be claimed: every gate it
-crosses is owned by a test named in
-[bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md), and the demo is
-evidence of nothing on its own.
+`scripts/bfcl_llm_generated_demo.py` runs the entire assisted authoring flow in one
+command: a reviewed source package is certified by live probes, an authoring model drafts
+what that source can support, the drafts plus reviewed semantics become a candidate pack,
+and the pack is validated, reviewed, frozen, published into a benchmark, and scored by a
+real evaluation run.
+
+Its purpose is to make the flow observable end to end, so that you can watch each gate and
+each artifact instead of reading about them. It is a demonstration, not a proof: the
+guarantee that a gate holds comes from the test that owns it, named in
+[bfcl-authoring-support-matrix.md](bfcl-authoring-support-matrix.md).
 
 For setup, live-model configuration, per-stage artifacts, an intentionally
 failing scorer run, and evaluation against an independent candidate endpoint,
@@ -20,8 +22,8 @@ uv run python scripts/bfcl_llm_generated_demo.py --workdir "$BFCL_LLM_DEMO_ROOT"
 ```
 
 The run takes a few minutes, most of it real probe sessions and two unmocked validation
-passes. It refuses a workdir that already exists, because a lane that reuses state is not
-the lane being demonstrated.
+passes. It refuses a workdir that already exists, because a run that reuses state is not
+the flow being demonstrated.
 
 ## What is simulated, and what is not
 
@@ -67,7 +69,7 @@ really seals the pack read-only, and evaluation runs the shipped scorer.
 
 The demo's candidate answers from the benchmark's own recorded assistant turns, keyed by
 what the user last said and how many tool results have come back. A clean run therefore
-scores 1.0 across every metric, which is the point: it shows the lane produced a benchmark
+scores 1.0 across every metric, which is the point: it shows the flow produced a benchmark
 that is passable, with assertions that fire and traces that complete.
 
 A scorer that only ever reports success proves nothing, so the same published benchmark

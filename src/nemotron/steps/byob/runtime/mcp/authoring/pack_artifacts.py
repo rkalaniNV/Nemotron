@@ -25,7 +25,7 @@ MCP profile chose, so a reviewer sees that vocabulary in the pack instead of hav
 remember it lives in another file.
 
 What is deliberately absent: fixtures, task templates, validation cases, and assertions.
-Those need evidence this lane cannot produce at `L0`, and emitting empty stubs would turn a
+Those need evidence this path cannot produce at `L0`, and emitting empty stubs would turn a
 missing input into a file that looks authored.
 """
 
@@ -55,7 +55,7 @@ from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     write_text_atomic,
 )
 
-# The pack files this lane still needs from a later phase, named so the draft cannot be
+# The pack files this path still needs from a later phase, named so the draft cannot be
 # mistaken for a loadable pack.
 PENDING_PACK_ARTIFACTS: tuple[str, ...] = (
     "fixtures.json",

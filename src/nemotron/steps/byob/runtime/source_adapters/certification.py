@@ -859,7 +859,7 @@ def verify_certification_report(
     trusted_public_keys: Mapping[str, Ed25519PublicKey],
     execution_inputs_digest: str | None = None,
 ) -> None:
-    """Rebind a report to trusted inputs and enforce the requested Flow 2 tier."""
+    """Rebind a report to trusted inputs and enforce the requested certification tier."""
 
     expected = {
         "profile_id": profile.profile_id,

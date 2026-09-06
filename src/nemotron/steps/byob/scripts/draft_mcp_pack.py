@@ -32,7 +32,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, required=True, help="evidence_bundle.json")
     # Only a bundle migrated from legacy v1 has these; native v2 intake produces neither,
-    # and requiring them would put the current lane behind a compatibility artifact.
+    # and requiring them would put the current path behind a compatibility artifact.
     parser.add_argument("--source-bundle", type=Path)
     parser.add_argument("--migration-record", type=Path)
     parser.add_argument("--certification-report", type=Path, required=True)
