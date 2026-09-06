@@ -119,7 +119,7 @@ translate = [
     "sacrebleu>=2.6.0,<3.0.0; python_version>='3.11'",
     "bcp47>=0.1.0; python_version>='3.11' and python_version<'3.14'",
 ]
-evaluator = ["nemo-evaluator-launcher>=0.1.0"]
+evaluator = ["nemo-evaluator-launcher>=0.2.6,<0.3"]
 curate = [
     "nemo-curator @ git+https://github.com/NVIDIA-NeMo/Curator.git@main ; python_version>='3.11' and python_version<'3.14'",
     "huggingface_hub>=0.20.0; python_version>='3.11'",
@@ -155,7 +155,7 @@ all = [
     "pylibraft-cu12==25.10.*; python_version>='3.11' and platform_system=='Linux' and platform_machine=='x86_64'",
     "raft-dask-cu12==25.10.*; python_version>='3.11' and platform_system=='Linux' and platform_machine=='x86_64'",
     "rapidsmpf-cu12==25.10.*; python_version>='3.11' and platform_system=='Linux' and platform_machine=='x86_64'",
-    "nemo-evaluator-launcher>=0.1.0",
+    "nemo-evaluator-launcher>=0.2.6,<0.3",
 ]
 
 # Note: megatron-bridge is required for training but not listed as a dependency

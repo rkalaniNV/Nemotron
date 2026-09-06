@@ -262,9 +262,13 @@ def plan_for(
         patch_cloud_data_mover_skip_configs,
         patch_dgxcloud_accept_legacy_kwargs,
         patch_dgxcloud_strip_source_chunks_from_exports,
+        patch_lepton_enable_log_collection,
     )
 
     patch_cloud_data_mover_skip_configs()
+    # Without this, a Lepton job that dies during startup leaves no logs at
+    # all -- the failure mode that costs the most time to diagnose.
+    patch_lepton_enable_log_collection()
     # DGXCloud needs chunks delivered via ``environmentVariables`` only, not
     # re-baked into ``torchrun_job.sh`` — otherwise the file balloons and
     # ``move_data`` spends ~12 min chunking it into ~46 workloads.
@@ -330,7 +334,7 @@ def plan_for(
                 f" && touch {ready_marker_q}"
                 f" || {{ status=$?; mkdir -p {pod_src_q}; touch {failed_marker_q}; exit $status; }};"
                 " else i=0;"
-                " while [ \"$i\" -lt 600 ]; do"
+                ' while [ "$i" -lt 600 ]; do'
                 f" [ -f {ready_marker_q} ] && break;"
                 f" [ -f {failed_marker_q} ] && echo 'source extraction failed on rank 0' >&2 && exit 1;"
                 " i=$((i + 1)); sleep 2;"
