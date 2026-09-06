@@ -683,6 +683,13 @@ def run_probe_suite(
         timeout_case = timeout_cases[0]
         timed_out = False
         fresh_ok = False
+        # A source that ignores its deadline and a probe that never reached a
+        # deadline are different findings, and both would otherwise be recorded as
+        # `timeout_observed: false`. Keep the failing exception so the report says
+        # which one happened: the first is the source's defect to fix, the second is
+        # usually the environment's.
+        probe_error: str | None = None
+        recovery_error: str | None = None
         try:
             episode(
                 f"probe-timeout-{timeout_case.case_id}",
@@ -698,30 +705,42 @@ def run_probe_suite(
             )
         except TimeoutError:
             timed_out = True
-        except Exception:  # noqa: BLE001 - anything else is not a deadline
-            pass
+        except Exception as exc:  # noqa: BLE001 - anything else is not a deadline
+            probe_error = type(exc).__name__
         try:
             episode(
                 "probe-timeout-recovery",
                 [{"op": "reset"}, {"op": "get_state"}],
             )
             fresh_ok = True
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             fresh_ok = False
+            recovery_error = type(exc).__name__
         timeout_ok = timed_out and fresh_ok
+        evidence = {
+            "timeout_observed": timed_out,
+            "business_call_attempts": 1,
+            "session_cleanup_completed": timed_out,
+            "fresh_episode_succeeded": fresh_ok,
+            "unknown_commit_state_preserved": timed_out,
+        }
+        if probe_error is not None:
+            evidence["probe_error"] = probe_error
+        if recovery_error is not None:
+            evidence["recovery_error"] = recovery_error
+        if timeout_ok:
+            timeout_reason = None
+        elif probe_error is not None:
+            timeout_reason = "probe_failed"
+        else:
+            timeout_reason = "cleanup_failed"
         records[CertificationProbe.TIMEOUT_CLEANUP] = probe_record(
             CertificationProbe.TIMEOUT_CLEANUP,
             started=timeout_started,
             calls=1,
             status="pass" if timeout_ok else "fail",
-            evidence={
-                "timeout_observed": timed_out,
-                "business_call_attempts": 1,
-                "session_cleanup_completed": timed_out,
-                "fresh_episode_succeeded": fresh_ok,
-                "unknown_commit_state_preserved": timed_out,
-            },
-            reason=None if timeout_ok else "cleanup_failed",
+            evidence=evidence,
+            reason=timeout_reason,
             cleanup_status="passed" if timeout_ok else "failed",
         )
 

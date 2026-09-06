@@ -21,6 +21,9 @@ from nemotron.steps.byob.runtime.source_adapters.local_python import (
     LocalPythonError,
     inspect_local_python_package,
 )
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import (
+    ProcessWorker,
+)
 from nemotron.steps.byob.runtime.source_adapters.local_python_probes import (
     LocalProbeCase,
     LocalProbePlan,
@@ -424,6 +427,71 @@ def test_local_a2_requires_timeout_cleanup_and_truthful_mutation(
     )
     assert mutation.reason == "mutation_declaration_mismatch"
     assert derive_attained_tier(profile, mutation_outcomes) is AdapterTier.A1
+
+
+def test_timeout_probe_separates_a_broken_transport_from_an_ignored_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A probe that never reached a deadline records why, not just that it failed.
+
+    A source that runs past its deadline and a transport that broke before the
+    deadline could be observed both record `timeout_observed: false`, so without a
+    reason an operator would go looking for a cleanup defect in a source whose real
+    problem is that it never answered.
+
+    The projected refusal code stays `cleanup_failed`, because a probe that never
+    completed cannot claim its session was cleaned up and the projection refuses
+    fail-closed on `cleanup_status`. The diagnosis lives in the observation the
+    outcome carries.
+    """
+    package = _runtime_package(tmp_path)
+    inspection = inspect_local_python_package(package, allowed_roots=(tmp_path,))
+    profile = local_python_reference_profile()
+
+    original = ProcessWorker.run_episode
+
+    def failing_run_episode(self, **kwargs):  # type: ignore[no-untyped-def]
+        if str(kwargs.get("task_id", "")).startswith("probe-timeout-"):
+            raise ConnectionResetError("worker connection lost")
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(ProcessWorker, "run_episode", failing_run_episode)
+
+    run = run_local_python_probes(
+        inspection,
+        _probe_plan(),
+        allowed_roots=(tmp_path,),
+    )
+    outcomes = project_probe_executions(
+        profile,
+        run.records,
+        input_digest=certification_input_digest(
+            run.descriptor,
+            source_identity_digest=inspection.source_identity_digest,
+            profile=profile,
+            execution_inputs_digest=run.plan_digest,
+        ),
+    )
+
+    raw = next(
+        record
+        for record in run.records
+        if record.observation.probe.value == "timeout_cleanup"
+    )
+    assert raw.observation.reason == "probe_failed"
+    assert raw.observation.evidence["timeout_observed"] is False
+    assert raw.observation.evidence["probe_error"] == "ConnectionResetError"
+
+    timeout = next(
+        item for item in outcomes if item.probe.value == "timeout_cleanup"
+    )
+    assert timeout.status == "fail"
+    observed = timeout.evidence["observation"]
+    assert observed["reason"] == "probe_failed"
+    assert observed["evidence"]["probe_error"] == "ConnectionResetError"
+    # The finding costs the top tier, exactly as an ignored deadline would.
+    assert derive_attained_tier(profile, outcomes) is AdapterTier.A1
 
 
 def test_local_probe_inputs_cannot_overlap_held_out_material(
