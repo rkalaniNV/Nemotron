@@ -14,6 +14,14 @@ Notes about the pack that are not themselves pack inputs belong here, where they
 can be revised freely. The pack's own `README.md` is frozen at the revision
 generation recorded.
 
+That freeze extends to links. The frozen `README.md` points at
+`config/banking_vn.gold.yaml` and `config/banking_vn.gold.paraphrase.yaml`, the
+names those configs carried at publication; they now ship as
+`publication.example.yaml` and `publication.paraphrase.example.yaml`. Repointing
+the links would be a byte change like any other, so the mapping is recorded here
+instead. Only the filenames, the commentary, and the declared `expt_name` and
+`output_dir` changed; every key that decides what gets generated is the same.
+
 ## File map
 
 - `manifest.yaml`: identity, Vietnamese prompts, frozen clock, primary keys,
@@ -93,12 +101,21 @@ you produce from these files can be compared against it:
 | `benchmark_raw.parquet` | `sha256:e988c246dccbafbf5a2c3638f2204a8de1c10da97f85160bffb3ddbc01ae1d94` |
 | `generation_config_hash` | `sha256:9dec917235992be2b2d888016ca27ecf9daab7a1f141abf530b7522ad577be48` |
 
-The pack in this checkout has since received documentation-only edits, so it no
-longer hashes to the value above. That is the fingerprint working as designed
-rather than a defect: the mechanism cannot distinguish a comment from a policy
-the backend reads, so it treats every byte in the directory as significant.
-Scoring the release identified above therefore requires the pack bytes from the
-revision that produced it, which remain available in version control.
+The pack in this checkout still hashes to the `content_hash` above, so this
+release is scoreable as it stands. `tests/steps/byob/test_bfcl_published_pack_fingerprint.py`
+pins that fact per file and fails at the commit that breaks it, rather than
+hours later inside someone else's eval.
+
+Of the rest, only the pack `content_hash` reproduces from this checkout. The
+config that produced this release has since been renamed and now declares an
+example `expt_name` and `output_dir` instead of the release's own, and that name
+reaches further than it looks: into the `run_id`, into the
+`generation_config_hash` that covers the whole config document, and into each
+row's `metadata` column and therefore both Parquet hashes. Restore the
+`expt_name` and `output_dir` recorded in that run's `run_manifest.json` if you
+need the identical artifact rather than an equivalent one. Nothing about what
+gets generated changed, so a run under the example names yields the same tasks,
+calls, and mixes.
 
 The pack `content_hash` is the one that matters when reading these numbers as
 evidence about the pack files: the manifest recorded it from the eight pack
