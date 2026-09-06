@@ -584,10 +584,7 @@ def approve_block(report: Mapping[str, Any]) -> list[str]:
     out.append("#   thresholds:")
     for name, direction, threshold, retained in rows:
         pad = " " * (width - len(name))
-        out.append(
-            f"#     - {{signal: {name},{pad} {direction}: {threshold!r}}}"
-            f"   # keeps {retained * 100:.2f}%"
-        )
+        out.append(f"#     - {{signal: {name},{pad} {direction}: {threshold!r}}}   # keeps {retained * 100:.2f}%")
     out.append("#   approver:")
     out.append("#   date:")
     out.append("#   method: manual")
