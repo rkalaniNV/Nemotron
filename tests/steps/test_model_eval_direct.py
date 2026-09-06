@@ -680,3 +680,154 @@ def test_explicit_adapter_endpoint_type_is_kept(tmp_path):
     run_direct(cfg, task_filters=["hellaswag"])
     manifest = json.loads((out / "run_manifest.dry-run.json").read_text())
     assert manifest["tasks"]["hellaswag"]["adapter_config"]["endpoint_type"] == "chat"
+
+
+# --- concurrent runs on one output_dir ---------------------------------------
+
+
+def _real_run(cfg):
+    """A non-dry run whose subprocess is stubbed out."""
+    cfg.dry_run = False
+    return cfg
+
+
+def test_a_second_run_cannot_claim_a_live_output_dir(tmp_path, monkeypatch):
+    """The not-empty check only catches a directory that ALREADY has results.
+    Two submissions racing on the same fresh directory both passed preflight,
+    interleaved their writes, and the summary reported whichever finished last."""
+    out = tmp_path / "results"
+    out.mkdir()
+    (out / ".nemotron-eval.lock").write_text('{"pid": 999, "host": "other"}')
+
+    cfg = _real_run(_cfg(output_dir=str(out)))
+    with pytest.raises(SystemExit, match="claimed by another run"):
+        run_direct(cfg, task_filters=["hellaswag"])
+
+
+def test_overwrite_does_not_override_a_live_claim(tmp_path):
+    """`overwrite` is about replacing stale results, not about racing a live
+    job -- silently proceeding would be the exact corruption it prevents."""
+    out = tmp_path / "results"
+    out.mkdir()
+    (out / ".nemotron-eval.lock").write_text("{}")
+
+    cfg = _real_run(_cfg(output_dir=str(out)))
+    cfg.overwrite = True
+    with pytest.raises(SystemExit, match="does not override a live claim"):
+        run_direct(cfg, task_filters=["hellaswag"])
+
+
+def test_a_dry_run_takes_no_claim_and_is_not_blocked(tmp_path):
+    """A dry run writes nothing that could collide, so it must neither take a
+    claim nor be blocked by one."""
+    out = tmp_path / "results"
+    out.mkdir()
+    (out / ".nemotron-eval.lock").write_text("{}")
+
+    run_direct(_cfg(output_dir=str(out)), task_filters=["hellaswag"])
+    assert (out / "summary.dry-run.json").exists()
+
+
+def test_the_claim_is_released_when_the_run_finishes(tmp_path, monkeypatch):
+    """Otherwise every re-run of a completed job needs a manual cleanup."""
+    import subprocess
+
+    class _Done:
+        stdout = io.BytesIO(b"")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _Done())
+    out = tmp_path / "results"
+    cfg = _real_run(_cfg(output_dir=str(out)))
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert not (out / ".nemotron-eval.lock").exists()
+    # ... and the directory is immediately reusable with overwrite.
+    cfg2 = _real_run(_cfg(output_dir=str(out)))
+    cfg2.overwrite = True
+    run_direct(cfg2, task_filters=["hellaswag"])
+
+
+# --- missing tokenizer -------------------------------------------------------
+
+
+def test_warns_when_a_completions_run_has_no_tokenizer(tmp_path, capsys):
+    """lm-eval falls back to loading the served-model-name as an HF repo and
+    dies with RepositoryNotFoundError deep in a Hub traceback, with nothing
+    pointing back at the unset tokenizer."""
+    cfg = _cfg(output_dir=str(tmp_path / "r"))
+    cfg.target.api_endpoint.type = "completions"
+    run_direct(cfg, task_filters=["hellaswag"])
+    err = capsys.readouterr().err
+    assert "no tokenizer configured" in err
+    assert "EVAL_TOKENIZER" in err
+    # Name the thing it will wrongly try to load.
+    assert "my-model" in err
+
+
+def test_no_warning_when_a_tokenizer_is_set(tmp_path, capsys):
+    cfg = _cfg(output_dir=str(tmp_path / "r"))
+    cfg.evaluation.nemo_evaluator_config.config.params = {"extra": {"tokenizer": "/mnt/tok"}}
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert "no tokenizer configured" not in capsys.readouterr().err
+
+
+def test_the_null_sentinel_counts_as_unset(tmp_path, capsys):
+    """`${oc.env:EVAL_TOKENIZER,null}` resolves to the STRING 'null'."""
+    cfg = _cfg(output_dir=str(tmp_path / "r"))
+    cfg.evaluation.nemo_evaluator_config.config.params = {"extra": {"tokenizer": "null"}}
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert "no tokenizer configured" in capsys.readouterr().err
+
+
+def test_chat_endpoints_are_not_warned(tmp_path, capsys):
+    """Chat endpoints tokenize server-side."""
+    cfg = _cfg(output_dir=str(tmp_path / "r"))
+    cfg.target.api_endpoint.type = "chat"
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert "no tokenizer configured" not in capsys.readouterr().err
+
+
+# --- failures.txt ------------------------------------------------------------
+
+
+def test_failure_tails_are_collected_into_one_file(tmp_path, monkeypatch):
+    """On a cluster whose job logs are unreadable after termination, a cause
+    buried in a per-task harness.log costs an extra job to reach."""
+    import subprocess
+
+    class _Failing:
+        def __init__(self):
+            self.stdout = io.BytesIO(b"Tasks were not found: mmlu_prox_vi\nTraceback...\n")
+
+        def wait(self):
+            return 1
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _Failing())
+    out = tmp_path / "results"
+    cfg = _cfg(output_dir=str(out))
+    cfg.dry_run = False
+    with pytest.raises(SystemExit):
+        run_direct(cfg, task_filters=["mmlu_prox_completions"])
+
+    text = (out / "failures.txt").read_text()
+    assert "===== mmlu_prox_completions =====" in text
+    assert "Tasks were not found: mmlu_prox_vi" in text
+
+
+def test_no_failures_file_when_everything_passes(tmp_path, monkeypatch):
+    import subprocess
+
+    class _Ok:
+        stdout = io.BytesIO(b"fine\n")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _Ok())
+    out = tmp_path / "results"
+    cfg = _cfg(output_dir=str(out))
+    cfg.dry_run = False
+    run_direct(cfg, task_filters=["hellaswag"])
+    assert not (out / "failures.txt").exists()

@@ -136,7 +136,45 @@ def _build_launcher_config(cfg: DictConfig) -> tuple[DictConfig, bool, list[str]
         ensure_wandb_host_env()
         inject_wandb_env_mappings(launcher_cfg)
 
+    # AFTER injection, not before. `inject_wandb_env_mappings` mutates the
+    # config, so a config that validates clean on its own can still be invalid
+    # by the time the launcher sees it -- which is precisely how a rejected key
+    # survived both a hand-audit of the YAML and an inspection of the compiled
+    # config.
+    _validate_launcher_schema(launcher_cfg)
+
     return launcher_cfg, dry_run, list(task_filters) if task_filters else None
+
+
+def _validate_launcher_schema(launcher_cfg: DictConfig) -> None:
+    """Run the launcher's own schema checks on the composed config.
+
+    The launcher validates at submission time, so a config error surfaces only
+    once a job has been scheduled. Running the same checks here means a
+    ``dry_run=true`` run fails identically to a real one, for free and with no
+    schema of our own to keep in sync.
+
+    Note this cannot cover ``nemotron steps run -d``: the generic runner prints
+    the compiled config and returns before the step executes, so nothing in
+    this file runs at all on that path.
+    """
+    try:
+        from nemo_evaluator_launcher.api.functional import (
+            _validate_config_sections,
+            _validate_no_missing_values,
+        )
+    except ImportError:
+        # Private helpers; if upstream renames them, submission-time validation
+        # still applies. Losing the early check must not break the run.
+        return
+
+    for check in (_validate_no_missing_values, _validate_config_sections):
+        try:
+            check(launcher_cfg)
+        except ValueError as exc:
+            raise SystemExit(f"launcher config is invalid:\n{exc}") from exc
+        except Exception:  # noqa: BLE001 - an unexpected internal error must not block
+            return
 
 
 def _passthrough_args(overrides: list[str]) -> list[str]:
@@ -239,6 +277,7 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
     _validate_task_names(tasks)
 
     out_root = Path(str(plain.get("output_dir") or "./results"))
+    _warn_if_tokenizer_missing(plain, model_id=str(model_id), model_type=model_type)
     # NB: not created here. A failed preflight must not leave a new output root
     # behind; creation happens in the execute phase below.
     dry_run = bool(plain.get("dry_run", False))
@@ -355,6 +394,12 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
     for stale in to_clear:
         shutil.rmtree(stale)
 
+    # Two submissions racing on the SAME fresh output_dir both clear the
+    # not-empty check above -- it only catches a directory that already has
+    # results in it. They then interleave writes into one directory and the
+    # summary reports whichever finished last. Claim the directory instead.
+    lock = _claim_output_dir(out_root, dry_run=dry_run, overwrite=overwrite)
+
     summary_name = "summary.dry-run.json" if dry_run else "summary.json"
     # Written BEFORE the tasks run. A job that is preempted or OOM-killed
     # mid-suite still leaves a record of what it was running and against what;
@@ -382,6 +427,7 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
     print(f"eval_manifest: {manifest_path}")
 
     summary: dict[str, str] = {}
+    failures: dict[str, str] = {}
     for task, task_out, cmd in plan:
         task_out.mkdir(parents=True, exist_ok=True)
         print(f"[{task}] {shlex.join(_safe_cmd(cmd, str(url), secrets_by_task.get(task, set())))}", flush=True)
@@ -411,14 +457,26 @@ def run_direct(cfg: DictConfig, *, task_filters: list[str] | None = None) -> Non
         summary[task] = "ok" if returncode == 0 else f"failed({returncode})"
         if returncode != 0:
             print(f"[{task}] FAILED with exit {returncode}; log: {log_path}", file=sys.stderr)
+            failures[task] = _log_tail(log_path)
 
     # A dry run must not clobber a real summary.json from a previous run.
     summary_path = out_root / summary_name
     summary_path.write_text(json.dumps(summary, indent=2))
+    if failures:
+        # One small file with every failure's tail. Otherwise the cause is
+        # buried in a per-task harness.log that, on a cluster whose job logs
+        # are unreadable after termination, costs a whole extra job to reach.
+        failures_path = out_root / "failures.txt"
+        failures_path.write_text("\n\n".join(f"===== {task} =====\n{tail}" for task, tail in failures.items()))
+        print(f"eval_failures: {failures_path}", file=sys.stderr)
     print(f"eval_results: {out_root}")
     print(f"eval_summary: {summary_path}")
     for task, state in summary.items():
         print(f"  {task}: {state}")
+    if lock is not None:
+        # Best effort: a reaped pod leaves it behind, and the message the next
+        # run prints explains how to clear it.
+        lock.unlink(missing_ok=True)
     if any(v.startswith("failed") for v in summary.values()):
         raise SystemExit(1)
 
@@ -645,6 +703,96 @@ def _run_manifest(
         "output_dir": str(out_root),
         "summary_path": str(out_root / summary_name),
     }
+
+
+def _claim_output_dir(out_root: Path, *, dry_run: bool, overwrite: bool) -> Path | None:
+    """Take an exclusive claim on ``out_root`` for the duration of the run.
+
+    The not-empty check refuses a directory that already HAS results. It cannot
+    catch two jobs starting against the same empty directory -- which is what
+    happens when a submission is retried because the first was believed to have
+    failed. Both pass preflight, both write into one directory, and the summary
+    reports whichever finished last.
+
+    ``O_CREAT | O_EXCL`` is atomic on POSIX and on the shared filesystems these
+    results land on. A dry run takes no claim: it writes nothing that could
+    collide, and it must never block a real run.
+    """
+    if dry_run:
+        return None
+    lock = out_root / ".nemotron-eval.lock"
+    payload = json.dumps(
+        {
+            "pid": os.getpid(),
+            "host": os.uname().nodename,
+            "started_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        }
+    )
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        try:
+            held = lock.read_text().strip()
+        except OSError:
+            held = "<unreadable>"
+        if overwrite:
+            # `overwrite` is about replacing stale RESULTS, not about racing a
+            # live job. Say so rather than silently proceeding.
+            raise SystemExit(
+                f"{out_root} is claimed by another run ({held}). overwrite=true replaces stale "
+                f"results; it does not override a live claim. Use a different output_dir, or "
+                f"delete {lock} if that run is definitely gone."
+            ) from None
+        raise SystemExit(
+            f"{out_root} is claimed by another run ({held}). Two runs writing here would "
+            f"interleave and the summary would report only the last one to finish. Use a "
+            f"different output_dir, or delete {lock} if that run is definitely gone."
+        ) from None
+    with os.fdopen(fd, "w") as handle:
+        handle.write(payload)
+    return lock
+
+
+def _warn_if_tokenizer_missing(plain: dict, *, model_id: str, model_type: str) -> None:
+    """Warn when a completions run has no client-side tokenizer configured.
+
+    lm-evaluation-harness's ``local-completions`` model builds log-likelihood
+    requests itself, so it loads a tokenizer with
+    ``AutoTokenizer.from_pretrained``. When none is given it falls back to the
+    ``model=`` value -- which here is the endpoint's served-model-name, not an
+    HF repo. The result is a ``RepositoryNotFoundError`` naming your
+    served-model-name as a missing repo, tens of lines into a Hub traceback,
+    with nothing to connect it to the tokenizer setting you left unset.
+
+    A warning rather than an error: not every harness needs a client-side
+    tokenizer, and chat endpoints generally do not.
+    """
+    if model_type != "completions":
+        return
+    params = (((plain.get("evaluation") or {}).get("nemo_evaluator_config") or {}).get("config") or {}).get(
+        "params"
+    ) or {}
+    if _is_set((params.get("extra") or {}).get("tokenizer")):
+        return
+    print(
+        f"Warning: no tokenizer configured (extra.tokenizer / EVAL_TOKENIZER is unset).\n"
+        f"  lm-evaluation-harness builds log-likelihood requests client-side and will fall\n"
+        f"  back to loading '{model_id}' as a HuggingFace repo, which fails with\n"
+        f"  RepositoryNotFoundError unless that happens to be a real repo id.\n"
+        f"  Set EVAL_TOKENIZER to the model's HF repo id or a local snapshot path.\n"
+        f"  A tokenizer-extended checkpoint MUST use its own tokenizer, not the base one.",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _log_tail(log_path: Path, *, lines: int = 40) -> str:
+    """Last lines of a harness log, for the run-level failures file."""
+    try:
+        text = log_path.read_text(errors="replace")
+    except OSError as exc:
+        return f"<could not read {log_path}: {exc}>"
+    return "\n".join(text.splitlines()[-lines:])
 
 
 def _validate_task_names(tasks: list[str]) -> None:

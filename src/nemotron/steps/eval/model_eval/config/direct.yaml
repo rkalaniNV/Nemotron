@@ -115,6 +115,12 @@ evaluation:
         # Smoke with a small number first; null runs the full split.
         limit_samples: ${oc.decode:${oc.env:EVAL_LIMIT_SAMPLES,null}}
         extra:
+          # REQUIRED for completions endpoints. lm-evaluation-harness builds
+          # log-likelihood requests client-side, so it loads this with
+          # AutoTokenizer. Left unset it falls back to the `model=` value --
+          # your served-model-name -- and dies with RepositoryNotFoundError
+          # naming that as a missing HF repo, which points nowhere near here.
+          # An HF repo id or a local snapshot path both work.
           # Tokenizer-extended checkpoints need their OWN tokenizer; the base
           # tokenizer would mis-tokenize every prompt and score silently wrong.
           tokenizer: ${oc.env:EVAL_TOKENIZER,null}
