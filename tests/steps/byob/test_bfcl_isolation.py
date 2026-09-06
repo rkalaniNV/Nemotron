@@ -14,6 +14,15 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.isolation import (
 )
 
 
+# Budgets that are scaffolding rather than the thing under test. Spawning a worker
+# and importing a backend competes with every other test process for CPU, so a value
+# chosen to look brisk fails on a loaded machine and says nothing when it does. These
+# are large enough that only a genuine hang trips them; where a timeout *is* the
+# assertion, the test states its own tight value instead.
+GENEROUS_TIMEOUT_S = 30.0
+GENEROUS_EPISODE_TIMEOUT_S = 60.0
+
+
 def _double() -> int:
     return 21 * 2
 
@@ -286,10 +295,10 @@ def get_state():
         seed=7,
         task_id="sanitized-import",
         steps=[{"op": "list_tools"}],
-        import_timeout_s=2.0,
+        import_timeout_s=GENEROUS_TIMEOUT_S,
         reset_timeout_s=0.1,
         tool_timeout_s=1.0,
-        episode_timeout_s=3.0,
+        episode_timeout_s=GENEROUS_EPISODE_TIMEOUT_S,
     ) == [["probe"]]
 
     with pytest.raises(TimeoutError, match="reset"):
@@ -300,10 +309,10 @@ def get_state():
             seed=7,
             task_id="reset-timeout",
             steps=[{"op": "reset"}],
-            import_timeout_s=2.0,
+            import_timeout_s=GENEROUS_TIMEOUT_S,
             reset_timeout_s=0.1,
             tool_timeout_s=1.0,
-            episode_timeout_s=3.0,
+            episode_timeout_s=GENEROUS_EPISODE_TIMEOUT_S,
         )
 
 
@@ -329,7 +338,7 @@ ASSERTION_CAPABILITIES = {
         encoding="utf-8",
     )
 
-    report = ProcessWorker().inspect_assertions(assertions, timeout_s=2.0)
+    report = ProcessWorker().inspect_assertions(assertions, timeout_s=GENEROUS_TIMEOUT_S)
 
     assert report["assert_valid"]["valid"] is True
     assert report["assert_valid"]["capabilities"] == {
@@ -364,7 +373,7 @@ ASSERTION_CAPABILITIES = {
         encoding="utf-8",
     )
 
-    report = ProcessWorker().inspect_assertions(assertions, timeout_s=2.0)
+    report = ProcessWorker().inspect_assertions(assertions, timeout_s=GENEROUS_TIMEOUT_S)
 
     assert report["assert_valid"]["valid"] is True
     assert report["assert_valid"]["reason"] is None
@@ -388,7 +397,7 @@ ASSERTION_CAPABILITIES = dict.fromkeys(ASSERTIONS, {"category": "state"})
         encoding="utf-8",
     )
 
-    report = ProcessWorker().inspect_assertions(assertions, timeout_s=2.0)
+    report = ProcessWorker().inspect_assertions(assertions, timeout_s=GENEROUS_TIMEOUT_S)
 
     assert report["assert_valid"]["valid"] is True
     assert report["assert_valid"]["capabilities"] is None
@@ -424,7 +433,7 @@ def get_state():
             {"op": "call_tool", "name": "probe", "arguments": {}, "turn_index": 2},
             {"op": "call_tool", "name": "probe", "arguments": {}, "turn_index": 4},
         ],
-        episode_timeout_s=5.0,
+        episode_timeout_s=GENEROUS_EPISODE_TIMEOUT_S,
     )
     assert outputs[1:] == [{"turn_index": 2}, {"turn_index": 4}]
 
@@ -465,7 +474,7 @@ def get_state():
         task_id="helpers",
         steps=[{"op": "reset"}, {"op": "call_tool", "name": "probe", "arguments": {}}],
         import_root=pack,
-        episode_timeout_s=5.0,
+        episode_timeout_s=GENEROUS_EPISODE_TIMEOUT_S,
     )
 
     assert outputs[1] == {"items": ["B-1"], "status": "on_loan"}
