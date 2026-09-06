@@ -41,6 +41,42 @@ description = "Record field containing the text to curate."
 default = "text"
 
 [[parameters]]
+name = "metadata_fields"
+description = "Extra record fields to carry through the pipeline. JsonlReader treats fields as a projection, so anything omitted here is discarded at the first stage. Empty reproduces the historical text-only read."
+default = []
+
+[[parameters]]
+name = "id_field"
+description = "Field holding the source corpus's own document identifier. Recorded in the run manifest. This is the only document ID that survives resharding; Curator's AddId is positional."
+default = "null"
+
+[[parameters]]
+name = "source_field"
+description = "Field naming the corpus a record came from. When set, the run manifest carries per-source input and output counts."
+default = "null"
+
+[[parameters]]
+name = "mode"
+description = "How an approved policy is applied. filter drops rows and discards the scores, adding no columns — the shape the existing word-count gate already has. annotate scores every row and drops none. both drops rows and keeps each score in __<signal> for the survivors. Only applies when heuristic_filters names a policy; absent reproduces current behaviour."
+default = "filter"
+choices = ["filter", "annotate", "both"]
+
+[[parameters]]
+name = "heuristic_filters"
+description = "Approved filtering policy. heuristic_filters.approved_policy names a promoted policy file; a candidate policy from curate/profile carries approved: false and is refused unless allow_unvalidated_policy is set. A policy using pack-backed signals also requires an explicit langpack_dir because no production packs are bundled. Signal names resolve through a closed allowlist, never an import path."
+default = "null"
+
+[[parameters]]
+name = "emit_ledger"
+description = "Path for the run's record accounting, consumed by curate/audit. Without it an audit can detect that records are missing but cannot tell one removed on purpose from one lost to a swallowed exception. Curator reports no per-stage removal counts, so the ledger attributes removals to 'unattributed' and says so in its own notes rather than naming a gate it cannot observe."
+default = "null"
+
+[[parameters]]
+name = "emit_manifest"
+description = "Path for the run manifest describing what this run read, wrote, and whether it finished. Null writes none, matching current behaviour."
+default = "null"
+
+[[parameters]]
 name = "dataset"
 description = "Optional Hugging Face snapshot_download kwargs. Set to null for local input_glob-only runs."
 default = "null"
@@ -49,6 +85,16 @@ default = "null"
 name = "language_codes"
 description = "Uppercase language codes to keep. Set [] to skip FastText language identification and filtering."
 default = ["EN"]
+
+[[parameters]]
+name = "annotate_domains"
+description = "Run MultilingualDomainClassifier without filtering: every document gets a label, none are dropped. Filtering on a first run discards most of a corpus with nothing to justify the choice; annotating produces the distribution the choice needs. Ignored when domains is non-empty, which already runs the classifier."
+default = false
+
+[[parameters]]
+name = "domain_score_field"
+description = "Optional column for Curator's complete class-probability vector in model label order. It is not a scalar confidence. Absent reproduces Curator's default of recording only the argmax label."
+default = "null"
 
 [[parameters]]
 name = "domains"
@@ -73,6 +119,14 @@ when = "You need a quick infrastructure smoke test"
 then = "Use config/tiny.yaml with the lepton_curate profile. It reads a packaged tiny JSONL, disables optional filters, and uses the Curator container as-is."
 
 [[strategies]]
+when = "You need to keep document IDs, URLs, or source labels in the output"
+then = "List them in metadata_fields. Without it the reader projects text only and every other column is dropped at the first stage, which leaves downstream steps with no way to attribute a record to its source."
+
+[[strategies]]
+when = "You need evidence that a run did not silently lose records"
+then = "Set emit_manifest to a path, and id_field/source_field if the corpus carries them. The manifest records input and output counts and omits completed_at when the run did not reach its write barrier."
+
+[[strategies]]
 when = "You already have local JSONL data"
 then = "Set dataset=null, point input_glob at the JSONL files, and start with language_codes=[], domains=[], and quality_filters={} until the reader/writer path is verified."
 
@@ -91,6 +145,26 @@ then = "Set both quality_filters.min_words and quality_filters.max_words to enab
 [[strategies]]
 when = "You need domain gating"
 then = "Set domains and optionally models.hf_cache_dir. Keep the first run small because the classifier can download/cache model assets."
+
+[[errors]]
+name = "policy_not_approved"
+recovery = "The policy carries approved: false, or is missing a required approval field. curate/profile emits candidates, never approvals: distribution analysis says what a threshold removes, not whether removing it is right. Promote it deliberately, or set heuristic_filters.allow_unvalidated_policy to override with a warning."
+
+[[errors]]
+name = "policy_langpack_mismatch"
+recovery = "The policy was derived from a different language pack than this run loads. Thresholds do not transfer between packs; re-profile against the current pack or pin the pack version."
+
+[[errors]]
+name = "unknown_signal_in_policy"
+recovery = "The policy names a signal outside the allowlist in runtime/registry.py. The error lists the allowed names. A policy file cannot name an import path."
+
+[[errors]]
+name = "metadata_field_absent_from_some_records"
+recovery = "A field named in metadata_fields is missing from some records. What the reader does in that case is Curator's behaviour, not this step's, and it has not been verified here — treat a run whose output lost a metadata column as unexplained and check a sample before relying on it. Raised as an open question in the PR."
+
+[[errors]]
+name = "language_filter_removed_everything"
+recovery = "language_codes are matched case-insensitively against the label FastText emits (lid.176 emits lowercase ISO codes), including the part before a script suffix. If a run still keeps nothing, check that models.fasttext_langid points at the model you expect and lower min_langid_score."
 
 [[errors]]
 name = "empty_or_tiny_output"

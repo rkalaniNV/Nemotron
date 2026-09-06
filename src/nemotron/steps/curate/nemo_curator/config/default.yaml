@@ -12,6 +12,36 @@ text_field: text
 input_glob: ./data/fineweb-edu/**/*.jsonl
 output_dir: ./output/filtered_jsonl
 
+# JsonlReader treats fields as a projection: anything not listed here is dropped
+# at the first stage. Empty keeps the historical text-only read. List the columns
+# you need downstream, e.g. [id, url, source, timestamp].
+metadata_fields: []
+
+# Recorded in the run manifest. id_field should name the corpus's own document
+# identifier — it is the only ID that survives resharding.
+id_field: null
+source_field: null
+
+# How an approved policy is applied. Ignored unless heuristic_filters names one.
+#   filter    drop rows, discard scores, add no columns (current behaviour)
+#   annotate  score every row, drop nothing
+#   both      drop rows, and keep each score in __<signal> for the survivors
+mode: filter
+
+# An approved filtering policy. curate/profile emits candidate_policies.yaml with
+# approved: false, which is refused here on purpose — promoting a candidate is a
+# separate act that records who approved it and on what evidence.
+heuristic_filters: null
+
+# Path for the run manifest. Null writes none, matching current behaviour.
+emit_manifest: null
+
+# Path for the record ledger that curate/audit reads to attribute a loss rather
+# than only detect it. Null writes none. Curator reports no per-stage removal
+# counts, so the ledger records how many documents entered and left and marks
+# them 'unattributed' — it does not name a gate it cannot observe.
+emit_ledger: null
+
 dataset:
   repo_id: HuggingFaceFW/fineweb-edu
   repo_type: dataset

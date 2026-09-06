@@ -1,0 +1,39 @@
+# Japanese particles and copulas, assembled for C4-ja transfer validation.
+# Compact by design. The runtime tokenises on whitespace, so this list
+# only matches particles that happen to be spaced (rare in Japanese prose).
+# The capability is still declared: an absent list cannot be improved later
+# without a pack change, and the undercount is recorded in pack.toml notes.
+# One per line.
+の
+は
+を
+に
+が
+と
+で
+も
+へ
+から
+まで
+より
+だけ
+など
+か
+な
+だ
+です
+ます
+した
+して
+いる
+ある
+する
+なる
+この
+その
+あの
+こと
+もの
+ため
+よう
+さん

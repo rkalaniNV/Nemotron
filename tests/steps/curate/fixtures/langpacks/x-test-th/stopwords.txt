@@ -1,0 +1,42 @@
+# Thai function words, assembled for C4-th transfer validation.
+# Compact by design, same role as the Hindi list.
+# Thai segments on whitespace, so stopword_ratio applies.
+# One per line.
+และ
+ใน
+ที่
+เป็น
+ของ
+ไม่
+ได้
+มี
+จะ
+จาก
+ว่า
+ไป
+มา
+แล้ว
+นี้
+นั้น
+ก็
+กับ
+หรือ
+โดย
+เพื่อ
+ให้
+อยู่
+ใช้
+ถูก
+ต้อง
+อย่าง
+ถ้า
+แต่
+เพราะ
+ดังนั้น
+ยัง
+ขึ้น
+ลง
+มาก
+เลย
+ครับ
+ค่ะ

@@ -109,6 +109,7 @@ CLAUDE.md
 config.yaml
 main.py
 src/nemotron/steps/_bootstrap/runtime/
+src/nemotron/steps/curate/__local__/
 
 # Documentation build
 docs/_build/

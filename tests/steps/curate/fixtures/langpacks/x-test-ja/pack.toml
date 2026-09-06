@@ -1,0 +1,35 @@
+# Japanese validation fixture. It is test data, not a bundled language pack or
+# a claim that Nemotron provides a Japanese curation default.
+#
+# A third script family after Latin (vi, en) and Devanagari (hi). Japanese does
+# not use removable diacritics: dakuten are part of the letter, and the few
+# combining marks in the Hiragana block are obligatory. Sentences end with
+# ideographic 。！？ which Curator's PunctuationFilter does not see.
+
+[pack]
+pack_id      = "x-test-ja"
+language_tag = "x-test-ja"
+version      = "1.1"
+schema       = 1
+
+[sources]
+stopwords = { file = "stopwords.txt", n = 33, origin = "particles and copulas assembled for C4-ja transfer validation", license = "CC0-1.0" }
+charset = { file = "charset.txt", script = "Jpan", note = "Hiragana, Katakana, CJK Unified Ideographs, fullwidth Latin", origin = "Unicode Standard Japanese script repertoires curated for Japanese", license = "Unicode-3.0" }
+boilerplate = { file = "boilerplate.txt", n = 10, origin = "observed on Japanese news and blog crawls", license = "Apache-2.0" }
+
+[orthography]
+sentence_terminators = ["。", "！", "？", ".", "!", "?"]
+
+[capabilities]
+supports = ["script_ratio", "boilerplate_hits", "sentence_end_ratio"]
+
+[notes]
+absent_capabilities = """diacritic_ratio and stopword_ratio_folded are not declared. Japanese dakuten are not removable tone marks; stripping them yields different letters, not degraded readable text."""
+stopword_ratio_not_declared = """Measured on 20,000 C4-ja documents: 93.7% of them score
+EXACTLY zero, and 87.9% of those are correct Japanese (script_ratio > 0.5). The signal
+tokenises on whitespace and Japanese prose is unsegmented, so a "token" is a whole run of
+text and never matches a stopword. That is not an undercount — the signal cannot
+distinguish "not Japanese" from "Japanese, written normally", which is the one distinction it
+exists to make. Declaring it would produce a clean-looking distribution over nothing.
+A morphological tokeniser (MeCab, or Curator get_word_splitter) is a runtime change,
+not a pack change; when one exists this capability can be declared."""
