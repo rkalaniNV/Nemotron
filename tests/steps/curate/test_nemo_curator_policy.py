@@ -725,9 +725,7 @@ def test_the_manifest_says_whether_a_person_approved_the_thresholds(step, tmp_pa
 
     corpus = tmp_path / "in"
     corpus.mkdir()
-    (corpus / "part.jsonl").write_text(
-        '{"id": "a", "text": "one"}\n{"id": "b", "text": "two"}\n', encoding="utf-8"
-    )
+    (corpus / "part.jsonl").write_text('{"id": "a", "text": "one"}\n{"id": "b", "text": "two"}\n', encoding="utf-8")
     out = tmp_path / "out"
     out.mkdir()
     (out / "part.jsonl").write_text('{"id": "a", "text": "one"}\n', encoding="utf-8")

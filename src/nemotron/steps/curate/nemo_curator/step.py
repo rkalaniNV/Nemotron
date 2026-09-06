@@ -1041,8 +1041,7 @@ def emit_manifest(
         "status": "approved" if thresholds else "unapproved",
         "thresholds_applied": len(thresholds),
         "note": (
-            "Thresholds from an approved policy, checked against a fingerprint of the "
-            "corpus they were measured on."
+            "Thresholds from an approved policy, checked against a fingerprint of the corpus they were measured on."
             if thresholds
             else "No approved policy was applied. Any filtering came from configuration "
             "written by hand, which carries no record of the corpus it was measured on. "
