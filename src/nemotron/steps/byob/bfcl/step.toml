@@ -129,7 +129,7 @@ skill = "src/nemotron/steps/byob/references/bfcl-bias-audit-contract.md"
 
 [[strategies]]
 when = "You want a domain-sized run covering every supported conversation shape"
-then = "Run config/banking_vn.yaml with stage=all against data/banking_vn_oracle_pack: it budgets tasks_per_category across six categories and covers single_turn, missing_slot, confirmation, correction, multi_tool, dependent_call, negative_path, clarify_only, and irrelevant with a distractor tool on every template."
+then = "Copy config/smoke.example.yaml, point oracle_pack.manifest_path at the pack, and run stage=all. As written it runs against data/banking_vn_oracle_pack, which declares a template for every conversation shape the pipeline supports: single_turn, missing_slot, confirmation, correction, multi_tool, dependent_call, negative_path, clarify_only, and irrelevant, with a distractor tool on every template."
 skill = "src/nemotron/steps/byob/references/bfcl-oracle-pack.md"
 
 [[strategies]]

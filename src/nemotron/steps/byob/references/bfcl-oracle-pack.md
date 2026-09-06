@@ -644,14 +644,15 @@ python -m nemotron.steps.byob.scripts.run \
   --stage all
 ```
 
-`config/tiny.yaml` (`tiny_library`) and `config/banking_vn.yaml` pin
+`config/tiny.yaml` (`tiny_library`) and `config/smoke.example.yaml` pin
 `lineage.policy: smoke_no_publication`; neither is publication-eligible.
-`banking_vn` is the reference domain pack: it declares a template for every
-policy edge the pipeline supports (`single_turn`, `missing_slot`, `confirmation`,
-`correction`, `multi_tool`, `dependent_call`, `negative_path`, `clarify_only`,
-`irrelevant`), and no template narrows `tools_present`, so every row must pick
-its calls out of the full nine-tool catalog. Point `config/default.yaml` at it
-for a publication-oriented run.
+`banking_vn_oracle_pack` is the reference domain pack, and it is worth reading
+before authoring your own: it declares a template for every policy edge the
+pipeline supports (`single_turn`, `missing_slot`, `confirmation`, `correction`,
+`multi_tool`, `dependent_call`, `negative_path`, `clarify_only`, `irrelevant`),
+and no template narrows `tools_present`, so every row must pick its calls out of
+the full nine-tool catalog. `config/publication.example.yaml` runs it at
+publication scale.
 `config/default.yaml` is the publication-oriented template. Its
 `oracle_pack.manifest_path` is a `REPLACE_ME_*` placeholder so the template can never
 publish an example domain by omission; point it at your own pack and the config runs

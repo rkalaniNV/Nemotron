@@ -160,7 +160,7 @@ def banking_run(tmp_path_factory: pytest.TempPathFactory) -> list[dict[str, Any]
     import pyarrow.parquet as pq
 
     tmp_path = tmp_path_factory.mktemp("banking_slice")
-    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "banking_vn.yaml").read_text(encoding="utf-8"))
+    config_data = yaml.safe_load((BFCL_CONFIG_DIR / "smoke.example.yaml").read_text(encoding="utf-8"))
     config_data["output_dir"] = str(tmp_path / "output")
     config_path = tmp_path / "banking.yaml"
     config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
@@ -610,7 +610,7 @@ def test_banking_rows_expose_only_declared_tools_and_confirm_mutations(banking_r
 
 
 def test_banking_categories_share_one_budget(banking_run) -> None:
-    config = yaml.safe_load((BFCL_CONFIG_DIR / "banking_vn.yaml").read_text(encoding="utf-8"))
+    config = yaml.safe_load((BFCL_CONFIG_DIR / "smoke.example.yaml").read_text(encoding="utf-8"))
     budget = config["task_generation"]["tasks_per_category"]
     templates = yaml.safe_load((BANKING_PACK_ROOT / "task_templates.yaml").read_text(encoding="utf-8"))
 

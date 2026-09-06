@@ -34,7 +34,7 @@ generation recorded.
 From the repository root:
 
 ```bash
-SMOKE="$(pwd)/src/nemotron/steps/byob/bfcl/config/banking_vn.yaml"
+SMOKE="$(pwd)/src/nemotron/steps/byob/bfcl/config/smoke.example.yaml"
 python -m nemotron.steps.byob.scripts.validate_oracle_pack \
   --config "$SMOKE" \
   --output-dir /tmp/bfcl-banking-vn-validation
@@ -55,7 +55,7 @@ The deterministic Gold profile targets 232 tasks in each of six categories:
 
 ```bash
 python -m nemotron.steps.byob.scripts.run \
-  --config "$(pwd)/src/nemotron/steps/byob/bfcl/config/banking_vn.gold.yaml" \
+  --config "$(pwd)/src/nemotron/steps/byob/bfcl/config/publication.example.yaml" \
   --stage all
 ```
 
@@ -65,7 +65,7 @@ records model-exposure provenance:
 ```bash
 export NGC_API_KEY=REPLACE_ME
 python -m nemotron.steps.byob.scripts.run \
-  --config "$(pwd)/src/nemotron/steps/byob/bfcl/config/banking_vn.gold.paraphrase.yaml" \
+  --config "$(pwd)/src/nemotron/steps/byob/bfcl/config/publication.paraphrase.example.yaml" \
   --stage all
 ```
 
@@ -77,7 +77,7 @@ artifact and cannot be scored against the old one.
 ## Reference release
 
 The scale claims in the pack's `README.md` are not projections. This pack
-produced a gold release on 2026-09-01 under `banking_vn.gold.paraphrase.yaml`,
+produced a gold release on 2026-09-01 under `publication.paraphrase.example.yaml`,
 and a local snapshot of it is kept at
 `BFCL/releases/banking-vn-gold-v1-1392/` alongside this checkout. Read that
 snapshot rather than regenerating when you need the numbers a statement there

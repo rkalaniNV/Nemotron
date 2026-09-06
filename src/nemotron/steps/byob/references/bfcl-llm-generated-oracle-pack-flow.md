@@ -408,7 +408,7 @@ publication or Oracle Pack has drifted.
 
 The generated tiny-library pack does not ship with a validated paraphrase
 profile. Do not point it at
-`banking_vn.gold.paraphrase.yaml`: its 1,392-row target, category budgets, style
+`publication.paraphrase.example.yaml`: its 1,392-row target, category budgets, style
 axes, and exact-surface constraints are specific to the Banking VN inventory.
 
 To add model-authored wording, create a pack-specific publication config that:

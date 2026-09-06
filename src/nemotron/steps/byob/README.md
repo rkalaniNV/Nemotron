@@ -62,7 +62,7 @@ Each generation stage writes one `stage_cache/` parquet keyed by `task_id`
 joining them shows which stage dropped a task.
 
 - Run the whole slice on the checked-in tiny pack with `nemotron steps run byob/bfcl -c src/nemotron/steps/byob/bfcl/config/tiny.yaml stage=all family=bfcl`.
-- Swap in `bfcl/config/banking_vn.yaml` for a domain-sized run: it budgets `tasks_per_category` across six categories and covers every conversation shape the pipeline supports.
+- Swap in `bfcl/config/smoke.example.yaml` for a domain-sized run: copy it, point it at your own pack, and it budgets `tasks_per_category` across every category the pack declares.
 - Validate a pack without generating with `python -m nemotron.steps.byob.scripts.validate_oracle_pack --config <CONFIG>`.
 - No stage of BFCL generation calls a model: user and assistant turns are rendered from the pack's templates.
 - Keep pack code under an `oracle_runtime.allowed_roots` entry; the default root is `data/`.
@@ -121,7 +121,7 @@ uv run nemotron steps run byob/mcq \
 ### BFCL
 
 Start from `bfcl/config/tiny.yaml` for a smoke run,
-`bfcl/config/banking_vn.yaml` for generation, or
+`bfcl/config/smoke.example.yaml` for a domain-sized generation run, or
 `bfcl/config/translate.yaml` for localization. Resolve
 `bfcl/config/eval.default.yaml`, then use `eval.cli.yaml` or
 `eval.launcher.yaml` for model evaluation. BFCL supports:

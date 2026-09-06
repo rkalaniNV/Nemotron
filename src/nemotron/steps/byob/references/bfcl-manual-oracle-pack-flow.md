@@ -700,22 +700,25 @@ src/nemotron/steps/byob/data/banking_vn_oracle_pack/
 Reference generation profiles:
 
 ```text
-src/nemotron/steps/byob/bfcl/config/banking_vn.yaml
-src/nemotron/steps/byob/bfcl/config/banking_vn.gold.yaml
-src/nemotron/steps/byob/bfcl/config/banking_vn.gold.paraphrase.yaml
+src/nemotron/steps/byob/bfcl/config/smoke.example.yaml
+src/nemotron/steps/byob/bfcl/config/publication.example.yaml
+src/nemotron/steps/byob/bfcl/config/publication.paraphrase.example.yaml
 ```
 
-- `banking_vn.yaml` is a small `smoke_no_publication` profile.
-- `banking_vn.gold.yaml` is the template-only Gold profile.
-- `banking_vn.gold.paraphrase.yaml` enables guarded Vietnamese paraphrasing and
-  targets a pack-specific 1,392-row release.
+- `smoke.example.yaml` is a small `smoke_no_publication` profile.
+- `publication.example.yaml` is the template-only Gold profile.
+- `publication.paraphrase.example.yaml` adds guarded model paraphrasing on top of
+  the same executable cases.
+
+All three run as written against the bundled reference pack. Copy the one that
+matches your intent and repoint `oracle_pack.manifest_path` at your own pack.
 
 Example paths:
 
 ```bash
 export BFCL_PACK_ROOT="$NEMOTRON_ROOT/src/nemotron/steps/byob/data/banking_vn_oracle_pack"
 export BFCL_PACK_MANIFEST="$BFCL_PACK_ROOT/manifest.yaml"
-export BFCL_GEN_CONFIG="$NEMOTRON_ROOT/src/nemotron/steps/byob/bfcl/config/banking_vn.gold.paraphrase.yaml"
+export BFCL_GEN_CONFIG="$NEMOTRON_ROOT/src/nemotron/steps/byob/bfcl/config/publication.paraphrase.example.yaml"
 ```
 
 The bundled profile uses a provider named `nvidia_inference_api`, credential

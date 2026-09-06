@@ -377,11 +377,11 @@ def test_applicable_b5_without_manifest_target_fails_closed(
     assert report["summary"]["status"] == "failed"
 
 
-def test_banking_gold_configs_pin_domain_specific_b5_and_b15_targets() -> None:
+def test_publication_examples_pin_explicit_balance_and_intent_targets() -> None:
     config_root = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob" / "bfcl" / "config"
     expected = {"1": 0.60, "2": 0.30, "3+": 0.10}
 
-    for name in ("banking_vn.gold.yaml", "banking_vn.gold.paraphrase.yaml"):
+    for name in ("publication.example.yaml", "publication.paraphrase.example.yaml"):
         document = yaml.safe_load((config_root / name).read_text(encoding="utf-8"))
         assert document["task_generation"]["tool_call_count_mix"] == expected
         assert document["task_generation"]["max_intent_share"] == 0.50

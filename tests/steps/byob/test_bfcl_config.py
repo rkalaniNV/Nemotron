@@ -58,15 +58,15 @@ def test_all_bfcl_configs_pin_family() -> None:
         "tiny.yaml",
         "default.yaml",
         "translate.yaml",
-        "banking_vn.yaml",
-        "banking_vn.gold.yaml",
-        "banking_vn.gold.paraphrase.yaml",
+        "smoke.example.yaml",
+        "publication.example.yaml",
+        "publication.paraphrase.example.yaml",
     ):
         data = yaml.safe_load((BFCL_CONFIG_DIR / name).read_text(encoding="utf-8"))
         assert data["family"] == "bfcl", name
 
 
-def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> None:
+def test_publication_example_can_bind_the_closest_uniform_bfcl_v1_scale() -> None:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.dedup_balancing_contract import (
         DedupBalancingDecision,
     )
@@ -89,7 +89,7 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
         build_plan,
     )
 
-    path = BFCL_CONFIG_DIR / "banking_vn.gold.yaml"
+    path = BFCL_CONFIG_DIR / "publication.example.yaml"
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     templates = yaml.safe_load(
         (BYOB_DIR / "data" / "banking_vn_oracle_pack" / "task_templates.yaml").read_text(encoding="utf-8")
@@ -278,8 +278,8 @@ def test_banking_gold_config_can_bind_the_closest_uniform_bfcl_v1_scale() -> Non
     }
 
 
-def test_banking_gold_paraphrase_profile_is_guarded_and_fail_closed() -> None:
-    config = BfclConfig.from_yaml(BFCL_CONFIG_DIR / "banking_vn.gold.paraphrase.yaml")
+def test_publication_paraphrase_example_is_guarded_and_fail_closed() -> None:
+    config = BfclConfig.from_yaml(BFCL_CONFIG_DIR / "publication.paraphrase.example.yaml")
     pack = load_pack(config)
     role = config.lineage.roles["paraphrase"]
     eligible = [template for template in pack.templates if (template.get("paraphrase") or {}).get("allowed") is True]

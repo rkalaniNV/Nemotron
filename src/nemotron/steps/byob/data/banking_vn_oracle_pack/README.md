@@ -37,7 +37,7 @@ the one-of-two choice a `required + 1 distractor` exposure would give, and the
 `clarify_only` and `irrelevant` rows have to decline while every plausible tool
 is in reach.
 
-The current [Gold publication configuration](../../bfcl/config/banking_vn.gold.yaml)
+The current [Gold publication configuration](../../bfcl/config/publication.example.yaml)
 binds 232 deterministic cases in each category (1,392 total). Scale comes from
 real slot inventory: fixture-backed accounts, cards, transactions, VietQR
 payments and disputes; mutation-safe `dispute_eligible` transactions crossed
@@ -59,7 +59,7 @@ from crowding out narrower intents. These values describe this pack and are not
 BFCL framework defaults.
 
 For model-authored wording diversity, use
-[`banking_vn.gold.paraphrase.yaml`](../../bfcl/config/banking_vn.gold.paraphrase.yaml).
+[`publication.paraphrase.example.yaml`](../../bfcl/config/publication.paraphrase.example.yaml).
 It keeps the same executable publication target and requests one guarded
 Vietnamese variant only for templates that explicitly opt in. As shipped it
 routes through the Data Designer provider `nvidia_inference_api` and reads

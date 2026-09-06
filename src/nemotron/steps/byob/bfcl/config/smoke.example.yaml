@@ -1,13 +1,22 @@
-# Reference oracle-pack configuration: validates the pack, then generates every
-# category at the configured budget.
+# Example: smoke-run a domain-sized oracle pack before spending a publication
+# budget on it. It validates the pack, then generates every declared category at
+# a small budget, so a pack defect surfaces in minutes rather than hours.
+#
+# Copy this file, point `oracle_pack.manifest_path` at your own pack, and set
+# `tasks_per_category` to at least the template count of your widest category.
+# It runs as written against the bundled reference pack.
+#
+# `lineage.policy: smoke_no_publication` makes the result deliberately
+# unpublishable. Use publication.example.yaml when you want a releasable
+# benchmark.
 
 family: bfcl
-expt_name: bfcl_banking_vn_validation
+expt_name: bfcl_smoke_validation
 stage: all
 random_seed: 42
 config_status: resolved
 
-output_dir: /tmp/bfcl/banking_vn_validation
+output_dir: /tmp/bfcl/smoke_validation
 
 oracle_pack:
   manifest_path: data/banking_vn_oracle_pack/manifest.yaml
@@ -49,7 +58,7 @@ semantic_deduplication_config:
   enabled: false
 
 exports:
-  # Enable either writer to exercise Stage 12 compatibility publication. The
-  # reference smoke config keeps them off so its default run stays minimal.
+  # Enable either writer to exercise Stage 12 compatibility publication. A smoke
+  # run keeps them off so its default run stays minimal.
   bfcl_json: false
   nemo_evaluator_bundle: false

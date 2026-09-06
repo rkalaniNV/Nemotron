@@ -23,16 +23,16 @@ nemotron steps run byob/bfcl \
 ```
 
 For a larger example covering every supported conversation policy, replace
-`tiny.yaml` with `banking_vn.yaml`.
+`tiny.yaml` with `smoke.example.yaml`.
 
-`config/banking_vn.gold.yaml` is the bundled publication-scale example. Its
+`config/publication.example.yaml` is the bundled publication-scale example. Its
 domain-specific inventory, scale, and current mix are documented with the
 [banking oracle pack](../data/banking_vn_oracle_pack/README.md); they are not
 framework defaults. That pack's file map, commands, and release record are in
 [banking_vn pack operations](../references/bfcl-banking-vn-pack-operations.md),
 held outside the pack directory so they stay editable: a published benchmark
 freezes every byte of the pack it was generated from.
-`config/banking_vn.gold.paraphrase.yaml` is the opt-in model-surface profile; it
+`config/publication.paraphrase.example.yaml` is the opt-in model-surface profile; it
 applies fail-closed exact-surface diversity constraints while retaining
 executable-case lineage. Model roles are routed by Data Designer, so the
 `provider` named in a role must exist in `model_providers.yaml` under
@@ -257,7 +257,7 @@ description, which makes it the fastest way to see what each artifact actually
 contains before committing to a generation run of your own. It sits at
 `BFCL/releases/banking-vn-gold-v1-1392/` alongside this checkout and holds the
 1,392-row banking_vn gold release produced on 2026-09-01 from
-`config/banking_vn.gold.paraphrase.yaml`.
+`config/publication.paraphrase.example.yaml`.
 
 The snapshot keeps the published data and its manifest and nothing else, so its
 layout is flatter than the `output_dir/expt_name/` layout described above:
