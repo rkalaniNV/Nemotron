@@ -1159,6 +1159,13 @@ def test_profile_and_the_flow_compute_the_same_fingerprint(tmp_path) -> None:
 
 
 def _ingest_cfg(tmp_path, **corpus_over):
+    # A real file, because preflight now refuses a corpus.input that matches
+    # nothing — the check that tells a user their relative path resolved against
+    # the working directory rather than against the config.
+    raw = tmp_path / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "part.parquet").write_bytes(b"")
+
     corpus = {
         "input": str(tmp_path / "raw" / "*.parquet"),
         "text_field": "text",
@@ -1310,3 +1317,25 @@ def test_a_policy_is_refused_when_the_corpus_it_names_is_absent(tmp_path) -> Non
         run_flow.materialise_policy(cfg, resolved, paths)
 
     assert "matched no files" in str(caught.value) or "does not exist" in str(caught.value)
+
+
+def test_an_unmatched_corpus_names_the_directory_it_looked_in(tmp_path, monkeypatch) -> None:
+    """A relative path in a config resolves against the working directory, not
+    against the config's own directory, so the same file names two different
+    places depending on where the command was run. The refusal has to say which
+    one applied, or the reader is left guessing.
+    """
+    monkeypatch.chdir(tmp_path)
+    cfg = {
+        "corpus": {"input": "./raw_jsonl/*.jsonl", "text_field": "text", "language": "x-test-vi"},
+        "output_root": str(tmp_path / "out"),
+        "steps": {"filter": {"enabled": True}},
+    }
+
+    with pytest.raises(run_flow.FlowConfigError) as caught:
+        run_flow.plan(cfg, dry_run=True)
+
+    message = str(caught.value)
+    assert "corpus.input matched no files" in message
+    assert str(tmp_path) in message, "the working directory it resolved against must be named"
+    assert "not against the directory holding the config" in message

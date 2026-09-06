@@ -47,6 +47,7 @@ import argparse
 import json
 import logging
 import sys
+import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -348,6 +349,18 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
     problems: list[str] = []
     warnings: list[str] = []
     enabled = {r.plan.key for r in resolved if r.enabled}
+
+    # The corpus is the one input nothing can substitute for, and a relative path
+    # in a config resolves against the working directory rather than against the
+    # config's own directory. Running the same file from two places therefore
+    # reads two different corpora, or none. Refuse here, naming both halves of
+    # the ambiguity, rather than at whichever step happens to read it first.
+    corpus_input = (cfg.get("corpus") or {}).get("input")
+    if corpus_input and not integrity.expand_inputs(corpus_input):
+        problems.append(
+            f"corpus.input matched no files: {corpus_input}\n"
+            + textwrap.indent(integrity.explain_no_match(corpus_input), "    ")
+        )
 
     # A typo under steps: would otherwise drop a whole stage the author asked
     # for, and the run would report success having never attempted it.

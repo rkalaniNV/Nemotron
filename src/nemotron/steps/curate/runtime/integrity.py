@@ -318,6 +318,43 @@ CORPUS_SIDECAR_NAMES = frozenset(
 )
 
 
+def explain_no_match(pattern: str | list[str]) -> str:
+    """Why a pattern found nothing, in terms of where it was actually looked for.
+
+    Relative paths in a config resolve against the process working directory,
+    not against the directory the config sits in, so the same file can name two
+    different places depending on where the command was run from. That is a real
+    trap: a run that wrote its output next to the config on Monday writes it
+    somewhere else on Tuesday, and the only symptom is a corpus that suddenly
+    matches nothing.
+
+    Until the resolution rule itself is settled, the least this can do is show
+    both halves of the ambiguity rather than leaving the reader to guess which
+    one applied.
+    """
+    patterns = [pattern] if isinstance(pattern, str) else list(pattern)
+    cwd = Path.cwd()
+    lines = [f"working directory: {cwd}"]
+    for item in patterns:
+        candidate = Path(item)
+        if candidate.is_absolute():
+            lines.append(f"  {item} (absolute)")
+        else:
+            lines.append(f"  {item} -> {(cwd / item)}")
+        # Walk up to the first parent that exists, so the message names the point
+        # where the path stops being real rather than only its unreachable end.
+        probe = (cwd / candidate).parent if not candidate.is_absolute() else candidate.parent
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        lines.append(f"    deepest existing directory: {probe}")
+    lines.append(
+        "Relative paths resolve against the working directory above, not against the "
+        "directory holding the config. Run from the config's directory, or make the path "
+        "absolute."
+    )
+    return "\n".join(lines)
+
+
 def expand_inputs(pattern: str | list[str] | None) -> list[str]:
     """Resolve a corpus reference the way every curate step already does.
 
@@ -415,7 +452,7 @@ def corpus_fingerprint(pattern: str | list[str] | None, text_field: str, id_fiel
         raise UnreadableCorpusError(
             f"{pattern} matched no files. A fingerprint over no input is the same value for "
             "every such corpus, so it cannot stand for this one — and the approve gate would "
-            "compare it as though it did."
+            "compare it as though it did.\n" + explain_no_match(pattern)
         )
     if not documents:
         raise UnreadableCorpusError(
