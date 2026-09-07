@@ -10,10 +10,7 @@
 
 <p align="center"><img src="./assets/guidebook_overview.png" alt="Tokenizer-extension decision path" width="760"></p>
 
-**Jump to:** [Data requirement](#1-how-much-tokenizer-data-is-enough) · [Vocabulary and method](#2-how-many-vocabulary-rowsand-which-extension-type) · [Embedding initialization](#3-how-should-new-embeddings-be-initialized) · [Learning rate](#4-which-learning-rate-policy-is-safe) · [Serving](#5-does-the-tokenizer-pay-at-serving-time)
-
-> [!IMPORTANT]
-> The corrected `expand` tokenizer is being rerun. FOCUS and HF-default results that depend on that rerun remain a **current snapshot**, not a final release claim. Stable and provisional findings are labelled separately below.
+**Jump to:** [Data requirement](#1-how-much-tokenizer-data-is-enough) · [Vocabulary and method](#2-how-many-vocabulary-rowsand-which-extension-type) · [Embedding initialization](#3-how-should-new-embeddings-be-initialized) · [Learning rate](#4-which-learning-rate-policy-is-safe) · [Serving](#5-does-the-tokenizer-pay-at-serving-time) · [Apply to your tokenizer](#6-apply-this-guide-to-your-tokenizer) · [Reproducibility](#reproducibility)
 
 ## How to read this guide
 
@@ -31,8 +28,8 @@ The tested languages are examples, not prerequisites and not universal constants
 |---|---|---|
 | How much tokenizer-training data? | Start with **10k–100k documents** and stop when held-out fertility flattens | Established across three languages |
 | How many vocabulary rows? | **+30k** is the common tested knee | Established within this model |
-| Add, Replace, or naive Expand? | Use **Add** for compatibility; **Replace** when rows matter; treat Expand as a baseline | Add vs Replace established; corrected Expand rerun in progress |
-| Which embedding initialization? | Begin with **meanconst**, then compare at the final training horizon | Directional until the corrected rerun closes |
+| Add, Replace, or naive Expand? | Use **Add** for compatibility; **Replace** when rows matter; consider Expand where the base vocab barely covers the script | Add and Replace are near-identical; Expand wins in Malayalam and loses in Hindi and Vietnamese |
+| Which embedding initialization? | Begin with **meanconst**, then compare at the final training horizon | Directional — differences are small and horizon-dependent |
 | Which learning-rate policy? | Use **DLR** when the vocabulary change is substantial | Replicated target/English BPB pattern across three languages |
 | How should different tokenizers be compared? | Use **bits per byte (BPB)**, not raw per-token perplexity | Required for a fair cross-tokenizer comparison |
 | Will extension improve model quality? | Treat it primarily as an **efficiency intervention** | Independent downstream-quality contribution not yet established |
@@ -117,9 +114,24 @@ Every second +15k increment buys only **0.40–0.48×** the gain of the first. U
 |---|---|---|---|
 | **Continued-BPE Add** | Preserves the base vocabulary and learns compatible new merges/rows | Compatibility and simplicity matter | Wins 11/11 matched Add-vs-Replace fertility pairs, but only by 0.016–0.30% |
 | **Prune-and-Replace** | Removes weak target-script rows before inserting new ones | Serving rows or vocabulary size are constrained | Nearly identical fertility with fewer final rows |
-| **Naive Expand** | Registers atomic token surfaces without continued merge learning | You need a baseline or a deliberately simple tokenizer | Corrected tokenizer rerun in progress; do not make a final quality claim yet |
+| **Naive Expand** | Registers atomic token surfaces without continued merge learning | You need a baseline, a deliberately simple tokenizer, or the target script is barely covered by the base vocab | Loses in Hindi (−6.8%) and Vietnamese (−1.6%); **wins in Malayalam (+2.5%)** |
 
 > **Clean takeaway:** the extension budget matters far more than Add versus Replace. Choose Add for operational compatibility and Replace when every row matters.
+
+> **Naive Expand is not uniformly worse.** At a 30,000-token budget:
+>
+> | Language | continued-BPE `add` | naive `add_tokens` | winner | margin |
+> |---|--:|--:|:--|--:|
+> | Hindi | **1.2871** | 1.3817 | continued-BPE | −6.8% |
+> | Vietnamese | **1.2623** | 1.2830 | continued-BPE | −1.6% |
+> | Malayalam | 2.1791 | **2.1251** | **naive** | +2.5% |
+>
+> The reversal tracks base-vocab coverage. `replace` finds only **406** prunable
+> base tokens in Malayalam versus 761 in Vietnamese — the stock vocab barely
+> covers `U+0D00–U+0D7F`, so almost any well-chosen unit helps and there is
+> little for merge training to add. Where the base already carries partial
+> coverage (Hindi, Vietnamese), the learned merges are what compose it. Expect
+> continued-BPE to win by more the better the base already covers your script.
 
 <details>
 <summary><strong>Why fertility alone is insufficient</strong></summary>
@@ -176,8 +188,10 @@ Before selecting a production tokenizer, also compare:
 
 The meanconst–BERT difference grows from **0.00029 BPB at 1k** to **0.01150 at 2.4k**. An early-only screen would incorrectly conclude that initialization does not matter.
 
-> [!CAUTION]
-> These initialization values are retained for transparency but remain a current snapshot until the corrected tokenizer rerun and dependent refresh complete. Malayalam FOCUS is now included; the current Add+DLR initializer grid has no missing language/method cell.
+> [!NOTE]
+> Initializer differences are small and depend on the training horizon; treat
+> them as directional rather than a ranking. The Add+DLR initializer grid is
+> complete across languages and methods.
 
 [Back to top](#top)
 
@@ -232,15 +246,67 @@ Per-token perplexity changes when token boundaries change, so it cannot fairly c
 
 > **Clean takeaway:** vocabulary rows impose a serving tax, but compression wins at matched A100/TP4 for all three languages. Re-measure on the production tensor-parallel shape—this result is not hardware-independent.
 
-## Customer release checklist
+## 6. Apply this guide to your tokenizer
 
-- [ ] Held-out fertility is reported by language, script, and domain.
-- [ ] Tokenizer corpus size is justified by a saturation curve.
-- [ ] Vocabulary size is justified by marginal gain and serving cost.
-- [ ] `tokens_spliced` equals the requested extension budget.
-- [ ] BPB uses the same held-out byte strings across tokenizers.
-- [ ] Target quality and English retention are evaluated after CPT.
-- [ ] Throughput is measured on the intended hardware, TP, batch, and request mix.
-- [ ] Provisional reruns are clearly distinguished from release-ready findings.
+Sections 1–5 report what we observed. This turns it into five decisions for
+**your** language, model and serving profile.
+
+### 1. Set acceptance thresholds before you build
+
+| Threshold | Question | Example |
+|---|---|---|
+| Fertility target | How much compression justifies the change? | ≥1.5× on held-out target text |
+| Retention budget | What English/general regression is acceptable? | BPB within +0.5% of base |
+| Serving floor | What net throughput must survive the vocabulary tax? | ≥1.2× end-to-end |
+
+Compression alone is not the goal — a smaller token count that costs quality or
+throughput is not a win.
+
+### 2. Size the tokenizer corpus
+
+Start at **10k–100k diverse documents** and confirm with a saturation curve
+(§1). More data stops helping well before you expect; measure rather than assume.
+Keep tokenizer-training and evaluation text **disjoint**, or fertility flatters
+itself.
+
+### 3. Choose budget and construction
+
+Measure held-out fertility at **+15k / +30k / +45k** and take the smallest knee
+(often +30k). Then pick the method (§2):
+
+- **Add** — preserves base IDs; the default for compatibility.
+- **Replace** — same fertility with fewer total rows, when rows are constrained.
+- **Expand** — worth testing when the base vocab barely covers your script.
+
+Verify `tokens_spliced` equals the requested budget before comparing anything —
+a short arm invalidates the comparison silently.
+
+### 4. Initialise and train
+
+Initialise new rows with an auxiliary encoder that actually covers your language,
+then apply the learning-rate policy from §4. Validate with BPB on identical
+held-out bytes across tokenizers — not just fertility, which cannot see whether
+the new rows carry meaning.
+
+### 5. Confirm the win end to end
+
+Measure target quality, English retention and throughput on the **intended
+hardware, tensor-parallel shape, batch profile and request mix** (§5). The
+vocabulary tax is real; the net result is what matters, and it is not
+hardware-independent.
+
+### Before release
+
+- [ ] Held-out fertility reported by language, script and domain.
+- [ ] Corpus size justified by a saturation curve; vocabulary size by marginal gain and serving cost.
+- [ ] `tokens_spliced` equals the requested budget.
+- [ ] BPB uses identical held-out bytes across tokenizers.
+- [ ] Target quality and English retention evaluated after CPT.
+- [ ] Throughput measured on the production serving profile.
 
 [Back to top](#top)
+
+## Reproducibility
+
+Datasets, pipeline steps, and the full hyperparameter tables live in
+[REPRODUCIBILITY.md](./REPRODUCIBILITY.md).

@@ -11,7 +11,7 @@
 
 <p align="center"><img src="./assets/guidebook_overview.png" alt="Continued-pretraining decision path" width="760"></p>
 
-**Jump to:** [Replay amount](#1-how-much-replay-is-enough) · [Retention](#2-does-more-replay-preserve-more-english) · [Target-token scale](#3-how-many-target-language-tokens-are-useful) · [Scheduler](#4-wsd-or-cosine) · [Practical recipe](#5-practical-cpt-recipe)
+**Jump to:** [Replay amount](#1-how-much-replay-is-enough) · [Retention](#2-does-more-replay-preserve-more-english) · [Target-token scale](#3-how-many-target-language-tokens-are-useful) · [Scheduler](#4-wsd-or-cosine) · [Apply to your run](#5-apply-this-guide-to-your-cpt-run) · [Reproducibility](#reproducibility) · [Future work](#future-work)
 
 ## How to read this guide
 
@@ -204,32 +204,71 @@ At the largest checkpoints:
 
 [Back to top](#top)
 
-## 5. Practical CPT recipe
+## 5. Apply this guide to your CPT run
 
-### Before training
+Sections 1–4 report what we observed. This turns it into five decisions for
+**your** language, model and product bar.
 
-- [ ] Fix the exact tokenizer and rebuild tokenizer-locked bin/idx data if it changes.
-- [ ] Record target tokens, replay ratio, sequence length, global batch size, training steps, schedule, and checkpoint cadence.
-- [ ] Establish target-language and English/general baselines with the exact evaluation harness.
-- [ ] Keep held-out target and retained-capability validation data out of training.
+### 1. Set acceptance thresholds before you train
 
-### During training
+Write down three numbers against your own baselines. Without them you cannot
+tell a finished run from an unfinished one.
 
-- [ ] Start with **20% English replay** at the 5B target budget unless the product requires a more conservative prior.
-- [ ] Evaluate at multiple checkpoints; do not infer final behavior from one early point.
-- [ ] Track native quality, ProX-en, ARC-Challenge, HellaSwag, and fixed-text BPB/loss.
-- [ ] Use marginal gain—not elapsed steps alone—to decide whether to continue.
+| Threshold | Question | Example |
+|---|---|---|
+| Adaptation floor | What gain justifies the run? | target benchmark ≥ base +8 |
+| Retention budget | What regression is acceptable? | English within −1.0 of base |
+| Minimum useful gain | When is more compute not worth it? | < +0.5 per 5B tokens |
+
+### 2. Size a pilot for your model
+
+Start at **~5B target tokens** with **1:4 replay** (§1). Hold the target corpus
+fixed and vary only replay — that is what makes arms comparable. Budget for
+several checkpoints, not one.
+
+### 3. Derive the step count
+
+```
+total_tokens = target_tokens × (1 + english_share / (1 − english_share))
+train_iters  = total_tokens / (global_batch_size × sequence_length)
+```
+
+`train_iters` **differs per ratio** because the target corpus is fixed. At a 5B
+target: 1:1 = 10.0B tokens, 1:2 = 7.5B, 1:4 = 6.25B, 1:8 = 5.6B.
+
+### 4. Evaluate several checkpoints
+
+Track target quality, retained capability (ProX-en, ARC-C, HellaSwag) and
+fixed-text BPB at each. Decide on **marginal gain per 5B tokens**, not elapsed
+steps. Read a few raw generations before trusting any aggregate.
+
+### 5. Pick the smallest configuration that clears both bars
+
+Choose the smallest replay ratio and token budget meeting your adaptation floor
+**and** retention budget together. Stop when marginal gain falls below your
+threshold, retention holds, and the result is stable across two adjacent
+checkpoints.
+
+If retention fails, add replay. If adaptation fails, add target tokens — §2
+shows more replay does not reliably recover English.
 
 ### Before release
 
-- [ ] Report the replay notation unambiguously as **English:target**.
-- [ ] Separate statistically stable findings from directional observations.
-- [ ] State whether token budgets are independent runs or checkpoints from one continuous run.
-- [ ] Validate the selected policy on the intended larger model and post-SFT checkpoint.
+Report ratios as **English:target**; name the harness for every number and never
+compare across harnesses; state whether budgets are separate runs or checkpoints
+from one run; validate on the model you intend to ship.
 
-## Evidence still needed
+[Back to top](#top)
 
-| Priority | Experiment | Customer question closed |
+## Reproducibility
+
+Datasets, pipeline steps, and the full hyperparameter tables live in
+[REPRODUCIBILITY.md](./REPRODUCIBILITY.md).
+
+
+## Future work
+
+| Priority | Experiment | Question it would close |
 |---:|---|---|
 | 1 | Extended-tokenizer CPT at 5B and 15B | Does token efficiency change the target-token scaling curve? |
 | 2 | New-row-only DLR | Can new lexical rows learn quickly with less movement of legacy rows? |
