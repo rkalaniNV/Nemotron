@@ -7,7 +7,7 @@ Supervised fine-tuning using NVIDIA Megatron-Bridge. Best for large-scale
 distributed training with tensor/pipeline/context parallelism. Requires
 packed Parquet data; standard profiles use data_prep/sft_packing. Includes
 experimental long-context topology references."""
-tags = ["sft", "fine-tuning", "megatron", "distributed-training", "long-context", "experimental"]
+tags = ["sft", "fine-tuning", "megatron", "distributed-training", "long-context"]
 
 [[consumes]]
 type = "packed_parquet"
@@ -68,7 +68,7 @@ name = "dataset.packed_sequence_specs.packed_train_data_path"
 description = "Packed training Parquet glob, usually data_prep/sft_packing output_dir/splits/train/*.parquet."
 
 [[parameters]]
-name = "recipe.peft"
+name = "peft"
 description = "'lora' = the shipped 30B default, 'null' = full SFT when the model fits"
 default = "lora"
 choices = ["null", "lora"]
