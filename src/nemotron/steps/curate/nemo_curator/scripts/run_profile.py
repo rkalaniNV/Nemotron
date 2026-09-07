@@ -531,6 +531,26 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
 
         per_signal.append(entry)
 
+    # What the proposed policy costs as a whole. The thresholds are the ones the
+    # approve block offers, so the figure answers the question a person asks
+    # right before pasting it: applying all of these at once, what is left? Read
+    # off the per-signal tables it cannot be answered at all -- those are each
+    # gate alone, and gates overlap.
+    proposed: dict[str, tuple[float, ...]] = {}
+    for entry in per_signal:
+        if entry.get("direction") not in ("min", "max"):
+            continue
+        table = profiling.gate_table(entry)
+        if table:
+            proposed[str(entry["signal"])] = (table[0][0],)
+    simulation = profiling.policy_simulation({name: sc.flat() for name, sc in scored.items()}, signals, proposed)
+    if simulation is None:
+        notes.append(
+            "policy simulation not computed: fewer than two signals produced a gate "
+            "table, so there is no policy to combine. This is 'the union was not "
+            "measured', not 'the gates do not overlap'."
+        )
+
     # Co-occurrence is only defined AT a threshold per signal, so it can only be
     # computed for signals that carry a reference operating point. Most do not:
     # a pack-parameterised signal has no Curator default to borrow.
@@ -587,6 +607,9 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
         # languages that share a script are indistinguishable to a script ratio.
         "language_composition": language_composition(sample, (cfg.get("models") or {}).get("fasttext_langid")),
         "cooccurrence": profiling.cooccurrence(masks),
+        # The union of the proposed gates, which no per-signal table and no
+        # pairwise overlap can give.
+        "policy_simulation": simulation,
         "interpretation": (
             "Descriptive only. These figures say what a threshold removes, not whether what it "
             "removes is low quality. Selecting among candidates requires downstream validation."

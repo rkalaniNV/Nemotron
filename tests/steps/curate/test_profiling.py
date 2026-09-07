@@ -291,6 +291,91 @@ def test_a_single_signal_has_no_pairs() -> None:
     assert p.cooccurrence({"a": ((0.1,), np.array([True]))}) == []
 
 
+# -- policy simulation --------------------------------------------------------
+
+
+def _named(name: str) -> r.Signal:
+    return r.Signal(
+        name=name,
+        factory=_Agrees,
+        direction="max",
+        units="ratio",
+        grid=r.Grid(0.0, 1.0, 8),
+        threshold_params=("max_ratio",),
+    )
+
+
+def _overlapping_pair():
+    """A rejects 1,000 docs, B rejects 800, and they share 600.
+
+    The union is 1,200, not 1,800. Summing per-gate figures overcounts by exactly
+    the overlap, which is the mistake this section exists to prevent.
+    """
+    a = [1.0] * 1000 + [0.0] * 1000
+    b = [0.0] * 400 + [1.0] * 800 + [0.0] * 800
+    return {"a": a, "b": b}, [_named("a"), _named("b")], {"a": (0.5,), "b": (0.5,)}
+
+
+def test_the_policy_drops_the_union_not_the_sum() -> None:
+    scored, signals, thresholds = _overlapping_pair()
+
+    sim = p.policy_simulation(scored, signals, thresholds)
+
+    assert sim["dropped"] == 1200, "1,000 + 800 - 600 shared"
+    assert sim["sum_of_marginals"] == 1800
+    assert sim["kept"] == 800
+    assert sim["retention"] == pytest.approx(0.4)
+
+
+def test_each_gate_reports_what_only_it_rejects() -> None:
+    """`unique` is the number that answers 'can I delete this gate'."""
+    scored, signals, thresholds = _overlapping_pair()
+
+    by_name = {g["signal"]: g for g in p.policy_simulation(scored, signals, thresholds)["per_gate"]}
+
+    assert by_name["a"]["fails_alone"] == 1000
+    assert by_name["a"]["shared"] == 600
+    assert by_name["a"]["unique"] == 400
+    assert by_name["b"]["unique"] == 200
+    # Remove a and the 1,000 it rejects stop mattering; only b's 800 remain.
+    assert by_name["a"]["retention_without"] == pytest.approx(0.6)
+    assert by_name["b"]["retention_without"] == pytest.approx(0.5)
+
+
+def test_a_gate_no_other_gate_needs_reports_zero_unique() -> None:
+    """foreign_script_ratio rejected 194 documents on real data and none alone."""
+    scored = {"wide": [1.0] * 100 + [0.0] * 100, "narrow": [1.0] * 50 + [0.0] * 150}
+    signals = [_named("wide"), _named("narrow")]
+
+    by_name = {
+        g["signal"]: g for g in p.policy_simulation(scored, signals, {"wide": (0.5,), "narrow": (0.5,)})["per_gate"]
+    }
+
+    assert by_name["narrow"]["fails_alone"] == 50
+    assert by_name["narrow"]["unique"] == 0
+    assert by_name["narrow"]["retention_without"] == pytest.approx(0.5), "deleting it changes nothing"
+
+
+def test_incremental_credit_moves_with_the_order_but_the_union_does_not() -> None:
+    """A ledger's per-gate counts are an artefact of stage order, not a property."""
+    scored, signals, thresholds = _overlapping_pair()
+
+    forward = p.policy_simulation(scored, signals, thresholds, order=["a", "b"])
+    reverse = p.policy_simulation(scored, signals, thresholds, order=["b", "a"])
+
+    assert [g["incremental"] for g in forward["per_gate"]] == [1000, 200]
+    assert [g["incremental"] for g in reverse["per_gate"]] == [800, 400]
+    assert forward["dropped"] == reverse["dropped"] == 1200
+    assert {g["signal"]: g["unique"] for g in forward["per_gate"]} == {
+        g["signal"]: g["unique"] for g in reverse["per_gate"]
+    }, "unique is order-independent; incremental is not"
+
+
+def test_one_gate_is_not_a_policy() -> None:
+    """A union of one set is that set, and reporting it as a combination misleads."""
+    assert p.policy_simulation({"a": [1.0, 0.0]}, [_named("a")], {"a": (0.5,)}) is None
+
+
 def test_masks_mark_rejections_not_keeps() -> None:
     signal = _signal(_Agrees)
     masks = p.operating_point_masks({"probe": [0.1, 0.9]}, [signal], {"probe": (0.5,)})

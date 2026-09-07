@@ -378,6 +378,95 @@ def operating_point_masks(
     return masks
 
 
+def policy_simulation(
+    scored: Mapping[str, Sequence[float]],
+    signals: Iterable[Signal],
+    thresholds: Mapping[str, tuple[float, ...]],
+    order: Sequence[str] | None = None,
+) -> dict[str, Any] | None:
+    """What a whole policy removes, as against what each gate removes alone.
+
+    Every per-signal table in this report answers "if this were the only gate".
+    A policy is a conjunction, so what it costs is the *union* of the rejects,
+    and the union is smaller than the sum by however many documents more than
+    one gate rejects. No per-signal table gives that number, and neither does
+    ``cooccurrence``: pairwise overlap does not determine the union of three or
+    more sets, and it is computed at Curator's defaults rather than at the
+    thresholds a person actually chose.
+
+    The figures here are computed from the scores this step already holds, so on
+    a sample that is the whole corpus they are exact rather than extrapolated.
+
+    Order-independent per gate:
+
+    ``fails_alone``
+        documents this gate rejects, ignoring every other gate.
+    ``shared``
+        of those, how many some other gate also rejects.
+    ``unique``
+        of those, how many no other gate rejects. Drop this gate and exactly
+        these documents come back.
+    ``retention_without``
+        what the policy would keep with this gate removed.
+
+    Order-dependent, and reported separately for that reason:
+
+    ``incremental``
+        what this gate is the first to reject, under ``order``. Real pipelines
+        short-circuit, so this is the shape a ledger records -- and changing the
+        order moves the credit between gates without changing the union.
+    """
+    masks = operating_point_masks(scored, signals, thresholds)
+    if len(masks) < 2:  # noqa: PLR2004 - a union of one gate is that gate
+        return None
+
+    names = list(order) if order else sorted(masks)
+    names = [n for n in names if n in masks]
+    length = len(next(iter(masks.values()))[1])
+    union = np.zeros(length, dtype=bool)
+    for name in names:
+        union |= masks[name][1]
+
+    dropped = int(np.sum(union))
+    per_gate: list[dict[str, Any]] = []
+    seen = np.zeros(length, dtype=bool)
+    for name in names:
+        point, reject = masks[name]
+        others = np.zeros(length, dtype=bool)
+        for other in names:
+            if other != name:
+                others |= masks[other][1]
+        incremental = int(np.sum(reject & ~seen))
+        seen |= reject
+        per_gate.append(
+            {
+                "signal": name,
+                "thresholds": [float(t) for t in point],
+                "fails_alone": int(np.sum(reject)),
+                "shared": int(np.sum(reject & others)),
+                "unique": int(np.sum(reject & ~others)),
+                "incremental": incremental,
+                "retention_without": 1.0 - (int(np.sum(others)) / length),
+            }
+        )
+
+    return {
+        "documents": length,
+        "gates": len(names),
+        "dropped": dropped,
+        "kept": length - dropped,
+        "retention": 1.0 - (dropped / length),
+        "sum_of_marginals": sum(g["fails_alone"] for g in per_gate),
+        "order": names,
+        "order_note": (
+            "incremental is computed in this order, which is the order the thresholds "
+            "appear in the policy, not the order the filter runs its stages. Every other "
+            "column here is order-independent."
+        ),
+        "per_gate": per_gate,
+    }
+
+
 # -- the human-readable half --------------------------------------------------
 #
 # profile_report.json is 314 KB for 24 signals: 64 retention points and a 32-bin
@@ -551,6 +640,9 @@ def summarise(report: Mapping[str, Any]) -> str:
         gates = gate_table(entry)
         if gates:
             bound = "max" if direction == "max" else "min"
+            lines.append("This gate applied alone. A policy applies all of them at once —")
+            lines.append("see `Policy simulation` for what the combination costs.")
+            lines.append("")
             lines.append(f"| to keep | set `{bound}:` | actually keeps | drops |")
             lines.append("|---|---|---|---|")
             total = corpus.get("document_count") or scored
@@ -572,8 +664,52 @@ def summarise(report: Mapping[str, Any]) -> str:
             )
             lines.append("")
 
+    lines.extend(_simulation_block(report))
     lines.extend(approve_block(report))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _simulation_block(report: Mapping[str, Any]) -> list[str]:
+    """The union of the proposed gates, which the per-signal tables cannot give."""
+    sim = report.get("policy_simulation")
+    if not sim:
+        return []
+
+    total = sim["documents"]
+    out = ["", "## Policy simulation", ""]
+    out.append(f"Every table above is one gate applied alone. Applying all {sim['gates']} at once")
+    out.append("removes the *union* of what they reject, which is smaller than the sum because")
+    out.append("gates overlap. Computed on the profiled sample from the scores already taken,")
+    out.append("so these are counts, not estimates.")
+    out.append("")
+    out.append(f"- keeps **{sim['kept']:,}** of {total:,} (**{sim['retention'] * 100:.2f}%**)")
+    out.append(f"- drops **{sim['dropped']:,}** ({(1 - sim['retention']) * 100:.2f}%)")
+    out.append(
+        f"- the per-gate figures sum to {sim['sum_of_marginals']:,}; the gap to "
+        f"{sim['dropped']:,} is documents more than one gate rejects"
+    )
+    out.append("")
+    out.append("`only this` is what a gate is alone responsible for: remove it and exactly")
+    out.append("those documents return. A gate whose `only this` is 0 changes nothing about")
+    out.append("what this policy delivers.")
+    out.append("")
+    out.append("| gate | at | fails alone | also caught | only this | keeps without |")
+    out.append("|---|---|---:|---:|---:|---:|")
+    for g in sorted(sim["per_gate"], key=lambda g: -g["unique"]):
+        at = ", ".join(f"{t:g}" for t in g["thresholds"])
+        out.append(
+            f"| {g['signal']} | {at} | {g['fails_alone']:,} | {g['shared']:,} "
+            f"| {g['unique']:,} | {g['retention_without'] * 100:.2f}% |"
+        )
+    out.append("")
+    out.append(sim["order_note"])
+    out.append("")
+    out.append("| gate | first to reject |")
+    out.append("|---|---:|")
+    for g in sim["per_gate"]:
+        out.append(f"| {g['signal']} | {g['incremental']:,} |")
+    out.append("")
+    return out
 
 
 def approve_block(report: Mapping[str, Any]) -> list[str]:
