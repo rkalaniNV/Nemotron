@@ -507,8 +507,9 @@ def _install_stub_fasttext(monkeypatch, verdicts, tmp_path):
 def test_the_profile_reports_what_language_the_corpus_is_in(monkeypatch, tmp_path) -> None:
     """No signal can answer this, and it is the question a person asks first.
 
-    script_ratio and latin_ratio come closest and cannot help: Vietnamese and
-    English are both Latin script. Without this, naming the wrong language in
+    script_ratio and latin_ratio come closest and cannot help: languages that
+    share a script are indistinguishable to a script ratio. Without this,
+    naming the wrong language in
     steps.filter.language_codes removes almost everything and still reports
     success, because the row counts reconcile either way.
     """

@@ -267,8 +267,8 @@ def language_composition(sample: dict[str, list[tuple[str, str]]], model_path: s
     Every other figure here describes the *shape* of the text — character
     ratios, punctuation, script. None of them answer the question a person asks
     first, which is what language this corpus is in. script_ratio and
-    latin_ratio come closest and cannot help: Vietnamese and English are both
-    Latin script.
+    latin_ratio come closest and cannot help: languages that share a script are
+    indistinguishable to a script ratio.
 
     That gap is not academic. A config naming the wrong language in
     steps.filter.language_codes removes almost everything and reports success,
@@ -584,7 +584,7 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
         "notes": notes,
         "signals": per_signal,
         # What language the corpus is in, which no signal above can answer:
-        # Vietnamese and English are both Latin script.
+        # languages that share a script are indistinguishable to a script ratio.
         "language_composition": language_composition(sample, (cfg.get("models") or {}).get("fasttext_langid")),
         "cooccurrence": profiling.cooccurrence(masks),
         "interpretation": (

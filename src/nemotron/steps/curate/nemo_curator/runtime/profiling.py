@@ -457,14 +457,19 @@ def summarise(report: Mapping[str, Any]) -> str:
     lines.append("would cost. Pick a threshold from the `gate at` table — those are swept")
     lines.append("grid points, so their retention was measured rather than interpolated.")
     lines.append("")
+    lines.append("`max` means the threshold is an upper bound and documents above it are")
+    lines.append("removed, `min` a lower bound, `interval` a two-sided pair. Which side of a")
+    lines.append("signal is desirable is not stated, because it does not generalise: a ratio")
+    lines.append("that marks noise in one language is ordinary in another.")
+    lines.append("")
 
     comp = report.get("language_composition")
     if comp:
         lines.append("## Language composition")
         lines.append("")
         lines.append(f"{comp['scored']:,} sampled documents, scored with the same FastText model")
-        lines.append("the filter uses. No signal below can answer this: Vietnamese and English are")
-        lines.append("both Latin script, so a script ratio cannot tell them apart.")
+        lines.append("the filter uses. No signal below can answer this: languages that share a")
+        lines.append("script are indistinguishable to a script ratio.")
         lines.append("")
         lines.append("| language | documents | share | median confidence |")
         lines.append("|---|---:|---:|---:|")
@@ -495,9 +500,8 @@ def summarise(report: Mapping[str, Any]) -> str:
         scored = health.get("documents_scored", 0)
         failed = health.get("scoring_failures", 0)
 
-        arrow = {"max": "lower is better", "min": "higher is better", "interval": "two-sided"}.get(direction, "")
         lines.append(f"## {name}")
-        lines.append(f"`{direction}` · {units} · {arrow}")
+        lines.append(" · ".join(part for part in (f"`{direction}`", units) if part))
         lines.append("")
 
         if not scored:
