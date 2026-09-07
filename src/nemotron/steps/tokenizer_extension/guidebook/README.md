@@ -30,14 +30,14 @@ The tested languages are examples, not prerequisites and not universal constants
 | How many vocabulary rows? | **+30k** is the common tested knee | Established within this model |
 | Add, Replace, or naive Expand? | Use **Add** for compatibility; **Replace** when rows matter; consider Expand where the base vocab barely covers the script | Add and Replace are near-identical; Expand wins in Malayalam and loses in Hindi and Vietnamese |
 | Which embedding initialization? | Begin with **meanconst**, then compare at the final training horizon | Directional — differences are small and horizon-dependent |
-
-> Short names like `meanconst` and `hfdefault` are figure labels, not config
-> values. [REPRODUCIBILITY.md](./REPRODUCIBILITY.md#settings) maps each one to
-> the exact `init_embeddings` YAML.
 | Which learning-rate policy? | Use **DLR** when the vocabulary change is substantial | Replicated target/English BPB pattern across three languages — measured outside this repository, see §4 |
 | How should different tokenizers be compared? | Use **bits per byte (BPB)**, not raw per-token perplexity | Required for a fair cross-tokenizer comparison |
 | Will extension improve model quality? | Treat it primarily as an **efficiency intervention** | Independent downstream-quality contribution not yet established |
 | Will it improve serving? | Usually—if fertility savings exceed the vocabulary-row tax on the intended deployment shape | Matched A100/TP4 evidence across three languages |
+
+> Short names like `meanconst` and `hfdefault` are figure labels, not config
+> values. [REPRODUCIBILITY.md](./REPRODUCIBILITY.md#settings) maps each one to
+> the exact `init_embeddings` YAML.
 
 ### Recommended starting recipe
 
