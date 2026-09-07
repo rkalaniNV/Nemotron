@@ -406,6 +406,39 @@ def test_the_gate_table_reports_documents_dropped() -> None:
     assert "actually keeps" in text
 
 
+def test_a_concentrated_signal_still_gets_one_gate_row_that_gates() -> None:
+    """Three levels resolving to one threshold is a table that answers nothing.
+
+    Retention that sits above 0.90 until the very top of the range makes 99/95/90
+    all pick the same grid point, so the reader sees one number written three
+    times and no threshold that costs anything. punctuation on Vietnamese C4 did
+    exactly this: every level said max 1.0, keeps 100.00%, drops 0 docs. The 0.80
+    level is the one that separates.
+    """
+    concentrated = _entry(
+        retention={
+            "kind": "curve",
+            "points": [
+                {"threshold": 0.0, "retained": 0.10},
+                {"threshold": 0.5, "retained": 0.82},
+                {"threshold": 1.0, "retained": 1.00},
+            ],
+        }
+    )
+
+    rows = p.gate_table(concentrated)
+
+    assert [level for _, _, level in rows] == [0.99, 0.95, 0.90, 0.80]
+    assert len({threshold for threshold, _, _ in rows}) == 2, rows
+    assert rows[0][0] == rows[1][0] == rows[2][0] == 1.0
+    assert rows[3][0] == 0.5, "the 0.80 row is the only one that names a gate with a cost"
+
+
+def test_the_gate_table_floor_matches_the_band_search_floor() -> None:
+    """A row proposing retention the band search will not report is a dead end."""
+    assert min(p.GATE_LEVELS) == 0.80
+
+
 def test_a_signal_that_scored_nothing_says_so_instead_of_showing_quantiles() -> None:
     dead = _entry(
         health={"documents_attempted": 100, "documents_scored": 0, "scoring_failures": 100},

@@ -388,8 +388,16 @@ def operating_point_masks(
 SPARK = "▁▂▃▄▅▆▇█"
 
 #: Retention levels worth naming. A user asking "what does this cost me" is
-#: really asking one of these three questions.
-GATE_LEVELS = (0.99, 0.95, 0.90)
+#: really asking one of these questions.
+#:
+#: 0.80 is the floor because band_search.min_keep_rate defaults there: a gate
+#: keeping less is outside the range this step will propose a band for. It earns
+#: its row on concentrated signals, where 99/95/90 all resolve to the same grid
+#: point and the table repeats one number three times. On a 20,000-document
+#: Vietnamese C4 sample, punctuation and sentence_end_ratio each collapsed to a
+#: single threshold across all three levels, and 12 of 21 signals gained a
+#: distinct threshold once 0.80 was added.
+GATE_LEVELS = (0.99, 0.95, 0.90, 0.80)
 
 
 def sparkline(counts: Sequence[int]) -> str:
