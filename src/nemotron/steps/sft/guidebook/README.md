@@ -11,7 +11,7 @@
 
 <p align="center"><img src="./assets/guidebook_overview.png" alt="Recommended SFT recipe" width="760"></p>
 
-**Jump to:** [The recipe](#the-recipe) · [What to expect](#what-to-expect) · [Base](#1-start-from-the-pre-rl-checkpoint) · [Curating the data](#2-curating-the-adaptation-data) · [Teacher](#3-choose-the-teacher-deliberately) · [Reasoning blend](#4-never-train-on-100-reasoning-on-data) · [Learning rate](#5-learning-rate-and-schedule) · [Data volume](#6-how-much-data-you-actually-need) · [Replay](#7-replay-english-alongside-the-target-data) · [Language fidelity](#8-measure-language-fidelity-not-just-accuracy) · [Full SFT vs LoRA](#9-use-full-parameter-sft) · [Checklists](#10-practical-sft-recipe)
+**Jump to:** [The recipe](#the-recipe) · [What to expect](#what-to-expect) · [Base](#1-start-from-the-pre-rl-checkpoint) · [Curating the data](#2-curating-the-adaptation-data) · [Teacher](#3-choose-the-teacher-deliberately) · [Reasoning blend](#4-never-train-on-100-reasoning-on-data) · [Learning rate](#5-learning-rate-and-schedule) · [Data volume](#6-how-much-data-you-actually-need) · [Replay](#7-replay-english-alongside-the-target-data) · [Language fidelity](#8-measure-language-fidelity-not-just-accuracy) · [Full SFT vs LoRA](#9-use-full-parameter-sft) · [Apply to your run](#10-apply-this-guide-to-your-sft-run) · [Reproducibility](#reproducibility) · [Future work](#future-work)
 
 ## Why this study exists
 
@@ -313,47 +313,102 @@ LoRA does have one real advantage — it preserves English instruction following
 
 [Back to top](#top)
 
-## 10. Practical SFT recipe
+## 10. Apply this guide to your SFT run
 
-### Before training
+Sections 1–9 report what we observed. This turns it into six decisions for
+**your** domain, language, model and product bar.
 
-- [ ] Fix tokenizer, chat template and sequence length before packing; re-pack if any of them change.
-- [ ] Establish target-domain **and** English baselines on the exact harness you will use afterwards.
-- [ ] Generate data through [`sdg/persona_mcq`](../../sdg/persona_mcq/README.md) or an equivalent pipeline with multi-teacher agreement, lexical *and* semantic dedup, and a language gate.
-- [ ] Verify the pack: duplicate rate, prompt language against target language per row, and answer-format markers checked **per language** rather than in aggregate.
-- [ ] Confirm the reasoning-on:off blend is in the pack — 90:10 — and that the off subset is at least a few thousand samples.
-- [ ] Add English replay data to the same pack. Do not train on target-domain data alone.
-- [ ] Record samples, language split, iterations-per-epoch, LR schedule and checkpoint cadence for every arm.
+### 1. Set acceptance thresholds before you train
 
-### During training
+Write down four numbers against your own baselines. Without them you cannot tell
+a finished run from an unfinished one.
 
-- [ ] Evaluate at several checkpoints. Never infer final behaviour from a single point.
-- [ ] Track accuracy **and** script fidelity for every generative benchmark, in every language.
-- [ ] Track reasoning-off mode integrity — the share of reasoning-off answers that still emit reasoning.
-- [ ] Track open-ended generation quality with an LLM judge; multiple-choice accuracy will not show it.
-- [ ] Carry untrained languages through the evaluation as controls, but do not let them decide a checkpoint.
+| Threshold | Question | Example from this study |
+|---|---|---|
+| Adaptation floor | What gain justifies the run? | target MILU ≥ base +8 |
+| Retention budget | What English regression is acceptable? | English within −1.0 of base |
+| Behaviour floor | What must not break? | reasoning-off leakage < 5% |
+| Minimum useful gain | When is more data not worth it? | < +0.5 per 50k samples |
 
-<a id="how-to-measure"></a>
-### How to measure
+### 2. Build the pack, not just the data
 
-These four rules each changed a conclusion during this study.
+Generate through a pipeline with a **multi-teacher agreement gate**, lexical
+*and* semantic dedup, and a language gate ([§2](#2-curating-the-adaptation-data)).
+Then check three properties of the pack itself before training: duplicate rate,
+prompt language against target language per row, and answer-format markers
+**per language** rather than in aggregate.
 
-- [ ] **Average across matched iterations.** In one experiment the headline sign was positive at the final iteration and negative at all four earlier ones. Quote the mean, not the endpoint.
-- [ ] **Anchor each arm to its own base.** Arms trained from different initialisations must never share an anchor or an axis.
-- [ ] **Match exposure, not steps.** Packs of different sizes see different numbers of epochs at the same iteration.
-- [ ] **Select on a plateau, not an argmax**, and only on the languages present in the training data. A raw maximum chases a late fractional gain into a checkpoint whose other benchmarks have already turned over.
+### 3. Compose the mix
+
+Three things go in the same pack:
+
+```
+target-domain data   50/50 English:target      -> the capability you want
+reasoning blend      90:10 reasoning-on:off    -> mode integrity  (§4)
+English replay       ~20k IF samples           -> instruction following  (§7)
+```
+
+Start at **50k–100k total samples** ([§6](#6-how-much-data-you-actually-need)) —
+sized by the reasoning-off subset, not by accuracy, which saturates earlier.
+
+### 4. Train
+
+Constant **1e-5**, full-parameter, warmup 5% of `train_iters`
+([§5](#5-learning-rate-and-schedule), [§9](#9-use-full-parameter-sft)). Save
+often enough to select from a curve, and use the **same cadence** across every
+arm you intend to compare.
+
+### 5. Evaluate several checkpoints, on more than accuracy
+
+At each checkpoint track target accuracy, English retention, **script fidelity**
+per generative benchmark ([§8](#8-measure-language-fidelity-not-just-accuracy)),
+**reasoning-off mode integrity** ([§4](#4-never-train-on-100-reasoning-on-data)),
+and open-ended generation quality with an LLM judge. Read a few raw generations
+before trusting any aggregate — the language failures are invisible in the
+numbers a multiple-choice metric produces.
+
+### 6. Select the smallest configuration that clears every bar
+
+Choose on a **plateau, not an argmax**, and only on the languages present in your
+training data. Stop when the marginal gain falls below your threshold, retention
+holds, and the result is stable across two adjacent checkpoints.
+
+If instruction following fails, add replay — unless you started from an
+RL-trained checkpoint, in which case plan an RL stage instead
+([§7](#7-replay-english-alongside-the-target-data)). If adaptation fails, change
+the teacher or the data before adding volume; [§6](#6-how-much-data-you-actually-need)
+shows more of the same data does not reliably help.
+
+### Measurement rules
+
+Four rules each changed a conclusion during this study.
+
+- **Average across matched iterations.** In one experiment the headline sign was
+  positive at the final iteration and negative at all four earlier ones. Quote
+  the mean, not the endpoint.
+- **Anchor each arm to its own base.** Arms trained from different
+  initialisations must never share an anchor or an axis.
+- **Match exposure, not steps.** Packs of different sizes see different numbers
+  of epochs at the same iteration.
+- **Name the harness for every number** and never compare across harnesses.
 
 ### Before release
 
-- [ ] Separate statistically stable findings from directional observations, and state the standard errors.
-- [ ] Report whether an effect replicated across independent runs, and say so when it did not.
-- [ ] State which iteration each claim refers to.
-- [ ] If you started from an RL-trained checkpoint, plan the RL stage needed to restore instruction following.
-- [ ] Re-validate the chosen recipe on the model you actually intend to ship.
+State the reasoning-on:off blend and the English:target split unambiguously;
+separate statistically stable findings from directional observations and give
+the standard errors; say which iteration each claim refers to; and re-validate
+on the model you intend to ship.
 
-## Evidence still needed
+[Back to top](#top)
 
-| Priority | Experiment | Question it closes |
+## Reproducibility
+
+Datasets, pipeline steps, hardware, and the full hyperparameter tables live in
+[REPRODUCIBILITY.md](./REPRODUCIBILITY.md).
+
+## Future work
+
+| Priority | Experiment | Question it would close |
 |---:|---|---|
 | 1 | A 100%-reasoning-on arm against the 90:10 blend | Quantifies the [section 4](#4-never-train-on-100-reasoning-on-data) recommendation directly |
 | 2 | Instruction-following data authored in the target language | Does the [section 7](#7-replay-english-alongside-the-target-data) repair improve when replay is not English-only? |
