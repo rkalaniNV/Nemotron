@@ -47,13 +47,6 @@ recipe:
   _target_: megatron.bridge.recipes.nemotronh.nemotron_3_super.nemotron_3_super_finetune_config
   peft: null
   packed_sequence: true
-  seq_length: 131072
-  tensor_model_parallel_size: 8
-  pipeline_model_parallel_size: 1
-  context_parallelism: 8
-  sequence_parallelism: true
-  expert_model_parallelism: 64
-  expert_tensor_parallelism: 1
   finetune_lr: 5.0e-6
   min_lr: 0.0
   lr_warmup_iters: 50
