@@ -261,6 +261,85 @@ def score_sample(
     return scored, health
 
 
+def language_composition(sample: dict[str, list[tuple[str, str]]], model_path: str | None) -> dict[str, Any] | None:
+    """What languages the corpus is actually in, and how sure the model is.
+
+    Every other figure here describes the *shape* of the text — character
+    ratios, punctuation, script. None of them answer the question a person asks
+    first, which is what language this corpus is in. script_ratio and
+    latin_ratio come closest and cannot help: Vietnamese and English are both
+    Latin script.
+
+    That gap is not academic. A config naming the wrong language in
+    steps.filter.language_codes removes almost everything and reports success,
+    because the row counts still reconcile. Measured here, the mistake is
+    visible before the filter runs rather than after.
+
+    Returns None when no model is configured. The absence is recorded rather
+    than filled in, because guessing the language is the thing this step exists
+    not to do.
+    """
+    if not model_path or not Path(model_path).is_file():
+        return None
+
+    import fasttext
+
+    model = fasttext.load_model(model_path)
+    labels: dict[str, int] = {}
+    scores: dict[str, list[float]] = {}
+    total = 0
+    for rows in sample.values():
+        for _key, text in rows:
+            # FastText reads one line; a newline mid-document truncates it.
+            flat = " ".join(text.split())
+            if not flat:
+                continue
+            # A list, not a bare string. fasttext 0.9.3's single-string branch
+            # calls np.array(probs, copy=False), which numpy>=2 raises on; the
+            # batch branch does not. Curator's own FastTextLangId passes a list
+            # for the same reason.
+            label, score = model.predict([flat], k=1)
+            code = label[0][0].removeprefix("__label__")
+            labels[code] = labels.get(code, 0) + 1
+            scores.setdefault(code, []).append(float(score[0][0]))
+            total += 1
+
+    if not total:
+        return None
+
+    rows = []
+    for code, count in sorted(labels.items(), key=lambda kv: -kv[1]):
+        confidences = sorted(scores[code])
+        rows.append(
+            {
+                "language": code,
+                "documents": count,
+                "share": count / total,
+                "confidence_p50": confidences[len(confidences) // 2],
+                "confidence_p10": confidences[max(0, int(0.10 * len(confidences)) - 1)],
+            }
+        )
+
+    all_scores = sorted(v for vs in scores.values() for v in vs)
+
+    def q(p: float) -> float:
+        return all_scores[max(0, min(len(all_scores) - 1, int(p * len(all_scores))))]
+
+    return {
+        "scored": total,
+        "model": model_path,
+        "languages": rows,
+        # The confidence gate is a separate decision from the code gate, so its
+        # distribution is reported separately. min_langid_score drops documents
+        # the model was unsure about whatever language it guessed.
+        "confidence": {"p1": q(0.01), "p5": q(0.05), "p25": q(0.25), "p50": q(0.50), "p75": q(0.75)},
+        "note": (
+            "Measured with the same FastText model the filter uses, on the same sample as the "
+            "signals above. Descriptive: it says what the corpus is, not which languages to keep."
+        ),
+    }
+
+
 def _placeholder_thresholds(signal: signal_registry.Signal) -> tuple[float, ...]:
     """Any valid construction: ``score_document`` does not depend on the threshold."""
     if isinstance(signal.grid, signal_registry.IntervalGrid):
@@ -504,6 +583,9 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
         },
         "notes": notes,
         "signals": per_signal,
+        # What language the corpus is in, which no signal above can answer:
+        # Vietnamese and English are both Latin script.
+        "language_composition": language_composition(sample, (cfg.get("models") or {}).get("fasttext_langid")),
         "cooccurrence": profiling.cooccurrence(masks),
         "interpretation": (
             "Descriptive only. These figures say what a threshold removes, not whether what it "

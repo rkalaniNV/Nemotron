@@ -458,6 +458,35 @@ def summarise(report: Mapping[str, Any]) -> str:
     lines.append("grid points, so their retention was measured rather than interpolated.")
     lines.append("")
 
+    comp = report.get("language_composition")
+    if comp:
+        lines.append("## Language composition")
+        lines.append("")
+        lines.append(f"{comp['scored']:,} sampled documents, scored with the same FastText model")
+        lines.append("the filter uses. No signal below can answer this: Vietnamese and English are")
+        lines.append("both Latin script, so a script ratio cannot tell them apart.")
+        lines.append("")
+        lines.append("| language | documents | share | median confidence |")
+        lines.append("|---|---:|---:|---:|")
+        for row in comp["languages"][:8]:
+            lines.append(
+                f"| `{row['language']}` | {row['documents']:,} | {row['share'] * 100:.2f}% "
+                f"| {row['confidence_p50']:.3f} |"
+            )
+        rest = comp["languages"][8:]
+        if rest:
+            n = sum(r["documents"] for r in rest)
+            lines.append(f"| _{len(rest)} more_ | {n:,} | {n / comp['scored'] * 100:.2f}% | |")
+        lines.append("")
+        c = comp["confidence"]
+        lines.append("Confidence, over every scored document. `min_langid_score` drops documents the")
+        lines.append("model was unsure about, whatever language it guessed:")
+        lines.append("")
+        lines.append("| p1 | p5 | p25 | p50 | p75 |")
+        lines.append("|---|---|---|---|---|")
+        lines.append(f"| {c['p1']:.3f} | {c['p5']:.3f} | {c['p25']:.3f} | {c['p50']:.3f} | {c['p75']:.3f} |")
+        lines.append("")
+
     for entry in report.get("signals") or []:
         name = entry.get("signal", "?")
         units = entry.get("units", "")

@@ -475,3 +475,97 @@ def test_unparsable_lines_are_counted_and_noted(tmp_path, curator_stub) -> None:
     assert report["corpus"]["unparsable_lines"] == 1
     assert report["corpus"]["damaged_shards"] == 1
     assert any("would not parse" in note for note in report["notes"])
+
+
+class _StubLangModel:
+    """FastText's batch interface, which is the one that works under numpy>=2."""
+
+    def __init__(self, verdicts: dict[str, tuple[str, float]]) -> None:
+        self._verdicts = verdicts
+
+    def predict(self, texts, k=1):  # noqa: ANN001, ARG002 - mirrors the library signature
+        labels, scores = [], []
+        for text in texts:
+            code, score = self._verdicts[text]
+            labels.append([f"__label__{code}"])
+            scores.append([score])
+        return labels, scores
+
+
+def _install_stub_fasttext(monkeypatch, verdicts, tmp_path):
+    import sys
+    import types
+
+    module = types.ModuleType("fasttext")
+    module.load_model = lambda _path: _StubLangModel(verdicts)
+    monkeypatch.setitem(sys.modules, "fasttext", module)
+    model = tmp_path / "lid.176.bin"
+    model.write_bytes(b"")
+    return str(model)
+
+
+def test_the_profile_reports_what_language_the_corpus_is_in(monkeypatch, tmp_path) -> None:
+    """No signal can answer this, and it is the question a person asks first.
+
+    script_ratio and latin_ratio come closest and cannot help: Vietnamese and
+    English are both Latin script. Without this, naming the wrong language in
+    steps.filter.language_codes removes almost everything and still reports
+    success, because the row counts reconcile either way.
+    """
+    from nemotron.steps.curate.nemo_curator.scripts import run_profile
+
+    verdicts = {f"vi-{i}": ("vi", 0.99) for i in range(8)}
+    verdicts.update({f"en-{i}": ("en", 0.60) for i in range(2)})
+    model = _install_stub_fasttext(monkeypatch, verdicts, tmp_path)
+    sample = {"src": [(str(i), text) for i, text in enumerate(verdicts)]}
+
+    out = run_profile.language_composition(sample, model)
+
+    assert out["scored"] == 10
+    by_code = {row["language"]: row for row in out["languages"]}
+    assert by_code["vi"]["documents"] == 8
+    assert by_code["vi"]["share"] == pytest.approx(0.8)
+    assert by_code["en"]["share"] == pytest.approx(0.2)
+    # ordered by size, so the corpus's actual language is the first row read
+    assert out["languages"][0]["language"] == "vi"
+
+
+def test_the_confidence_distribution_is_reported_separately(monkeypatch, tmp_path) -> None:
+    """Which language to keep and how sure the model must be are two decisions,
+    and min_langid_score is the second one. Reporting only the label would leave
+    a threshold with no distribution behind it."""
+    from nemotron.steps.curate.nemo_curator.scripts import run_profile
+
+    verdicts = {f"doc-{i}": ("vi", i / 100) for i in range(100)}
+    model = _install_stub_fasttext(monkeypatch, verdicts, tmp_path)
+    sample = {"src": [(str(i), text) for i, text in enumerate(verdicts)]}
+
+    out = run_profile.language_composition(sample, model)
+
+    c = out["confidence"]
+    assert c["p1"] < c["p25"] < c["p50"] < c["p75"]
+    assert 0.0 <= c["p1"] <= 1.0
+
+
+def test_no_model_reports_absence_rather_than_guessing(tmp_path) -> None:
+    """Nemotron does not choose a language for the user. An absent model is
+    recorded as unmeasured, not filled in from the script or a heuristic."""
+    from nemotron.steps.curate.nemo_curator.scripts import run_profile
+
+    sample = {"src": [("1", "Tiếng Việt")]}
+
+    assert run_profile.language_composition(sample, None) is None
+    assert run_profile.language_composition(sample, str(tmp_path / "absent.bin")) is None
+
+
+def test_a_document_with_embedded_newlines_is_still_scored(monkeypatch, tmp_path) -> None:
+    """FastText reads one line. A newline mid-document truncates the text it
+    sees, so a long article would be classified on its first line alone."""
+    from nemotron.steps.curate.nemo_curator.scripts import run_profile
+
+    model = _install_stub_fasttext(monkeypatch, {"one two three": ("vi", 0.9)}, tmp_path)
+    sample = {"src": [("1", "one\ntwo\n\nthree")]}
+
+    out = run_profile.language_composition(sample, model)
+
+    assert out["scored"] == 1, "the newlines must be flattened before predict, not truncate it"
