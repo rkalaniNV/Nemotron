@@ -130,3 +130,6 @@ skills/*/evals/tier3-reports/
 /spec/
 /tests/skills/
 /tools/fetch_sample_corpus.py
+
+# Curator model cache, written at run time by a step reading a relative path.
+cache/
