@@ -139,7 +139,7 @@ def _corpus(tmp_path, n_in: int, n_out: int):
 
 
 def test_the_ledger_balances_on_a_normal_run(tmp_path, monkeypatch) -> None:
-    from nemotron.steps.curate.runtime import ledger as ledger_module
+    from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     step = _stub_curator(monkeypatch)
     cfg = _corpus(tmp_path, 100, 82)
@@ -156,7 +156,7 @@ def test_the_ledger_balances_on_a_normal_run(tmp_path, monkeypatch) -> None:
 
 def test_the_ledger_does_not_name_a_gate_it_cannot_observe(tmp_path, monkeypatch) -> None:
     """No counters reached us, so no breakdown is invented."""
-    from nemotron.steps.curate.runtime import ledger as ledger_module
+    from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     step = _stub_curator(monkeypatch)
     path = tmp_path / "ledger.json"
@@ -170,7 +170,7 @@ def test_the_ledger_does_not_name_a_gate_it_cannot_observe(tmp_path, monkeypatch
 
 def test_per_gate_counts_are_recorded_when_they_reconcile(tmp_path, monkeypatch) -> None:
     """Curator's own per-stage counters, published only once they add up."""
-    from nemotron.steps.curate.runtime import ledger as ledger_module
+    from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     step = _stub_curator(monkeypatch)
     path = tmp_path / "ledger.json"
@@ -190,7 +190,7 @@ def test_per_gate_counts_are_recorded_when_they_reconcile(tmp_path, monkeypatch)
 
 def test_a_breakdown_that_does_not_reconcile_is_discarded(tmp_path, monkeypatch) -> None:
     """The disk count is independent evidence; a breakdown that contradicts it is not published."""
-    from nemotron.steps.curate.runtime import ledger as ledger_module
+    from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     step = _stub_curator(monkeypatch)
     path = tmp_path / "ledger.json"
@@ -269,7 +269,7 @@ def test_counts_that_do_not_sum_to_the_observed_loss_are_refused(monkeypatch) ->
 
 def test_a_run_that_gained_rows_is_reported_not_balanced_away(tmp_path, monkeypatch) -> None:
     """More out than in is a real fault — a retry double-write, say."""
-    from nemotron.steps.curate.runtime import ledger as ledger_module
+    from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     step = _stub_curator(monkeypatch)
     path = tmp_path / "ledger.json"
@@ -284,7 +284,7 @@ def test_a_run_that_gained_rows_is_reported_not_balanced_away(tmp_path, monkeypa
 
 def test_an_incomplete_run_still_writes_its_ledger(tmp_path, monkeypatch) -> None:
     """The unbalanced ledger IS the evidence; refusing to write it destroys it."""
-    from nemotron.steps.curate.runtime import ledger as ledger_module
+    from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     step = _stub_curator(monkeypatch)
     path = tmp_path / "ledger.json"
@@ -401,6 +401,28 @@ def test_real_jsonl_reader_preserves_string_ids_and_mixed_metadata(tmp_path) -> 
     assert records[0]["id"] == "001"
     assert records[1]["id"] == "1"
     assert records[0]["mixed"] == "01"
+
+
+def test_the_shipped_configs_expose_the_langid_score() -> None:
+    """A knob nobody can see is a knob nobody sets.
+
+    No flow config mentioned min_langid_score, so a run that named language_codes
+    got whatever the code fell back to, and nothing in the config or the report
+    said which value was in effect.
+    """
+    flow_configs = (STEP_DIR / "config").glob("*.yaml")
+    checked = 0
+    for path in flow_configs:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        block = (cfg.get("steps") or {}).get("filter") or {}
+        if "language_codes" not in block:
+            continue
+        checked += 1
+        quality = block.get("quality_filters") or {}
+        assert "min_langid_score" in quality, (
+            f"{path.name} offers language_codes but never names the confidence threshold that goes with it"
+        )
+    assert checked, "no shipped config declares language_codes"
 
 
 def test_writing_into_a_directory_that_already_has_output_is_refused(tmp_path, monkeypatch) -> None:

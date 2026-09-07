@@ -12,7 +12,7 @@ import inspect
 import pytest
 import yaml
 
-from nemotron.steps.curate.runtime import policy
+from nemotron.steps.curate.nemo_curator.runtime import policy
 
 PROFILE_DIGEST = "sha256:" + "a" * 64
 CORPUS_FINGERPRINT = "sha256:" + "b" * 64
@@ -496,7 +496,7 @@ def test_a_threshold_between_swept_points_warns_that_it_was_not_measured() -> No
 
 def test_a_swept_threshold_inside_a_band_warns_about_nothing() -> None:
     """Otherwise every promotion warns and the warnings stop being read."""
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     swept = signal_registry.SIGNALS["unicode_alpha_numeric"].grid.values()
     inside = next(v for v in swept if 0.25 <= v <= 0.40)

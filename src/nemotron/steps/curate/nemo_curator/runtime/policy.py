@@ -190,7 +190,7 @@ def promote(
     if not thresholds:
         raise PolicyNotPromotableError("no thresholds chosen; an approved policy that gates nothing is not one")
 
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     profiled: dict[str, dict[str, Any]] = {}
     for profiled_candidate in candidate.get("candidates") or []:
@@ -312,7 +312,7 @@ def validate_approved_policy(document: Any) -> list[str]:
     else:
         # Imported here so this module still loads without the registry's
         # dependencies; the registry itself imports nemo_curator only lazily.
-        from nemotron.steps.curate.runtime import registry as signal_registry
+        from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
         for i, entry in enumerate(thresholds):
             if not isinstance(entry, dict) or "signal" not in entry:

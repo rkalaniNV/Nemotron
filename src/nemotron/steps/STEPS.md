@@ -18,7 +18,12 @@
 
 | Step | Description | Consumes | Produces |
 | --- | --- | --- | --- |
+| [curate/audit](curate/nemo_curator/audit/) | Integrity evidence for a curated corpus: per-shard readability, row counts, and a content digest, compared against a manifest declared by the producing step. Completeness is claimed only relative to that manifest. Detection only: attributing loss to a cause requires a producer-emitted ledger. | curation_ledger, filtered_jsonl | curation_report |
+| [curate/decontamination](curate/nemo_curator/decontamination/) | Remove training documents that near-duplicate a held-out split, using exact source-document identity plus MinHash/LSH candidates verified by exact Jaccard. Detects whole-document near-duplicates only; a benchmark question embedded in a long document is substring contamination and is out of scope. | filtered_jsonl | filtered_jsonl, decontamination_report |
+| [curate/ingest](curate/nemo_curator/ingest/) | Read a raw parquet or JSONL corpus, mint a content-derived document id when it carries none, map source columns onto the names the curate steps expect, and write JSONL. Runs without Ray or a GPU so preparing data does not require a cluster. | raw_jsonl | raw_jsonl |
 | [curate/nemo_curator](curate/nemo_curator/) | Read JSONL text with NeMo Curator, optionally hydrate a Hugging Face snapshot, apply light language, word-count, and domain filters, and write downstream-ready JSONL. | raw_jsonl | filtered_jsonl |
+| [curate/profile](curate/nemo_curator/profile/) | Measure quality-signal distributions on a target corpus and report what candidate thresholds would do to it. Curator's default heuristic thresholds are inherited from English-language work. This step reports retention impact and proposes candidate policies. It does not approve any policy; promotion is a separate, recorded act. | filtered_jsonl | profile_report, filter_policy |
+| [curate/subset](curate/nemo_curator/subset/) | Draw stratified subsets of a corpus at several fixed token budgets in one run, guaranteeing that every smaller tier is contained in every larger one, so a filtering ablation compares policies rather than dataset sizes. | filtered_jsonl | filtered_jsonl, subset_plan, subset_report |
 
 ## data_prep — Data Preparation
 

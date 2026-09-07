@@ -18,7 +18,7 @@ Every class here is a ``DocumentFilter`` subclass, which is how Curator's own
 CLIMB tutorial adds a scorer without modifying the library
 (``tutorials/text/nemotron-climb-data-curation/3_prune.py:50``). None of them
 contains a language name: the character sets, word lists, patterns and fold maps
-all arrive from a :class:`~nemotron.steps.curate.runtime.langpack.LanguagePack`.
+all arrive from a :class:`~nemotron.steps.curate.nemo_curator.runtime.langpack.LanguagePack`.
 
 The base class is resolved lazily so this module imports on a host without
 ``nemo_curator``. Subclassing the real base matters at runtime: Curator's
@@ -31,8 +31,8 @@ from __future__ import annotations
 import unicodedata
 from typing import Any, cast
 
-from nemotron.steps.curate.runtime.langpack import LanguagePack
-from nemotron.steps.curate.runtime.registry import IMPL_VERSION
+from nemotron.steps.curate.nemo_curator.runtime.langpack import LanguagePack
+from nemotron.steps.curate.nemo_curator.runtime.registry import IMPL_VERSION
 
 #: Bumped when a signal's numbers change, so a policy or profile measured under
 #: the previous version is refused rather than silently compared. 0.2.0 scores on

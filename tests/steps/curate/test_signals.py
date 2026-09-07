@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from nemotron.steps.curate.runtime import langpack, signals
+from nemotron.steps.curate.nemo_curator.runtime import langpack, signals
 
 FIXTURES = Path(__file__).parent / "fixtures" / "langpacks"
 
@@ -297,7 +297,7 @@ def test_every_pack_signal_runs_against_an_invented_language() -> None:
 
 
 def test_every_pack_signal_has_its_own_stage_name() -> None:
-    from nemotron.steps.curate.runtime import registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry
 
     pack = load_fixture("vi")
     names: dict[str, list[str]] = {}
@@ -314,7 +314,7 @@ def test_every_pack_signal_has_its_own_stage_name() -> None:
 
 def test_the_stage_name_is_the_registry_key() -> None:
     """A policy names `latin_ratio`; the column and the ledger entry must agree."""
-    from nemotron.steps.curate.runtime import registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry
 
     pack = load_fixture("vi")
     for name, signal in registry.SIGNALS.items():
@@ -329,7 +329,7 @@ def test_the_stage_name_is_the_registry_key() -> None:
 
 def test_signals_sharing_a_capability_are_still_distinct() -> None:
     """The three script signals are the case that made this fail."""
-    from nemotron.steps.curate.runtime import registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry
 
     pack = load_fixture("vi")
     trio = ("script_ratio", "latin_ratio", "foreign_script_ratio")
@@ -351,7 +351,7 @@ def test_the_same_text_scores_the_same_in_nfc_and_nfd() -> None:
     """
     import unicodedata
 
-    from nemotron.steps.curate.runtime import registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry
 
     pack = load_fixture("vi")
     sentence = "Việt Nam là một quốc gia nằm ở phía đông bán đảo Đông Dương."
@@ -380,7 +380,7 @@ def test_measurement_normalisation_does_not_touch_the_document() -> None:
     """
     import unicodedata
 
-    from nemotron.steps.curate.runtime import registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry
 
     pack = load_fixture("vi")
     nfd = unicodedata.normalize("NFD", "Tiếng Việt")

@@ -28,9 +28,9 @@ import pandas as pd
 import pytest
 import yaml
 
-from nemotron.steps.curate.runtime import langpack
-from nemotron.steps.curate.runtime import policy as policy_module
-from nemotron.steps.curate.runtime import registry as signal_registry
+from nemotron.steps.curate.nemo_curator.runtime import langpack
+from nemotron.steps.curate.nemo_curator.runtime import policy as policy_module
+from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
 # Three clean documents and two that are almost entirely emoji. Scored by
 # ``unicode_alpha_numeric`` at the 0.25 default, the split is 3 kept / 2 dropped.
@@ -270,7 +270,7 @@ def test_an_approved_policy_warns_about_nothing(step, tmp_path) -> None:
 
 
 def test_policy_is_bound_to_the_configured_input_corpus(step, tmp_path) -> None:
-    from nemotron.steps.curate.runtime import integrity
+    from nemotron.steps.curate.nemo_curator.runtime import integrity
 
     first = tmp_path / "first.jsonl"
     second = tmp_path / "second.jsonl"
@@ -291,7 +291,7 @@ def test_policy_is_bound_to_the_configured_input_corpus(step, tmp_path) -> None:
 
 
 def test_resolved_policy_contents_participate_in_manifest_identity(step, tmp_path) -> None:
-    from nemotron.steps.curate.runtime import integrity, manifest
+    from nemotron.steps.curate.nemo_curator.runtime import integrity, manifest
 
     corpus = tmp_path / "input.jsonl"
     corpus.write_text('{"id":"1","text":"same corpus"}\n', encoding="utf-8")
@@ -443,7 +443,7 @@ def test_a_policy_naming_a_pack_signal_can_actually_be_executed(step) -> None:
 
 def test_every_pack_backed_signal_in_the_registry_can_be_built(step) -> None:
     """A signal profile can propose but the filter cannot construct is unusable."""
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     pack = vietnamese_fixture()
     spec = {
@@ -476,7 +476,7 @@ def test_a_pack_signal_without_an_explicit_pack_directory_is_refused(step) -> No
     pack = vietnamese_fixture()
     spec = {"language_tag": pack.language_tag, "content_hash": pack.content_hash}
 
-    with pytest.raises(langpack.LanguagePackNotFoundError, match="does not bundle"):
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="explicit langpack_dir"):
         step.policy_stages([{"signal": PACK_SIGNAL, "min": 0.05}], "text", "filter", spec)
 
 
@@ -586,7 +586,7 @@ def test_every_registry_signal_has_a_known_direction() -> None:
     import importlib
 
     module = importlib.import_module("nemotron.steps.curate.nemo_curator.step")
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     directions = {s.direction for s in signal_registry.SIGNALS.values()}
     assert directions <= set(module.BOUND_KEYS)
@@ -611,7 +611,7 @@ def test_every_requirement_the_registry_declares_is_one_this_step_can_supply() -
     import importlib
 
     module = importlib.import_module("nemotron.steps.curate.nemo_curator.step")
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     declared = {r for s in signal_registry.SIGNALS.values() for r in s.requires}
 
@@ -625,7 +625,7 @@ def test_the_tokenizer_reaches_the_filter(step, monkeypatch) -> None:
     """Asserted on the kwargs, since constructing it needs Curator installed."""
     import dataclasses
 
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     seen: dict = {}
     original = signal_registry.SIGNALS["token_count"]
@@ -691,7 +691,7 @@ def test_a_threshold_without_a_bound_is_refused_not_defaulted() -> None:
     of the corpus and reports success.
     """
     from nemotron.steps.curate.nemo_curator import step
-    from nemotron.steps.curate.runtime import registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry
 
     signal = registry.SIGNALS["non_alpha_numeric"]
     assert signal.curator_default, "fixture assumes this signal ships a default"
@@ -707,7 +707,7 @@ def test_the_shipped_default_is_still_reported_just_never_applied() -> None:
     have used and decide for themselves. That is the whole difference between
     informing a decision and making it.
     """
-    from nemotron.steps.curate.runtime import registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry
 
     assert registry.SIGNALS["non_alpha_numeric"].curator_default == (0.25,)
 

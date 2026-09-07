@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from nemotron.steps.curate.runtime import ledger
+from nemotron.steps.curate.nemo_curator.runtime import ledger
 
 
 def balanced(stage: str = "s", source: str = "") -> ledger.StageLedger:

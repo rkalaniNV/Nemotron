@@ -156,7 +156,7 @@ def _content_hash(directory: Path, files: Iterable[Path]) -> str:
 
 def load_pack(directory: str | Path) -> LanguagePack:
     """Load and validate one pack directory."""
-    root = Path(directory)
+    root = Path(directory).resolve()
     manifest_path = root / "pack.toml"
     if not manifest_path.is_file():
         raise LanguagePackNotFoundError(f"no pack.toml under {root}")
@@ -285,14 +285,15 @@ def _assert_capabilities_are_backed(pack: LanguagePack, manifest_path: Path) -> 
 def resolve_dir(langpack_dir: str | Path | None) -> Path:
     """Resolve an explicitly supplied pack root.
 
-    Language data is corpus-specific and is not a supported product default.
-    Requiring the directory keeps private validation fixtures from becoming an
-    implicit runtime dependency merely because they exist in a source checkout.
+    Requiring the directory keeps a packaged reference pack or private
+    validation fixture from becoming an implicit language choice merely because
+    it exists on the machine.
     """
     if langpack_dir is None or str(langpack_dir).strip() in {"", "bundled"}:
         raise LanguagePackNotFoundError(
-            "langpack_dir is required: Nemotron does not bundle production language packs. "
-            "Supply the directory containing your reviewed BCP-47 pack."
+            "an explicit langpack_dir is required: Nemotron never chooses a language-pack "
+            "root implicitly. Point it at data/langpacks for the opt-in English reference "
+            "pack, or at the directory containing your own reviewed BCP-47 pack."
         )
     return Path(langpack_dir)
 

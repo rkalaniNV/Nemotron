@@ -46,7 +46,7 @@ from nemo_curator.pipeline import Pipeline
 from nemo_curator.stages.text.io.reader import JsonlReader
 from nemo_curator.stages.text.io.writer import JsonlWriter
 
-from nemotron.steps.curate.runtime import manifest as run_manifest
+from nemotron.steps.curate.nemo_curator.runtime import manifest as run_manifest
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 
@@ -200,7 +200,7 @@ def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -
     if not path:
         return PolicyResolution([], {}, [], {})
 
-    from nemotron.steps.curate.runtime import policy as policy_module
+    from nemotron.steps.curate.nemo_curator.runtime import policy as policy_module
 
     policy_bytes = Path(path).read_bytes()
     document = yaml.safe_load(policy_bytes) or {}
@@ -218,7 +218,7 @@ def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -
     # implementation; running them under another silently measures a different
     # quantity, and the profile records the version precisely so this can be
     # checked rather than assumed.
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     declared_impl = document.get("signals_impl_version")
     if declared_impl != signal_registry.IMPL_VERSION:
@@ -228,7 +228,7 @@ def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -
             "numbers the thresholds refer to; re-profile against the current implementation."
         )
 
-    from nemotron.steps.curate.runtime import integrity
+    from nemotron.steps.curate.nemo_curator.runtime import integrity
 
     declared_fingerprint = (document.get("corpus") or {}).get("fingerprint")
     actual_fingerprint = declared_fingerprint
@@ -323,7 +323,7 @@ def load_policy_pack(langpack_spec: dict, needed_by: list[str]) -> Any:
     pack's contents; running them against a different revision of that pack
     silently measures something else.
     """
-    from nemotron.steps.curate.runtime import langpack
+    from nemotron.steps.curate.nemo_curator.runtime import langpack
 
     tag = langpack_spec.get("language_tag") or langpack_spec.get("id")
     if not isinstance(tag, str) or not tag:
@@ -430,7 +430,7 @@ def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_s
         # F2 must build exactly the pipeline it built before.
         return []
 
-    from nemotron.steps.curate.runtime import registry as signal_registry
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
     named: list[str] = []
     for index, entry in enumerate(thresholds):
@@ -910,7 +910,7 @@ def emit_ledger(
     What it can and cannot say is stated in the ledger itself rather than left to
     be inferred: see :data:`ATTRIBUTION_NOTE`.
     """
-    from nemotron.steps.curate.runtime import ledger as ledger_module
+    from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     source_field = cfg.get("source_field")
     resolved_inputs = input_files if input_files is not None else resolve_inputs(cfg["input_glob"])

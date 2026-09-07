@@ -262,7 +262,7 @@ def test_a_manifest_is_written_when_asked(pipeline_log, tmp_path, monkeypatch) -
     cfg["emit_manifest"] = str(destination)
     _run(step, cfg, tmp_path, monkeypatch)
 
-    from nemotron.steps.curate.runtime import manifest as m
+    from nemotron.steps.curate.nemo_curator.runtime import manifest as m
 
     assert destination.exists()
     document = m.read_manifest(destination)

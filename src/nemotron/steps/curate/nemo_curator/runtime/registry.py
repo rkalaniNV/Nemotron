@@ -162,7 +162,7 @@ def _local(class_name: str) -> Callable[..., Any]:
     """A signal Curator does not provide, parameterised by a language pack."""
 
     def factory(**kwargs: Any) -> Any:
-        from nemotron.steps.curate.runtime import signals as local
+        from nemotron.steps.curate.nemo_curator.runtime import signals as local
 
         return getattr(local, class_name)(**kwargs)
 

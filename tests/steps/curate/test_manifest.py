@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from nemotron.steps.curate.runtime import manifest as m
+from nemotron.steps.curate.nemo_curator.runtime import manifest as m
 
 
 def _valid(**overrides):
@@ -124,7 +124,7 @@ def test_count_jsonl_survives_a_truncated_file(tmp_path) -> None:
 
 def test_the_producer_and_the_auditor_count_a_damaged_shard_identically(tmp_path) -> None:
     """One definition of 'a row', or every audit of a damaged corpus is a false mismatch."""
-    from nemotron.steps.curate.runtime import integrity
+    from nemotron.steps.curate.nemo_curator.runtime import integrity
 
     path = tmp_path / "a.jsonl"
     path.write_text('{"id":1}\n{"id":2,,,BROKEN\n{"id":3}\n', encoding="utf-8")

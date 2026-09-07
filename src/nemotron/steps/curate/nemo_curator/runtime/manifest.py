@@ -164,7 +164,7 @@ def count_jsonl(paths: Iterable[str | Path], source_field: str | None = None) ->
 
     A truncated file still contributes its surviving rows rather than raising.
     """
-    from nemotron.steps.curate.runtime import integrity
+    from nemotron.steps.curate.nemo_curator.runtime import integrity
 
     file_count = 0
     row_count = 0

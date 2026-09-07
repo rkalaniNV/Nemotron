@@ -13,8 +13,8 @@ import sys
 
 import pytest
 
-from nemotron.steps.curate.runtime import registry as r
-from nemotron.steps.curate.runtime import signals
+from nemotron.steps.curate.nemo_curator.runtime import registry as r
+from nemotron.steps.curate.nemo_curator.runtime import signals
 
 
 def test_registry_and_local_scorers_publish_one_implementation_version() -> None:
