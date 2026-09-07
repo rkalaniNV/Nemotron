@@ -1,0 +1,128 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nemotron 3.5 Lightning 30B-A3B packed SFT at 4k context.
+# Mirrors src/nemotron/recipes/lightning35/stage1_sft/config/default.yaml:
+# TP=2 + sequence parallel, EP=8, PP=1, CP=1, GBS=128, 100 iters.
+# Pin nodes: 4 so world size is 32 (TP×EP).
+#
+# Required env (set in env.toml profile or shell):
+#   L35_PACKED_DIR, L35_OUTPUT_DIR, L35_PRETRAINED_CHECKPOINT
+# Optional: WANDB_PROJECT, WANDB_ENTITY, WANDB_NAME
+#
+# Convert HF → Megatron first (do not load weights from HuggingFace at SFT time):
+#   nemotron steps run convert/hf_to_megatron -c lightning35
+# Then SFT:
+#   nemotron steps run sft/megatron_bridge -c lightning35
+
+run:
+  data: null
+  env:
+    # Official recipe still pins the internal rc until the public 26.08 tag is
+    # used on-cluster. Lepton env.toml overrides container_image.
+    container: nvcr.io/nvidia/nemo:26.08
+    container_image: nvcr.io/nvidia/nemo:26.08
+    nodes: 4
+    gpus_per_node: 8
+    ntasks_per_node: 8
+    job_name: l35-sft-4k
+    env_vars:
+      UB_SKIPMC: "0"
+      CUDA_DEVICE_MAX_CONNECTIONS: "1"
+      PYTORCH_ALLOC_CONF: "expandable_segments:True"
+      FLASHINFER_WORKSPACE_BASE: /nemo_run/cache/flashinfer_workspace
+      FLASHINFER_CUBIN_DIR: /nemo_run/cache/flashinfer_cubins
+      TRITON_CACHE_DIR: /tmp/triton_cache
+      TORCHINDUCTOR_CACHE_DIR: /tmp/torchinductor_cache
+      TILELANG_CACHE_DIR: /tmp/tilelang_cache
+      TORCH_EXTENSIONS_DIR: /tmp/torch_extensions
+      XDG_CACHE_HOME: /tmp/xdg_cache
+    # Same Megatron-Bridge / Megatron-LM pins as the official stage1_sft recipe.
+    mounts:
+      - ${auto_mount:git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@0c565c9a063bc8578ec094b4eb488594ed8b033a,/opt/Megatron-Bridge}
+      - ${auto_mount:git+https://github.com/NVIDIA/Megatron-LM.git@d12f6c8c9aff51e166d872fd70151687a8e3f375,/opt/Megatron-Bridge/3rdparty/Megatron-LM}
+
+# Base init: resume > pretrained_checkpoint. Convert the HF base first
+# (convert/hf_to_megatron -c lightning35) and point this at that Megatron path.
+# Do not set hf_model_path / load_hf_weights here.
+
+recipe:
+  _target_: megatron.bridge.recipes.nemotronh.nemotron_3_5_lightning_sft_config
+
+dataset:
+  seq_length: 4096
+  packed_sequence_specs:
+    packed_sequence_size: 4096
+    packed_train_data_path: ${oc.env:L35_PACKED_DIR}/splits/train
+    packed_val_data_path: ${oc.env:L35_PACKED_DIR}/splits/valid
+
+train:
+  train_iters: 100
+  global_batch_size: 128
+  micro_batch_size: 1
+  eval_interval: 10
+  eval_iters: 1
+
+model:
+  seq_length: 4096
+  tensor_model_parallel_size: 2
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  expert_model_parallel_size: 8
+  expert_tensor_parallel_size: 1
+  sequence_parallel: true
+  calculate_per_token_loss: true
+  recompute_granularity: selective
+  recompute_modules: [moe, layernorm, core_attn, mlp]
+
+optimizer:
+  lr: 5.0e-6
+  min_lr: 0.0
+
+scheduler:
+  lr_warmup_iters: 10
+  lr_decay_iters: 100
+
+ddp:
+  check_for_nan_in_grad: true
+  grad_reduce_in_fp32: false
+  overlap_grad_reduce: false
+  overlap_param_gather: false
+  average_in_collective: false
+  use_distributed_optimizer: true
+
+logger:
+  log_interval: 1
+  wandb_project: ${oc.env:WANDB_PROJECT}
+  wandb_entity: ${oc.env:WANDB_ENTITY}
+  wandb_exp_name: ${oc.env:WANDB_NAME}
+  wandb_save_dir: ${oc.env:L35_OUTPUT_DIR}/sft-4k-tp2-ep8/wandb
+  log_throughput: true
+  tensorboard_dir: ${oc.env:L35_OUTPUT_DIR}/sft-4k-tp2-ep8/tensorboard
+
+checkpoint:
+  save: ${oc.env:L35_OUTPUT_DIR}/sft-4k-tp2-ep8
+  pretrained_checkpoint: ${oc.env:L35_PRETRAINED_CHECKPOINT}/iter_0000000
+  save_interval: 20
+  finetune: true
+
+mixed_precision: bf16_mixed
+mixed_precision_overrides:
+  grad_reduce_in_fp32: false
+
+rng:
+  seed: 1234
+
+dist:
+  distributed_timeout_minutes: 120

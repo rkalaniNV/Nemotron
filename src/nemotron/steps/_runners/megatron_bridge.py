@@ -240,11 +240,24 @@ def _maybe_build_dataset(cfg: Any, container: dict[str, Any]) -> None:
 
     Skipped when the YAML doesn't supply a ``dataset:`` block (pretrain steps
     typically rely on the recipe's own dataset config).
+
+    Import and ``FinetuningDatasetConfig`` construction match
+    ``recipes/lightning35/stage1_sft/train.py``: Megatron-Bridge >= the
+    2026-07 dataset refactor moved ``PackedSequenceSpecs`` to
+    ``megatron.bridge.data.packing`` and replaced ``packed_sequence_specs``
+    with ``enable_offline_packing`` / ``offline_packing_specs``.
     """
     if "dataset" not in container:
         return
 
-    from megatron.bridge.data.datasets.packed_sequence import PackedSequenceSpecs
+    try:  # Megatron-Bridge >= the 2026-07 dataset refactor (builder architecture)
+        from megatron.bridge.data.packing import PackedSequenceSpecs
+
+        legacy_dataset_api = False
+    except ImportError:  # pre-refactor Megatron-Bridge
+        from megatron.bridge.data.datasets.packed_sequence import PackedSequenceSpecs
+
+        legacy_dataset_api = True
     from megatron.bridge.training.config import FinetuningDatasetConfig
 
     dataset_cfg = dict(container["dataset"] or {})
@@ -255,21 +268,44 @@ def _maybe_build_dataset(cfg: Any, container: dict[str, Any]) -> None:
     if "packed_sequence_specs" in dataset_cfg:
         specs = dict(dataset_cfg["packed_sequence_specs"] or {})
         has_validation = bool(specs.get("packed_val_data_path"))
-        packed_specs = PackedSequenceSpecs(
-            packed_sequence_size=specs.get("packed_sequence_size", -1),
-            packed_train_data_path=specs.get("packed_train_data_path"),
-            packed_val_data_path=specs.get("packed_val_data_path"),
-            packed_metadata_path=specs.get("packed_metadata_path"),
-        )
+        packed_kwargs: dict[str, Any] = {
+            "packed_sequence_size": specs.get("packed_sequence_size", -1),
+            "packed_train_data_path": specs.get("packed_train_data_path"),
+            "packed_val_data_path": specs.get("packed_val_data_path"),
+            "packed_metadata_path": specs.get("packed_metadata_path"),
+        }
+        if not legacy_dataset_api:
+            from nemotron.kit.recipe_loader import derive_pad_seq_to_mult
+
+            packed_kwargs["pad_cu_seqlens"] = specs.get("pad_cu_seqlens", False)
+            packed_kwargs["pad_seq_to_mult"] = derive_pad_seq_to_mult(
+                specs.get("pad_seq_to_mult"),
+                getattr(cfg, "model", None),
+                getattr(cfg, "dist", None),
+            )
+        packed_specs = PackedSequenceSpecs(**packed_kwargs)
 
     current = cfg.dataset
-    cfg.dataset = FinetuningDatasetConfig(
+    common_fields = dict(
         dataset_root=dataset_cfg.get("dataset_root", getattr(current, "dataset_root", None)),
         seq_length=dataset_cfg.get("seq_length", getattr(current, "seq_length", 4096)),
-        packed_sequence_specs=packed_specs,
         dataloader_type=dataset_cfg.get("dataloader_type", getattr(current, "dataloader_type", "batch")),
         do_validation=has_validation,
         do_test=False,
+    )
+    if legacy_dataset_api:
+        cfg.dataset = FinetuningDatasetConfig(packed_sequence_specs=packed_specs, **common_fields)
+        return
+    if (
+        common_fields["dataset_root"] is None
+        and packed_specs is not None
+        and packed_specs.packed_train_data_path is not None
+    ):
+        common_fields["dataset_root"] = str(packed_specs.packed_train_data_path)
+    cfg.dataset = FinetuningDatasetConfig(
+        enable_offline_packing=packed_specs is not None,
+        offline_packing_specs=packed_specs,
+        **common_fields,
     )
 
 
