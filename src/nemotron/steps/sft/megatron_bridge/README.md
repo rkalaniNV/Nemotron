@@ -19,14 +19,12 @@ different model or distributed shape. Developers usually change:
 
 - `dataset.packed_sequence_specs.packed_train_data_path`: packed Parquet glob,
   usually `<packed>/splits/train/*.parquet`.
-- `recipe.seq_length`, `dataset.seq_length`, packed sequence size, and
-  `model.seq_length`: keep all four equal to the prepared `pack_size`.
-- `checkpoint.pretrained_checkpoint`: optional Megatron base checkpoint.
-- `checkpoint.load`: optional checkpoint used to resume an interrupted run.
-- `recipe.peft`: keep LoRA only when intentionally running adapter-style SFT; set full
-  SFT explicitly when memory allows.
+- `seq_length`, `dataset.seq_length`, and packed sequence size: keep these equal
+  to the `data_prep/sft_packing` `pack_size`.
+- `checkpoint.pretrained_checkpoint`: optional Megatron base or resume checkpoint.
+- `peft`: keep LoRA only when intentionally running adapter-style SFT; set full SFT explicitly when memory allows.
 - `train.micro_batch_size`, `train.global_batch_size`, and model parallel sizes:
-  keep them compatible with the selected env profile.
+keep them compatible with the selected env profile.
 
 Example shape:
 
@@ -34,10 +32,7 @@ Example shape:
 uv run nemotron steps run sft/megatron_bridge \
   -c <project>/config/sft_megatron_bridge.yaml \
   dataset.packed_sequence_specs.packed_train_data_path='<packed>/splits/train/*.parquet' \
-  recipe.seq_length=<pack-size> \
-  dataset.seq_length=<pack-size> \
-  dataset.packed_sequence_specs.packed_sequence_size=<pack-size> \
-  model.seq_length=<pack-size>
+  seq_length=<pack-size>
 ```
 
 Related patterns:
@@ -48,9 +43,7 @@ Related patterns:
 ## Config Nuances
 
 - Set `recipe.packed_sequence: true` when consuming packed Parquet.
-- Keep `recipe.seq_length`, `dataset.seq_length`,
-  `dataset.packed_sequence_specs.packed_sequence_size`, and `model.seq_length`
-  equal.
+- Keep `dataset.seq_length`, `dataset.packed_sequence_specs.packed_sequence_size`, and `model.seq_length` equal.
 - Use `model.sequence_parallel: true` for MoE plus tensor parallelism.
 - Start with `train.micro_batch_size: 1` when validating a new distributed shape and choose `train.global_batch_size` as a multiple of the resulting data-parallel size.
 - Inspect data_prep loss masks before trusting loss curves from a new template
@@ -105,8 +98,6 @@ uv run nemotron steps run sft/megatron_bridge \
 
 ## Guardrails
 
-- For the standard profiles, run `data_prep/sft_packing` first unless compatible
-  packed data already exists. The Super3 long-context configs remain
-  reference-only and require additional alignment-aware pipeline support.
+- Run `data_prep/sft_packing` first unless a compatible packed dataset already exists.
 - Repack data after tokenizer, template, or sequence length changes.
 - Convert Megatron checkpoints to HF format before HF-native evaluation or deployment.
