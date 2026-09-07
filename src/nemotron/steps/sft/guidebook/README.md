@@ -2,22 +2,22 @@
 
 # Supervised Fine-Tuning Guidebook
 
-> You want to adapt a post-trained model to a new domain or language. This guidebook is the output of an ablation study run specifically to answer that: which base checkpoint, which teacher, what reasoning blend, what learning rate, how much data, and what to put back in so nothing regresses.
+> You want to adapt a post-trained model to a new domain or language. This guidebook is the output of an ablation study run specifically to answer that: which base checkpoint, how to curate the data, what reasoning blend, what learning rate, how much data, and what to put back in so nothing regresses.
 
 **Intended use:** a language- and domain-agnostic recipe for adapting an instruct model with SFT<br>
-**Observed evidence:** Nemotron-3-Nano-30B-A3B, Hindi and Malayalam, 13 controlled ablations<br>
+**Observed evidence:** Nemotron-3-Nano-30B-A3B, Hindi and Malayalam, controlled ablations<br>
 **Example metrics used:** MILU, GSM8K-Indic, IndicIFEval, IndiVibe (LLM-as-judge), script fidelity<br>
 **Reading time:** 10–12 minutes
 
 <p align="center"><img src="./assets/guidebook_overview.png" alt="Recommended SFT recipe" width="760"></p>
 
-**Jump to:** [The recipe](#the-recipe) · [What to expect](#what-to-expect) · [Base](#1-start-from-the-pre-rl-checkpoint) · [Curating the data](#2-curating-the-adaptation-data) · [Teacher](#3-choose-the-teacher-deliberately) · [Reasoning blend](#4-never-train-on-100-reasoning-on-data) · [Learning rate](#5-learning-rate-and-schedule) · [Data volume](#6-how-much-data-you-actually-need) · [Replay](#7-replay-english-alongside-the-target-data) · [Language fidelity](#8-measure-language-fidelity-not-just-accuracy) · [Full SFT vs LoRA](#9-use-full-parameter-sft) · [Apply to your run](#10-apply-this-guide-to-your-sft-run) · [Reproducibility](#reproducibility) · [Future work](#future-work)
+**Jump to:** [The recipe](#the-recipe) · [What to expect](#what-to-expect) · [Base](#1-start-from-the-pre-rl-checkpoint) · [Curating the data](#2-curating-the-adaptation-data) · [Reasoning blend](#3-never-train-on-100-reasoning-on-data) · [Learning rate](#4-learning-rate-and-schedule) · [Data volume](#5-how-much-data-you-actually-need) · [Replay](#6-replay-english-alongside-the-target-data) · [Language fidelity](#7-measure-language-fidelity-not-just-accuracy) · [Full SFT vs LoRA](#8-use-full-parameter-sft) · [Apply to your run](#9-apply-this-guide-to-your-sft-run) · [Reproducibility](#reproducibility) · [Future work](#future-work)
 
 ## Why this study exists
 
 Adapting an already post-trained instruct model is not the same problem as pretraining it. The model already follows instructions, already reasons on demand, and already has an alignment you are about to disturb. The questions a developer actually faces are narrow and practical — *what learning rate, what data mix, how much of it, and what will I break?* — and they are not answered by general SFT guidance.
 
-This study ran 13 controlled ablations to answer them on one concrete use case: adding **Indic language and cultural knowledge** to Nemotron-3-Nano using multiple-choice data grounded in [Nemotron Personas India](#2-curating-the-adaptation-data). The recipe below is what those runs support. The use case is an example; the decisions generalise.
+This study ran a series of controlled ablations to answer them on one concrete use case: adding **Indic language and cultural knowledge** to Nemotron-3-Nano using multiple-choice data grounded in [Nemotron Personas India](#2-curating-the-adaptation-data). The recipe below is what those runs support. The use case is an example; the decisions generalise.
 
 ## How to read this guide
 
@@ -31,13 +31,12 @@ All scores are reasoning-on unless stated, taken at each arm's selected checkpoi
 |---|---|---|
 | **Base checkpoint** | The **pre-RL SFT-only** checkpoint, if you have it | [1](#1-start-from-the-pre-rl-checkpoint) |
 | **Data** | Persona-grounded synthetic data via [`sdg/persona_mcq`](../../sdg/persona_mcq/README.md), 50/50 English:target | [2](#2-curating-the-adaptation-data) |
-| **Teacher for SDG** | **gemma-4-31B-it** | [3](#3-choose-the-teacher-deliberately) |
-| **Reasoning blend** | **90:10 reasoning-on : reasoning-off.** Never 100% on | [4](#4-never-train-on-100-reasoning-on-data) |
-| **Learning rate** | **Constant 1e-5** | [5](#5-learning-rate-and-schedule) |
-| **Volume** | **50k–100k total samples.** More does not buy accuracy | [6](#6-how-much-data-you-actually-need) |
-| **Replay** | **English IF data alongside the target data** — 20k was enough | [7](#7-replay-english-alongside-the-target-data) |
-| **Optional** | +bidirectional en↔target translation pairs, for language routing | [8](#8-measure-language-fidelity-not-just-accuracy) |
-| **Method** | **Full-parameter SFT**, not LoRA | [9](#9-use-full-parameter-sft) |
+| **Reasoning blend** | **90:10 reasoning-on : reasoning-off.** Never 100% on | [3](#3-never-train-on-100-reasoning-on-data) |
+| **Learning rate** | **Constant 1e-5** | [4](#4-learning-rate-and-schedule) |
+| **Volume** | **50k–100k total samples.** More does not buy accuracy | [5](#5-how-much-data-you-actually-need) |
+| **Replay** | **English IF data alongside the target data** — 20k was enough | [6](#6-replay-english-alongside-the-target-data) |
+| **Optional** | +bidirectional en↔target translation pairs, for language routing | [7](#7-measure-language-fidelity-not-just-accuracy) |
+| **Method** | **Full-parameter SFT**, not LoRA | [8](#8-use-full-parameter-sft) |
 
 ## What to expect
 
@@ -52,15 +51,15 @@ The full recipe — persona MCQ data **plus English IF replay** — on the pre-R
 | **IndicIFEval** (instruction following) | −0.81 | −0.61 | −4.90 |
 | **IndiVibe** (LLM-as-judge generation) | — | **56.4 / 100** win-rate vs base | — |
 
-**English is preserved on all three tracked English benchmarks.** MILU improves, GSM8K-Indic and IndicIFEval are flat inside one standard error. That is the point of the replay in [section 7](#7-replay-english-alongside-the-target-data): *without* it, the same run costs 4.08pp of English IndicIFEval.
+**English is preserved on all three tracked English benchmarks.** MILU improves, GSM8K-Indic and IndicIFEval are flat inside one standard error. That is the point of the replay in [section 6](#6-replay-english-alongside-the-target-data): *without* it, the same run costs 4.08pp of English IndicIFEval.
 
 **Target-language gains are large, on knowledge and maths together.** Malayalam gains 17 points of MILU and 14 points of GSM8K-Indic from the same pack.
 
-**IndicIFEval in the target language is the axis to watch.** With the replay it is recovered on the pre-RL base (−0.61 Hindi). On an already-RL-trained checkpoint it is **not** recoverable by SFT replay alone — see [section 7](#7-replay-english-alongside-the-target-data).
+**IndicIFEval in the target language is the axis to watch.** With the replay it is recovered on the pre-RL base (−0.61 Hindi). On an already-RL-trained checkpoint it is **not** recoverable by SFT replay alone — see [section 6](#6-replay-english-alongside-the-target-data).
 
 **Generation quality improves too.** IndiVibe, judged by an LLM against the model's own base, reaches 56.4 on the pre-RL base and 75.9 on the released base (50 = no change), so the gains are not confined to multiple-choice formats.
 
-> **Read this next to the totals:** the pre-RL base answered only 16% of its Hindi maths questions in Hindi. After SFT it answers 91% of them in Hindi. That is a large behavioural improvement that no multiple-choice metric reports — see [section 8](#8-measure-language-fidelity-not-just-accuracy).
+> **Read this next to the totals:** the pre-RL base answered only 16% of its Hindi maths questions in Hindi. After SFT it answers 91% of them in Hindi. That is a large behavioural improvement that no multiple-choice metric reports — see [section 7](#7-measure-language-fidelity-not-just-accuracy).
 
 [Back to top](#top)
 
@@ -77,7 +76,7 @@ The same 100k persona-MCQ pack on both checkpoints:
 | Released SFT+RL | 72.02 | 77.82 | +5.80 |
 | **Pre-RL SFT-only** | 69.48 | 78.11 | **+8.63** |
 
-The pre-RL model starts nearly 3 points lower and finishes higher. The same ordering holds for Malayalam (+17.26 pre-RL against +13.70 released). The decisive difference is instruction following: on the pre-RL base the regression is fully repairable with replay data, and on the RL-trained base it is not ([section 7](#7-replay-english-alongside-the-target-data)).
+The pre-RL model starts nearly 3 points lower and finishes higher. The same ordering holds for Malayalam (+17.26 pre-RL against +13.70 released). The decisive difference is instruction following: on the pre-RL base the regression is fully repairable with replay data, and on the RL-trained base it is not ([section 6](#6-replay-english-alongside-the-target-data)).
 
 > [!NOTE]
 > This is a recommendation about where to *start* SFT, not about what to ship. If you must start from an RL-trained checkpoint, plan an RL stage after SFT rather than expecting replay data to cover it.
@@ -103,10 +102,16 @@ The stages, in order:
 | `build_sft` | Keeps only records where the teachers **unanimously** agree | Consistency gate on the label |
 | `sample` | Aligns English/target pairs and applies the reasoning blend | Produces the final training pack |
 
+**The teacher matters.** We compared several candidate teachers internally before this study and
+picked **gemma-4-31B-it**, which is the teacher behind every result in this guidebook. Treat the
+teacher as a real decision rather than a default, and compare candidates on **open-ended generation
+quality** as well as on your knowledge benchmark — in our comparison the strongest models on
+multiple-choice accuracy were not the strongest on generation.
+
 Two gates in that config are worth copying regardless of domain:
 
 - **Unanimous multi-teacher agreement** (`sft.agreement: unanimous`). Treat it as a *consistency* gate, not factual verification — it removes items the teachers disagree about, which are disproportionately the ambiguous or wrong ones.
-- **A script-fidelity gate at curation time.** The config constrains the Devanagari fraction of each assistant response — 0.00–0.15 for English records, 0.70–1.00 for Hindi records. Enforcing language at data-build time is much cheaper than discovering the problem after training ([section 8](#8-measure-language-fidelity-not-just-accuracy)).
+- **A script-fidelity gate at curation time.** The config constrains the Devanagari fraction of each assistant response — 0.00–0.15 for English records, 0.70–1.00 for Hindi records. Enforcing language at data-build time is much cheaper than discovering the problem after training ([section 7](#7-measure-language-fidelity-not-just-accuracy)).
 
 ```bash
 uv run nemotron steps run sdg/persona_mcq -c default pipeline.experiment_name=my-run
@@ -117,31 +122,7 @@ uv run nemotron steps run sdg/persona_mcq -c default pipeline.experiment_name=my
 
 [Back to top](#top)
 
-## 3. Choose the teacher deliberately
-
-> **Recommendation:** **gemma-4-31B-it**. The teacher that generates your synthetic data is a first-order decision, and the knowledge score alone will not reveal the right choice — check open-ended generation quality at the same time.
-
-### Observed evidence
-
-<p align="center"><img src="./assets/teacher_choice.png" alt="Teacher comparison" width="740"></p>
-
-Five teachers generating the same 100k persona-MCQ set, pre-RL base:
-
-| Teacher | Hindi MILU gain | IndiVibe generation quality |
-|---|---:|---:|
-| **gemma-4-31B-it** | **+8.41** | **+10.00** |
-| Qwen3.5-122B-A10B | +7.89 | −12.27 |
-| gpt-oss-120b | +7.87 | −13.64 |
-| Nemotron-3-Super-120B | +6.16 | 0.00 |
-| Nemotron-3-Nano-30B (self-distill) | +4.49 | −11.82 |
-
-Three teachers land within 0.6pp of each other on MILU, which is inside noise — on knowledge alone the choice would look arbitrary. On open-ended generation they separate sharply, and **gemma-4-31B-it is the only teacher that gains knowledge and improves generation quality at the same time**.
-
-Self-distillation from the model being trained is the weakest option here, which is worth knowing before committing generation budget to it.
-
-[Back to top](#top)
-
-## 4. Never train on 100% reasoning-on data
+## 3. Never train on 100% reasoning-on data
 
 > **Recommendation:** mix reasoning-on and reasoning-off responses in the same pack. **90:10 on:off** worked well here and is the shipped default (`sampling.reasoning_off_fraction: 0.10`). Training only on reasoning-on data disturbs the model's alignment and teaches it to reason even when the caller has explicitly asked it not to.
 
@@ -168,7 +149,7 @@ Leakage falls monotonically as the reasoning-off subset grows. Extrapolating to 
 
 [Back to top](#top)
 
-## 5. Learning rate and schedule
+## 4. Learning rate and schedule
 
 > **Recommendation:** **constant 1e-5**, full-parameter. Prefer a constant schedule over cosine when you intend to evaluate intermediate checkpoints.
 
@@ -184,11 +165,11 @@ Three constant learning rates on the same blend, evaluated early where an over-h
 
 The three rates are close this early, which is the useful result: none of them is destructive in the first few dozen steps, so the choice can be made on later behaviour rather than on early damage. 1e-5 is the best of the three and is the value every other experiment in this series uses.
 
-> **Why constant rather than cosine:** under a cosine schedule the learning rate at step *k* depends on the *total* `train_iters`, so an intermediate checkpoint is a partially-decayed run rather than the model you would get by training for that many steps. With a constant rate every checkpoint is directly comparable, which is what makes the volume and stopping decisions in section 6 measurable at all.
+> **Why constant rather than cosine:** under a cosine schedule the learning rate at step *k* depends on the *total* `train_iters`, so an intermediate checkpoint is a partially-decayed run rather than the model you would get by training for that many steps. With a constant rate every checkpoint is directly comparable, which is what makes the volume and stopping decisions in section 5 measurable at all.
 
 [Back to top](#top)
 
-## 6. How much data you actually need
+## 5. How much data you actually need
 
 > **Recommendation:** **50k–100k total samples**, split 50/50 English:target. Knowledge accuracy saturates far earlier than that, but the reasoning-off subset needs to stay large enough to hold mode integrity — which is what sets the floor.
 
@@ -206,7 +187,7 @@ The three rates are close this early, which is the useful result: none of them i
 
 **20k samples reached 91% of the gain that 200k produced.** The remaining 180k bought +0.57pp, inside 2 SE of the 20k result. On knowledge alone, 20k would be the recommendation.
 
-**But knowledge is not the only axis.** At 20k the 10% reasoning-off subset is only 2,000 samples, and reasoning-off mode integrity degrades badly ([section 4](#4-never-train-on-100-reasoning-on-data): 20.1% leakage in Malayalam against 4.0% at 100k). That is what moves the recommendation up to 50k–100k: you are not buying more accuracy, you are buying enough reasoning-off supervision to keep the mode intact.
+**But knowledge is not the only axis.** At 20k the 10% reasoning-off subset is only 2,000 samples, and reasoning-off mode integrity degrades badly ([section 3](#3-never-train-on-100-reasoning-on-data): 20.1% leakage in Malayalam against 4.0% at 100k). That is what moves the recommendation up to 50k–100k: you are not buying more accuracy, you are buying enough reasoning-off supervision to keep the mode intact.
 
 <details>
 <summary><strong>What the larger packs also buy</strong></summary>
@@ -217,7 +198,7 @@ Volume buys **tolerance to training length**. The small packs peak and then deca
 
 [Back to top](#top)
 
-## 7. Replay English alongside the target data
+## 6. Replay English alongside the target data
 
 > **Recommendation:** when fine-tuning an instruct model, **do not train on target-domain data alone**. Include English replay — in this study 20k English instruction-following samples in the same pack was enough to hold every English benchmark flat and recover the target-language regression.
 
@@ -258,7 +239,7 @@ On the RL-trained checkpoint the replay recovers part of English and **nothing o
 
 [Back to top](#top)
 
-## 8. Measure language fidelity, not just accuracy
+## 7. Measure language fidelity, not just accuracy
 
 > **Recommendation:** for every benchmark whose answer is free-form prose, report the **share of answers actually written in the expected language** next to the accuracy. A multiple-choice metric grades one option letter and cannot see this at all.
 
@@ -288,7 +269,7 @@ Knowledge is flat inside 1 SE, script fidelity improves, and instruction followi
 
 [Back to top](#top)
 
-## 9. Use full-parameter SFT
+## 8. Use full-parameter SFT
 
 > **Recommendation:** **full-parameter SFT** for installing new domain or language knowledge. A LoRA adapter moved the model considerably less on every knowledge axis measured, and the shortfall grew with how unfamiliar the target language was.
 
@@ -306,16 +287,16 @@ Identical pack, identical base, identical iterations — only the update rule di
 
 Full SFT delivers roughly three times the knowledge gain in Hindi and nearly four times in Malayalam. (The Malayalam full-SFT figure here is +15.50 rather than the +17.26 quoted in [What to expect](#what-to-expect) because each page selects its own checkpoint independently — 400 here against 800 there. Both arms on this table are read at the same iterations as each other, which is what makes the comparison valid.) The harder, less-represented language shows the larger gap, which is what you would expect if the limit is adapter capacity rather than tuning.
 
-LoRA does have one real advantage — it preserves English instruction following, where full SFT regresses. But [section 7](#7-replay-english-alongside-the-target-data) buys that back directly for the cost of 20k replay samples without giving up the knowledge, so it is not a reason to choose the adapter for this task.
+LoRA does have one real advantage — it preserves English instruction following, where full SFT regresses. But [section 6](#6-replay-english-alongside-the-target-data) buys that back directly for the cost of 20k replay samples without giving up the knowledge, so it is not a reason to choose the adapter for this task.
 
 > [!NOTE]
 > The learning rates are deliberately unmatched (1e-5 full, 1e-4 LoRA) because an adapter barely moves at 1e-5. This measures LoRA as it would actually be run. A setting that needs many cheap, composable, revertible adapters rather than maximum knowledge from one run is a different question and is not tested here.
 
 [Back to top](#top)
 
-## 10. Apply this guide to your SFT run
+## 9. Apply this guide to your SFT run
 
-Sections 1–9 report what we observed. This turns it into six decisions for
+Sections 1–8 report what we observed. This turns it into six decisions for
 **your** domain, language, model and product bar.
 
 ### 1. Set acceptance thresholds before you train
@@ -348,21 +329,21 @@ reasoning blend      90:10 reasoning-on:off    -> mode integrity  (§4)
 English replay       ~20k IF samples           -> instruction following  (§7)
 ```
 
-Start at **50k–100k total samples** ([§6](#6-how-much-data-you-actually-need)) —
+Start at **50k–100k total samples** ([§5](#5-how-much-data-you-actually-need)) —
 sized by the reasoning-off subset, not by accuracy, which saturates earlier.
 
 ### 4. Train
 
 Constant **1e-5**, full-parameter, warmup 5% of `train_iters`
-([§5](#5-learning-rate-and-schedule), [§9](#9-use-full-parameter-sft)). Save
+([§4](#4-learning-rate-and-schedule), [§8](#8-use-full-parameter-sft)). Save
 often enough to select from a curve, and use the **same cadence** across every
 arm you intend to compare.
 
 ### 5. Evaluate several checkpoints, on more than accuracy
 
 At each checkpoint track target accuracy, English retention, **script fidelity**
-per generative benchmark ([§8](#8-measure-language-fidelity-not-just-accuracy)),
-**reasoning-off mode integrity** ([§4](#4-never-train-on-100-reasoning-on-data)),
+per generative benchmark ([§7](#7-measure-language-fidelity-not-just-accuracy)),
+**reasoning-off mode integrity** ([§3](#3-never-train-on-100-reasoning-on-data)),
 and open-ended generation quality with an LLM judge. Read a few raw generations
 before trusting any aggregate — the language failures are invisible in the
 numbers a multiple-choice metric produces.
@@ -375,8 +356,8 @@ holds, and the result is stable across two adjacent checkpoints.
 
 If instruction following fails, add replay — unless you started from an
 RL-trained checkpoint, in which case plan an RL stage instead
-([§7](#7-replay-english-alongside-the-target-data)). If adaptation fails, change
-the teacher or the data before adding volume; [§6](#6-how-much-data-you-actually-need)
+([§6](#6-replay-english-alongside-the-target-data)). If adaptation fails, change
+the teacher or the data before adding volume; [§5](#5-how-much-data-you-actually-need)
 shows more of the same data does not reliably help.
 
 ### Measurement rules
@@ -410,8 +391,8 @@ Datasets, pipeline steps, hardware, and the full hyperparameter tables live in
 
 | Priority | Experiment | Question it would close |
 |---:|---|---|
-| 1 | A 100%-reasoning-on arm against the 90:10 blend | Quantifies the [section 4](#4-never-train-on-100-reasoning-on-data) recommendation directly |
-| 2 | Instruction-following data authored in the target language | Does the [section 7](#7-replay-english-alongside-the-target-data) repair improve when replay is not English-only? |
+| 1 | A 100%-reasoning-on arm against the 90:10 blend | Quantifies the [section 3](#3-never-train-on-100-reasoning-on-data) recommendation directly |
+| 2 | Instruction-following data authored in the target language | Does the [section 6](#6-replay-english-alongside-the-target-data) repair improve when replay is not English-only? |
 | 3 | An RL stage after SFT on the released checkpoint | Confirms instruction following is restorable that way |
 | 4 | The same pipeline for a non-Indic domain | Does the recipe hold when the adaptation is domain rather than language? |
 | 5 | The same recipe on the larger shipping model | Do these Nano results transfer to the model that ships? |

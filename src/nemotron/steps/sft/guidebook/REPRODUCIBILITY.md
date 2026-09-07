@@ -93,8 +93,8 @@ Two auxiliary packs appear in the guidebook:
 
 | Pack | Contents | Used in |
 |---|---|---|
-| IF replay | 20k English instruction-following samples | [§7](./README.md#7-replay-english-alongside-the-target-data) |
-| Translation | bidirectional en↔target pairs (Updesh) | [§8](./README.md#8-measure-language-fidelity-not-just-accuracy) |
+| IF replay | 20k English instruction-following samples | [§6](./README.md#6-replay-english-alongside-the-target-data) |
+| Translation | bidirectional en↔target pairs (Updesh) | [§7](./README.md#7-measure-language-fidelity-not-just-accuracy) |
 
 ### Base checkpoints
 
@@ -110,7 +110,7 @@ Two auxiliary packs appear in the guidebook:
 > rather than +8.63) and the instruction-following regression is not recoverable
 > by replay alone, which is exactly the finding in
 > [§1](./README.md#1-start-from-the-pre-rl-checkpoint) and
-> [§7](./README.md#7-replay-english-alongside-the-target-data).
+> [§6](./README.md#6-replay-english-alongside-the-target-data).
 
 ---
 
@@ -169,9 +169,9 @@ Shared by every full-SFT arm:
 That is deliberate: under a cosine schedule the rate at step *k* depends on the
 total `train_iters`, so intermediate checkpoints are partially-decayed runs and
 are not comparable to each other. See
-[§5](./README.md#5-learning-rate-and-schedule).
+[§4](./README.md#4-learning-rate-and-schedule).
 
-**LoRA arms** ([§9](./README.md#9-use-full-parameter-sft)) change only:
+**LoRA arms** ([§8](./README.md#8-use-full-parameter-sft)) change only:
 
 | Setting | Value |
 |---|---|
@@ -187,13 +187,12 @@ are not comparable to each other. See
 | Guidebook section | Arm | `train_iters` | warmup | save every |
 |---|---|--:|--:|--:|
 | [§1](./README.md#1-start-from-the-pre-rl-checkpoint) base choice | MCQ 100k, both bases | 500 | 25 | 50 |
-| [§3](./README.md#3-choose-the-teacher-deliberately) teacher | MCQ 100k × 5 teachers × 2 bases | 500 | 25 | 50 |
-| [§6](./README.md#6-how-much-data-you-actually-need) volume | MCQ 20k | 500 | 25 | 20 |
+| [§5](./README.md#5-how-much-data-you-actually-need) volume | MCQ 20k | 500 | 25 | 20 |
 | | MCQ 50k / 80k / 100k | 500 | 25 | 50 |
 | | MCQ 200k | 1000 | 50 | 100 |
-| [§7](./README.md#7-replay-english-alongside-the-target-data) replay | MCQ 100k + IF 20k, both bases | 500 | 25 | 50 |
-| [§8](./README.md#8-measure-language-fidelity-not-just-accuracy) translation | MCQ 100k + Updesh, both bases | 500 | 25 | 50 |
-| [§9](./README.md#9-use-full-parameter-sft) LoRA | MCQ 100k, LoRA | 500 | 25 | 50 |
+| [§6](./README.md#6-replay-english-alongside-the-target-data) replay | MCQ 100k + IF 20k, both bases | 500 | 25 | 50 |
+| [§7](./README.md#7-measure-language-fidelity-not-just-accuracy) translation | MCQ 100k + Updesh, both bases | 500 | 25 | 50 |
+| [§8](./README.md#8-use-full-parameter-sft) LoRA | MCQ 100k, LoRA | 500 | 25 | 50 |
 | English + Malayalam | MCQ en50k+ml50k | 1000 | 50 | 100 |
 
 Checkpoint cadence must be identical across arms being compared — a
@@ -214,7 +213,9 @@ finer-grained arm gets more chances to land on a favourable checkpoint.
 | 500 iterations | 2,097,152 | ≈1.05 B |
 | 1000 iterations | 2,097,152 | ≈2.10 B |
 
-The full study is 13 experiments over **307 trained checkpoints**, each evaluated
+The full study behind this guidebook trained and evaluated **307 checkpoints** —
+more experiments than are published here, since not every arm produced a
+recommendation worth shipping. Each checkpoint was evaluated
 on four benchmarks across three languages and two reasoning modes.
 **Evaluation, not training, was the dominant cost**: that is 20 benchmark ×
 language × mode cells per checkpoint — MILU, GSM8K-Indic and IndicIFEval at
