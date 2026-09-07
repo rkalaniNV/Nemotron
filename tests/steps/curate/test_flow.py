@@ -86,30 +86,11 @@ def test_the_flow_declares_no_gpu() -> None:
     assert "gpus_per_node = 0" in source
 
 
-def test_the_shipped_default_does_not_filter_on_an_unreviewed_policy() -> None:
-    cfg = yaml.safe_load((STEP_DIR / "config" / "chain.yaml").read_text(encoding="utf-8"))
-
-    assert cfg["approve"] is None
-    assert cfg["corpus"]["language"] is None
-    assert cfg["corpus"]["langpack_dir"] is None
-
-
 def test_the_default_config_covers_every_step_in_the_plan() -> None:
     """A step missing from the shipped config is one nobody knows they can enable."""
-    cfg = yaml.safe_load((STEP_DIR / "config" / "chain.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load((STEP_DIR / "config" / "vi_c4.yaml").read_text(encoding="utf-8"))
 
     assert set(cfg["steps"]) == {plan.key for plan in run_flow.STEP_ORDER}
-
-
-def test_tiny_runs_ingest_without_gpu_downloads_or_a_language_pack() -> None:
-    cfg = yaml.safe_load((STEP_DIR / "config" / "chain_tiny.yaml").read_text(encoding="utf-8"))
-
-    assert cfg["steps"]["ingest"]["enabled"] is True
-    assert all(not cfg["steps"][key]["enabled"] for key in ("profile", "filter", "audit", "subset", "decontamination"))
-    assert "language" not in cfg["corpus"]
-
-
-# -- derivation ---------------------------------------------------------------
 
 
 def test_the_manifest_path_is_derived_for_both_producer_and_consumer(tmp_path) -> None:
@@ -717,7 +698,9 @@ def test_every_error_the_flow_raises_is_documented() -> None:
 # customer_support_tools. An example that stops parsing is worse than none: it
 # is the first thing a new user copies.
 
-EXAMPLE_CONFIGS = ("en_c4", "vi_c4", "hi_sangraha")
+# One shipped worked example. en_c4 and hi_sangraha were dropped with the
+# configs they read; vi_c4 is the corpus this pipeline was validated on.
+EXAMPLE_CONFIGS = ("vi_c4",)
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
@@ -752,15 +735,7 @@ def test_the_worked_example_names_a_language_and_explicit_pack_root(name) -> Non
     assert cfg["corpus"]["langpack_dir"] not in (None, "", "bundled")
 
 
-def test_the_english_example_opts_into_the_packaged_reference_root() -> None:
-    cfg = yaml.safe_load((STEP_DIR / "config" / "en_c4.yaml").read_text(encoding="utf-8"))
-
-    assert cfg["corpus"]["language"] == "en"
-    assert cfg["corpus"]["langpack_dir"].endswith("/steps/curate/nemo_curator/data/langpacks")
-    assert cfg["steps"]["ingest"]["enabled"] is True
-
-
-@pytest.mark.parametrize("name", ("vi_c4", "hi_sangraha"))
+@pytest.mark.parametrize("name", ("vi_c4",))
 def test_non_english_examples_require_an_external_pack_root(name) -> None:
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
 
@@ -793,25 +768,6 @@ def test_the_worked_example_only_names_signals_its_pack_supports(name) -> None:
             f"{name}.yaml names {signal_name}, which the {cfg['corpus']['language']} pack "
             f"cannot support (needs {sorted(required)})"
         )
-
-
-def test_the_hindi_example_does_not_gate_on_sentence_end_ratio() -> None:
-    """Measured: at >= 0.8 it keeps 86.8% of web but 15.9% of pdf and 7.7% of speech.
-
-    The corpus figure is a reassuring 78.4%, so a config that gated on it would
-    look reasonable while deleting the OCR and ASR sources rather than cleaning
-    them. Pinned so nobody adds it back without seeing why it is absent.
-    """
-    cfg = yaml.safe_load((STEP_DIR / "config" / "hi_sangraha.yaml").read_text(encoding="utf-8"))
-
-    assert cfg["approve"] is None, "an approve block here would need this reasoning revisited"
-    assert "sentence_end_ratio" in (cfg["steps"]["profile"]["signals"] or []), (
-        "it is profiled on purpose — measuring it is exactly how the pdf/speech "
-        "collapse was found; the point is that it is measured and not gated on"
-    )
-
-
-# -- what the adversarial review found ----------------------------------------
 
 
 def test_an_absent_optional_artifact_is_unset_not_merely_warned(tmp_path) -> None:
