@@ -459,9 +459,10 @@ def policy_simulation(
         "sum_of_marginals": sum(g["fails_alone"] for g in per_gate),
         "order": names,
         "order_note": (
-            "incremental is computed in this order, which is the order the thresholds "
-            "appear in the policy, not the order the filter runs its stages. Every other "
-            "column here is order-independent."
+            "incremental is computed in the order listed above, not the order the filter "
+            "runs its stages — the filter's order is a property of the pipeline, not of "
+            "the policy, and this step does not know it. Every other column is "
+            "order-independent."
         ),
         "per_gate": per_gate,
     }

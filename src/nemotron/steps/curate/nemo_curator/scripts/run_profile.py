@@ -543,7 +543,12 @@ def build_report(cfg: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], d
         table = profiling.gate_table(entry)
         if table:
             proposed[str(entry["signal"])] = (table[0][0],)
-    simulation = profiling.policy_simulation({name: sc.flat() for name, sc in scored.items()}, signals, proposed)
+    # Same order the approve block prints, so the simulation's incremental column
+    # and the block a reader is copying from line up. Passed explicitly rather
+    # than left to the default: agreeing by coincidence is not agreeing.
+    simulation = profiling.policy_simulation(
+        {name: sc.flat() for name, sc in scored.items()}, signals, proposed, order=sorted(proposed)
+    )
     if simulation is None:
         notes.append(
             "policy simulation not computed: fewer than two signals produced a gate "
