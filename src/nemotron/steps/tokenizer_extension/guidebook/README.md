@@ -30,7 +30,11 @@ The tested languages are examples, not prerequisites and not universal constants
 | How many vocabulary rows? | **+30k** is the common tested knee | Established within this model |
 | Add, Replace, or naive Expand? | Use **Add** for compatibility; **Replace** when rows matter; consider Expand where the base vocab barely covers the script | Add and Replace are near-identical; Expand wins in Malayalam and loses in Hindi and Vietnamese |
 | Which embedding initialization? | Begin with **meanconst**, then compare at the final training horizon | Directional — differences are small and horizon-dependent |
-| Which learning-rate policy? | Use **DLR** when the vocabulary change is substantial | Replicated target/English BPB pattern across three languages |
+
+> Short names like `meanconst` and `hfdefault` are figure labels, not config
+> values. [REPRODUCIBILITY.md](./REPRODUCIBILITY.md#settings) maps each one to
+> the exact `init_embeddings` YAML.
+| Which learning-rate policy? | Use **DLR** when the vocabulary change is substantial | Replicated target/English BPB pattern across three languages — measured outside this repository, see §4 |
 | How should different tokenizers be compared? | Use **bits per byte (BPB)**, not raw per-token perplexity | Required for a fair cross-tokenizer comparison |
 | Will extension improve model quality? | Treat it primarily as an **efficiency intervention** | Independent downstream-quality contribution not yet established |
 | Will it improve serving? | Usually—if fertility savings exceed the vocabulary-row tax on the intended deployment shape | Matched A100/TP4 evidence across three languages |
@@ -44,7 +48,7 @@ measure held-out fertility at +15k / +30k / +45k
         ↓
 choose the smallest useful vocabulary knee (often +30k)
         ↓
-initialize with meanconst + train with DLR
+initialize with meanconst (method: subword, uniform)
         ↓
 validate BPB, target quality, English retention, and serving throughput
 ```
@@ -210,6 +214,14 @@ The meanconst–BERT difference grows from **0.00029 BPB at 1k** to **0.01150 at
 | High LR | Whole model at `1e-4` | Learns the target fastest | **+14.99–18.35% English BPB damage** | Do not use as the safe default |
 
 > **Clean takeaway:** train changed lexical capacity faster, not the whole model. DLR is the best tested target/retention exchange rate.
+
+> **Availability.** The DLR results above come from an experimental training
+> stack outside this repository. The `pretrain/megatron_bridge` step ships no
+> differential-learning-rate option, so this section is **evidence, not a
+> runnable recipe** — treat it as a reason to seek a decoupled embedding
+> learning rate in whichever trainer you use, not as a config you can set here.
+> The supported path in this repository is the conservative whole-model
+> learning rate ("Low LR" above).
 
 ### BPB versus perplexity
 

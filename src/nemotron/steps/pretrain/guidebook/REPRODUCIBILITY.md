@@ -2,9 +2,14 @@
 
 The data, pipeline and hyperparameters behind the results in this guidebook.
 
+This is a **settings reference**, not a turnkey replication bundle. It gives
+the datasets, the pipeline and every hyperparameter that shapes the result —
+enough to re-run the method and reproduce the reported *trends*. It does not
+ship dataset revision pins, run or checkpoint identifiers, or the scripts
+behind the figures, so individual scores will not reproduce digit-for-digit.
+
 Cluster-specific values — scheduler profiles, mount points, output paths — are
-site configuration; substitute your own. Everything that affects the result is
-given explicitly.
+site configuration; substitute your own.
 
 **Contents:** [Quick start](#quick-start) · [Hardware](#hardware) ·
 [Data](#data) · [Blending](#blending) · [Pipeline](#pipeline) ·
@@ -58,9 +63,26 @@ GPU (PP 1, CP 1, ETP 1).
 | GPUs | 8 × H100 80GB SXM |
 | Parallelism | TP 4 × EP 8 — must match training |
 
-**Smaller-scale reproduction.** A single 8-GPU node reproduces the method:
-reduce `global_batch_size` and `train_iters` together to keep the token budget
-consistent, and adjust the expert-parallel size to the GPU count.
+In training the parallel degrees multiply out to the rank count, so TP 4 ×
+EP 8 requires exactly 32 GPUs. Inference is different: the serving stack
+overlays expert parallelism on the same 8 GPUs, which is why the evaluation
+shape below reads TP 4 × EP 8 on a single node.
+
+**Smaller-scale reproduction (1 node, 8 GPUs).** Use **TP 2 × EP 4 = 8 ranks**
+(PP 1, CP 1, ETP 1) and keep `micro_batch_size: 2`. Hold the *token* budget
+fixed, not the step count — when `global_batch_size` falls, `train_iters` must
+**rise** by the same factor:
+
+| | 32-GPU reference | 8-GPU reproduction |
+|---|--:|--:|
+| TP × EP | 4 × 8 | 2 × 4 |
+| `global_batch_size` | 512 | 128 |
+| Tokens per iteration | 4,194,304 | 1,048,576 |
+| `train_iters` (Punjabi 1:4) | 762 | 3,048 |
+
+Scale warmup and the WSD decay window by the same factor so the schedule keeps
+its shape. Optimizer state and gradient accumulation differ at a smaller batch,
+so treat the result as a method check rather than a numeric match.
 
 ---
 
@@ -68,11 +90,14 @@ consistent, and adjust the expert-parallel size to the GPU count.
 
 | Language | Dataset | Subset / split | Target tokens |
 |---|---|---|--:|
-| Hindi | `ai4bharat/sangraha` | `verified` / `hin` | 5 B, 15 B |
+| Hindi | `ai4bharat/sangraha` | `verified` / `hin` | 5 B, 14.41 B |
 | Punjabi | `ai4bharat/sangraha` | `verified` / `pan` | 2.558 B |
 | Malayalam | `ai4bharat/sangraha` | `verified` / `mal` | 5.030 B |
-| Vietnamese | mixed blend *(composition not yet published)* | — | 5 B |
 | English replay | `nvidia/Nemotron-CC-v2.1` | `High-Quality-DQA` | varies by ratio |
+
+The Vietnamese CPT arms shown in the guidebook figures used an internal mixed
+blend whose composition is not published here; those arms are **not
+reproducible from this document**. Every other arm is.
 
 Tokenization uses the base model's own tokenizer (no extension in this track),
 with `add_bos: false`, `add_eos: true`, 64 train / 1 valid / 1 test shards,
@@ -121,9 +146,6 @@ re-tokenization needed.
 nemotron steps run data_prep/pretrain_prep  -c <target-prep-config> -b <profile>
 nemotron steps run data_prep/pretrain_prep  -c <replay-prep-config> -b <profile>
 
-# verify shard counts and token totals
-nemotron steps run data_prep/inspect_binidx -c <inspect-config>     -b <profile>
-
 # continued pretraining
 nemotron steps run pretrain/megatron_bridge -c <cpt-config>         -b <profile>
 ```
@@ -170,16 +192,24 @@ Per arm — replay notation is **English:target** (1:4 = 20% English):
 | Hindi 1:2 | 5 B | 33% | 1788 | 48 | 358 |
 | Hindi 1:4 | 5 B | 20% | 1490 | 30 | 298 |
 | Hindi 1:8 | 5 B | 11% | 1341 | 30 | 268 |
-| Hindi 15B 1:4 (WSD) | 15 B | 20% | 4294 | 30 | 859 |
-| Hindi 15B 1:4 (cosine) | 15 B | 20% | 4294 | 30 | — |
+| Hindi 15B 1:4 (WSD) | 14.41 B | 20% | 4294 | 30 | 859 |
+| Hindi 15B 1:4 (cosine) | 14.41 B | 20% | 4294 | 30 | — |
 
 ```
 total_tokens = target_tokens × (1 + english_share / (1 − english_share))
 train_iters  = total_tokens / (global_batch_size × sequence_length)
 ```
 
+The two `Hindi 15B` arms are named for their nominal 15 B budget; the 4,294
+iterations they actually ran are 14.41 B target tokens, and that is the figure
+quoted everywhere in the guidebook.
+
+Warmup is ~2% of `train_iters` for most arms. Two Hindi arms depart from that
+and are reported as run rather than silently normalised: `Hindi 1:2` used 48
+where the 2% rule gives 36, and `Hindi 1:8` used 30 where it gives 27.
+
 Checkpoint cadence: 610 iters for the ~2.5B arms, 1630 for the 5B arms, 200 for
-the 15B curve. Keep it identical across arms being compared.
+the longest curve. Keep it identical across arms being compared.
 
 ---
 
@@ -196,7 +226,7 @@ including startup. Multiply by 32 for GPU-hours.
 | 5B target, 1:8 | 1341 | ~11.2 h | ~360 |
 | 5B target, 1:4 | 1490 | ~12.4 h | ~400 |
 | 5B target, 1:1 | 2384 | ~19.9 h | ~635 |
-| 15B target, 1:4 | 4294 | ~35.8 h | ~1145 |
+| 14.41B target, 1:4 | 4294 | ~35.8 h | ~1145 |
 
 A full four-ratio grid at a 5B target budget is roughly **1,900 GPU-hours**.
 Data prep adds a few CPU-hours per corpus; evaluation adds ~1 GPU-hour per
@@ -210,16 +240,18 @@ Checkpoints are Megatron distributed format (`iter_{N:07d}`). Serve with the
 same parallelism used for training (TP 4 × EP 8, PP 1, ETP 1) and evaluate over
 HTTP.
 
-| Benchmark | Shots | Measures |
-|---|---|---|
-| MILU (hi / pa / ml / en) | 5 | target-language quality |
-| VMLU (vi) | — | target-language quality |
-| MMLU-ProX (en) | — | retained capability |
-| ARC-Challenge | 25 | retained capability |
-| HellaSwag | — | retained capability |
+| Benchmark | Harness | Shots | Measures |
+|---|---|---|---|
+| MILU (hi / pa / ml / en) | lm-evaluation-harness | 5 | target-language quality |
+| VMLU (vi) | lm-evaluation-harness | — | target-language quality |
+| MMLU-ProX (en) | NeMo-Evaluator | — | retained capability |
+| ARC-Challenge | NeMo-Evaluator | 25 | retained capability |
+| HellaSwag | NeMo-Evaluator | — | retained capability |
 
-Scores are harness-dependent: record which harness produced each number and
-compare only within one.
+**Scores are not comparable across harnesses.** The same checkpoint can differ
+by tens of points between two harnesses on one benchmark, because prompt
+construction, normalisation and scoring all differ. Record which harness
+produced every number and compare only within one.
 
 ---
 
@@ -233,7 +265,8 @@ The pipeline is language-agnostic; four things change.
    budget is the corpus and `train_iters` follows from it; above that, choose a
    budget and subset.
 3. **Iterations** — recompute per ratio with the formula above. Warmup ≈ 2% of
-   `train_iters`, WSD decay ≈ 20%.
+   `train_iters`, WSD decay ≈ 20%. The 2% figure is the recommendation; two
+   arms in the table above ran hand-set warmups.
 4. **Benchmarks** — substitute a target-language benchmark for MILU/VMLU. Keep
    the English retention set unchanged so retention stays comparable.
 

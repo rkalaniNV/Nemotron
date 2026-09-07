@@ -139,6 +139,10 @@ Always compare with the matching base checkpoint and identical harness settings.
 | 10B | 60.89 | **61.13** | 63.73 | **64.77** |
 | 15B | **61.50** | 61.41 | 63.53 | **65.12** |
 
+Row labels are nominal token budgets. The Hindi table below is labelled with
+the token counts the runs actually consumed, so its top row reads 14.41B rather
+than 15B.
+
 ### Observed Hindi trajectory
 
 | Target tokens | WSD MILU-hi | Cosine MILU-hi | WSD ProX-en | Cosine ProX-en |

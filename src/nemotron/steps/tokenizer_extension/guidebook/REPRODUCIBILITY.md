@@ -2,9 +2,14 @@
 
 The data, pipeline and settings behind the results in this guidebook.
 
+This is a **settings reference**, not a turnkey replication bundle. It gives
+the datasets, the pipeline and every setting that shapes the result — enough to
+re-run the method and reproduce the reported *trends*. It does not ship dataset
+revision pins, run identifiers, or the scripts behind the figures, so
+individual numbers will not reproduce digit-for-digit.
+
 Cluster-specific values — scheduler profiles, mount points, output paths — are
-site configuration; substitute your own. Everything that affects the result is
-given explicitly.
+site configuration; substitute your own.
 
 **Contents:** [Quick start](#quick-start) · [Hardware](#hardware) ·
 [Data](#data) · [Pipeline](#pipeline) · [Settings](#settings) ·
@@ -98,17 +103,44 @@ comparisons are only valid at a matched budget.
 |---|---|
 | Base model | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16`, bfloat16 |
 | `arm` | `add` or `replace` — matches `extend` |
-| `method` | `subword`, `focus`, `hfdefault`, `meanconst` |
-| Averaging (input / output) | `uniform`, `char_weighted`, `max_char`, `bert_weighted` — set independently per side |
-| Auxiliary encoder | MuRIL for Indic, XLM-R otherwise — must cover the target language |
-| Temperature | 0.1 |
+| `method` | `baseline`, `subword`, or `focus` — the only three the step accepts |
+| `subword.{input,output}_averaging` | `uniform`, `char_weighted`, `max_char`, `bert_weighted`, `gemma_weighted` — set independently per side |
+| Auxiliary encoder | MuRIL for Indic, XLM-R otherwise — must cover the target language; leave `bert_model` unset and let `language:` resolve it |
+| `subword.temperature` | 0.1 (used only by `bert_weighted` / `gemma_weighted`) |
 | Norm correction | input on, output off |
+
+The guidebook figures label the initialization arms with short experiment
+names. Those are **not** config values; this is what each one is:
+
+| Figure label | Config |
+|---|---|
+| `hfdefault` | `method: baseline` with `baseline.mode: hf_default` |
+| `meanconst` | `method: subword` with both averagings `uniform` |
+| `bert` | `method: subword` with `bert_weighted` on one or both sides |
+| `focus` | `method: focus` (needs a fastText vector file) |
+
+```yaml
+# meanconst, the default: mean of each new token's base-vocabulary subwords
+method: subword
+arm: add
+language: hindi
+subword:
+  input_averaging: uniform
+  output_averaging: uniform
+  input_norm_correction: true
+  output_norm_correction: false     # on risks LM-head over-confidence
+```
 
 **`evaluate` / `eval_init`**
 
-Fertility runs over the full held-out corpus. BPB uses `max_docs: 3000`,
-`max_tokens: 1,000,000`, `max_length: 2048` — set both caps so every model is
-scored over the same text.
+Fertility runs over the full held-out corpus.
+
+BPB uses `max_docs: 3000` and `max_length: 2048`. **Cap documents, never
+tokens.** `max_docs` is tokenizer-independent, so every model sees the same
+text; a binding `max_tokens` stops each model at a different document, and a
+more efficient tokenizer would then be scored on *more* text than the base —
+which is exactly the comparison BPB exists to make fair. Leave `max_tokens`
+unset (or set it high enough never to bind) for any cross-tokenizer run.
 
 ---
 
