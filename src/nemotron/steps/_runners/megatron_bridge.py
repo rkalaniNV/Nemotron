@@ -24,8 +24,10 @@ All three step.py wrappers go through the same pipeline:
        else finetune from a Megatron ``pretrained_checkpoint``, else build from
        HF weights via AutoBridge. Side-effects on ``cfg.checkpoint`` are explicit
        YAML knobs, not implicit.
-    5. (Optional) Apply PEFT via ``default_peft_config`` from the YAML
-       ``peft:`` block.
+    5. (Optional) Apply PEFT from the YAML ``peft:`` block. ``default_peft_config``
+       lives in ``recipes.utils.finetune_utils`` on older Megatron-Bridge and
+       in ``recipes.utils.dataset_utils`` on nemo:26.08 / MB 0c565c9+; if
+       neither helper exists, construct ``LoRA`` / ``DoRA`` directly.
     6. Apply ``dataset:`` either as a normal recipe override (pretrain) or
        translate it into ``FinetuningDatasetConfig`` (SFT-style steps).
     7. Hand off to the entry point (``finetune`` / ``pretrain``).
@@ -35,6 +37,7 @@ Each step.py picks which features to enable via the runner's flags.
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
@@ -182,13 +185,58 @@ def _maybe_load_hf_weights(cfg: Any, container: dict[str, Any]) -> None:
 # PEFT
 # =============================================================================
 
+# Older Megatron-Bridge (nemo:26.04 / Nano containers) keeps the helper in
+# finetune_utils. The 2026-07 recipe refactor (nemo:26.08, MB 0c565c9) moved
+# it to dataset_utils. Direct LoRA/DoRA construction is the last resort.
+_PEFT_HELPER_MODULES = (
+    "megatron.bridge.recipes.utils.finetune_utils",
+    "megatron.bridge.recipes.utils.dataset_utils",
+)
+
+
+def _fallback_peft_config(peft_scheme: Any, **kwargs: Any) -> Any:
+    """Build LoRA/DoRA when recipe helpers are absent (nemo:26.08 public API)."""
+    if peft_scheme is None:
+        return None
+    if not isinstance(peft_scheme, str):
+        return peft_scheme
+    scheme = peft_scheme.lower()
+    if scheme in {"none", ""}:
+        return None
+    if scheme == "lora":
+        from megatron.bridge.peft.lora import LoRA
+
+        return LoRA(**kwargs)
+    if scheme == "dora":
+        from megatron.bridge.peft.dora import DoRA
+
+        return DoRA(**kwargs)
+    if scheme in {"canonical_lora", "canonical-lora"}:
+        from megatron.bridge.peft.canonical_lora import CanonicalLoRA
+
+        return CanonicalLoRA(**kwargs)
+    raise ValueError(f"Unknown PEFT scheme: {peft_scheme}. Supported: 'lora', 'dora', 'canonical_lora'.")
+
+
+def _import_default_peft_config() -> Callable[..., Any]:
+    """Resolve ``default_peft_config`` across Megatron-Bridge recipe layouts."""
+    for module_name in _PEFT_HELPER_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        helper = getattr(module, "default_peft_config", None)
+        if callable(helper):
+            return helper
+    return _fallback_peft_config
+
 
 def _maybe_apply_peft(cfg: Any, container: dict[str, Any]) -> None:
     """Build a PEFT config from the YAML ``peft:`` block when present.
 
     The block is forwarded to Megatron-Bridge's ``default_peft_config`` via
-    its ``peft_scheme`` arg. Skip silently when ``peft.type``/``scheme`` is
-    null/false/missing.
+    its ``peft_scheme`` arg (or to ``LoRA`` / ``DoRA`` if that helper moved).
+    Skip silently when ``peft.type``/``scheme`` is null/false/missing.
     """
     block = container.get("peft")
     if not block:
@@ -198,8 +246,7 @@ def _maybe_apply_peft(cfg: Any, container: dict[str, Any]) -> None:
     if not scheme:
         return
 
-    from megatron.bridge.recipes.utils.finetune_utils import default_peft_config
-
+    default_peft_config = _import_default_peft_config()
     cfg.peft = default_peft_config(peft_scheme=scheme, **peft_kwargs)
 
 
