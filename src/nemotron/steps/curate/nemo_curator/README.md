@@ -1,8 +1,9 @@
 # Lightweight Text Curation (NeMo Curator)
 
 Use `curate/nemo_curator` to turn raw JSONL or a Hugging Face snapshot into
-`filtered_jsonl` that feeds translation, pretraining prep, or SFT prep. See
-`../README.md` for the broader curation journey.
+`filtered_jsonl` that feeds translation, pretraining prep, or SFT prep. It is the
+only step in this category that drops rows. See `../README.md` for the broader
+curation journey and the two-run measure-then-apply gate this step sits inside.
 
 Use this README for workflow and pitfalls; use `step.toml` for the exact
 artifact, parameter, strategy, and error manifest before editing configs or code.
@@ -107,7 +108,14 @@ For a Lepton execution profile, add `-r lepton_curate` and inspect logs with
 
 - Manifest: [step.toml](step.toml)
 - Runner: [step.py](step.py)
-- Configs: `config/default.yaml`, `config/tiny.yaml`
+- Configs for this step: `config/default.yaml`, `config/tiny.yaml`
+- Configs for the whole six-step flow, which also live here:
+  [`config/vi_c4_measure.yaml`](config/vi_c4_measure.yaml) (run 1) and
+  [`config/vi_c4_apply.yaml`](config/vi_c4_apply.yaml) (run 2). They are a
+  different shape — `corpus:`, `output_root:`, `steps:`, `approve:` — and are
+  read by `scripts/run_flow.py`, not by this step.
+- The other five steps: `ingest/`, `profile/`, `audit/`, `subset/`,
+  `decontamination/`, each with its own manifest and README.
 
 ## Guardrails
 

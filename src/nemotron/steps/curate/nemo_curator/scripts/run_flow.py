@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI for ``steps/curate/flow`` — one config, six steps, one command.
+"""Runner for the curate flow — one config, six steps, one command.
+
+Invoked as a module rather than through ``nemotron steps run``: the flow
+orchestrates the six registered steps and is not itself one of them.
 
 Running the curate category by hand means six configs plus a hand-written
 approved policy, and the paths between them have to agree. Two of those

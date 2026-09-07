@@ -88,7 +88,7 @@ def test_the_flow_declares_no_gpu() -> None:
 
 def test_the_default_config_covers_every_step_in_the_plan() -> None:
     """A step missing from the shipped config is one nobody knows they can enable."""
-    cfg = yaml.safe_load((STEP_DIR / "config" / "vi_c4.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load((STEP_DIR / "config" / "vi_c4_measure.yaml").read_text(encoding="utf-8"))
 
     assert set(cfg["steps"]) == {plan.key for plan in run_flow.STEP_ORDER}
 
@@ -698,9 +698,11 @@ def test_every_error_the_flow_raises_is_documented() -> None:
 # customer_support_tools. An example that stops parsing is worse than none: it
 # is the first thing a new user copies.
 
-# One shipped worked example. en_c4 and hi_sangraha were dropped with the
-# configs they read; vi_c4 is the corpus this pipeline was validated on.
-EXAMPLE_CONFIGS = ("vi_c4",)
+# One shipped worked example, in the two halves the pipeline actually runs in:
+# vi_c4_measure profiles the corpus, vi_c4_apply gates it on what that measured.
+# en_c4 and hi_sangraha were dropped with the configs they read; vi_c4 is the
+# corpus this pipeline was validated on.
+EXAMPLE_CONFIGS = ("vi_c4_measure", "vi_c4_apply")
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
@@ -714,16 +716,49 @@ def test_the_worked_example_derives_six_step_configs(name) -> None:
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
 def test_the_worked_example_is_reachable_by_name(name) -> None:
-    """``-c vi_c4`` resolves against the step's own config dir, so it must be there."""
+    """``-c vi_c4_measure`` resolves against the step's own config dir, so it must be there."""
     assert (STEP_DIR / "config" / f"{name}.yaml").is_file()
 
 
-@pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
-def test_the_worked_example_ships_unapproved(name) -> None:
+def test_the_measure_example_ships_unapproved() -> None:
     """A shipped config that filters on someone else's thresholds is the trap."""
-    cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load((STEP_DIR / "config" / "vi_c4_measure.yaml").read_text(encoding="utf-8"))
 
     assert cfg["approve"] is None
+    assert cfg["steps"]["profile"]["enabled"], "run 1 exists to measure"
+    assert cfg["steps"]["subset"]["quality_score_field"] is None, (
+        "no policy yet, so steps.filter writes no __<signal> column to stratify on"
+    )
+
+
+def test_the_apply_example_shows_a_filled_approve_block() -> None:
+    """The half a reader needs and cannot get from a config that ships approve: null."""
+    cfg = yaml.safe_load((STEP_DIR / "config" / "vi_c4_apply.yaml").read_text(encoding="utf-8"))
+
+    assert not cfg["steps"]["profile"]["enabled"], "measured already; this run applies"
+    thresholds = cfg["approve"]["thresholds"]
+    assert thresholds
+    assert cfg["approve"]["approver"] == "you@example.com", (
+        "a placeholder, never a real name: a shipped approval nobody made is the trap"
+    )
+    signals = {t["signal"] for t in thresholds}
+    assert {"min", "max"} <= {key for t in thresholds for key in t if key != "signal"}, (
+        "the example must show both bound directions, not just max"
+    )
+    column = cfg["steps"]["subset"]["quality_score_field"]
+    assert column.removeprefix("__") in signals, "quality_score_field must name a column the policy actually produces"
+    assert cfg["steps"]["filter"]["mode"] in ("annotate", "both"), (
+        "under mode 'filter' the scores are discarded and the column never lands"
+    )
+
+
+def test_the_two_halves_describe_the_same_corpus() -> None:
+    """The approval carries a corpus fingerprint; a drift here is what it refuses."""
+    measure = yaml.safe_load((STEP_DIR / "config" / "vi_c4_measure.yaml").read_text(encoding="utf-8"))
+    apply_ = yaml.safe_load((STEP_DIR / "config" / "vi_c4_apply.yaml").read_text(encoding="utf-8"))
+
+    assert measure["corpus"] == apply_["corpus"]
+    assert measure["output_root"] == apply_["output_root"]
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
@@ -735,7 +770,7 @@ def test_the_worked_example_names_a_language_and_explicit_pack_root(name) -> Non
     assert cfg["corpus"]["langpack_dir"] not in (None, "", "bundled")
 
 
-@pytest.mark.parametrize("name", ("vi_c4",))
+@pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
 def test_non_english_examples_require_an_external_pack_root(name) -> None:
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
 

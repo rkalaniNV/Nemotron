@@ -109,7 +109,7 @@ uv run nemotron steps run curate/ingest \
   id_prefix=c4vi- source=c4_vi
 ```
 
-Inside `curate/flow` it is the first step, and downstream steps read its output
+Inside the six-step flow it runs first, and downstream steps read its output
 automatically — set `steps.ingest.enabled: true` and point `corpus.input` at the
 raw files.
 

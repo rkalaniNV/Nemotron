@@ -1,39 +1,87 @@
 # Nemotron Curation
 
-Use this category to turn raw or third-party JSONL into a filtered corpus that
-can feed translation, pretraining prep, or SFT prep.
+Turn a raw corpus into a filtered one you can defend: what was removed, on whose
+threshold, and against which measurement.
 
-## Developer Journey
+## The shape of it
 
-1. Identify the raw source: local JSONL or a Hugging Face snapshot.
-2. Run the curate step with all optional filters disabled to verify the
-   reader/writer path.
-3. Add language, word-count, or domain filters one at a time.
-4. Inspect intermediate shards after each filter change — empty output usually
-   means a filter is too aggressive.
-5. Hand the filtered JSONL to translation or data prep.
+Curating with quality thresholds takes **two runs**, because the numbers you need
+do not exist until the corpus has been read. Run 1 measures. You choose. Run 2
+applies what you chose.
+
+```text
+raw parquet/JSONL
+  -> curate/ingest          mint a content-derived id, normalise to JSONL
+  -> curate/profile         RUN 1 ONLY: what would each threshold cost?
+                            -> profile_summary.md      read this
+                            -> candidate_policies.yaml approved: false
+  ---- a person picks thresholds and signs for them ----
+  -> curate/nemo_curator    the only step that drops rows
+  -> curate/audit           independently recount; refuse a silent loss
+  -> curate/subset          nested token-budget tiers
+  -> curate/decontamination overlap against a holdout
+```
+
+Nothing here approves a threshold on your behalf. A distribution says what a gate
+removes; it never says whether removing it is right.
 
 ## Steps
 
 | Need | Step | Input | Output |
 |---|---|---|---|
-| Lightweight JSONL filtering with optional language/word-count/domain gates | [`curate/nemo_curator`](nemo_curator/README.md) | `raw_jsonl` (or HF snapshot) | `filtered_jsonl` |
+| Raw parquet/JSONL in, curatable JSONL with a stable id out | [`curate/ingest`](nemo_curator/ingest/README.md) | `raw_jsonl` | `prepared_jsonl` |
+| Measure what each threshold would remove, before removing anything | [`curate/profile`](nemo_curator/profile/README.md) | `raw_jsonl` | `profile_report`, `candidate_policy` |
+| Language, length, domain and approved-policy gating | [`curate/nemo_curator`](nemo_curator/README.md) | `raw_jsonl` (or HF snapshot) | `filtered_jsonl` |
+| Prove no records went missing without being counted | [`curate/audit`](nemo_curator/audit/README.md) | `filtered_jsonl` | `audit_report` |
+| Nested token-budget tiers from one corpus | [`curate/subset`](nemo_curator/subset/README.md) | `filtered_jsonl` | `subset_jsonl` |
+| Overlap against an evaluation holdout | [`curate/decontamination`](nemo_curator/decontamination/README.md) | `filtered_jsonl` | `decontamination_report` |
 
-## Data And Artifact Flow
+Each is a registered step and runs on its own:
 
-```text
-raw_jsonl / HF snapshot
-  -> curate/nemo_curator (JsonlReader -> optional filters -> JsonlWriter)
-  -> filtered_jsonl
-  -> translate/* or data_prep/*
+```bash
+uv run nemotron steps run curate/profile -c default
 ```
 
-This category is intentionally lightweight. Deduplication, crawling, and full
-web extraction belong in dedicated NeMo Curator recipes, not this step.
+## Running all six from one config
+
+The flow derives every cross-step path, so a producer and its consumer cannot
+disagree, and refuses a misconfigured run before any step does work. It is a
+script rather than a registered step, so it takes a config path:
+
+```bash
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+  --config src/nemotron/steps/curate/nemo_curator/config/vi_c4_measure.yaml
+```
+
+Two worked examples show the two halves, and are meant to be copied:
+
+- [`vi_c4_measure.yaml`](nemo_curator/config/vi_c4_measure.yaml) — run 1, `approve: null`
+- [`vi_c4_apply.yaml`](nemo_curator/config/vi_c4_apply.yaml) — run 2, a filled approve block
+
+`--plan` prints the derived per-step configs without running anything.
+
+## Developer Journey
+
+1. Identify the raw source: local parquet/JSONL or a Hugging Face snapshot.
+2. Run `vi_c4_measure` with your paths. Nothing is gated on a policy nobody read.
+3. Read `output/profile/profile_summary.md`: the language composition, then each
+   signal's `gate at` table, then `Policy simulation` for what the gates cost
+   *together* — they overlap, so the union is smaller than the sum.
+4. Copy the `Approve block` section into `vi_c4_apply.yaml`, edit the thresholds,
+   and write down in `evidence` what you actually looked at.
+5. Delete `filtered_jsonl/`, `audit/` and `subset/`, then run `vi_c4_apply`.
+6. Check `flow_report.json`: `policy_applied`, `audit_passed`, and the warnings.
 
 ## Guardrails
 
-- Don't enable every filter on the first run.
-- Inspect intermediate JSONL before tightening filters.
-- Split very large input files before reading; OOMs usually come from
-  oversized partitions.
+- Profile the **unfiltered** corpus. Profiling the filtered output measures the
+  gates after they have already run.
+- `corpus.language` has no default. A wrong default silently produces wrong
+  numbers, which is worse than an error.
+- No production language pack is bundled. Only an opt-in English reference pack
+  ships; supply a reviewed pack root for anything else.
+- Gate one thing in one place. Declaring the same gate in both
+  `quality_filters` and the policy builds two stages for it, and the per-gate
+  breakdown is then discarded as `unattributed` rather than published wrong.
+- Empty or tiny output usually means a filter is too aggressive — read the
+  ledger's `filtered_by_reason` before changing thresholds.
