@@ -162,6 +162,26 @@ def _artifact_paths(root: Path) -> dict[str, str]:
     }
 
 
+def _thresholds_applied(manifest_path: str) -> int:
+    """How many thresholds the filter reports having applied, or 0.
+
+    The step records this in its own manifest whichever way the policy reached
+    it, so this is the one place that knows the answer for both routes. A
+    manifest that is missing or unreadable means the run did not get far enough
+    to have applied anything.
+    """
+    try:
+        with Path(manifest_path).open(encoding="utf-8") as handle:
+            document = json.load(handle)
+    except (OSError, ValueError):
+        return 0
+    policy_block = document.get("policy")
+    if not isinstance(policy_block, dict):
+        return 0
+    count = policy_block.get("thresholds_applied")
+    return int(count) if isinstance(count, int) and count > 0 else 0
+
+
 def _write_json_atomic(path: Path, document: dict[str, Any]) -> None:
     """Commit a JSON artifact without exposing an interrupted partial file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -887,10 +907,17 @@ def run(cfg: dict) -> dict[str, Any]:
 
     audit_result = next((r for r in results if r["step_id"] == "curate/audit"), None)
     filter_result = next((r for r in results if r["step_id"] == "curate/nemo_curator"), None)
-    # Presence of an approve block is not application. When steps.filter is
+    # What the filter actually did, read from the manifest it wrote, rather than
+    # what this flow promoted.
+    #
+    # Presence of an approve block is not application: when steps.filter is
     # disabled the policy is promoted and written and nothing runs it, and a
-    # report claiming otherwise is the specific lie this field would tell.
-    policy_applied = bool(cfg.get("approve") and filter_result and filter_result["status"] == "ok")
+    # report claiming otherwise is the specific lie this field would tell. But
+    # the converse lie is just as bad. A policy reaching the step through
+    # steps.filter.heuristic_filters.approved_policy is applied just as truly as
+    # one this flow promoted, and reporting false there tells a reader the corpus
+    # was never gated when thousands of documents were removed by thresholds.
+    policy_applied = bool(filter_result and filter_result["status"] == "ok" and _thresholds_applied(paths["manifest"]))
     report = {
         "schema_version": SCHEMA_VERSION,
         "step_id": "curate/flow",

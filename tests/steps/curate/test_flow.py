@@ -1345,3 +1345,28 @@ def test_a_corpus_the_run_will_download_is_not_refused_for_being_absent(tmp_path
     resolved, _, _ = run_flow.plan(cfg, dry_run=True)
 
     assert any(r.plan.key == "filter" and r.enabled for r in resolved)
+
+
+def test_policy_applied_reports_what_the_filter_did_not_what_the_flow_promoted(tmp_path) -> None:
+    """A policy can reach the filter without this flow promoting it.
+
+    steps.filter.heuristic_filters.approved_policy is a supported route — the
+    flow only refuses it when an approve block would promote a *different*
+    policy to the same place. Reporting policy_applied: false there tells a
+    reader the corpus was never gated while the filter was removing documents on
+    thresholds, which is the same lie the field exists to prevent, inverted.
+    """
+    manifest = tmp_path / "run_manifest.json"
+
+    manifest.write_text(json.dumps({"policy": {"status": "approved", "thresholds_applied": 2}}))
+    assert run_flow._thresholds_applied(str(manifest)) == 2
+
+    manifest.write_text(json.dumps({"policy": {"status": "unapproved", "thresholds_applied": 0}}))
+    assert run_flow._thresholds_applied(str(manifest)) == 0, "no thresholds is not application"
+
+    manifest.write_text(json.dumps({"input": {}}))
+    assert run_flow._thresholds_applied(str(manifest)) == 0, "a manifest without a policy block"
+
+    assert run_flow._thresholds_applied(str(tmp_path / "absent.json")) == 0, (
+        "a run that never wrote a manifest applied nothing"
+    )
