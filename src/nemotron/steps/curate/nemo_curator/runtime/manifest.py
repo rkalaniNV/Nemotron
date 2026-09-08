@@ -339,6 +339,25 @@ def write_manifest(path: str | Path, manifest: dict[str, Any]) -> Path:
     return destination
 
 
+class ManifestUnreadableError(ValueError):
+    """The manifest could not be read at all, as opposed to read and found wanting."""
+
+
 def read_manifest(path: str | Path) -> Any:
-    """Read a manifest without validating it, so an auditor can report on a bad one."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    """Read a manifest without validating it, so an auditor can report on a bad one.
+
+    Not validating is the point: the auditor decides what a bad manifest means.
+    But a missing file and a truncated one were raising OSError and
+    JSONDecodeError straight out of the audit, which reads as the tool crashing
+    rather than as the finding it is — and an audit that crashes on the artifact
+    it was pointed at is the one case it must handle.
+
+    Raised as one type so the caller can turn it into a finding without catching
+    every IO error the interpreter can produce.
+    """
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ManifestUnreadableError(f"{path}: cannot be read: {exc.strerror or exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ManifestUnreadableError(f"{path}: is not valid JSON: {exc}") from exc

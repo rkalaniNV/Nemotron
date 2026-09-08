@@ -53,7 +53,6 @@ import sys
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from glob import iglob
 from pathlib import Path
 from typing import Any, cast
 
@@ -364,22 +363,25 @@ def _stale_corpus_warnings(paths: dict[str, str]) -> list[str]:
 
 
 def _any_match(pattern: str | list[str]) -> bool:
-    """Whether a pattern matches at least one file, stopping at the first.
+    """Whether the corpus reference resolves to at least one file the steps read.
 
-    ``integrity.expand_inputs`` walks a directory tree, filters by extension and
-    sorts the result. Preflight only needs to know whether anything is there, and
-    it runs before every step, so it asks the cheaper question.
+    It must answer the same question ``integrity.expand_inputs`` answers, because
+    preflight exists to refuse a run the steps would refuse anyway — a preflight
+    that disagrees with the resolver is worse than none, and it disagreed in both
+    directions.
+
+    Too permissive: a directory was accepted when it merely had *something* in
+    it, so a folder holding only a README passed preflight and the step then
+    failed on an empty corpus. Too strict: the directory branch returned on the
+    first pattern instead of trying the rest, so `[empty_dir, real_dir]` reported
+    no match while the resolver found the files.
+
+    ``expand_inputs`` sorts and walks the whole tree where this only needs the
+    first hit. Preflight runs once per flow, against a path the run is about to
+    read in full, so that cost buys agreement — and this is the second time an
+    independent path resolver in this file has disagreed with the shared one.
     """
-    patterns = [pattern] if isinstance(pattern, str) else list(pattern)
-    for item in patterns:
-        candidate = Path(item)
-        if candidate.is_dir():
-            return any(candidate.iterdir())
-        if candidate.exists():
-            return True
-        if next(iglob(item, recursive=True), None) is not None:
-            return True
-    return False
+    return bool(integrity.expand_inputs(pattern))
 
 
 def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> list[str]:

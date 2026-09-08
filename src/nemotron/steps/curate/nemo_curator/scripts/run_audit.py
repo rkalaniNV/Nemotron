@@ -81,12 +81,21 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
         raise ConfigError(f"target_glob matched no files: {cfg.get('target_glob')!r}")
 
     declared_path = cfg.get("declared_manifest")
-    declared = run_manifest.read_manifest(declared_path) if declared_path else None
+    declared = None
+    unreadable: str | None = None
+    if declared_path:
+        try:
+            declared = run_manifest.read_manifest(declared_path)
+        except run_manifest.ManifestUnreadableError as exc:
+            # The artifact the audit was pointed at is missing or truncated. That
+            # is a finding about the run, not a failure of the auditor, and
+            # reporting it is the whole job.
+            unreadable = str(exc)
     if declared_path and not isinstance(declared, dict):
         # A manifest that is valid JSON but not an object would otherwise fail
         # with an AttributeError deep in the comparison, which reads as a crash
         # rather than as the finding it is.
-        declared = {"__malformed__": True}
+        declared = {"__malformed__": unreadable or "declared_manifest is not a JSON object"}
     source_field = _nested(declared, "output", "source_field") or cfg.get("source_field")
 
     want_digest = mode in ("digest", "all")
