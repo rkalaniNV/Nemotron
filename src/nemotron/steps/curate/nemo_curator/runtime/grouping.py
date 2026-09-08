@@ -250,7 +250,13 @@ def group_key(
     for name in cfg.fields:
         if name not in record:
             continue
-        if name in URL_FIELD_ALIASES:
+        if name != cfg.id_field and name in URL_FIELD_ALIASES:
+            # Classified by role, not by name. A corpus whose identifier column
+            # happens to be called `uri` or `link` had its ids run through
+            # canonical_url -- lowercased, scheme-stripped, query-trimmed -- so
+            # two distinct ids could collapse to one key, and the configured
+            # id_field was the one thing that should never be reinterpreted.
+            #
             # Every alias produces the same ``url:`` namespace, so a corpus that
             # renames the field still groups with one that does not.
             canonical = canonical_url(record[name])

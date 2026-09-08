@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import sys
 import types
 from dataclasses import dataclass
@@ -776,3 +777,72 @@ def test_an_overridden_policy_is_not_recorded_as_approved(tmp_path) -> None:
     # The flag alone is not an override: a policy meeting the contract is approved
     # whether or not the escape hatch was left open.
     assert curate_step._resolve_policy({"heuristic_filters": {}}).overridden is False
+
+
+def test_the_manifest_states_survive_an_empty_override_and_a_refusal(tmp_path) -> None:
+    """Three artifact-level defects, all of them a report saying the wrong thing.
+
+    An override with nothing to apply — the documented escape hatch points
+    approved_policy at candidate_policies.yaml, which carries `candidates` and no
+    `thresholds` — was recorded as plain "unapproved", indistinguishable from a
+    run that configured no policy at all.
+
+    A run refused for an unapproved policy wrote no manifest, because
+    emit_manifest re-resolved the same file and re-raised inside the failure
+    handler: the one failure most worth recording was the only one with no
+    record.
+
+    And "approved" never meant anyone approved — `approval` is optional in the
+    contract — so the method is now carried separately.
+    """
+    from nemotron.steps.curate.nemo_curator import step as curate_step
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
+
+    corpus = tmp_path / "in.jsonl"
+    corpus.write_text('{"id": "a", "text": "x"}\n')
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    def manifest_for(document: dict, **heuristics: object) -> dict:
+        policy = tmp_path / f"policy-{len(list(tmp_path.iterdir()))}.yaml"
+        policy.write_text(yaml.safe_dump(document))
+        cfg = {
+            "heuristic_filters": {"approved_policy": str(policy), **heuristics},
+            "output_dir": str(output_dir),
+            "input_glob": str(corpus),
+            "text_field": "text",
+            "id_field": "id",
+        }
+        try:
+            resolved = curate_step._resolve_policy(cfg, [str(corpus)])
+        except Exception:
+            resolved = None
+        written = tmp_path / f"manifest-{len(list(tmp_path.iterdir()))}.json"
+        curate_step.emit_manifest(
+            cfg, str(written), "t", completed=True, input_files=[str(corpus)], policy_resolution=resolved
+        )
+        return json.loads(written.read_text())["policy"]
+
+    from nemotron.steps.curate.nemo_curator.runtime import integrity
+
+    fingerprint = integrity.corpus_fingerprint([str(corpus)], "text", "id")
+    base = {
+        "schema_version": 1,
+        "signals_impl_version": signal_registry.IMPL_VERSION,
+        "corpus": {"fingerprint": fingerprint},
+        "profile_digest": "sha256:" + "0" * 64,
+    }
+
+    # An override that gates nothing is still an override.
+    empty = manifest_for({**base, "approved": False, "candidates": [{"signal": "x"}]}, allow_unvalidated_policy=True)
+    assert empty["status"] == "override_unvalidated"
+    assert empty["thresholds_applied"] == 0
+
+    # A policy that cannot be resolved at all still produces a manifest.
+    refused = manifest_for({"schema_version": 1, "approved": False, "thresholds": []})
+    assert refused["status"] == "unresolved"
+    assert "could not be resolved" in refused["note"]
+
+    # "approved" is about the schema; the signature is recorded separately.
+    unsigned = manifest_for({**base, "approved": True, "thresholds": [{"signal": "numbers_ratio", "max": 0.25}]})
+    assert unsigned["approval_declared"] is None

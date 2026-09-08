@@ -272,11 +272,17 @@ def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -
             declared_pack[key] = block[key]
 
     thresholds = [dict(entry) for entry in document.get("thresholds") or []]
+    approval_block = document.get("approval")
     identity = {
         "policy_digest": f"sha256:{hashlib.sha256(policy_bytes).hexdigest()}",
         "profile_digest": document.get("profile_digest"),
         "signals_impl_version": declared_impl,
         "corpus_fingerprint": actual_fingerprint,
+        # Carried so the manifest can say whether anyone claimed to approve this,
+        # separately from whether it met the schema. `approval` is optional in the
+        # contract -- deliberately, since a name in YAML proves nothing a machine
+        # can check -- so "approved" alone over-claims when the block is absent.
+        "approval_method": (approval_block or {}).get("method") if isinstance(approval_block, dict) else None,
         "thresholds": thresholds,
         **({"langpack_content_hash": declared_pack["content_hash"]} if declared_pack.get("content_hash") else {}),
     }
@@ -749,6 +755,7 @@ def run(cfg: dict) -> dict[str, Any]:
                 stage_counts=stage_counts,
                 input_files=input_files,
                 identity_config=identity_config,
+                policy_resolution=policy_resolution,
             )
         if ledger_path:
             emit_ledger(
@@ -787,6 +794,7 @@ def run(cfg: dict) -> dict[str, Any]:
                     completed=False,
                     input_files=input_files,
                     identity_config=identity_config,
+                    policy_resolution=policy_resolution,
                 )
             except Exception as exc:  # noqa: BLE001 - preserve the original pipeline failure
                 print(f"curate/nemo_curator: WARNING could not write failed manifest: {exc}")
@@ -985,6 +993,7 @@ def emit_manifest(
     stage_counts: dict[str, int] | None = None,
     input_files: list[str] | None = None,
     identity_config: dict[str, Any] | None = None,
+    policy_resolution: PolicyResolution | None = None,
 ) -> None:
     """Write the run manifest after the pipeline's own write barrier.
 
@@ -1044,21 +1053,57 @@ def emit_manifest(
     # design — the artifact looks exactly like a released one. Naming the state
     # is cheaper than renaming the directory and does not disturb the paths the
     # flow derives for the steps downstream.
-    resolved = _resolve_policy(cfg)
+    # Reuse the resolution the run already made. Re-resolving from disk read the
+    # policy a second time and re-globbed the corpus without the input_files it
+    # was handed, so a run whose input_glob covered its own output_dir raised
+    # here and was reported as failed after succeeding. And when the run failed
+    # *because* the policy was refused, re-resolving raised the same error inside
+    # the failure handler -- so the one failure that most needs a manifest got
+    # none at all.
+    resolved = policy_resolution
+    unresolvable: str | None = None
+    if resolved is None:
+        try:
+            resolved = _resolve_policy(cfg, input_files)
+        except Exception as exc:  # noqa: BLE001 - the manifest records this, it does not raise it
+            resolved = PolicyResolution([], {}, [], {})
+            unresolvable = str(exc)
     thresholds = resolved.thresholds
     document["policy"] = {
-        "status": ("override_unvalidated" if resolved.overridden else "approved") if thresholds else "unapproved",
+        # The override is tested before the count. A policy carried past the
+        # contract with nothing to apply -- the documented escape hatch points
+        # approved_policy at candidate_policies.yaml, which has `candidates` and
+        # no `thresholds` -- was recorded as plainly "unapproved", which reads as
+        # "no policy was configured" rather than "one was, it was overridden, and
+        # it turned out to gate nothing".
+        "status": (
+            "unresolved"
+            if unresolvable
+            else "override_unvalidated"
+            if resolved.overridden
+            else "approved"
+            if thresholds
+            else "unapproved"
+        ),
         "thresholds_applied": len(thresholds),
+        # What the artifact can actually support. The gate rests on the corpus
+        # fingerprint and the scorer version, not on a name: `approval` is
+        # optional in the contract, so "approved" means the policy met the
+        # schema, never that a person signed it. Recording the declared method
+        # separates the two for a reader who has only this file.
+        "approval_declared": (resolved.identity or {}).get("approval_method"),
         "note": (
-            (
-                "Thresholds applied under allow_unvalidated_policy: the policy did not meet the "
-                "approval contract and ran anyway. The run log names which fields were unmet. "
-                "Treat this corpus as an experiment, not a release."
+            f"The configured policy could not be resolved, so none was applied: {unresolvable}"
+            if unresolvable
+            else (
+                f"{len(thresholds)} threshold(s) applied under allow_unvalidated_policy: the "
+                "policy did not meet the approval contract and ran anyway. The run log names "
+                "which fields were unmet. Treat this corpus as an experiment, not a release."
                 if resolved.overridden
                 else "Thresholds from an approved policy, checked against a fingerprint of the "
                 "corpus they were measured on."
             )
-            if thresholds
+            if thresholds or resolved.overridden
             else "No approved policy was applied. Any filtering came from configuration "
             "written by hand, which carries no record of the corpus it was measured on. "
             "Treat this corpus as a measurement, not as a release."

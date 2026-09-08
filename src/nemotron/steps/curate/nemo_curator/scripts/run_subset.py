@@ -538,11 +538,24 @@ def _run(cfg: dict, started_at: str, output_dir: Path, prepared: tuple[list[str]
         },
         "tiers": tiers,
         "nesting_verified": True,
+        # Tiers this run neither wrote nor removed. Narrowing the cleanup to
+        # this run's own tiers was right -- deleting another run's output is
+        # not this step's business -- but it leaves a directory holding tiers
+        # that do not nest with each other, described by a report whose
+        # interpretation says they nest by construction. That claim is about
+        # `tiers` above, so name what it does not cover.
+        "foreign_tiers": sorted(
+            entry.name
+            for entry in output_dir.glob("budget_*")
+            if entry.name not in {Path(t["output"]).name for t in tiers}
+        ),
         "warnings": list(plan.warnings),
         "interpretation": (
             "Tiers nest by construction: each is a prefix of one fixed per-stratum ordering. "
             "Tokens delivered are at most the budget; any difference is reported as "
-            "token_shortfall and is never made up from another stratum."
+            "token_shortfall and is never made up from another stratum. The claim covers "
+            "`tiers` only -- any directory listed under `foreign_tiers` was written by a "
+            "different run and nests with nothing here."
         ),
     }
     report_tmp = output_dir / ".subset_report.json.tmp"
