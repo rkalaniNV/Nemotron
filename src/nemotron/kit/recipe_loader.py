@@ -96,7 +96,5 @@ def extract_recipe_config(
         return default_target, {}
 
     target = str(recipe_dict.pop("_target_", default_target))
-    # Overlays that swap ``_target_`` null inherited kwargs (a zero-arg recipe
-    # would TypeError if Nano's ``packed_sequence`` / ``seq_length`` leaked in).
-    kwargs = {key: value for key, value in recipe_dict.items() if value is not None}
+    kwargs = recipe_dict
     return target, kwargs
