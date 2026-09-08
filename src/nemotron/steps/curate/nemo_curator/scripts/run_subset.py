@@ -52,7 +52,7 @@ import json
 import logging
 import shutil
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -307,15 +307,33 @@ def scan(cfg: dict, paths: list[str], counter: Any) -> tuple[list[subset.ScanRow
     return rows, stats
 
 
-def _reset_output_artifacts(output_dir: Path) -> None:
-    """Remove stale or partial artifacts owned by this step."""
+def _tier_dir_names(cfg: dict) -> list[str]:
+    """The tier directories this run will write, named from the config alone.
+
+    The unit is decided by whether a tokenizer is configured, so the names are
+    known before anything is read -- which is what lets the cleanup below be
+    scoped to this run instead of to the glob.
+    """
+    unit = "words" if cfg.get("tokenizer") in (None, False) else "tokens"
+    return [f"budget_{budget}_{unit}" for budget in cfg.get("token_budgets") or []]
+
+
+def _reset_output_artifacts(output_dir: Path, tier_names: Sequence[str]) -> None:
+    """Remove the artifacts THIS run owns, and only those.
+
+    Globbing ``budget_*`` swept away tiers belonging to other runs: a directory
+    holding budget_500000000_tokens from last week is not stale merely because
+    today's config asks for budget_2000000_tokens. The names come from the
+    config, so a tier this run will not write is a tier it must not delete.
+    """
     for name in ("plan.json", "subset_report.json", ".plan.json.tmp", ".subset_report.json.tmp"):
         (output_dir / name).unlink(missing_ok=True)
-    for path in output_dir.glob("budget_*"):
+    for name in tier_names:
+        path = output_dir / name
         if path.is_dir():
             shutil.rmtree(path)
-        else:
-            path.unlink(missing_ok=True)
+        elif path.exists():
+            path.unlink()
 
 
 def main() -> None:
@@ -361,11 +379,12 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
 
     output_dir = Path(raw_output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    _reset_output_artifacts(output_dir)
+    tier_names = _tier_dir_names(cfg)
+    _reset_output_artifacts(output_dir, tier_names)
     try:
         return _run(cfg, started_at, output_dir)
     except BaseException:
-        _reset_output_artifacts(output_dir)
+        _reset_output_artifacts(output_dir, tier_names)
         raise
 
 

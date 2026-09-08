@@ -540,3 +540,33 @@ def test_a_failed_write_leaves_no_partial_tiers_or_success_reports(tmp_path, mon
     assert not (output / "plan.json").exists()
     assert not (output / "subset_report.json").exists()
     assert not list(output.glob("budget_*"))
+
+
+def test_cleanup_removes_this_run_s_tiers_and_leaves_the_rest(tmp_path) -> None:
+    """`budget_*` swept away tiers this run was never going to write.
+
+    A directory holding budget_500000000_tokens from last week is not stale
+    merely because today's config asks for budget_2000000_tokens. The tier names
+    follow from the config alone — the unit is decided by whether a tokenizer is
+    set — so the cleanup can name what it owns instead of globbing for it.
+    """
+    for name in ("budget_500000000_tokens", "budget_2000000_tokens", "budget_9_words"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "subset.jsonl").write_text("{}\n")
+    (tmp_path / "plan.json").write_text("{}")
+
+    cfg = {"token_budgets": [2000000], "tokenizer": {"name": "x", "revision": "y"}}
+    assert run_subset._tier_dir_names(cfg) == ["budget_2000000_tokens"]
+
+    run_subset._reset_output_artifacts(tmp_path, run_subset._tier_dir_names(cfg))
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["budget_500000000_tokens", "budget_9_words"]
+
+
+def test_the_tier_unit_follows_the_tokenizer(tmp_path) -> None:
+    """Names must match what _run writes, or cleanup silently misses them."""
+    assert run_subset._tier_dir_names({"token_budgets": [7], "tokenizer": None}) == ["budget_7_words"]
+    assert run_subset._tier_dir_names({"token_budgets": [7]}) == ["budget_7_words"]
+    assert run_subset._tier_dir_names({"token_budgets": [7], "tokenizer": {"name": "n", "revision": "r"}}) == [
+        "budget_7_tokens"
+    ]
