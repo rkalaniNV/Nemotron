@@ -1666,3 +1666,36 @@ def test_a_decontaminated_corpus_the_run_will_not_read_is_named(tmp_path, caplog
 
     _, _, warnings = run_flow.plan(cfg)
     assert any("BEFORE decontamination" in w and str(stale) in w for w in warnings), warnings
+
+
+def test_subset_reads_the_decontaminated_file_and_not_the_directory(tmp_path) -> None:
+    """A glob here would feed subset the holdout it is protecting.
+
+    curate/decontamination's work_dir is derived as output_dir/cache, so with
+    similarity enabled the step writes cache/union/union.jsonl beneath its own
+    output directory — the train and holdout splits merged, with ids rewritten.
+    A `decontaminated/**/*.jsonl` spelling, which is how every other corpus in
+    this flow is addressed, would therefore put the evaluation split into the
+    training tiers. The artifact is one named file for that reason.
+    """
+    root = tmp_path / "out"
+    paths = run_flow._artifact_paths(root)
+    assert paths["decontaminated"] == str(root / "decontaminated" / "train_decontaminated.jsonl")
+    assert not any(character in paths["decontaminated"] for character in "*?["), (
+        "the decontaminated corpus is addressed as a file, never as a pattern"
+    )
+
+    resolved, _ = run_flow.derive(
+        {
+            "corpus": {"input": str(tmp_path / "raw" / "*.jsonl"), "text_field": "text", "id_field": "id"},
+            "output_root": str(root),
+            "steps": {"decontamination": {"enabled": True}, "subset": {"enabled": True}},
+        }
+    )
+    subset = next(r for r in resolved if r.plan.key == "subset")
+    assert subset.config["input_glob"] == paths["decontaminated"]
+
+    work_dir = next(r for r in resolved if r.plan.key == "decontamination").config["work_dir"]
+    assert Path(work_dir).is_relative_to(root / "decontaminated"), (
+        "the premise of this test: the step's scratch space lives under its output directory"
+    )
