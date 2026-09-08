@@ -70,6 +70,18 @@ _EXCLUDE_SUFFIXES = (
     ".onnx",
     ".h5",
     ".hdf5",
+    # Documentation assets. Guidebook figures live beside the docs they
+    # illustrate, inside src/, but nothing at run time reads them. Shipping them
+    # inflates the tarball, and an oversized payload is rejected after the job id
+    # is handed back -- the job then exists in `lep job list` but has no
+    # scheduler entry, no events and no replicas, so it never starts.
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".pdf",
 )
 _SCOPED_COLLECTIONS = frozenset({"recipes", "steps"})
 _DEFAULT_TARBALL_WARN_BYTES = 1_000_000
