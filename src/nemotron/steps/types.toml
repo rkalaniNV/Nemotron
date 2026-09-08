@@ -32,6 +32,9 @@ description = "Megatron bin/idx tokenized data with blend.json"
 description = "Megatron distributed checkpoint (sharded across TP/PP)"
 convert_to = { checkpoint_hf = "convert/megatron_to_hf" }
 
+[tokenizer]
+description = "Extended tokenizer directory (vocab + merges) produced by tokenizer_extension/extend"
+
 [checkpoint_hf]
 description = "HuggingFace safetensors format"
 convert_to = { checkpoint_megatron = "convert/hf_to_megatron" }

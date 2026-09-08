@@ -30,6 +30,10 @@ env.bak/
 venv.bak/
 .venv/
 
+# This is a source package, not a virtual environment.
+!src/nemotron/steps/env/
+!src/nemotron/steps/env/**
+
 # UV lock files in recipe stages are tracked for reproducible builds
 
 # IDEs
@@ -133,3 +137,6 @@ skills/*/evals/tier3-reports/
 
 # Curator model cache, written at run time by a step reading a relative path.
 cache/
+
+# Guidebook figure generators are kept local, not shipped with the docs.
+src/nemotron/steps/*/guidebook/generate_assets.py

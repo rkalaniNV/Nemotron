@@ -37,6 +37,7 @@ CATEGORY_TITLES = {
     "rl": "Reinforcement Learning",
     "sft": "Supervised Fine-Tuning",
     "sdg": "Synthetic Data Generation",
+    "tokenizer_extension": "Tokenizer Extension",
     "translate": "Translation",
 }
 VALID_PATTERN_CONFIDENCE = {"high", "medium", "experimental"}
