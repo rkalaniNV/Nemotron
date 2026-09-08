@@ -20,8 +20,8 @@ description = """Measure quality-signal distributions on a target corpus and rep
 tags = ["curate", "profiling", "quality"]
 
 [[consumes]]
-type = "filtered_jsonl"
-description = "Corpus to profile. Typically curate/nemo_curator output with filters disabled."
+type = "raw_jsonl"
+description = "The corpus to profile, BEFORE any filtering. Profiling filtered output measures the gates after they have already removed what they remove, which is the one measurement this step exists to avoid. prepared_jsonl is accepted here too, and is what the flow passes when curate/ingest runs."
 
 [[produces]]
 type = "profile_report"

@@ -24,8 +24,8 @@ type = "filtered_jsonl"
 description = "The training split to decontaminate, and the held-out split to protect. Both carry a stable document id."
 
 [[produces]]
-type = "filtered_jsonl"
-description = "train_decontaminated.jsonl: the training split with overlapping documents removed. The holdout is never written."
+type = "decontaminated_jsonl"
+description = "train_decontaminated.jsonl: the training split with overlapping documents removed. The holdout is never written. Declared apart from filtered_jsonl so a step that must run after this one can say so: the two corpora differ by exactly the documents this step was asked to remove."
 
 [[produces]]
 type = "decontamination_report"

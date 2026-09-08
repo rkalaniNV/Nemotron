@@ -15,6 +15,7 @@ clean-looking result from a broken configuration is worse than six commands.
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -1393,3 +1394,83 @@ def test_the_flow_report_distinguishes_an_override_from_an_approval(tmp_path) ->
     manifest.write_text(json.dumps({"input": {}}))
     assert run_flow._policy_status(str(manifest)) is None, "a manifest without a policy block"
     assert run_flow._policy_status(str(tmp_path / "absent.json")) is None
+
+
+# -- the documented cascade ---------------------------------------------------
+def _table_cells(row: str) -> list[str]:
+    """Markdown row to cells, honouring the escaped pipe that separates alternatives."""
+    return [cell.strip().replace("\\|", "|") for cell in re.split(r"(?<!\\)\|", row.strip().strip("|"))]
+
+
+def _named_types(cell: str) -> set[str]:
+    return set(re.findall(r"`([a-z_]+)`", cell))
+
+
+def _compatible(candidate: str, declared: set[str], type_defs: dict) -> bool:
+    """Whether a type the README names is one a step declaring `declared` accepts."""
+    seen, stack = set(), [candidate]
+    while stack:
+        current = stack.pop()
+        if current in declared:
+            return True
+        parents = type_defs.get(current, {}).get("is_a", [])
+        for parent in [parents] if isinstance(parents, str) else parents:
+            if parent not in seen:
+                seen.add(parent)
+                stack.append(parent)
+    return False
+
+
+def test_the_readme_steps_table_matches_what_the_steps_declare() -> None:
+    """Three descriptions of the same cascade disagreed; this leaves one.
+
+    The category README's table, the six step.toml manifests, and STEP_ORDER
+    were written separately and drifted separately — the table named
+    `audit_report`, `candidate_policy` and `subset_jsonl`, none of which any
+    manifest declares or types.toml registers, and listed the steps in an order
+    the flow does not run them in. A table nobody checks is a fourth opinion, so
+    it is parsed and compared rather than proof-read.
+
+    A type the README names that the manifest does not is accepted when it is
+    reachable by `is_a` from one that is: that is what compatibility means, and
+    naming `prepared_jsonl` beside `raw_jsonl` is the whole reason the distinct
+    type exists.
+    """
+    steps_root = STEP_DIR.parent.parent
+    type_defs = tomllib.loads((steps_root / "types.toml").read_text(encoding="utf-8"))
+    manifests = {
+        data["step"]["id"]: data
+        for path in sorted(STEP_DIR.parent.rglob("step.toml"))
+        for data in [tomllib.loads(path.read_text(encoding="utf-8"))]
+        if data.get("step", {}).get("id")
+    }
+
+    readme = (STEP_DIR.parent / "README.md").read_text(encoding="utf-8")
+    rows = [
+        line
+        for line in readme.split("## Steps", 1)[1].splitlines()
+        if line.startswith("|") and "curate/" in line and "---" not in line
+    ]
+    assert len(rows) == len(run_flow.STEP_ORDER), f"the table describes {len(rows)} of six steps"
+
+    documented_order: list[str] = []
+    for row in rows:
+        cells = _table_cells(row)
+        step_id = re.search(r"`(curate/[a-z_]+)`", cells[1]).group(1)
+        documented_order.append(step_id)
+        declared = manifests[step_id]
+
+        for section, cell in (("consumes", cells[2]), ("produces", cells[3])):
+            actual = {entry["type"] for entry in declared.get(section, [])}
+            documented = _named_types(cell)
+            missing = actual - documented
+            assert not missing, f"{step_id} declares {section} {sorted(missing)}; the README omits it"
+            for extra in documented - actual:
+                assert _compatible(extra, actual, type_defs), (
+                    f"the README says {step_id} {section} {extra!r}, which is not "
+                    f"compatible with anything it declares ({sorted(actual)})"
+                )
+
+    assert documented_order == [plan.step_id for plan in run_flow.STEP_ORDER], (
+        "the table must list the steps in the order the flow runs them"
+    )

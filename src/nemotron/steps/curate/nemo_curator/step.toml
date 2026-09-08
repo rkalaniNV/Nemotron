@@ -21,11 +21,24 @@ tags = ["curate", "nemo-curator", "jsonl", "ray", "huggingface"]
 
 [[consumes]]
 type = "raw_jsonl"
-description = "Raw local JSONL records, or a Hugging Face dataset snapshot materialized before Curator reads input_glob."
+description = "Raw local JSONL records, or a Hugging Face dataset snapshot materialized before Curator reads input_glob. prepared_jsonl is accepted too, and is what the flow passes when curate/ingest runs."
+
+[[consumes]]
+type = "filter_policy"
+required = false
+description = "The approved policy whose thresholds this step applies. Optional: without one the step still runs its language, length and domain gates, and the manifest records that no thresholds were applied. A policy that is not approved is refused rather than applied."
 
 [[produces]]
 type = "filtered_jsonl"
 description = "Filtered JSONL records suitable for downstream translation, pretraining prep, or SFT prep. Language/domain annotations are present only when those filters are enabled."
+
+[[produces]]
+type = "curation_manifest"
+description = "run_manifest.json: per-shard row counts and digests, the policy applied and its approval state, and completed_at written only at the write barrier. curate/audit compares the corpus against this and can claim completeness only when it is present."
+
+[[produces]]
+type = "curation_ledger"
+description = "curation_ledger.json: how many documents entered, how many left, and which gate rejected each one. What lets curate/audit attribute loss to a cause instead of only detecting it."
 
 [[parameters]]
 name = "input_glob"

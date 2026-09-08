@@ -24,8 +24,8 @@ type = "raw_jsonl"
 description = "A raw corpus as parquet or JSONL, in whatever column layout it arrived with."
 
 [[produces]]
-type = "raw_jsonl"
-description = "JSONL with text, a unique id, and optionally source plus any carried columns. Written alongside ingest_report.json, which records how each id was derived."
+type = "prepared_jsonl"
+description = "JSONL with text, a unique id, and optionally source plus any carried columns. Written alongside ingest_report.json, which records how each id was derived. Declared apart from raw_jsonl because the id is the whole point: every step after this one names individual documents, and a raw corpus does not guarantee one."
 
 [[parameters]]
 name = "input"

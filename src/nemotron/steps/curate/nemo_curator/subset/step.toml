@@ -21,7 +21,7 @@ tags = ["curate", "subset", "ablation", "sampling", "determinism"]
 
 [[consumes]]
 type = "filtered_jsonl"
-description = "A curated corpus carrying its own document id. Optionally carries score columns from curate/nemo_curator mode: annotate or both, which then join the stratum key."
+description = "A curated corpus carrying its own document id. Optionally carries score columns from curate/nemo_curator mode: annotate or both, which then join the stratum key. When curate/decontamination runs, this must be its decontaminated_jsonl output: tiers cut from the pre-decontamination corpus carry the documents decontamination was asked to remove."
 
 [[produces]]
 type = "filtered_jsonl"

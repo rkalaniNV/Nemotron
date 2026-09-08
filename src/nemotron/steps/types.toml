@@ -7,9 +7,17 @@
 description = "Raw downloaded JSONL records"
 is_a = ["training_jsonl"]
 
+[prepared_jsonl]
+description = "Raw JSONL normalized to the canonical text/id/source column names, with a stable document id minted where the source had none. Usable anywhere raw_jsonl is, and additionally safe for steps that must name individual documents"
+is_a = ["raw_jsonl"]
+
 [filtered_jsonl]
 description = "JSONL with domain/language annotations (from NeMo Curator)"
 is_a = ["training_jsonl"]
+
+[decontaminated_jsonl]
+description = "A curated corpus with documents overlapping a held-out evaluation split removed. Usable anywhere filtered_jsonl is; the distinct name is what lets a step declare that it must read the corpus AFTER decontamination rather than before"
+is_a = ["filtered_jsonl"]
 
 [translated_jsonl]
 description = "JSONL with translated messages + FAITH quality scores"
@@ -54,6 +62,9 @@ description = "Per-signal distributions, retention surfaces, and candidate thres
 
 [filter_policy]
 description = "A filtering policy for a specific corpus, with provenance and an approval state; only an approved policy is executable"
+
+[curation_manifest]
+description = "The producing step's own account of a run: shard names with row counts and digests, the policy that was applied and its approval state, and a completed_at written only at the write barrier. Absent completed_at is how a corpus left by a killed writer is told from a finished one"
 
 [curation_ledger]
 description = "Per-stage record accounting written by the producing step: inputs, successes, filtered counts by reason, and failed or quarantined units. What makes loss attributable rather than merely detectable"

@@ -18,8 +18,8 @@ raw parquet/JSONL
   ---- a person picks thresholds and signs for them ----
   -> curate/nemo_curator    the only step that drops rows
   -> curate/audit           independently recount; refuse a silent loss
-  -> curate/subset          nested token-budget tiers
   -> curate/decontamination overlap against a holdout
+  -> curate/subset          nested token-budget tiers, cut from what is left
 ```
 
 Nothing here approves a threshold on your behalf. A distribution says what a gate
@@ -27,14 +27,31 @@ removes; it never says whether removing it is right.
 
 ## Steps
 
+Listed in the order the flow runs them. Types are the ones each step declares in
+its `step.toml` and registers in [`../types.toml`](../types.toml) — this table is
+generated from nothing, so it is checked against them by `tests/steps/test_types.py`
+rather than trusted.
+
 | Need | Step | Input | Output |
 |---|---|---|---|
 | Raw parquet/JSONL in, curatable JSONL with a stable id out | [`curate/ingest`](nemo_curator/ingest/README.md) | `raw_jsonl` | `prepared_jsonl` |
-| Measure what each threshold would remove, before removing anything | [`curate/profile`](nemo_curator/profile/README.md) | `raw_jsonl` | `profile_report`, `candidate_policy` |
-| Language, length, domain and approved-policy gating | [`curate/nemo_curator`](nemo_curator/README.md) | `raw_jsonl` (or HF snapshot) | `filtered_jsonl` |
-| Prove no records went missing without being counted | [`curate/audit`](nemo_curator/audit/README.md) | `filtered_jsonl` | `audit_report` |
-| Nested token-budget tiers from one corpus | [`curate/subset`](nemo_curator/subset/README.md) | `filtered_jsonl` | `subset_jsonl` |
-| Overlap against an evaluation holdout | [`curate/decontamination`](nemo_curator/decontamination/README.md) | `filtered_jsonl` | `decontamination_report` |
+| Measure what each threshold would remove, before removing anything | [`curate/profile`](nemo_curator/profile/README.md) | `raw_jsonl` \| `prepared_jsonl` | `profile_report`, `filter_policy` |
+| Language, length, domain and approved-policy gating | [`curate/nemo_curator`](nemo_curator/README.md) | `raw_jsonl` \| `prepared_jsonl` (or HF snapshot), `filter_policy` | `filtered_jsonl`, `curation_manifest`, `curation_ledger` |
+| Prove no records went missing without being counted | [`curate/audit`](nemo_curator/audit/README.md) | `filtered_jsonl`, `curation_manifest`, `curation_ledger` | `curation_report` |
+| Overlap against an evaluation holdout | [`curate/decontamination`](nemo_curator/decontamination/README.md) | `filtered_jsonl` | `decontaminated_jsonl`, `decontamination_report` |
+| Nested token-budget tiers from one corpus | [`curate/subset`](nemo_curator/subset/README.md) | `filtered_jsonl` \| `decontaminated_jsonl` | `filtered_jsonl`, `subset_plan`, `subset_report` |
+
+Two of those types exist only to make a dependency statable. `prepared_jsonl` is a
+`raw_jsonl` with a guaranteed document id, so every step that reads a raw corpus
+accepts it; `decontaminated_jsonl` is a `filtered_jsonl` with the holdout overlap
+removed, so everything downstream accepts it and `curate/subset` can say it must
+read the corpus *after* decontamination rather than before. Both were identity
+edges — `raw_jsonl -> raw_jsonl`, `filtered_jsonl -> filtered_jsonl` — which state
+that a step changed nothing.
+
+`curation_manifest` and `curation_ledger` are optional inputs to `curate/audit`:
+without them it still runs, and reports completeness as informational and
+attribution as unavailable rather than reporting a clean result.
 
 Each is a registered step and runs on its own:
 

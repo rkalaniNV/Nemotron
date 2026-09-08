@@ -20,12 +20,18 @@ description = """Integrity evidence for a curated corpus: per-shard readability,
 tags = ["curate", "audit", "integrity"]
 
 [[consumes]]
-type = "curation_ledger"
-description = "Optional per-stage ledgers from the producing steps. Their presence is what turns detection into attribution."
+type = "filtered_jsonl"
+description = "Corpus to audit. decontaminated_jsonl is accepted too, and is what the flow passes when curate/decontamination runs."
 
 [[consumes]]
-type = "filtered_jsonl"
-description = "Corpus to audit."
+type = "curation_manifest"
+required = false
+description = "The producing step's own account of the run. Without it row counts are informational and completeness is not claimed, so its absence is reported rather than assumed benign."
+
+[[consumes]]
+type = "curation_ledger"
+required = false
+description = "Optional per-stage ledgers from the producing steps. Their presence is what turns detection into attribution."
 
 [[produces]]
 type = "curation_report"
