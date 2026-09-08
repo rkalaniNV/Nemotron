@@ -161,6 +161,25 @@ def _artifact_paths(root: Path) -> dict[str, str]:
     }
 
 
+def _policy_status(manifest_path: str) -> str | None:
+    """The state the filter recorded: approved, override_unvalidated, unapproved.
+
+    Read rather than re-derived, for the same reason _thresholds_applied is: the
+    step knows which route the policy took and this does not. Carrying it up
+    matters because flow_report.json is the surface the READMEs point a reader
+    at, and without it an overridden run and an approved one are identical here —
+    the same conflation the step-level manifest was fixed for.
+    """
+    try:
+        with Path(manifest_path).open(encoding="utf-8") as handle:
+            document = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    block = document.get("policy")
+    status = block.get("status") if isinstance(block, dict) else None
+    return status if isinstance(status, str) else None
+
+
 def _thresholds_applied(manifest_path: str) -> int:
     """How many thresholds the filter reports having applied, or 0.
 
@@ -933,6 +952,9 @@ def run(cfg: dict) -> dict[str, Any]:
         "status": "failed" if failure is not None else "ok",
         "policy_applied": policy_applied,
         "policy_promoted": bool(cfg.get("approve")),
+        # Distinguishes a policy that met the approval contract from one carried
+        # past it by allow_unvalidated_policy. policy_applied is true for both.
+        "policy_status": _policy_status(paths["manifest"]),
     }
     _write_json_atomic(report_path, report)
     ran = [r["step_id"] for r in results if r["status"] == "ok"]

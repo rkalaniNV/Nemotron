@@ -1370,3 +1370,26 @@ def test_policy_applied_reports_what_the_filter_did_not_what_the_flow_promoted(t
     assert run_flow._thresholds_applied(str(tmp_path / "absent.json")) == 0, (
         "a run that never wrote a manifest applied nothing"
     )
+
+
+def test_the_flow_report_distinguishes_an_override_from_an_approval(tmp_path) -> None:
+    """policy_applied is true for both, and the READMEs point readers here.
+
+    The step-level manifest was fixed to name three states; leaving flow_report
+    with only a boolean reproduces the same conflation one layer up, on the
+    surface a reader is actually told to open.
+    """
+    manifest = tmp_path / "run_manifest.json"
+
+    manifest.write_text(json.dumps({"policy": {"status": "override_unvalidated", "thresholds_applied": 2}}))
+    assert run_flow._policy_status(str(manifest)) == "override_unvalidated"
+
+    manifest.write_text(json.dumps({"policy": {"status": "approved", "thresholds_applied": 17}}))
+    assert run_flow._policy_status(str(manifest)) == "approved"
+
+    manifest.write_text(json.dumps({"policy": {"status": "unapproved", "thresholds_applied": 0}}))
+    assert run_flow._policy_status(str(manifest)) == "unapproved"
+
+    manifest.write_text(json.dumps({"input": {}}))
+    assert run_flow._policy_status(str(manifest)) is None, "a manifest without a policy block"
+    assert run_flow._policy_status(str(tmp_path / "absent.json")) is None
