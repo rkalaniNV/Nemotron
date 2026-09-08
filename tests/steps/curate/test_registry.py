@@ -16,6 +16,10 @@ import pytest
 from nemotron.steps.curate.nemo_curator.runtime import registry as r
 from nemotron.steps.curate.nemo_curator.runtime import signals
 
+from .._step_helpers import step_dir
+
+STEP_DIR = step_dir(__file__, "curate", "nemo_curator")
+
 
 def test_registry_and_local_scorers_publish_one_implementation_version() -> None:
     assert r.IMPL_VERSION == signals.IMPL_VERSION
@@ -287,4 +291,22 @@ def test_the_ngram_exclusion_is_still_justified_upstream() -> None:
     assert len(scores) > 1, (
         f"one document scored {scores} under eight hash seeds. If upstream now breaks ties "
         "deterministically, remove RepeatingTopNGramsFilter from EXCLUDED and register it."
+    )
+
+
+def test_the_profile_readme_lists_every_signal() -> None:
+    """A documented allowlist that drifts is worse than none.
+
+    The README table is how a person finds out what they may name in a policy.
+    Adding a signal without listing it leaves them reading registry.py, and
+    listing one that no longer exists sends them to an unknown_signal_in_policy
+    error with the docs on their side.
+    """
+    import re
+
+    readme = (STEP_DIR / "profile" / "README.md").read_text(encoding="utf-8")
+    listed = set(re.findall(r"^\| `([a-z_]+)` \| `(?:min|max|interval)`", readme, re.M))
+
+    assert listed == set(r.SIGNALS), (
+        f"README table out of sync: missing {sorted(set(r.SIGNALS) - listed)}, stale {sorted(listed - set(r.SIGNALS))}"
     )

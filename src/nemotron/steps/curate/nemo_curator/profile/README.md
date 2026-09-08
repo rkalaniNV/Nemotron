@@ -91,6 +91,61 @@ the caller asked.
 A closed allowlist in `../runtime/registry.py`. Config names a signal, never an
 import path.
 
+The allowlist has 24 entries in two groups. Which group a signal is in decides
+where to read about what it measures.
+
+### Wrapping a Curator filter (15)
+
+These score exactly what Curator's filter scores; this step adds a swept grid, a
+verified direction and a retention curve. What each one measures is documented in
+[NeMo Curator's heuristic quality assessment](https://docs.nvidia.com/nemo/curator/curate-text/process-data/quality-assessment/heuristic).
+
+| signal | bound | units | needs |
+|---|---|---|---|
+| `bullet_ratio` | `max` | ratio | — |
+| `ellipsis` | `max` | ratio | — |
+| `max_word_length` | `max` | characters | — |
+| `mean_word_length` | `interval` | characters | — |
+| `non_alpha_numeric` | `max` | ratio | — |
+| `numbers_ratio` | `max` | ratio | — |
+| `parentheses_ratio` | `max` | ratio | — |
+| `punctuation` | `max` | ratio | — |
+| `repeating_duplicate_ngrams` | `max` | ratio | — |
+| `symbol_to_word` | `max` | ratio | — |
+| `token_count` | `interval` | tokens | `tokenizer` |
+| `urls_ratio` | `max` | ratio | — |
+| `white_space` | `max` | ratio | — |
+| `word_count` | `interval` | words | — |
+| `words_with_alphabets` | `min` | ratio | — |
+
+### Implemented here (9)
+
+Curator has no equivalent, or has one that cannot be used outside English. The
+`replaces` column names the filter each one stands in for, where there is one.
+
+| signal | bound | units | needs | replaces | what it measures |
+|---|---|---|---|---|---|
+| `boilerplate_hits` | `max` | patterns | `boilerplate_hits` | `BoilerPlateStringFilter` | Counts matches of the pack's boilerplate patterns. Curator's version hardcodes English cookie and privacy phrases, so on any other language it matches nothing and reports nothing. |
+| `diacritic_ratio` | `min` | ratio | `diacritic_ratio` | — | Share of letters carrying a mark this language treats as removable. Only declared where marks are removable at all: Vietnamese tone marks strip to degraded but readable text, Devanagari matras are obligatory vowels. |
+| `foreign_script_ratio` | `max` | ratio | `script_ratio` | — | Share of letters from neither this language's script nor base Latin. |
+| `latin_ratio` | `max` | ratio | `script_ratio` | — | Share of letters that are plain unmarked Latin. High values on a non-Latin corpus mean untranslated boilerplate, code, or the wrong language entirely. |
+| `script_ratio` | `min` | ratio | `script_ratio` | `HistogramFilter` | Share of letters in the pack's own script. Continuous, unlike Curator's, which thresholds internally and returns 0 or 1 — a binary value cannot be swept. |
+| `sentence_end_ratio` | `min` | ratio | `sentence_end_ratio` | `PunctuationFilter` | Share of sentence-like spans ending in a terminator this language actually uses. Curator's looks for `.`, `!` and `?`; Hindi ends sentences with `।`. |
+| `stopword_ratio` | `min` | ratio | `stopword_ratio` | `CommonEnglishWordsFilter` | Function-word density from the pack's list. Prose has a characteristic density; keyword lists and navigation furniture do not. |
+| `stopword_ratio_folded` | `min` | ratio | `stopword_ratio_folded` | `CommonEnglishWordsFilter` | The same density measured after removing marks from both sides, so diacritic-stripped prose is still recognised as prose. |
+| `unicode_alpha_numeric` | `max` | ratio | — | `NonAlphaNumericFilter` | Counts Unicode categories L, N and all of M instead of `[a-zA-Z0-9\n?!,.]`. At Curator's own 0.25 default the ASCII version retains 99.66% of English and 0.11% of Hindi. |
+
+`needs` names a language-pack capability, or a tokenizer. A signal whose
+requirement the pack does not declare is skipped with a note rather than scored on
+data it cannot read. Fifteen need nothing and run on any corpus.
+
+Eleven Curator filters are deliberately absent, and naming one in a policy is an
+error rather than a silent skip: English-hardcoded word lists, binary scores that
+cannot be swept, and four repetition filters whose parameter names and
+`keep_document` comparisons disagree. Each reason is recorded in
+`registry.EXCLUDED`, so the Curator page above will describe filters this step
+will not run.
+
 Curator's filters do not share one shape — some are upper bounds, some lower,
 and `word_count` and `mean_word_length` gate from both sides at once. A
 two-sided gate produces a **retention surface**, not a curve: the retention of a
