@@ -66,9 +66,22 @@ disagree, and refuses a misconfigured run before any step does work. It is a
 script rather than a registered step, so it takes a config path:
 
 ```bash
-uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+uv run --extra curate --extra xenna \
+  python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
   --config src/nemotron/steps/curate/nemo_curator/config/vi_c4_measure.yaml
 ```
+
+The two extras are not optional and a plain `uv run` will not do. Curator executes
+the filter on Ray, and Ray resolves the *worker* interpreter independently of the
+one you launched: without `xenna` on that side the run reaches the executor and
+dies with `ModuleNotFoundError: No module named 'cosmos_xenna'` from inside a
+worker, several minutes in, after the flow has already reported its plan. Neither
+extra is in the default dependency set, because installing Curator and Ray is not
+something every user of this repository should be made to do.
+
+Steps that never start Ray — `curate/profile`, `curate/subset`,
+`curate/decontamination` with `skip_similarity: true` — run under `--extra curate`
+alone.
 
 Two worked examples show the two halves, and are meant to be copied:
 
