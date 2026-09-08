@@ -3235,6 +3235,15 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+deduplication-cuda12 = [
+    { name = "cudf-cu12" },
+    { name = "cuml-cu12" },
+    { name = "pylibcugraph-cu12" },
+    { name = "pylibraft-cu12" },
+    { name = "raft-dask-cu12" },
+    { name = "rapidsmpf-cu12" },
+    { name = "scikit-learn" },
+]
 text-cpu = [
     { name = "beautifulsoup4" },
     { name = "fasttext" },
@@ -3430,6 +3439,11 @@ curate = [
     { name = "nemo-curator", extra = ["text-cpu"] },
     { name = "pyyaml" },
 ]
+curate-gpu = [
+    { name = "huggingface-hub" },
+    { name = "nemo-curator", extra = ["deduplication-cuda12", "text-cpu"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "pyyaml" },
+]
 data-sdg = [
     { name = "data-designer" },
 ]
@@ -3524,6 +3538,7 @@ requires-dist = [
     { name = "gcsfs", marker = "extra == 'gcs'", specifier = ">=2024.0.0" },
     { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "huggingface-hub", marker = "python_full_version >= '3.11' and extra == 'curate'", specifier = ">=0.20.0" },
+    { name = "huggingface-hub", marker = "python_full_version >= '3.11' and extra == 'curate-gpu'", specifier = ">=0.20.0" },
     { name = "imageio-ffmpeg", marker = "extra == 'all'", specifier = ">=0.5.1" },
     { name = "imageio-ffmpeg", marker = "extra == 'audio'", specifier = ">=0.5.1" },
     { name = "iso639-lang", marker = "python_full_version >= '3.11' and extra == 'all'", specifier = ">=2.6.0,<3.0.0" },
@@ -3534,6 +3549,7 @@ requires-dist = [
     { name = "loguru", marker = "python_full_version >= '3.11' and extra == 'byob'", specifier = ">=0.7,<1" },
     { name = "loguru", marker = "python_full_version >= '3.11' and extra == 'translate'", specifier = ">=0.7,<1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "nemo-curator", extras = ["deduplication-cuda12", "text-cpu"], marker = "python_full_version >= '3.11' and python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'curate-gpu'", specifier = "==1.3.0" },
     { name = "nemo-curator", extras = ["text-cpu"], marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'curate'", specifier = "==1.3.0" },
     { name = "nemo-curator", extras = ["translation-all"], marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'all'", specifier = "==1.3.0" },
     { name = "nemo-curator", extras = ["translation-all"], marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'byob'", specifier = "==1.3.0" },
@@ -3567,6 +3583,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "pyyaml", marker = "python_full_version >= '3.11' and extra == 'byob'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "python_full_version >= '3.11' and extra == 'curate'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "python_full_version >= '3.11' and extra == 'curate-gpu'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "python_full_version >= '3.11' and extra == 'translate'", specifier = ">=6.0" },
     { name = "raft-dask-cu12", marker = "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'all'", specifier = "==25.10.*" },
     { name = "raft-dask-cu12", marker = "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'byob-gpu'", specifier = "==25.10.*" },
@@ -3604,7 +3621,7 @@ requires-dist = [
     { name = "webdataset", marker = "extra == 'audio'", specifier = ">=0.2.86" },
     { name = "xxhash", specifier = ">=3.4.0" },
 ]
-provides-extras = ["wandb", "s3", "gcs", "sentencepiece", "xenna", "audio", "data-sdg", "byob", "byob-gpu", "translate", "evaluator", "curate", "dev", "all"]
+provides-extras = ["wandb", "s3", "gcs", "sentencepiece", "xenna", "audio", "data-sdg", "byob", "byob-gpu", "translate", "evaluator", "curate", "curate-gpu", "dev", "all"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.3" }]
