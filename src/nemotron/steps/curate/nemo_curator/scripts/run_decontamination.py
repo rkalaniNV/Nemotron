@@ -337,7 +337,7 @@ def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
         holdout,
         left_source=TRAIN,
         right_source=HOLDOUT,
-        cfg=grouping.GroupKeyConfig(text_field=text_field),
+        cfg=grouping.GroupKeyConfig(text_field=text_field, id_field=id_field),
     )
     if not groups["comparable"]:
         # Zero shared groups here would be a structural certainty, not a

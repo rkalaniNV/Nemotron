@@ -341,9 +341,25 @@ def main() -> None:
 
 
 def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
-    """Run the subset lifecycle, removing all owned artifacts on failure."""
+    """Run the subset lifecycle, removing all owned artifacts on failure.
+
+    Nothing is deleted until the configuration has been validated. The previous
+    order cleared ``budget_*`` before checking token_budgets, so a config error
+    destroyed the previous run's tiers on the way to reporting itself — and with
+    output_dir defaulting to the working directory, it did that wherever the
+    caller happened to be standing.
+    """
     started_at = started_at or run_manifest.utc_now()
-    output_dir = Path(cfg.get("output_dir") or ".")
+    raw_output_dir = cfg.get("output_dir")
+    if not raw_output_dir or not str(raw_output_dir).strip():
+        raise ConfigError(
+            "output_dir is required and has no default. This step deletes the budget_* "
+            "directories it owns before writing, and a defaulted path decides where that "
+            "happens on the caller's behalf."
+        )
+    _validate_config(cfg)
+
+    output_dir = Path(raw_output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     _reset_output_artifacts(output_dir)
     try:
@@ -353,7 +369,8 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
         raise
 
 
-def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
+def _validate_config(cfg: dict) -> None:
+    """Every check that can be made before anything is read or removed."""
     budgets = cfg.get("token_budgets") or []
     if (
         not isinstance(budgets, list)
@@ -370,6 +387,12 @@ def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
         or list(length_bands) != sorted(set(length_bands))
     ):
         raise ConfigError("length_bands must be a non-empty, strictly increasing list of positive integers")
+
+
+def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
+    budgets = cfg["token_budgets"]
+    raw_length_bands = cfg.get("length_bands")
+    length_bands = subset.DEFAULT_LENGTH_BANDS if raw_length_bands is None else raw_length_bands
 
     paths = resolve_inputs(cfg["input_glob"])
     counter, unit = build_counter(cfg)

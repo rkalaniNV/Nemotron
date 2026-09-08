@@ -594,3 +594,31 @@ def test_a_positional_fallback_key_never_establishes_comparability() -> None:
 
     assert result["left_key_fields"] == {grouping.POSITIONAL_FIELD: 2}
     assert result["comparable"] is False
+
+
+def test_the_configured_id_field_is_what_identity_matching_reads() -> None:
+    """A corpus whose id is not called `id` had its exact pass silently disabled.
+
+    The exact-identity pass exists to catch the case similarity cannot: the same
+    source document, rewritten enough that no shingle survives. It found it by
+    keying on the record id. That id was read as a hardcoded `record["id"]`, so a
+    corpus using `doc_id` fell through to the normalised-text-hash fallback —
+    which by construction cannot match a document whose text changed. The run
+    then reported zero overlap, and the report does not distinguish "measured and
+    found none" from "keyed off a field that is not there".
+    """
+    train = [{"doc_id": "a1", "text": "The original wording of this document."}]
+    holdout = [{"doc_id": "a1", "text": "This document, but reworded."}]
+
+    unset = grouping.cross_split_groups(train, holdout, cfg=grouping.GroupKeyConfig(text_field="text"))
+    assert unset["shared_group_count"] == 0, "the bug: same document, no overlap reported"
+    assert list(unset["left_key_fields"]) == ["__norm_text_hash"]
+
+    named = grouping.cross_split_groups(
+        train, holdout, cfg=grouping.GroupKeyConfig(text_field="text", id_field="doc_id")
+    )
+    assert named["shared_group_count"] == 1
+    assert list(named["left_key_fields"]) == ["doc_id"]
+    assert named["shared_groups"][0]["left_ids"] == ["a1"], (
+        "ids were reported as empty strings, so removal downstream had nothing to remove"
+    )

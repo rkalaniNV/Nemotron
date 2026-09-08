@@ -51,7 +51,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 GROUP_KEY_FIELD = "__group_key"
@@ -211,12 +211,25 @@ def normalized_text_hash(text: Any) -> str:
 
 @dataclass
 class GroupKeyConfig:
-    """Which fields identify a source document, in precedence order."""
+    """Which fields identify a source document, in precedence order.
 
-    fields: list[str] = field(default_factory=lambda: [*URL_FIELD_ALIASES, "id"])
+    ``id_field`` names the record's own identifier. It is both the last resort
+    for keying and the value reported back for every match, so a corpus whose id
+    lives anywhere other than ``id`` needs it set: leaving the default reads a
+    field that is not there, keys every record off the positional fallback —
+    which is per-side and so can never match across two splits — and reports
+    every matched id as the empty string.
+    """
+
+    fields: list[str] | None = None
     text_field: str = "text"
     hash_field: str = "__text_hash"
     use_normalized_text: bool = True
+    id_field: str = "id"
+
+    def __post_init__(self) -> None:
+        if self.fields is None:
+            self.fields = [*URL_FIELD_ALIASES, self.id_field]
 
 
 def group_key(
@@ -322,10 +335,14 @@ def cross_split_groups(
     decision, and for a decontamination run the answer is always the training
     split — but that belongs to the caller, not here.
     """
+    # Normalised once so the reported id and the keying rules come from the same
+    # object. Callers may pass None, and the defaults have to agree.
+    cfg = cfg or GroupKeyConfig()
+
     right_keys: dict[str, list[str]] = {}
     right_fields: Counter[str] = Counter()
     for record in assign_group_keys(right, right_source, cfg, id_namespace=id_namespace):
-        right_keys.setdefault(record[GROUP_KEY_FIELD], []).append(str(record.get("id", "")))
+        right_keys.setdefault(record[GROUP_KEY_FIELD], []).append(str(record.get(cfg.id_field, "")))
         right_fields[record[GROUP_KEY_SOURCE_FIELD]] += 1
 
     shared: dict[str, dict[str, Any]] = {}
@@ -345,7 +362,7 @@ def cross_split_groups(
                     "right_ids": right_keys[key],
                 },
             )
-            entry["left_ids"].append(str(record.get("id", "")))
+            entry["left_ids"].append(str(record.get(cfg.id_field, "")))
 
     # Each key is namespaced by the field that produced it, so a record keyed off
     # a field the other side never uses sits in a key space nothing can match. It
