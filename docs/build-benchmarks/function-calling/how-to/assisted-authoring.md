@@ -19,7 +19,7 @@ During supplement and candidate-pack review, use the artifact index in
 tool catalog and fixtures, backend or endpoint, templates, assertions, validation
 cases, and held-out policy with the same create-contract-example-validate structure.
 
-This page is the walkthrough. `src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md` is the matching command-level reference: it lists every subcommand and refusal code, and its invocations are executed as smoke cases by the test suite, so consult it when you need exact arguments rather than the shape of the flow.
+This page is the walkthrough. [`src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md`](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md) is the matching command-level reference: it lists every subcommand and refusal code, and its invocations are executed as verification cases by the test suite, so consult it when you need exact arguments rather than the shape of the flow.
 
 :::{tip}
 To watch the whole flow run before you prepare a source of your own, use the
@@ -42,18 +42,18 @@ non-normative walkthrough rather than a production launcher. Pass
 ## Before You Start
 
 - Install the BYOB dependencies with `uv sync --extra byob`, and prepare a source package in one of the two supported layouts below.
-- Prepare a domain brief, a reviewed statement of what the source is for, which is sanitized and bound into the evidence. Copy `src/nemotron/steps/byob/references/bfcl-domain-brief.skeleton.txt` and replace every bracketed `BFCL-SKELETON` block; intake rejects the copy while even one remains. `bfcl-domain-brief.example.txt` is the same form filled in, being the brief a published release was authored from. Prefer the skeleton for a new source, since copying the example tends to carry its banking framing across with it. See {doc}`../reference/domain-brief` for its content and safety contract.
+- Prepare a domain brief, a reviewed statement of what the source is for, which is sanitized and bound into the evidence. Copy [`src/nemotron/steps/byob/references/bfcl-domain-brief.skeleton.txt`](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/byob/references/bfcl-domain-brief.skeleton.txt) and replace every bracketed `BFCL-SKELETON` block; intake rejects the copy while even one remains. `bfcl-domain-brief.example.txt` is the same form filled in, being the brief a published release was authored from. Prefer the skeleton for a new source, since copying the example tends to carry its banking framing across with it. Refer to {doc}`../reference/domain-brief` for its content and safety contract.
 - Prepare a probe plan, which you need for certification tier A1 or A2 and therefore
-  for a Gold release. See {doc}`../reference/probe-plan`.
-  `src/nemotron/steps/byob/references/bfcl-probe-plan.example.json`
+  for a Gold release. Refer to {doc}`../reference/probe-plan`.
+  [`src/nemotron/steps/byob/references/bfcl-probe-plan.example.json`](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/byob/references/bfcl-probe-plan.example.json)
   is a complete A2-shaped banking example: copy its structure, then replace its tools,
   fixture ids, cases, and domain assumptions.
 - Have a certification key pair and its allowlisted key identifier available.
-- Organizational defaults that should not be retyped per session belong in a reviewed policy file; see `src/nemotron/steps/byob/references/bfcl-authoring-policy.example.yaml`.
+- Organizational defaults that should not be retyped per session belong in a reviewed policy file; see [`src/nemotron/steps/byob/references/bfcl-authoring-policy.example.yaml`](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/byob/references/bfcl-authoring-policy.example.yaml).
 
 ### Source layouts
 
-A `local_python` source requires `backend.py` as its only import-closure root, a reviewed `tools.json`, and a canonical `dependency-lock.json`, and may add `fixtures.json`. An `http_package` source requires a strict, secret-free `endpoint_config.yaml` and its companion `tools.json`. `src/nemotron/steps/byob/references/bfcl-conventional-source-packages.md` is the normative description of both, including the dependency-lock format and the static-inspection rules.
+A `local_python` source requires `backend.py` as its only import-closure root, a reviewed `tools.json`, and a canonical `dependency-lock.json`, and may add `fixtures.json`. An `http_package` source requires a strict, secret-free `endpoint_config.yaml` and its companion `tools.json`. [`src/nemotron/steps/byob/references/bfcl-conventional-source-packages.md`](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/byob/references/bfcl-conventional-source-packages.md) is the normative description of both, including the dependency-lock format and the static-inspection rules.
 
 ### Create and pre-check authoring inputs
 
@@ -73,7 +73,7 @@ A probe plan may be written from the reviewed source contract or drafted by a mo
 for human review:
 
 ```text
-python -m nemotron.steps.byob.scripts.draft_probe_plan \
+uv run python -m nemotron.steps.byob.scripts.draft_probe_plan \
   --source /srv/sources/warehouse-package \
   --domain-brief /srv/sources/domain-brief.txt \
   --output /srv/sources/probe-plan.json \
@@ -86,7 +86,7 @@ It does not certify the plan or its source. Check the reviewed plan without exec
 probes:
 
 ```bash
-python -m nemotron.steps.byob.scripts.check_probe_plan \
+uv run python -m nemotron.steps.byob.scripts.check_probe_plan \
   --source /srv/sources/warehouse-package \
   --probe-plan /srv/sources/probe-plan.json
 ```
@@ -95,13 +95,13 @@ The check reports static coverage gaps that would block A2. Intake remains
 authoritative because only it executes the probes and observes reset, isolation,
 confirmation, timeout cleanup, and result behavior.
 
-### Optionally Scaffold A Local Source
+### Optionally Scaffold a Local Source
 
 If no independently implemented local source exists, generate the mechanical
 four-function interface and fill its domain decisions manually:
 
 ```bash
-python -m nemotron.steps.byob.scripts.scaffold_source_package \
+uv run python -m nemotron.steps.byob.scripts.scaffold_source_package \
   --tools /srv/sources/warehouse-package/tools.json \
   --output /srv/sources/warehouse-package \
   --collection assets \
@@ -131,7 +131,7 @@ semantics.
 Check the result against its own catalogue before spending an intake run on it:
 
 ```bash
-python -m nemotron.steps.byob.scripts.check_source_package \
+uv run python -m nemotron.steps.byob.scripts.check_source_package \
   --source /srv/sources/warehouse-package
 ```
 
@@ -156,7 +156,7 @@ Publication currently supports `local_python`. An `http_package` source reaches 
 `author` runs source intake and produces transport-neutral evidence. Two decisions are required at this first command rather than deferred, because evidence that has already been collected cannot be retroactively declared clean.
 
 ```bash
-python -m nemotron.steps.byob.scripts.bfcl_author \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author \
   --ci author \
   --workspace /srv/bfcl/authoring/warehouse \
   --source /srv/sources/warehouse-package \
@@ -181,7 +181,7 @@ The probe plan is one transport-neutral document. It names a case per published 
 Intake may raise digest-bound open questions about the source. Apply the reviewed answers as a new evidence revision:
 
 ```bash
-python -m nemotron.steps.byob.scripts.bfcl_author answer \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author answer \
   --workspace /srv/bfcl/authoring/warehouse \
   --evidence <EVIDENCE_BUNDLE_JSON> \
   --questions <OPEN_QUESTIONS_JSON> \
@@ -197,12 +197,12 @@ the evidence bundle is sanitized before anything is sent anywhere. Supply either
 record to a path you choose.
 
 ```bash
-python -m nemotron.steps.byob.scripts.bfcl_author authorize \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author authorize \
   --workspace /srv/bfcl/authoring/warehouse \
   --subject <MODEL_EXPOSURE_SUBJECT_JSON> \
   --authorized-by reviewer@example.test
 
-python -m nemotron.steps.byob.scripts.bfcl_author approve \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author approve \
   --workspace /srv/bfcl/authoring/warehouse \
   --boundary evidence \
   --approved-by reviewer@example.test \
@@ -237,7 +237,7 @@ From drafting onward, the short command blocks below show the guided subcommand 
 operator-owned arguments, not a standalone invocation to copy without session output.
 The current session supplies some paths while the delegated command still requires
 artifact, model, key, digest, or output arguments printed by the previous gate. Use
-`src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md` for the exact argument
+[`src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md`](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md) for the exact argument
 contract, or run `scripts/bfcl_assisted_authoring_demo.py` for a complete executable
 sequence.
 :::
@@ -245,7 +245,7 @@ sequence.
 ## Step 4: Draft
 
 ```text
-python -m nemotron.steps.byob.scripts.bfcl_author draft \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author draft \
   --workspace /srv/bfcl/authoring/warehouse \
   <artifact, certification, approval, key, output, and model arguments>
 ```
@@ -255,7 +255,7 @@ Drafting issues bounded, cached, structured model requests and stops at proposal
 ## Step 5: Assemble the Candidate Pack
 
 ```bash
-python -m nemotron.steps.byob.scripts.bfcl_author assemble \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author assemble \
   --workspace /srv/bfcl/authoring/warehouse \
   --supplement /srv/bfcl/authoring/warehouse/reviewed-supplement.yaml \
   --output /srv/bfcl/authoring/warehouse/candidate-pack
@@ -271,7 +271,7 @@ in a child revision.
 ## Step 6: Build the Review Packet
 
 ```text
-python -m nemotron.steps.byob.scripts.bfcl_author review \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author review \
   --workspace /srv/bfcl/authoring/warehouse \
   --adapter-kind local_python \
   <review-packet input and output arguments>
@@ -282,13 +282,13 @@ Review assembles independently verified certification, fresh validation, the ans
 ## Step 7: Approve the Release, Then Freeze
 
 ```text
-python -m nemotron.steps.byob.scripts.bfcl_author approve \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author approve \
   --workspace /srv/bfcl/authoring/warehouse \
   --boundary release \
   --approved-by reviewer@example.test \
   <review packet, checklist, and output arguments>
 
-python -m nemotron.steps.byob.scripts.bfcl_author freeze \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author freeze \
   --workspace /srv/bfcl/authoring/warehouse \
   <freeze inputs, approval, and output arguments>
 ```
@@ -298,7 +298,7 @@ Release approval binds the exact review packet, so a rebuilt packet needs its ne
 ## Step 8: Publish
 
 ```text
-python -m nemotron.steps.byob.scripts.bfcl_author publish \
+uv run python -m nemotron.steps.byob.scripts.bfcl_author publish \
   --workspace /srv/bfcl/authoring/warehouse \
   --adapter-kind local_python \
   <frozen release, generation config, and output arguments>
