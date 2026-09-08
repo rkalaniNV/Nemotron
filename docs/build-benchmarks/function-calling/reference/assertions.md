@@ -27,8 +27,11 @@ python -m nemotron.steps.byob.scripts.scaffold_oracle_pack \
 Extend the generated module with domain predicates derived from independently reviewed
 requirements.
 
-Keep assertions human-authored and derive them from independently reviewed domain
-requirements. Custom state and result semantics are executable oracle truth.
+In assisted authoring, a model may propose bounded declarative assertion
+specifications. The compiler currently accepts only supported trace-path predicates
+such as tool-called, tool-not-called, and tool-called-after. It does not accept
+arbitrary model-written Python. Assertions requiring custom state or result semantics
+remain human-authored.
 
 ## Function Contract
 
