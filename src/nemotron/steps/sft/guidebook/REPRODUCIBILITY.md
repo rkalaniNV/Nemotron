@@ -129,17 +129,17 @@ Two auxiliary packs appear in the guidebook:
 
 | Base | Identifier | Used for |
 |---|---|---|
-| **Released SFT+RL** | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16` | every headline number in the guidebook |
-| Pre-RL SFT-only | internal Nemotron-3-Nano SFT checkpoint, iteration 13,600 | [§9](./README.md#9-if-you-can-start-before-rl-you-get-more) and the LoRA comparison in [§7](./README.md#7-use-full-parameter-sft) |
+| **`NVIDIA-Nemotron-3-Nano-30B-A3B-BF16`** | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16` | every headline number in the guidebook |
+| internal SFT version of the same model | internal Nemotron-3-Nano SFT checkpoint, iteration 13,600 — taken before the RL stages | [§9](./README.md#9-if-you-have-the-internal-sft-checkpoint-you-get-more) and the LoRA comparison in [§7](./README.md#7-use-full-parameter-sft) |
 
 > [!NOTE]
 > The guidebook is written against the **public released model**, so the recipe
-> and every headline table reproduce with no internal artefacts. The pre-RL
-> checkpoint is internal and not publicly available; the two places that depend
-> on it are labelled "pre-RL" in the text. Starting there instead gives larger
-> gains (Hindi MILU +8.63 rather than +5.80) and makes the instruction-following
-> regression repairable by replay alone — which is the finding in
-> [§9](./README.md#9-if-you-can-start-before-rl-you-get-more).
+> and every headline table reproduce with no internal artefacts. The internal SFT
+> checkpoint is not publicly available; the two places that depend on it are
+> labelled in place. Starting there instead gives larger gains (Hindi MILU +8.63
+> rather than +5.80) and makes the instruction-following regression repairable by
+> replay alone — which is the finding in
+> [§9](./README.md#9-if-you-have-the-internal-sft-checkpoint-you-get-more).
 
 ---
 
@@ -217,18 +217,25 @@ are not comparable to each other. See
 
 | Guidebook section | Arm | Base | `train_iters` | warmup | save every |
 |---|---|---|--:|--:|--:|
-| [§3](./README.md#3-learning-rate-and-schedule) learning rate | MCQ 170k at 1e-5 / 5e-6 / 3e-6, read at iteration 80 | released | — | — | 20 |
-| [§4](./README.md#4-how-much-data-you-actually-need) volume | MCQ 20k | released | 500 | 25 | 20 |
-| | MCQ 50k / 80k / 100k | released | 500 | 25 | 50 |
-| | MCQ 200k | released | 1000 | 50 | 100 |
-| [§5](./README.md#5-replay-english-alongside-the-target-data) replay | MCQ 100k + IF 20k en | released + pre-RL | 500 | 25 | 50 |
-| [§6](./README.md#6-measure-language-fidelity-not-just-accuracy) translation | MCQ 100k + Updesh en↔target | released + pre-RL | 500 | 25 | 50 |
-| | English + Malayalam, MCQ en50k+ml50k | released + pre-RL | 1000 | 50 | 100 |
-| [§7](./README.md#7-use-full-parameter-sft) LoRA | MCQ 100k, LoRA vs full SFT | pre-RL only | 500 | 25 | 50 |
-| [§9](./README.md#9-if-you-can-start-before-rl-you-get-more) base choice | MCQ 100k, both bases | released + pre-RL | 500 | 25 | 50 |
+| [§3](./README.md#3-learning-rate-and-schedule) learning rate | MCQ 170k at 1e-5 / 5e-6 / 3e-6, selected at iterations 20–40 | BF16 | — | — | 20 |
+| [§4](./README.md#4-how-much-data-you-actually-need) volume | MCQ 20k | BF16 | 500 | 25 | 20 |
+| | MCQ 50k / 80k / 100k | BF16 | 500 | 25 | 50 |
+| | MCQ 200k | BF16 | 1000 | 50 | 100 |
+| [§5](./README.md#5-replay-english-alongside-the-target-data) replay | MCQ 100k + IF 20k en | both | 500 | 25 | 50 |
+| [§6](./README.md#6-measure-language-fidelity-not-just-accuracy) translation | MCQ 100k + Updesh en↔target | both | 500 | 25 | 50 |
+| | English + Malayalam, MCQ en50k+ml50k | both | 1000 | 50 | 100 |
+| [§7](./README.md#7-use-full-parameter-sft) LoRA | MCQ 100k, LoRA vs full SFT | internal SFT only | 500 | 25 | 50 |
+| [§9](./README.md#9-if-you-have-the-internal-sft-checkpoint-you-get-more) base choice | MCQ 100k, both bases | both | 500 | 25 | 50 |
+
+In the **Base** column, *BF16* is `NVIDIA-Nemotron-3-Nano-30B-A3B-BF16`,
+*internal SFT* is the internal SFT version of the same model, and *both* means
+the arm was run from each of them separately and reported against its own base.
 
 Checkpoint cadence must be identical across arms being compared — a
-finer-grained arm gets more chances to land on a favourable checkpoint.
+finer-grained arm gets more chances to land on a favourable checkpoint. Every
+arm is reported at its own **selected checkpoint** — the plateau its curve
+settles on, chosen using only the languages present in that arm's training
+data — never at a fixed iteration and never averaged across iterations.
 
 ---
 
@@ -260,7 +267,10 @@ easy to plan the training and be surprised by the evaluation.
 ## Evaluation
 
 Checkpoints are served over HTTP and evaluated with `nemo-evaluator run_eval`
-in `chat` mode.
+in `chat` mode. Every score reported in the guidebook is **reasoning-on**; the
+reasoning-off runs below exist to measure mode integrity
+([§2](./README.md#2-never-train-on-100-reasoning-on-data)) and are labelled as
+such wherever they appear.
 
 | Benchmark | Dataset | n | Measures |
 |---|---|--:|---|
