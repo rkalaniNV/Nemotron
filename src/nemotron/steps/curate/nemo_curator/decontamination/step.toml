@@ -73,6 +73,16 @@ description = "Passed to Curator's FuzzyDeduplicationWorkflow: seed, char_ngrams
 default = { seed = 42, char_ngrams = 24, num_bands = 20, minhashes_per_band = 13 }
 
 [[parameters]]
+name = "prefer_id_field"
+description = "Group on id_field before the URL aliases rather than after. The default order suits a corpus whose URL is the real identity of a page and whose id is synthetic. Set this when the URL column is coarse — a source_url holding a site homepage groups every document from that site into one key, so a single holdout page marks the whole site's training documents as overlapping and they are removed without duplicating anything."
+default = false
+
+[[parameters]]
+name = "shared_id_space"
+description = "Whether the two splits are parts of one corpus, so an equal id means the same document. True by default, which is what a train/holdout split of one corpus is: namespacing ids by side would give one document two keys and report no overlap at all. Set false only when the splits are separately built corpora that both number from zero, where equal ids are a collision rather than a match."
+default = true
+
+[[parameters]]
 name = "work_dir"
 description = "Scratch directory for the union corpus and Curator's dedup cache."
 default = "./cache/decontamination"

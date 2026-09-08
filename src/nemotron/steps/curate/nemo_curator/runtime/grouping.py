@@ -226,10 +226,21 @@ class GroupKeyConfig:
     hash_field: str = "__text_hash"
     use_normalized_text: bool = True
     id_field: str = "id"
+    #: Put ``id_field`` ahead of the URL aliases instead of behind them.
+    #:
+    #: The default order is right when the id is synthetic and the URL is the
+    #: real identity of a page. It is wrong when the URL column is coarse: a
+    #: ``source_url`` holding a site homepage groups every document from that
+    #: site together, so one holdout page marks the whole site's training
+    #: documents as overlapping and they are removed without being duplicates
+    #: of anything. Set this when the corpus id is the authoritative one.
+    prefer_id_field: bool = False
 
     def __post_init__(self) -> None:
         if self.fields is None:
-            self.fields = [*URL_FIELD_ALIASES, self.id_field]
+            self.fields = (
+                [self.id_field, *URL_FIELD_ALIASES] if self.prefer_id_field else [*URL_FIELD_ALIASES, self.id_field]
+            )
 
 
 def group_key(

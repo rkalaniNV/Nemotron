@@ -46,3 +46,8 @@ work_dir: ./cache/decontamination
 # entirely. Useful without a GPU; the report then states plainly that
 # near-duplicate overlap was not measured.
 skip_similarity: false
+
+# The two splits are parts of one corpus, so an equal id means the same
+# document. Set false only for separately built corpora that both number
+# from zero, where an equal id is a collision rather than a match.
+shared_id_space: true

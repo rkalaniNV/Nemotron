@@ -622,3 +622,52 @@ def test_the_configured_id_field_is_what_identity_matching_reads() -> None:
     assert named["shared_groups"][0]["left_ids"] == ["a1"], (
         "ids were reported as empty strings, so removal downstream had nothing to remove"
     )
+
+
+def test_a_coarse_url_column_can_be_overruled_by_the_configured_id() -> None:
+    """The URL aliases outranked id_field with no way to say otherwise.
+
+    That order is right when the URL is a page's real identity and the id is
+    synthetic. It is wrong when the column is coarse: a `source_url` holding a
+    site homepage puts every document from that site in one key, so a single
+    holdout page from that site marks all of its training documents as
+    overlapping — and they are removed without duplicating anything.
+    """
+    train = [
+        {"doc_id": "a1", "source_url": "https://site.example/", "text": "one article"},
+        {"doc_id": "a2", "source_url": "https://site.example/", "text": "a different article"},
+    ]
+    holdout = [{"doc_id": "b9", "source_url": "https://site.example/", "text": "unrelated third article"}]
+
+    default = grouping.cross_split_groups(
+        train, holdout, cfg=grouping.GroupKeyConfig(text_field="text", id_field="doc_id")
+    )
+    assert list(default["left_key_fields"]) == ["source_url"]
+    assert default["left_records_affected"] == 2, "both training documents flagged, neither a duplicate"
+
+    preferred = grouping.cross_split_groups(
+        train,
+        holdout,
+        cfg=grouping.GroupKeyConfig(text_field="text", id_field="doc_id", prefer_id_field=True),
+    )
+    assert list(preferred["left_key_fields"]) == ["doc_id"]
+    assert preferred["shared_group_count"] == 0
+    assert preferred["left_records_affected"] == 0
+
+
+def test_the_shared_id_space_can_be_turned_off() -> None:
+    """The docstring documented an argument the config could not reach.
+
+    Two splits of one corpus share an id space, which is why SHARED_CORPUS is the
+    default. Two separately built corpora that both number from zero do not, and
+    there was no way to say so from a config file.
+    """
+    train = [{"doc_id": "1", "text": "corpus A document one"}]
+    holdout = [{"doc_id": "1", "text": "corpus B document one, unrelated"}]
+    cfg = grouping.GroupKeyConfig(text_field="text", id_field="doc_id")
+
+    shared = grouping.cross_split_groups(train, holdout, cfg=cfg, id_namespace=grouping.SHARED_CORPUS)
+    assert shared["shared_group_count"] == 1, "equal ids read as the same document"
+
+    per_side = grouping.cross_split_groups(train, holdout, cfg=cfg, id_namespace=None)
+    assert per_side["shared_group_count"] == 0, "equal ids read as a collision"

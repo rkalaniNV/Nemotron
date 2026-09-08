@@ -337,7 +337,17 @@ def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
         holdout,
         left_source=TRAIN,
         right_source=HOLDOUT,
-        cfg=grouping.GroupKeyConfig(text_field=text_field, id_field=id_field),
+        cfg=grouping.GroupKeyConfig(
+            text_field=text_field,
+            id_field=id_field,
+            prefer_id_field=bool(cfg.get("prefer_id_field", False)),
+        ),
+        # Two splits of one corpus share an id space: the same document carries
+        # the same id on both sides, and namespacing by side would give it two
+        # keys and report no overlap. Set shared_id_space false when the splits
+        # are genuinely different corpora that both number from zero, where
+        # equal ids do not imply the same document.
+        id_namespace=grouping.SHARED_CORPUS if cfg.get("shared_id_space", True) else None,
     )
     if not groups["comparable"]:
         # Zero shared groups here would be a structural certainty, not a
