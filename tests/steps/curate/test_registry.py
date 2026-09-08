@@ -310,3 +310,23 @@ def test_the_profile_readme_lists_every_signal() -> None:
     assert listed == set(r.SIGNALS), (
         f"README table out of sync: missing {sorted(set(r.SIGNALS) - listed)}, stale {sorted(listed - set(r.SIGNALS))}"
     )
+
+
+def test_the_language_dependence_tables_cover_every_signal_exactly_once() -> None:
+    """Three groups, and a signal in none of them is one nobody was warned about.
+
+    The third group — no declared requirement, but a whitespace or ASCII
+    assumption baked into the measurement — is the one that matters. A signal
+    added there without a row silently inherits "language-agnostic" from its
+    absence, which is the claim the table exists to stop anyone making.
+    """
+    import re
+
+    readme = (STEP_DIR / "profile" / "README.md").read_text(encoding="utf-8")
+    section = readme[readme.index("### Language dependence") : readme.index("### Wrapping a Curator filter")]
+    listed = re.findall(r"^\| `([a-z_]+)` \| `(?:min|max|interval)`", section, re.M)
+
+    assert len(listed) == len(set(listed)), f"a signal appears in two groups: {sorted(listed)}"
+    assert set(listed) == set(r.SIGNALS), (
+        f"missing {sorted(set(r.SIGNALS) - set(listed))}, stale {sorted(set(listed) - set(r.SIGNALS))}"
+    )

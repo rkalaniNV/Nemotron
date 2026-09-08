@@ -94,6 +94,86 @@ import path.
 The allowlist has 24 entries in two groups. Which group a signal is in decides
 where to read about what it measures.
 
+### Language dependence
+
+Which of the three groups a signal is in decides what it costs to use on a new
+corpus, and whether its number means the same thing there as it did here.
+
+**Language-agnostic (7).** The rule is defined over Unicode or over characters
+that mean the same thing in every script, so the measurement transfers and there
+is nothing to supply.
+
+Transferring is not the same as being comparable. `white_space` is well defined
+everywhere and its ordinary range still differs threefold between a language that
+separates words with spaces and one that does not — 0.186 median across en, vi
+and hi against 0.059 across th and ja. Agnostic means the number is meaningful on
+any corpus, not that a threshold chosen on one corpus belongs on another. That is
+what the profile is for.
+
+| signal | bound | units |
+|---|---|---|
+| `bullet_ratio` | `max` | ratio |
+| `ellipsis` | `max` | ratio |
+| `numbers_ratio` | `max` | ratio |
+| `parentheses_ratio` | `max` | ratio |
+| `unicode_alpha_numeric` | `max` | ratio |
+| `urls_ratio` | `max` | ratio |
+| `white_space` | `max` | ratio |
+
+**Language-dependent, and it says so (9).** These declare a
+requirement and are skipped with a note when the pack does not meet it, so a
+corpus never gets a number the pack could not support.
+
+| signal | bound | units | needs |
+|---|---|---|---|
+| `boilerplate_hits` | `max` | patterns | `boilerplate_hits` |
+| `diacritic_ratio` | `min` | ratio | `diacritic_ratio` |
+| `foreign_script_ratio` | `max` | ratio | `script_ratio` |
+| `latin_ratio` | `max` | ratio | `script_ratio` |
+| `script_ratio` | `min` | ratio | `script_ratio` |
+| `sentence_end_ratio` | `min` | ratio | `sentence_end_ratio` |
+| `stopword_ratio` | `min` | ratio | `stopword_ratio` |
+| `stopword_ratio_folded` | `min` | ratio | `stopword_ratio_folded` |
+| `token_count` | `interval` | tokens | `tokenizer` |
+
+**Language-dependent without declaring it (8).** These need no pack,
+so they run everywhere — and quietly measure something else outside the languages
+they were written for. Read them on a new corpus before gating on them.
+
+| signal | bound | units | the assumption |
+|---|---|---|---|
+| `max_word_length` | `max` | characters | the longest whitespace-separated run |
+| `mean_word_length` | `interval` | characters | characters per whitespace-separated word |
+| `non_alpha_numeric` | `max` | ratio | counts only `[a-zA-Z0-9\n?!,.]` as content |
+| `punctuation` | `max` | ratio | looks for `.`, `!`, `?` only |
+| `repeating_duplicate_ngrams` | `max` | ratio | n-grams over whitespace-separated words |
+| `symbol_to_word` | `max` | ratio | symbols per whitespace-separated word |
+| `word_count` | `interval` | words | documents, in whitespace-separated words |
+| `words_with_alphabets` | `min` | ratio | share of whitespace-separated words containing a letter |
+
+The last group is where a threshold silently stops meaning what it meant.
+Measured on 20,000 C4 documents per language:
+
+| | en | vi | hi | th | ja |
+|---|---:|---:|---:|---:|---:|
+| `word_count` p50 | 191 | 405 | 316 | **86** | **72** |
+| `mean_word_length` p50 | 4.96 | 3.63 | 4.36 | **11.96** | **19.25** |
+| `max_word_length` p50 | 14 | 12 | 16 | **62** | **157** |
+
+Thai and Japanese do not separate words with spaces, so a whole clause becomes one
+"word". A `mean_word_length` p95 of 121 characters is not a long word; it is the
+profile telling you word-based gates do not apply to this corpus. The shipped
+`min_words: 50` removes 39% of the Japanese corpus and 33% of the Thai one, and
+because `word_count` is not part of a policy it does not appear in the policy
+simulation — it is charged before that section is reached.
+
+`non_alpha_numeric` and `punctuation` embed a different assumption: an ASCII
+alphabet and Latin sentence terminators. Curator's own non-English cascade drops
+the first for that reason. `unicode_alpha_numeric` and `sentence_end_ratio` are the
+script-aware replacements — at Curator's own 0.25 default, `non_alpha_numeric`
+retains 99.66% of English and 0.11% of Hindi, where `unicode_alpha_numeric` retains
+96.53%. `punctuation` scores 1.000 on Hindi and Japanese text that ends every
+sentence correctly, because it looks for `.`, `!` and `?` and Hindi ends with `।`.
 ### Wrapping a Curator filter (15)
 
 These score exactly what Curator's filter scores; this step adds a swept grid, a

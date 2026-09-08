@@ -74,6 +74,10 @@ Two worked examples show the two halves, and are meant to be copied:
 
 ## Guardrails
 
+- Signals fall into three groups by language dependence — agnostic, pack-backed,
+  and those that assume whitespace word segmentation or an ASCII alphabet without
+  saying so. The third group is the one that silently stops meaning what it meant.
+  See [Language dependence](nemo_curator/profile/README.md#language-dependence).
 - Profile the **unfiltered** corpus. Profiling the filtered output measures the
   gates after they have already run.
 - `corpus.language` has no default. A wrong default silently produces wrong
