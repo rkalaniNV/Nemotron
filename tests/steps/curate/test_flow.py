@@ -1474,3 +1474,195 @@ def test_the_readme_steps_table_matches_what_the_steps_declare() -> None:
     assert documented_order == [plan.step_id for plan in run_flow.STEP_ORDER], (
         "the table must list the steps in the order the flow runs them"
     )
+
+
+# -- decontamination before subset ---------------------------------------------
+
+
+def decontaminable_corpus(tmp_path: Path) -> tuple[str, str, set[str]]:
+    """A corpus, a holdout that shares pages with it, and the ids that must go.
+
+    Overlap is by source page rather than by wording, so the removal happens on
+    CPU through the exact group-identity pass and the test needs no GPU.
+    """
+    words = "curation tokens budget corpus stratum nesting document policy".split()
+    body = lambda i: " ".join(words[(i + j) % len(words)] for j in range(30)) + "."  # noqa: E731
+
+    corpus_dir = tmp_path / "out" / "filtered_jsonl"
+    corpus_dir.mkdir(parents=True)
+    contaminated = {f"d{i:03d}" for i in range(8)}
+    with (corpus_dir / "part_0.jsonl").open("w", encoding="utf-8") as fh:
+        for i in range(40):
+            fh.write(
+                json.dumps(
+                    {
+                        "id": f"d{i:03d}",
+                        "source": "web",
+                        "url": f"https://example.test/page/{i}",
+                        "text": body(i),
+                    }
+                )
+                + "\n"
+            )
+
+    holdout = tmp_path / "holdout.jsonl"
+    with holdout.open("w", encoding="utf-8") as fh:
+        for i in range(8):
+            # Same page, different wording: nothing textual links these to the
+            # training documents, so only the group-identity pass can find them.
+            fh.write(
+                json.dumps(
+                    {
+                        "id": f"h{i:03d}",
+                        "url": f"https://example.test/page/{i}",
+                        "text": "Entirely different prose about unrelated matters. " * 6,
+                    }
+                )
+                + "\n"
+            )
+
+    return str(corpus_dir), str(holdout), contaminated
+
+
+def tier_documents(subset_root: Path) -> set[str]:
+    found: set[str] = set()
+    for tier in sorted(subset_root.glob("budget_*")):
+        corpus = tier / "subset.jsonl"
+        if corpus.is_file():
+            found |= {
+                json.loads(line)["id"] for line in corpus.read_text(encoding="utf-8").splitlines() if line.strip()
+            }
+    return found
+
+
+def test_subset_tiers_never_contain_what_decontamination_removed(tmp_path) -> None:
+    """The ordering, asserted on documents rather than on STEP_ORDER.
+
+    Both steps declared ``needs=("corpus",)``, so which ran first was whatever
+    the tuple happened to say — and it said subset. Tiers were cut from the
+    corpus that still held every document decontamination was about to remove,
+    and no artifact could show it: the subset report counts documents, not their
+    provenance, and the decontamination report describes a corpus the tiers were
+    not taken from.
+
+    This asserts the property, not the order, so it stays true if the mechanism
+    changes and fails if the ordering regresses.
+    """
+    corpus_dir, holdout, planted = decontaminable_corpus(tmp_path)
+    root = tmp_path / "out"
+    cfg = {
+        "corpus": {
+            "input": f"{corpus_dir}/*.jsonl",
+            "text_field": "text",
+            "id_field": "id",
+            "source_field": "source",
+        },
+        "output_root": str(root),
+        "steps": {
+            "ingest": {"enabled": False},
+            "profile": {"enabled": False},
+            # Disabled: the corpus is already at paths['corpus'], and running
+            # Curator here would buy the test nothing it is checking.
+            "filter": {"enabled": False},
+            "audit": {"enabled": False},
+            "decontamination": {"enabled": True, "holdout": holdout, "skip_similarity": True},
+            "subset": {
+                "enabled": True,
+                "token_budgets": [200, 600],
+                "length_bands": [16, 50],
+                "tokenizer": None,
+                "token_cache": None,
+                "quality_score_field": None,
+                "seed": 0,
+            },
+        },
+        "approve": None,
+    }
+
+    run_flow.run(cfg)
+
+    before = {
+        json.loads(line)["id"]
+        for line in (Path(corpus_dir) / "part_0.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    kept = {
+        json.loads(line)["id"]
+        for line in (root / "decontaminated" / "train_decontaminated.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    removed = before - kept
+    assert removed == planted, (
+        f"the fixture proves nothing unless decontamination removed the planted pages: {sorted(removed)}"
+    )
+
+    tiers = tier_documents(root / "subset")
+    assert tiers, "subset wrote no tier, so the assertion below would hold vacuously"
+    assert not (tiers & removed), (
+        f"subset tiers carry {sorted(tiers & removed)}, which decontamination removed. "
+        "The tiers were cut before decontamination ran."
+    )
+    assert tiers <= kept, "every tier document must come from the decontaminated corpus"
+
+
+def test_a_producer_scheduled_after_its_consumer_is_refused(monkeypatch, tmp_path) -> None:
+    """The guard that makes the ordering above a checked claim, not a comment.
+
+    Nothing in STEP_ORDER stopped a step from being placed before the step whose
+    output it reads: the dependency loop treated "enabled" as "will have run".
+    Simulating the regression is the only way to reach this branch, because the
+    tuple is now correct.
+    """
+    corpus_dir, holdout, _ = decontaminable_corpus(tmp_path)
+    regressed = tuple(
+        sorted(run_flow.STEP_ORDER, key=lambda p: 99 if p.key == "decontamination" else run_flow.STEP_POSITION[p.key])
+    )
+    monkeypatch.setattr(run_flow, "STEP_ORDER", regressed)
+    monkeypatch.setattr(run_flow, "STEP_POSITION", {p.key: i for i, p in enumerate(regressed)})
+
+    cfg = {
+        "corpus": {"input": f"{corpus_dir}/*.jsonl", "text_field": "text", "id_field": "id"},
+        "output_root": str(tmp_path / "out"),
+        "steps": {
+            "filter": {"enabled": False},
+            "decontamination": {"enabled": True, "holdout": holdout, "skip_similarity": True},
+            "subset": {"enabled": True, "token_budgets": [200], "length_bands": [16], "seed": 0},
+        },
+    }
+
+    with pytest.raises(run_flow.FlowConfigError) as excinfo:
+        run_flow.plan(cfg)
+    message = str(excinfo.value)
+    assert "steps.subset needs 'decontaminated'" in message
+    assert "scheduled to run after it" in message
+
+
+def test_a_decontaminated_corpus_the_run_will_not_read_is_named(tmp_path, caplog) -> None:
+    """The same silence from the other side.
+
+    With decontamination disabled, subset legitimately reads the pre-decontamination
+    corpus — but if an earlier run left a decontaminated one beside it, the author
+    almost certainly meant that. No `needs` edge can state this, because the
+    dependency genuinely is not required; it is a warning rather than a refusal
+    for the same reason.
+    """
+    corpus_dir, _, _ = decontaminable_corpus(tmp_path)
+    root = tmp_path / "out"
+    stale = root / "decontaminated"
+    stale.mkdir(parents=True)
+    (stale / "train_decontaminated.jsonl").write_text(
+        json.dumps({"id": "d000", "text": "kept"}) + "\n", encoding="utf-8"
+    )
+
+    cfg = {
+        "corpus": {"input": f"{corpus_dir}/*.jsonl", "text_field": "text", "id_field": "id"},
+        "output_root": str(root),
+        "steps": {
+            "filter": {"enabled": False},
+            "decontamination": {"enabled": False},
+            "subset": {"enabled": True, "token_budgets": [200], "length_bands": [16], "seed": 0},
+        },
+    }
+
+    _, _, warnings = run_flow.plan(cfg)
+    assert any("BEFORE decontamination" in w and str(stale) in w for w in warnings), warnings

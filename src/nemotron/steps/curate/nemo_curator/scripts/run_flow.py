@@ -121,11 +121,41 @@ STEP_ORDER: tuple[StepPlan, ...] = (
     # attribution as unavailable. Both are real answers, and both look like a
     # clean result unless something says why.
     StepPlan("audit", "curate/audit", "audit", needs=("corpus",), optional=("manifest", "ledger")),
+    # Before subset, not after. Subset cuts fixed-size tiers and writes them out;
+    # a tier cut from the pre-decontamination corpus carries exactly the
+    # documents decontamination was asked to remove, and every consumer of the
+    # tiers reads them as decontaminated. The removal is then a no-op nobody
+    # reports. Both steps used to declare needs=("corpus",), so the order between
+    # them was whatever this tuple happened to say.
+    StepPlan(
+        "decontamination",
+        "curate/decontamination",
+        "decontaminated",
+        needs=("corpus",),
+        produces=("decontaminated",),
+        gpus=1,
+    ),
     StepPlan("subset", "curate/subset", "subset", needs=("corpus",)),
-    StepPlan("decontamination", "curate/decontamination", "decontaminated", needs=("corpus",), gpus=1),
 )
 
 STEPS_BY_KEY = {plan.key: plan for plan in STEP_ORDER}
+#: Where each step sits in the run. Ordering is a dependency fact, so it is
+#: checkable rather than trusted: see ``preflight``.
+STEP_POSITION = {plan.key: index for index, plan in enumerate(STEP_ORDER)}
+
+
+def _needs(plan: StepPlan, enabled: set[str]) -> tuple[str, ...]:
+    """A step's required artifacts, given what else this run does.
+
+    Only subset differs, and only on one artifact: when decontamination runs,
+    the corpus subset must read is the decontaminated one. Saying so here rather
+    than only in ``derive`` is what makes the dependency checkable — the flow
+    refuses a subset that would read the wrong corpus instead of quietly cutting
+    tiers from it.
+    """
+    if plan.key == "subset" and "decontamination" in enabled:
+        return tuple("decontaminated" if name == "corpus" else name for name in plan.needs)
+    return plan.needs
 
 
 @dataclass
@@ -155,6 +185,9 @@ def _artifact_paths(root: Path) -> dict[str, str]:
         "manifest": str(root / "filtered_jsonl" / "run_manifest.json"),
         "ledger": str(root / "filtered_jsonl" / "curation_ledger.json"),
         "prepared": str(root / "ingested"),
+        # One file, not a directory: curate/decontamination writes the retained
+        # training split as a single train_decontaminated.jsonl beside its report.
+        "decontaminated": str(root / "decontaminated" / "train_decontaminated.jsonl"),
         "candidates": str(root / "profile" / "candidate_policies.yaml"),
         "profile_report": str(root / "profile" / "profile_report.json"),
         "approved_policy": str(root / "policy" / "approved_policy.yaml"),
@@ -228,6 +261,7 @@ def derive(cfg: dict) -> tuple[list[Resolved], dict[str, str]]:
     paths = _artifact_paths(root)
     steps_cfg = cfg.get("steps") or {}
     ingest_on = bool((steps_cfg.get("ingest") or {}).get("enabled"))
+    decon_on = bool((steps_cfg.get("decontamination") or {}).get("enabled"))
 
     # Ingest reads the author's raw field names but deliberately emits the
     # category's canonical schema. Every consumer must therefore read the
@@ -321,7 +355,12 @@ def derive(cfg: dict) -> tuple[list[Resolved], dict[str, str]]:
         elif plan.key == "subset":
             step_cfg = {
                 **shared,
-                "input_glob": f"{paths['corpus']}/**/*.jsonl",
+                # The corpus as it stands after decontamination, when
+                # decontamination runs. Cutting tiers from paths['corpus'] there
+                # would put the removed documents back into every tier, and the
+                # subset report — which counts documents, not their provenance —
+                # would look exactly the same.
+                "input_glob": (paths["decontaminated"] if decon_on else f"{paths['corpus']}/**/*.jsonl"),
                 "output_dir": out,
             }
         else:  # decontamination
@@ -444,9 +483,25 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
     for resolved_step in resolved:
         if not resolved_step.enabled:
             continue
-        for artifact in resolved_step.plan.needs:
+        for artifact in _needs(resolved_step.plan, enabled):
             producer = next((p.key for p in STEP_ORDER if artifact in p.produces), None)
             if producer in enabled:
+                # Enabled is not the same as "will have run". A producer
+                # scheduled after its consumer has written nothing by the time
+                # the consumer reads, so the consumer silently falls back to
+                # whatever a previous run left at that path — or reports an empty
+                # corpus. This is the check that makes STEP_ORDER a claim the
+                # flow verifies rather than one it trusts: subset and
+                # decontamination both declared needs=("corpus",) and their
+                # relative order was accidental.
+                if STEP_POSITION[producer] < STEP_POSITION[resolved_step.plan.key]:
+                    continue
+                problems.append(
+                    f"steps.{resolved_step.plan.key} needs {artifact!r}, which steps.{producer} "
+                    f"produces, but steps.{producer} is scheduled to run after it. Nothing would "
+                    f"be at {paths[artifact]} when steps.{resolved_step.plan.key} reads, so its "
+                    "output would describe the corpus as it was before that step, not after."
+                )
                 continue
             # The producer is disabled. Reuse a previous run's artifact only if
             # it is actually there; otherwise say which step would have made it,
@@ -515,6 +570,22 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
             "it. Set corpus.source_field_in_source to the column the RAW data carries, or "
             "corpus.source_value to a constant. Without one of those the column is absent "
             "and per-source figures silently describe shards instead."
+        )
+
+    # The mirror case, which no `needs` edge can state: decontamination is OFF, so
+    # subset legitimately reads paths['corpus'] — but a decontaminated corpus is
+    # sitting beside it from an earlier run. The author decontaminated once and
+    # reasonably expects it to hold; subset would cut tiers from the corpus that
+    # still contains every removed document, and nothing in its report would
+    # differ. A warning, not a refusal: re-tiering the full corpus on purpose is
+    # a legitimate thing to ask for.
+    if "subset" in enabled and "decontamination" not in enabled and _artifact_exists(paths["decontaminated"]):
+        warnings.append(
+            f"steps.subset reads {paths['corpus']}, the corpus BEFORE decontamination, because "
+            f"steps.decontamination is disabled — but {paths['decontaminated']} exists from an "
+            "earlier run. The tiers will contain the documents that run removed. Enable "
+            "steps.decontamination, or point steps.subset.input_glob at the decontaminated "
+            "corpus, if that is not what you meant."
         )
 
     # A score column subset stratifies on only exists if the filter wrote it.

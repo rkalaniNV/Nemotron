@@ -103,6 +103,14 @@ steps:
     mode: all
     comparison_fields: [id]       # required by containment; no implicit default
 
+  decontamination:
+    enabled: false
+    holdout: null
+    threshold: 0.8
+    shingle_kind: char
+    skip_similarity: true         # GPU similarity needs cuDF; this runs the
+                                  # exact pass on CPU
+
   subset:
     enabled: false
     token_budgets: [100000000, 500000000]
@@ -120,14 +128,6 @@ steps:
     quality_score_field: null
     length_bands: [128, 512, 2048, 8192]
     seed: 0
-
-  decontamination:
-    enabled: false
-    holdout: null
-    threshold: 0.8
-    shingle_kind: char
-    skip_similarity: true         # GPU similarity needs cuDF; this runs the
-                                  # exact pass on CPU
 
 # ── What to read when this run finishes ──────────────────────────────────────
 # output/vi/profile/profile_summary.md, and specifically its `Approve block`

@@ -6,6 +6,15 @@ what you measured was the *policy*.
 Use this README for workflow and pitfalls; use `step.toml` for the exact
 artifact, parameter, strategy, and error manifest before editing configs.
 
+**Run it after `curate/decontamination`, not before.** A tier is written out and
+read as a corpus in its own right, so a tier cut before decontamination carries
+exactly the documents decontamination was asked to remove — and nothing says so
+afterwards: the subset report counts documents, not their provenance, and the
+decontamination report describes a corpus the tiers were not taken from. The flow
+orders the two steps and points `input_glob` at `train_decontaminated.jsonl`
+automatically. Running this step by hand is the case to watch: point `input_glob`
+at the decontaminated corpus yourself.
+
 ## The Problem It Addresses
 
 Policy A retains 80% of a corpus. Policy B retains 95%. Train on whatever each

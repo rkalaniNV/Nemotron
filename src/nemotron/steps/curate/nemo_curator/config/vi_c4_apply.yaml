@@ -66,6 +66,13 @@ steps:
     mode: all
     comparison_fields: [id]
 
+  decontamination:
+    enabled: false
+    holdout: null
+    threshold: 0.8
+    shingle_kind: char
+    skip_similarity: true
+
   # Now worth enabling: with a policy applied, filter writes __<signal> columns
   # that subset can stratify on without a second pass over the corpus.
   subset:
@@ -91,13 +98,6 @@ steps:
     quality_score_field: __script_ratio
     length_bands: [128, 512, 2048, 8192]
     seed: 0
-
-  decontamination:
-    enabled: false
-    holdout: null
-    threshold: 0.8
-    shingle_kind: char
-    skip_similarity: true
 
 # ── The part that only exists after run 1 ────────────────────────────────────
 # Copied from the `Approve block` section of output/vi/profile/profile_summary.md
