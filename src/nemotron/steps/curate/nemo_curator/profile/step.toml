@@ -85,7 +85,7 @@ default = { min_keep_rate = 0.8, max_keep_rate = 0.995 }
 
 [[parameters]]
 name = "models"
-description = "Optional models. models.tokenizer is a { name, revision } mapping and enables the token_count signal; the revision is required because counts from two revisions are not comparable."
+description = "Optional models. models.fasttext_langid is a path to a FastText language-identification model and enables the language-composition table, which no signal can supply because languages sharing a script are indistinguishable to a script ratio; a configured path that is not a file is refused rather than silently skipped. models.tokenizer is a { name, revision } mapping and enables the token_count signal; the revision is required because counts from two revisions are not comparable."
 
 [[strategies]]
 when = "You are curating a language Curator publishes no thresholds for"

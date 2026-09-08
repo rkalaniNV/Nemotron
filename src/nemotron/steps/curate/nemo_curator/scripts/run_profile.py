@@ -278,9 +278,23 @@ def language_composition(sample: dict[str, list[tuple[str, str]]], model_path: s
     Returns None when no model is configured. The absence is recorded rather
     than filled in, because guessing the language is the thing this step exists
     not to do.
+
+    A model that IS configured but cannot be read is a different thing entirely,
+    and refusing is the only honest answer. Returning None there would produce a
+    report identical in every byte to one from a run that asked for no model, so
+    a typo in the path would be indistinguishable from a deliberate choice --
+    and the reader would conclude the corpus had no language measured rather
+    than that theirs failed to run.
     """
-    if not model_path or not Path(model_path).is_file():
+    if not model_path:
         return None
+    if not Path(model_path).is_file():
+        raise FileNotFoundError(
+            f"models.fasttext_langid points at {model_path}, which is not a file. Language "
+            "composition cannot be measured without it. Fix the path, or remove the key to "
+            "profile without a language breakdown -- but do not leave a wrong path, because "
+            "the report it produces is indistinguishable from one nobody asked for."
+        )
 
     import fasttext
 

@@ -548,15 +548,21 @@ def test_the_confidence_distribution_is_reported_separately(monkeypatch, tmp_pat
     assert 0.0 <= c["p1"] <= 1.0
 
 
-def test_no_model_reports_absence_rather_than_guessing(tmp_path) -> None:
+def test_no_model_reports_absence_rather_than_guessing() -> None:
     """Nemotron does not choose a language for the user. An absent model is
-    recorded as unmeasured, not filled in from the script or a heuristic."""
+    recorded as unmeasured, not filled in from the script or a heuristic.
+
+    Only an absent key means that. A path that is set and unreadable is a typo,
+    and it is refused — see
+    test_a_wrong_fasttext_path_is_refused_not_silently_skipped. This test
+    asserted the opposite until then, which is how the two came to be
+    indistinguishable in the report.
+    """
     from nemotron.steps.curate.nemo_curator.scripts import run_profile
 
     sample = {"src": [("1", "Tiếng Việt")]}
 
     assert run_profile.language_composition(sample, None) is None
-    assert run_profile.language_composition(sample, str(tmp_path / "absent.bin")) is None
 
 
 def test_a_document_with_embedded_newlines_is_still_scored(monkeypatch, tmp_path) -> None:
@@ -570,3 +576,24 @@ def test_a_document_with_embedded_newlines_is_still_scored(monkeypatch, tmp_path
     out = run_profile.language_composition(sample, model)
 
     assert out["scored"] == 1, "the newlines must be flattened before predict, not truncate it"
+
+
+def test_a_wrong_fasttext_path_is_refused_not_silently_skipped(tmp_path) -> None:
+    """The degraded report was byte-identical to the clean one.
+
+    `models.fasttext_langid` absent means "do not measure language", and that is
+    a legitimate choice this step records rather than fills in. A path that is
+    set but unreadable is a typo, and returning None for it produced a report
+    with language_composition null, no note, and no non-zero exit — identical in
+    every byte to a run that asked for no model. The reader would conclude the
+    corpus had no language breakdown rather than that theirs had failed.
+    """
+    from nemotron.steps.curate.nemo_curator.scripts import run_profile
+
+    sample = {"src": [("a", "xin chào thế giới")]}
+
+    assert run_profile.language_composition(sample, None) is None, "absent stays absent"
+    assert run_profile.language_composition(sample, "") is None
+
+    with pytest.raises(FileNotFoundError, match="which is not a file"):
+        run_profile.language_composition(sample, str(tmp_path / "typo-lid.176.bin"))
