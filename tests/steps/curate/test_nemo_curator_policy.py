@@ -742,3 +742,37 @@ def test_the_manifest_says_whether_a_person_approved_the_thresholds(step, tmp_pa
     assert policy["status"] == "unapproved"
     assert policy["thresholds_applied"] == 0
     assert "not as a release" in policy["note"]
+
+
+def test_an_overridden_policy_is_not_recorded_as_approved(tmp_path) -> None:
+    """The manifest is what a reader has once the run log is gone.
+
+    allow_unvalidated_policy runs a policy that failed the approval contract.
+    The thresholds do gate the corpus, so "unapproved" would be false too — but
+    recording "approved" launders the exact check that was skipped, and the note
+    beside it claimed a corpus fingerprint the policy never carried.
+    """
+    from nemotron.steps.curate.nemo_curator import step as curate_step
+    from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
+
+    incomplete = tmp_path / "hand.yaml"
+    incomplete.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "approved": True,
+                "signals_impl_version": signal_registry.IMPL_VERSION,
+                "thresholds": [{"signal": "numbers_ratio", "max": 0.25}],
+            }
+        )
+    )
+    cfg = {"heuristic_filters": {"approved_policy": str(incomplete), "allow_unvalidated_policy": True}}
+
+    resolved = curate_step._resolve_policy(cfg)
+
+    assert resolved.thresholds, "the policy still ran"
+    assert resolved.overridden is True
+
+    # The flag alone is not an override: a policy meeting the contract is approved
+    # whether or not the escape hatch was left open.
+    assert curate_step._resolve_policy({"heuristic_filters": {}}).overridden is False

@@ -192,6 +192,11 @@ class PolicyResolution:
     langpack_spec: dict[str, Any]
     warnings: list[str]
     identity: dict[str, Any]
+    #: True when allow_unvalidated_policy carried a policy past the approval
+    #: contract it did not meet. The thresholds still ran, so the corpus was
+    #: gated -- but recording that as "approved" launders the exact check that
+    #: was skipped, and the manifest is what a reader has once the log is gone.
+    overridden: bool = False
 
 
 def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -> PolicyResolution:
@@ -213,6 +218,9 @@ def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -
         # A run that names several policies needs to know which one was refused.
         raise policy_module.PolicyNotApprovedError(f"{path}: {exc}") from exc
     warnings = [f"{path}: {w}" for w in warnings]
+    # The flag alone is not an override. A policy that meets the contract is
+    # approved whether or not someone left the escape hatch open.
+    overridden = bool(block.get("allow_unvalidated_policy")) and bool(policy_module.validate_approved_policy(document))
 
     # The scorers themselves are versioned. Thresholds were calibrated by one
     # implementation; running them under another silently measures a different
@@ -272,7 +280,7 @@ def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -
         "thresholds": thresholds,
         **({"langpack_content_hash": declared_pack["content_hash"]} if declared_pack.get("content_hash") else {}),
     }
-    return PolicyResolution(thresholds, declared_pack, warnings, identity)
+    return PolicyResolution(thresholds, declared_pack, warnings, identity, overridden=overridden)
 
 
 def resolve_policy(cfg: dict) -> tuple[list[dict], dict, list[str]]:
@@ -1036,12 +1044,20 @@ def emit_manifest(
     # design — the artifact looks exactly like a released one. Naming the state
     # is cheaper than renaming the directory and does not disturb the paths the
     # flow derives for the steps downstream.
-    thresholds, _, _ = resolve_policy(cfg)
+    resolved = _resolve_policy(cfg)
+    thresholds = resolved.thresholds
     document["policy"] = {
-        "status": "approved" if thresholds else "unapproved",
+        "status": ("override_unvalidated" if resolved.overridden else "approved") if thresholds else "unapproved",
         "thresholds_applied": len(thresholds),
         "note": (
-            "Thresholds from an approved policy, checked against a fingerprint of the corpus they were measured on."
+            (
+                "Thresholds applied under allow_unvalidated_policy: the policy did not meet the "
+                "approval contract and ran anyway. The run log names which fields were unmet. "
+                "Treat this corpus as an experiment, not a release."
+                if resolved.overridden
+                else "Thresholds from an approved policy, checked against a fingerprint of the "
+                "corpus they were measured on."
+            )
             if thresholds
             else "No approved policy was applied. Any filtering came from configuration "
             "written by hand, which carries no record of the corpus it was measured on. "
