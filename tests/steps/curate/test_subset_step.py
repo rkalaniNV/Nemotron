@@ -570,3 +570,74 @@ def test_the_tier_unit_follows_the_tokenizer(tmp_path) -> None:
     assert run_subset._tier_dir_names({"token_budgets": [7], "tokenizer": {"name": "n", "revision": "r"}}) == [
         "budget_7_tokens"
     ]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param({"input_glob": "/nonexistent/dir/*.jsonl"}, id="input_glob-matches-nothing"),
+        pytest.param({"input_glob": None}, id="input_glob-absent"),
+        pytest.param({"id_field": None}, id="id_field-missing"),
+        pytest.param({"seed": "zero"}, id="seed-not-an-integer"),
+        pytest.param({"tokenizer": {"name": "x"}}, id="tokenizer-without-revision"),
+    ],
+)
+def test_a_config_error_leaves_the_previous_run_intact(tmp_path, override) -> None:
+    """The delete must not run before the configuration is known to be good.
+
+    Validation covered token_budgets and length_bands only, so every other config
+    error still raised from inside _run — after the tiers had been removed. A
+    mistyped input_glob destroyed the previous run on its way to reporting
+    itself, which is the failure the review asked to prevent.
+    """
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    for name in ("budget_600_words", "budget_1500_words"):
+        (output_dir / name).mkdir()
+        (output_dir / name / "subset.jsonl").write_text('{"id": "a"}\n')
+    (output_dir / "plan.json").write_text("{}")
+    (output_dir / "subset_report.json").write_text("{}")
+    before = sorted(p.name for p in output_dir.iterdir())
+
+    cfg = {
+        "output_dir": str(output_dir),
+        "token_budgets": [600, 1500],
+        "tokenizer": None,
+        "input_glob": str(tmp_path / "data" / "*.jsonl"),
+        "id_field": "id",
+        "text_field": "text",
+    }
+    cfg.update(override)
+    if override.get("input_glob") is None and "input_glob" in override:
+        cfg.pop("input_glob")
+
+    with pytest.raises(run_subset.ConfigError):
+        run_subset.run(cfg)
+
+    assert sorted(p.name for p in output_dir.iterdir()) == before
+
+
+def test_a_padded_output_dir_is_not_silently_relative(tmp_path, monkeypatch) -> None:
+    """Validating a stripped string and then using the unstripped one.
+
+    `"  /data/out"` passed the emptiness check and then became a *relative* path
+    whose first component is two spaces, created under the caller's working
+    directory while /data/out was never touched — reinstating the very hazard
+    the required-output_dir message says it prevents.
+    """
+    monkeypatch.chdir(tmp_path)
+    wanted = tmp_path / "wanted"
+
+    with pytest.raises(run_subset.ConfigError):
+        run_subset.run(
+            {
+                "output_dir": f"  {wanted}  ",
+                "token_budgets": [600],
+                "tokenizer": None,
+                "input_glob": str(tmp_path / "absent" / "*.jsonl"),
+                "id_field": "id",
+                "text_field": "text",
+            }
+        )
+
+    assert [p.name for p in tmp_path.iterdir() if p.name.strip() != p.name] == []

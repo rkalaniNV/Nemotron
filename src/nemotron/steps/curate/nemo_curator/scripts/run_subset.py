@@ -375,21 +375,34 @@ def run(cfg: dict, started_at: str | None = None) -> dict[str, Any]:
             "directories it owns before writing, and a defaulted path decides where that "
             "happens on the caller's behalf."
         )
-    _validate_config(cfg)
+    prepared = _validate_config(cfg)
 
-    output_dir = Path(raw_output_dir)
+    # Stripped, because the emptiness check above already strips: validating one
+    # string and then using another lets "  /data/out" through as a *relative*
+    # path whose first component is two spaces, created under the caller's
+    # working directory while /data/out is never touched.
+    output_dir = Path(str(raw_output_dir).strip())
     output_dir.mkdir(parents=True, exist_ok=True)
     tier_names = _tier_dir_names(cfg)
     _reset_output_artifacts(output_dir, tier_names)
     try:
-        return _run(cfg, started_at, output_dir)
+        return _run(cfg, started_at, output_dir, prepared)
     except BaseException:
         _reset_output_artifacts(output_dir, tier_names)
         raise
 
 
-def _validate_config(cfg: dict) -> None:
-    """Every check that can be made before anything is read or removed."""
+def _validate_config(cfg: dict) -> tuple[list[str], Any, str]:
+    """Every check that can be made before anything is removed.
+
+    Returns what the checks had to build anyway -- the resolved input paths and
+    the counter -- so ``_run`` does not resolve them a second time.
+
+    The narrow version of this function checked token_budgets and length_bands
+    only, and everything else still raised from inside _run, after the delete. A
+    mistyped input_glob destroyed the previous run's tiers on its way to
+    reporting itself. Any check that needs no output directory belongs here.
+    """
     budgets = cfg.get("token_budgets") or []
     if (
         not isinstance(budgets, list)
@@ -407,14 +420,27 @@ def _validate_config(cfg: dict) -> None:
     ):
         raise ConfigError("length_bands must be a non-empty, strictly increasing list of positive integers")
 
+    if not cfg.get("id_field"):
+        raise ConfigError("id_field is required: a subset that cannot name its documents cannot be nested")
+    try:
+        int(cfg.get("seed") or 0)
+    except (TypeError, ValueError):
+        raise ConfigError(f"seed must be an integer, got {cfg.get('seed')!r}") from None
+    if "input_glob" not in cfg:
+        raise ConfigError("input_glob is required")
+    # build_counter validates the whole tokenizer block; resolve_inputs refuses a
+    # pattern matching nothing. Both read configuration, neither writes.
+    counter, unit = build_counter(cfg)
+    paths = resolve_inputs(cfg["input_glob"])
+    return paths, counter, unit
 
-def _run(cfg: dict, started_at: str, output_dir: Path) -> dict[str, Any]:
+
+def _run(cfg: dict, started_at: str, output_dir: Path, prepared: tuple[list[str], Any, str]) -> dict[str, Any]:
     budgets = cfg["token_budgets"]
     raw_length_bands = cfg.get("length_bands")
     length_bands = subset.DEFAULT_LENGTH_BANDS if raw_length_bands is None else raw_length_bands
 
-    paths = resolve_inputs(cfg["input_glob"])
-    counter, unit = build_counter(cfg)
+    paths, counter, unit = prepared
 
     rows, scan_stats = scan(cfg, paths, counter)
     counter.save()
