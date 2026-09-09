@@ -11,7 +11,7 @@
 :::{grid-item-card}
 :columns: 8
 
-**What You'll Build**: one NeMo Evaluator Launcher result directory for a single hosted chat smoke-test task, written by the `eval/model_eval` step.
+**What You Will Build**: one NeMo Evaluator Launcher result directory for a single hosted chat verification task, written by the `eval/model_eval` step.
 
 ^^^
 
@@ -85,7 +85,7 @@ It sets `deployment.type: none`, points NeMo Evaluator Launcher at `target.api_e
    $ uv run --no-sync nemotron steps show eval/model_eval
    ```
 
-1. Run the hosted chat smoke test.
+1. Run the hosted chat verification run.
 
    ```console
    $ uv run --no-sync nemotron steps run eval/model_eval \

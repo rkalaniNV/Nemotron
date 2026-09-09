@@ -34,7 +34,7 @@ The response contains the fields declared in `src/nemotron/steps/eval/model_eval
 | `consumes` | Optional input artifact type. This step accepts `checkpoint_megatron`. |
 | `produces` | Output artifact type. This step produces `eval_results`. |
 | `parameters` | Documented knobs such as `target.api_endpoint.*`, `deployment.checkpoint_path`, `task_filters`, and launcher params. |
-| `strategies` | Rules for hosted smoke tests, checkpoint evaluation, endpoint/task pairing, and task-name selection. |
+| `strategies` | Rules for hosted verification runs, checkpoint evaluation, endpoint/task pairing, and task-name selection. |
 | `errors` | Named failure modes and recovery guidance. |
 | `reference` | Upstream NeMo Evaluator Launcher references. |
 
@@ -46,7 +46,7 @@ The step provides two config files under `src/nemotron/steps/eval/model_eval/con
 :language: yaml
 ```
 
-`tiny_chat.yaml` is the hosted chat smoke-test config.
+`tiny_chat.yaml` is the hosted chat verification config.
 It sets `deployment.type: none`, reads `target.api_endpoint.*` from environment variables, and runs `mmlu_instruct` with `limit_samples: 1`.
 
 ```{literalinclude} ../../../src/nemotron/steps/eval/model_eval/config/default.yaml
