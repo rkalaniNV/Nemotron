@@ -3495,6 +3495,7 @@ byob-gpu = [
     { name = "transformers" },
 ]
 curate = [
+    { name = "cosmos-xenna" },
     { name = "huggingface-hub" },
     { name = "nemo-curator", extra = ["text-cpu"] },
     { name = "pyyaml" },
@@ -3584,6 +3585,7 @@ requires-dist = [
     { name = "colorama", specifier = ">=0.4.6" },
     { name = "cosmos-xenna", marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'byob'", specifier = ">=0.2,<0.3" },
     { name = "cosmos-xenna", marker = "extra == 'all'" },
+    { name = "cosmos-xenna", marker = "extra == 'curate'" },
     { name = "cosmos-xenna", marker = "extra == 'xenna'" },
     { name = "cuda-bindings", marker = "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'all'", specifier = ">=12.9,<13" },
     { name = "cuda-bindings", marker = "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'byob-gpu'", specifier = ">=12.9,<13" },
