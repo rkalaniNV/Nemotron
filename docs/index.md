@@ -80,7 +80,7 @@ Generate and translate custom multiple-choice benchmarks with `byob/mcq`.
 :link: curate/index
 :link-type: doc
 
-Filter JSONL text with `curate/nemo_curator` before translation or training data preparation.
+Ingest, profile, filter, audit, decontaminate, and subset multilingual text corpora with the `curate` steps.
 :::
 
 :::{grid-item-card} Synthetic Data Generation
@@ -243,6 +243,7 @@ Airgap Environment <steps/airgap.md>
 
 About <curate/index.md>
 Getting Started <curate/getting-started.md>
+Concepts <curate/explanation/index.md>
 Tasks <curate/how-to/index.md>
 Reference <curate/reference/index.md>
 ```
