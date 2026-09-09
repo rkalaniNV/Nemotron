@@ -305,13 +305,14 @@ def main() -> None:
         json.dumps(
             {
                 "schema_version": "1.0",
-                "status": "pass",
+                "status": "review_required",
                 "written": sorted(written),
                 "tools": [tool.name for tool in surface],
                 "drafted_with_model": bool(args.draft_with_model),
                 # Always true on a fresh scaffold, and stated rather than implied: this is
                 # the one field that says the output is not yet a source.
                 "review_required": REVIEW_MARKER in backend,
+                "executable": REVIEW_MARKER not in backend,
                 "findings": findings,
                 "model_call": model_call,
                 "model": model_provenance,

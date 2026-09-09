@@ -1184,7 +1184,9 @@ def test_scaffold_writes_a_source_the_checker_then_blocks(tmp_path: Path) -> Non
     )
     assert scaffolded.returncode == 0, scaffolded.stderr
     report = json.loads(scaffolded.stdout)
+    assert report["status"] == "review_required"
     assert report["review_required"] is True
+    assert report["executable"] is False
     assert report["drafted_with_model"] is False
     assert {Path(path).name for path in report["written"]} == {
         "backend.py",
