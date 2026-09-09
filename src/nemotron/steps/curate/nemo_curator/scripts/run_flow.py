@@ -442,6 +442,35 @@ def _any_match(pattern: str | list[str]) -> bool:
     return bool(integrity.expand_inputs(pattern))
 
 
+def _language_keep_list_warnings(cfg: dict) -> list[str]:
+    """Whether the keep-list names the language the corpus is measured as.
+
+    ``corpus.language`` selects the pack a corpus is MEASURED with;
+    ``steps.filter.language_codes`` decides which documents are KEPT. They are
+    deliberately independent — a Hindi corpus may retain English on purpose —
+    so disagreement is legal and cannot be refused. A keep-list that shares no
+    language with the pack is almost always one carried over from another
+    config, and the result is a corpus filtered to almost nothing with a
+    balanced ledger and a zero exit status. Say so before the filter runs.
+    """
+    language = str((cfg.get("corpus") or {}).get("language") or "").strip()
+    codes = ((cfg.get("steps") or {}).get("filter") or {}).get("language_codes")
+    if not language or not codes:
+        return []
+    subtags = {part for part in language.casefold().split("-") if part}
+    kept = {str(code).casefold() for code in codes}
+    if subtags & kept:
+        return []
+    return [
+        f"corpus.language is {language!r} but steps.filter.language_codes is "
+        f"{sorted(codes)}, which name no language in common. language_codes decides "
+        "what to keep and is separate from the pack that measures the corpus, so a "
+        "keep-list left over from another config removes nearly every document while "
+        "the ledger still balances. Set it to the languages you mean to keep, or [] "
+        "to disable the language gate."
+    ]
+
+
 def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> list[str]:
     """Refuse everything refusable before the first step does any work.
 
@@ -758,6 +787,8 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
                 "skip_similarity: true to run the exact source-identity pass on CPU alone; "
                 "the report then says overlap was NOT measured rather than reporting none."
             )
+
+    warnings.extend(_language_keep_list_warnings(cfg))
 
     if problems:
         raise FlowConfigError("the flow cannot run as configured:\n  - " + "\n  - ".join(problems))
