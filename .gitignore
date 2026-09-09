@@ -113,6 +113,7 @@ CLAUDE.md
 config.yaml
 main.py
 src/nemotron/steps/_bootstrap/runtime/
+src/nemotron/steps/curate/__local__/
 
 # Documentation build
 docs/_build/
@@ -133,6 +134,9 @@ skills/*/evals/tier3-reports/
 /spec/
 /tests/skills/
 /tools/fetch_sample_corpus.py
+
+# Curator model cache, written at run time by a step reading a relative path.
+cache/
 
 # Guidebook figure generators are kept local, not shipped with the docs.
 src/nemotron/steps/*/guidebook/generate_assets.py
