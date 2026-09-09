@@ -55,23 +55,78 @@ python -m nemotron.steps.byob.scripts.bfcl_author draft \
   --model <DEPLOYED_MODEL_NAME>
 ```
 
-The four drafting stages checkpoint independently. Each invalid response receives one
-repair with the exact validation findings. If that repair fails, edit the named
-`*.candidate.yaml`, save it under the canonical name printed in the error (for example
-`drafts/validation_cases.yaml`), and rerun `draft`. Accepted or human-reviewed stages
-resume without another provider call.
+The four drafting stages checkpoint independently. An invalid response stops drafting:
+the candidate and field-level findings are retained, and **a human must correct the
+errors**. There is no automatic model repair. Edit the named `*.candidate.yaml`, save
+the correction under the canonical name printed in the error (for example
+`drafts/validation_cases.yaml`), then record the human review when resuming:
+
+```bash
+python -m nemotron.steps.byob.scripts.bfcl_author draft \
+  --workspace /tmp/my-bfcl-work \
+  --model-provider <DATA_DESIGNER_PROVIDER> \
+  --model <DEPLOYED_MODEL_NAME> \
+  --reviewed-draft validation_cases \
+  --draft-reviewed-by developer@example.com \
+  --draft-reviewed-at <ISO_8601_TIME_WITH_TIMEZONE>
+```
+
+Repeat `--reviewed-draft` for each corrected stage. Missing, corrupt, or stale
+checkpoint metadata also requires explicit human review; editing coverage invalidates
+the dependent drafts' bindings. Unchanged bound stages resume without a provider call.
+A schema-valid proposal is not human approval: humans remain responsible for correcting
+the manifest, supplement, fixtures, templates, assertions, and other benchmark files
+against the domain specification before the final release review. Validation checks
+consistency; it cannot establish whether the benchmark models the domain correctly.
+
+Resume with the original model identity and decoding settings. `drafting_model.json`
+records them before the first proposal, including a rejected one; human correction
+does not erase the assisting model from final provenance. A different model requires
+a separate drafting output. When migrating older drafts without this declaration,
+a human must restore the original `model` object from `draft_provenance.json` into
+`drafting_model.json`. If that original identity cannot be established, do not claim
+the old drafts have complete provenance.
 
 Trust modes have intentionally different release meaning:
 
 | Mode | Source/evidence plumbing | Human approval | Release meaning |
 | --- | --- | --- | --- |
 | `dev` | Workspace-local and automatic | Explicit model-exposure consent plus final human review | Runnable and evaluable, `development_unsealed`, never official |
-| `release` | Workspace-local source evidence | One final approval and release signing identity | Candidate for normal publication |
+| `release` | Workspace-local source evidence | One final approval and release signing identity | Local `release_candidate_unofficial`, never official |
 | `compliance` | Every existing certificate, authorization, and approval input remains explicit | Existing separated gates | Existing signed compliance path |
 
 Existing `author` sessions without a prepared profile or explicit trust mode continue
 to default to `compliance`; the developer default applies only to the new `prepare`
 entry point.
+
+Both non-compliance modes bind their trust labels into the reviewed packet, signed
+release, and published run manifest. Their published rows and run are explicitly
+`gold_eligible: false`, even when fresh executable Gold validation passes. Local signing
+establishes integrity, not compliance approval. The existing compliance contract remains
+unchanged.
+
+Developer releases created before trust labels were bound into the seal must be
+reviewed and frozen again. Guided developer publication refuses those unlabelled
+releases; missing labels are not evidence of compliance approval.
+
+In `dev` and `release`, `approve --boundary release --accept-reviewed-release` records the
+human's review and freezes that exact packet. It still requires `--approved-by` and
+`--reviewed-at`. If freezing is interrupted, repeat the same approval command; it resumes
+the freeze without another approval. Compliance keeps its separated gates and checklist.
+
+Expected-trace generation and executable replay print per-task progress and retain
+completed tasks. After an interruption, use the existing verified generation resume
+path with the same configuration and unchanged inputs:
+
+```bash
+python -m nemotron.steps.byob.scripts.run --family bfcl --stage generate \
+  --config ./generate.yaml --skip-until expected_trace
+```
+
+Use `--skip-until executable_replay` for an interruption in replay. A fresh generation
+or guided publication performs fresh validation; it does not silently reuse an old
+publication. The default backend import budget is 60 seconds; explicit configured
+timeouts still take precedence.
 
 :::{tip}
 To watch the whole flow run before you prepare a source of your own, use the

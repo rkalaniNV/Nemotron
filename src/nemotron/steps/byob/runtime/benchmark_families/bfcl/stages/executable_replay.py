@@ -35,6 +35,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     write_stage_table,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.task_progress import TaskProgress
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,7 @@ def run_executable_replay(
     schema_failures: dict[str, list[dict[str, Any]]],
     *,
     skipped: dict[str, str] | None = None,
+    progress: TaskProgress | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Replay every schema-valid task and cache the verdicts.
 
@@ -159,7 +161,7 @@ def run_executable_replay(
     )
     skipped = skipped or {}
     verdicts: dict[str, dict[str, Any]] = {}
-    for task in tasks:
+    for index, task in enumerate(tasks, 1):
         task_id = str(task["task_id"])
         if task_id in skipped:
             verdicts[task_id] = {
@@ -176,7 +178,14 @@ def run_executable_replay(
                 "detail": detail,
             }
             continue
-        verdicts[task_id] = replay_task(worker, config, pack, task, traces[task_id])
+        verdicts[task_id] = (
+            progress.run(
+                {"task": task, "trace": traces[task_id]},
+                lambda: replay_task(worker, config, pack, task, traces[task_id]),
+                index=index, total=len(tasks),
+            )
+            if progress is not None else replay_task(worker, config, pack, task, traces[task_id])
+        )
 
     write_stage_table(
         stage_cache_dir(config) / REPLAY_VALIDATED_TASKS,

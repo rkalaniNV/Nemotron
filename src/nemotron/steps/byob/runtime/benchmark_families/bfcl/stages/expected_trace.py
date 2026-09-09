@@ -41,6 +41,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.stage_tables import (
     write_stage_table,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import stage_cache_dir
+from nemotron.steps.byob.runtime.benchmark_families.bfcl.task_progress import TaskProgress
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.templating import (
     PlaceholderError,
     placeholder_names,
@@ -447,6 +448,8 @@ def run_expected_trace(
     pack: LoadedPack,
     tasks: list[dict[str, Any]],
     plans: dict[str, dict[str, Any]],
+    *,
+    progress: TaskProgress | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, str]]:
     """Derive and cache expected traces, dropping instances their own data cannot bind.
 
@@ -464,15 +467,19 @@ def run_expected_trace(
     dependent_tasks = 0
     rows: list[dict[str, Any]] = []
     kept: list[dict[str, Any]] = []
-    for task in tasks:
+    for index, task in enumerate(tasks, 1):
         task_id = str(task["task_id"])
         try:
-            calls = build_expected_calls(
-                pack,
-                task,
-                plans[task_id],
-                resolve_trace=_oracle_trace_resolver(worker, config, pack, task),
-            )
+            def derive() -> dict[str, Any]:
+                return {"calls": build_expected_calls(
+                    pack, task, plans[task_id],
+                    resolve_trace=_oracle_trace_resolver(worker, config, pack, task),
+                )}
+
+            calls = (
+                progress.run({"task": task, "plan": plans[task_id]}, derive, index=index, total=len(tasks))
+                if progress is not None else derive()
+            )["calls"]
         except TaskDataError as exc:
             logger.warning("BFCL expected_trace dropped task %s: %s", task_id, exc)
             drop_reasons[task_id] = str(exc)

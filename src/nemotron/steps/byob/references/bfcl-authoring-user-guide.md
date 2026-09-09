@@ -67,9 +67,27 @@ Source layouts are defined in
 the policy described in [bfcl-authoring-rollout.md](bfcl-authoring-rollout.md)
 ([`test_bfcl_authoring_rollout_policy.py`](../../../../../tests/steps/byob/test_bfcl_authoring_rollout_policy.py)).
 
+## Human correction and developer mode
+
+Models propose benchmark files; humans must correct errors in manifests, supplements,
+fixtures, and every other authored artifact. A passing validator does not establish
+domain correctness or count as human approval. Invalid drafting responses are retained
+with diagnostics and stop the run without automatic model repair. After correcting the
+canonical YAML named in the error, resume `draft` with `--reviewed-draft <stage>`,
+`--draft-reviewed-by <human>`, and `--draft-reviewed-at <timestamp-with-timezone>`.
+Repeat `--reviewed-draft` for each reviewed stage. Missing or stale bindings require
+review too; they are never silently relabeled as human-authored.
+
+The developer walkthrough describes the four-input `prepare` entry point. Its `dev`
+and `release` modes keep explicit exposure consent and a final human review, then seal
+the approved packet through one approval command. Retrying that command resumes an
+interrupted freeze. Their publication remains unofficial and Gold-ineligible, with
+trust labels bound into the packet, release seal, and run manifest. The compliance
+sequence below is unchanged; local keys cannot turn developer output into compliance.
+
 ## The two authorization boundaries
 
-The normal command sequence is:
+The compliance command sequence is:
 
 1. `author` creates transport-neutral evidence.
 2. `answer` applies any digest-bound open questions.

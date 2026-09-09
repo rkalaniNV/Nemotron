@@ -72,7 +72,7 @@ Process-worker bounds, the frozen clock, and the pack trust roots.
 | `clock` | quoted ISO-8601 string | none, required | The frozen clock every oracle session receives. It must parse as ISO-8601 and must carry a UTC offset, so a run stays reproducible. Quote it, or YAML delivers a `datetime` and the loader refuses it. |
 | `tool_timeout_s` | number > 0 | `5.0` | Per tool call. |
 | `assertion_timeout_s` | number > 0 | `5.0` | Per assertion evaluation. |
-| `import_timeout_s` | number > 0 | `10.0` | Importing pack code inside the worker. |
+| `import_timeout_s` | number > 0 | `60.0` | Importing pack code inside the worker. |
 | `reset_timeout_s` | number > 0 | `5.0` | Establishing clean state for a task. |
 | `episode_timeout_s` | number > 0 | `60.0` | A whole replay episode. |
 | `worker` | `process` or `thread` | `process` | Isolation for pack code. Gold eligibility requires `process`; `thread` exists for debugging. |

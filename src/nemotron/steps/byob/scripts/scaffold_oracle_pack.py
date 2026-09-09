@@ -379,7 +379,7 @@ def _config(target: Path, pack_id: str) -> dict:
             "clock": "2026-01-01T00:00:00+00:00",
             "tool_timeout_s": 5.0,
             "assertion_timeout_s": 5.0,
-            "import_timeout_s": 10.0,
+            "import_timeout_s": 60.0,
             "reset_timeout_s": 5.0,
             "episode_timeout_s": 60.0,
             "worker": "process",

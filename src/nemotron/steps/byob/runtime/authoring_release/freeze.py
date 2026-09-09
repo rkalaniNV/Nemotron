@@ -40,9 +40,11 @@ from nemotron.steps.byob.runtime.authoring_release.review import (
     load_review_approval,
     load_review_packet,
 )
+from nemotron.steps.byob.runtime.authoring_release.trust import TRUST_FIELDS, packet_trust
 from nemotron.steps.byob.runtime.authoring_release.versions import (
     FREEZE_MANIFEST_VERSION_V2,
     FREEZE_MANIFEST_VERSION_V3,
+    FREEZE_MANIFEST_VERSION_V4,
     MCP_FREEZE_MANIFEST_VERSION_V1,
 )
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.origin_provenance import (
@@ -410,8 +412,10 @@ def freeze_canonical_pack(
                 "candidate pack changed while it was being frozen",
                 recovery="retry from a stable reviewed workspace",
             )
+        trust = packet_trust(packet.document)
         manifest: dict[str, Any] = {
-            "schema_version": FREEZE_MANIFEST_VERSION_V3,
+            "schema_version": FREEZE_MANIFEST_VERSION_V4 if trust else FREEZE_MANIFEST_VERSION_V3,
+            **trust,
             "adapter_kind": adapter.kind,
             "frozen_pack_fingerprint": frozen_fingerprint,
             "review_packet_digest": packet.digest,
@@ -486,17 +490,19 @@ def load_frozen_release(
             "legacy v2 freeze manifests have no authenticated seal",
             recovery="re-freeze under v3 with a trusted Ed25519 authority",
         )
-    if version not in {FREEZE_MANIFEST_VERSION_V2, FREEZE_MANIFEST_VERSION_V3}:
+    if version not in {FREEZE_MANIFEST_VERSION_V2, FREEZE_MANIFEST_VERSION_V3, FREEZE_MANIFEST_VERSION_V4}:
         raise AuthoringFreezeError(
             "freeze_manifest_version_unsupported",
             f"unsupported freeze manifest version {version!r}",
-            recovery="use a v1 MCP, explicitly migrated v2, or signed v3 release",
+            recovery="use a v1 MCP, explicitly migrated v2, or signed v3/v4 release",
         )
     expected_keys = (
         _MANIFEST_KEYS
-        if version == FREEZE_MANIFEST_VERSION_V3
+        if version in {FREEZE_MANIFEST_VERSION_V3, FREEZE_MANIFEST_VERSION_V4}
         else _MANIFEST_KEYS - {"seal_issuer", "signing_key_id", "signature"}
     )
+    if version == FREEZE_MANIFEST_VERSION_V4:
+        expected_keys = expected_keys | TRUST_FIELDS
     if set(manifest) != expected_keys:
         raise AuthoringFreezeError(
             "freeze_manifest_invalid",
@@ -511,7 +517,7 @@ def load_frozen_release(
             "freeze manifest digest mismatch",
             recovery="restore the immutable frozen release",
         )
-    if version == FREEZE_MANIFEST_VERSION_V3:
+    if version in {FREEZE_MANIFEST_VERSION_V3, FREEZE_MANIFEST_VERSION_V4}:
         if trusted_seal_keys is None or expected_seal_issuer is None:
             raise AuthoringFreezeError(
                 "release_seal_trust_required",
@@ -567,6 +573,13 @@ def load_frozen_release(
             "release_adapter_mismatch",
             "manifest adapter differs from its review packet",
             recovery="restore the immutable frozen release",
+        )
+    trust = packet_trust(packet.document)
+    if {name: manifest[name] for name in TRUST_FIELDS if name in manifest} != trust:
+        raise AuthoringFreezeError(
+            "release_trust_mismatch",
+            "frozen trust status differs from the exact approved review packet",
+            recovery="re-freeze the human-approved packet with its original trust mode",
         )
     if manifest.get("source_digests") != packet.document["source_digests"]:
         raise AuthoringFreezeError(

@@ -603,7 +603,12 @@ def _generate_bfcl_unlocked(
     # to the kept set. Schema/replay still receive every expanded task so stage tables
     # keep a joinable row for each drop.
     if "expected_trace" in stages[stages.index(target) :]:
-        traces, drop_reasons = run_expected_trace(config, pack, tasks, plans)
+        from nemotron.steps.byob.runtime.benchmark_families.bfcl.task_progress import TaskProgress
+
+        traces, drop_reasons = run_expected_trace(
+            config, pack, tasks, plans,
+            progress=TaskProgress(cache / "checkpoints", "expected_trace", identity),
+        )
         state["traces"] = traces
         state["drop_reasons"] = drop_reasons
         pin_artifacts("expected_traces.parquet")
@@ -635,6 +640,8 @@ def _generate_bfcl_unlocked(
     pin_artifacts("schema_validated_traces.parquet")
 
     if "executable_replay" in stages[stages.index(target) :]:
+        from nemotron.steps.byob.runtime.benchmark_families.bfcl.task_progress import TaskProgress
+
         verdicts = run_executable_replay(
             config,
             pack,
@@ -642,6 +649,7 @@ def _generate_bfcl_unlocked(
             traces,
             schema_failures,
             skipped=drop_reasons,
+            progress=TaskProgress(cache / "checkpoints", "executable_replay", identity),
         )
         paraphrase_report = apply_expected_result_guards(
             config,

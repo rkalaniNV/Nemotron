@@ -383,7 +383,7 @@ class OracleRuntimeConfig:
     clock: str
     tool_timeout_s: float = 5.0
     assertion_timeout_s: float = 5.0
-    import_timeout_s: float = 10.0
+    import_timeout_s: float = 60.0
     reset_timeout_s: float = 5.0
     episode_timeout_s: float = 60.0
     worker: str = "process"
@@ -552,7 +552,7 @@ class BfclConfig:
                 "oracle_runtime.assertion_timeout_s",
             ),
             import_timeout_s=_require_number(
-                runtime_raw.get("import_timeout_s", 10.0),
+                runtime_raw.get("import_timeout_s", 60.0),
                 "oracle_runtime.import_timeout_s",
             ),
             reset_timeout_s=_require_number(runtime_raw.get("reset_timeout_s", 5.0), "oracle_runtime.reset_timeout_s"),

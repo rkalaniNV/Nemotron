@@ -15,9 +15,9 @@
 
 """The four authoring calls, each validated against the evidence before it is believed.
 
-Each accepted stage is checkpointed immediately.  A rejected candidate is retained next
-to its validation feedback and may receive one explicit repair attempt.  The retry is part
-of BFCL's visible authoring policy rather than Data Designer's hidden restart loop.
+Each valid proposal is checkpointed immediately. A rejected candidate is retained next
+to its validation feedback. A human must correct it and explicitly record review before
+the workflow continues; a model cannot repair or approve benchmark semantics for them.
 
 The order is a dependency, not a preference. Coverage decides what the benchmark is trying
 to exercise, and the other three refer to it, so it is produced first and passed forward as
@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_json,
     write_canonical_json,
+    write_canonical_yaml,
     write_text_atomic,
 )
 from nemotron.steps.byob.runtime.pack_authoring.bundle import EvidenceView
@@ -93,11 +95,30 @@ class DraftBundle:
 
     def as_documents(self) -> dict[str, Any]:
         return {
-            "coverage_plan": self.coverage.model_dump(mode="json"),
-            "validation_cases": self.validation_cases.model_dump(mode="json"),
-            "task_templates": self.task_templates.model_dump(mode="json"),
-            "assertion_specs": self.assertions.model_dump(mode="json"),
+            "coverage_plan": self.coverage.model_dump(mode="json", exclude_unset=True),
+            "validation_cases": self.validation_cases.model_dump(mode="json", exclude_unset=True),
+            "task_templates": self.task_templates.model_dump(mode="json", exclude_unset=True),
+            "assertion_specs": self.assertions.model_dump(mode="json", exclude_unset=True),
         }
+
+
+@dataclass(frozen=True)
+class DraftReview:
+    """An explicit human attestation of corrected files, bound on acceptance."""
+
+    stages: tuple[str, ...]
+    reviewed_by: str
+    reviewed_at: str
+
+    def __post_init__(self) -> None:
+        if not self.stages or not set(self.stages) <= {
+            "coverage_plan", "validation_cases", "task_templates", "assertion_specs",
+        }:
+            raise ValueError("name the corrected draft files being reviewed")
+        if not self.reviewed_by.strip():
+            raise ValueError("corrected drafts require a human reviewer")
+        if datetime.fromisoformat(self.reviewed_at.replace("Z", "+00:00")).tzinfo is None:
+            raise ValueError("draft review timestamp must include a timezone")
 
 
 @dataclass(frozen=True)
@@ -111,9 +132,8 @@ class DraftingContext:
     caller: StructuredCaller | None = None
     quota: RunQuota | None = None
     checkpoint_root: Path | None = None
-    repair_attempts: int = 0
-    repair_feedback: str | None = None
-    attempt_index: int = 0
+    human_review: DraftReview | None = None
+    coverage_digest: str | None = None
 
     @property
     def grounding(self) -> Grounding:
@@ -142,47 +162,27 @@ def _call(
     columns: dict[str, str],
     output_format: type[BaseModel],
 ) -> tuple[Any, ModelCallRecord]:
-    if context.repair_feedback is not None:
-        task = (
-            f"{task}\n\nThis is a single repair attempt. Correct every issue in "
-            "{{ repair_feedback }} and return the complete corrected document."
+    try:
+        response, record = call_structured(
+            context.model,
+            stage_name=stage,
+            prompt_version=prompt_version,
+            system_prompt=AUTHORING_SYSTEM_PROMPT,
+            prompt=task,
+            columns=columns,
+            output_format=output_format,
+            cache=context.cache,
+            run_dir=context.run_dir,
+            caller=context.caller,
+            quota=context.quota,
         )
-        columns = {**columns, "repair_feedback": context.repair_feedback}
-    response, record = call_structured(
-        context.model,
-        stage_name=stage,
-        prompt_version=prompt_version,
-        system_prompt=AUTHORING_SYSTEM_PROMPT,
-        prompt=task,
-        columns=columns,
-        output_format=output_format,
-        cache=context.cache,
-        run_dir=context.run_dir,
-        caller=context.caller,
-        quota=context.quota,
-    )
-    parsed = _parse(stage, response, output_format)
+    except AuthoringModelError as exc:
+        if context.checkpoint_root is not None and exc.response is not None:
+            write_canonical_yaml(exc.response, context.checkpoint_root / f"{stage}.candidate.yaml")
+        raise
     if context.checkpoint_root is not None:
-        _write_yaml(
-            parsed.model_dump(mode="json"),
-            context.checkpoint_root / f"{stage}.attempt-{context.attempt_index}.candidate.yaml",
-        )
-    return parsed, record
-
-
-def _write_yaml(document: object, path: Path) -> Path:
-    payload = yaml.safe_dump(
-        document,
-        sort_keys=True,
-        default_flow_style=False,
-        allow_unicode=True,
-        width=100,
-    )
-    return write_text_atomic(str(payload), path)
-
-
-def _stage_error_text(stage: str, attempt: int, exc: Exception) -> str:
-    return f"stage: {stage}\nattempt: {attempt}\nerror: {exc}\n"
+        write_canonical_yaml(response, context.checkpoint_root / f"{stage}.candidate.yaml")
+    return _parse(stage, response, output_format), record
 
 
 def _checkpoint_record(
@@ -194,7 +194,7 @@ def _checkpoint_record(
     output_format: type[BaseModel],
     document: BaseModel,
 ) -> ModelCallRecord:
-    dumped = document.model_dump(mode="json")
+    dumped = document.model_dump(mode="json", exclude_unset=True)
     return ModelCallRecord(
         stage=stage,
         prompt_version=prompt_version,
@@ -208,55 +208,6 @@ def _checkpoint_record(
     )
 
 
-def _load_accepted_checkpoint(
-    context: DraftingContext,
-    *,
-    stage: str,
-    prompt_version: str,
-    task: str,
-    document_name: str,
-    output_format: type[BaseModel],
-    validate: Callable[[Grounding, Any], Any],
-) -> tuple[Any, ModelCallRecord] | None:
-    if context.checkpoint_root is None:
-        return None
-    path = context.checkpoint_root / f"{document_name}.yaml"
-    if not path.is_file():
-        return None
-    try:
-        document = output_format.model_validate(
-            yaml.safe_load(path.read_text(encoding="utf-8"))
-        )
-        document = validate(context.grounding, document)
-    except (OSError, ValueError, ValidationError, GroundingError) as exc:
-        raise GroundingError(
-            stage,
-            [f"reviewed checkpoint {path} is invalid: {exc}"],
-        ) from exc
-    digest = sha256_json(document.model_dump(mode="json"))
-    metadata_path = context.checkpoint_root / f"{document_name}.checkpoint.json"
-    try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        if metadata.get("evidence_digest") != context.evidence.digest:
-            return None
-        if metadata.get("document_digest") != digest:
-            raise ValueError("checkpoint was edited")
-        record = replace(
-            ModelCallRecord(**metadata["call"]),
-            served_from_cache=True,
-        )
-    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        record = _checkpoint_record(
-            context,
-            stage=stage,
-            prompt_version=prompt_version,
-            task=task,
-            output_format=output_format,
-            document=document,
-        )
-    return document, record
-
-
 def _run_stage(
     context: DraftingContext,
     *,
@@ -268,61 +219,77 @@ def _run_stage(
     validate: Callable[[Grounding, Any], Any],
     produce: Callable[[DraftingContext], tuple[Any, ModelCallRecord]],
 ) -> tuple[Any, ModelCallRecord]:
-    """Run, validate, checkpoint, and at most once repair one drafting stage."""
-    accepted = _load_accepted_checkpoint(
-        context,
-        stage=stage,
-        prompt_version=prompt_version,
-        task=task,
-        document_name=document_name,
-        output_format=output_format,
-        validate=validate,
+    """Propose once, or resume an evidence-bound file; errors require human correction."""
+    if context.checkpoint_root is None:
+        return produce(context)
+    path = context.checkpoint_root / f"{document_name}.yaml"
+    metadata_path = path.with_suffix(".checkpoint.json")
+    binding = {
+        "schema_version": "bfcl-draft-checkpoint-v2",
+        "evidence_digest": context.evidence.digest,
+        "coverage_digest": context.coverage_digest,
+        "prompt_hash": prompt_hash(prompt_version, AUTHORING_SYSTEM_PROMPT, task),
+        "output_schema_hash": sha256_json(output_format.model_json_schema()),
+    }
+    recovery = (
+        f"A human must correct {path}, then rerun draft with --reviewed-draft {document_name} "
+        "--draft-reviewed-by HUMAN --draft-reviewed-at ISO-8601-TIMESTAMP. "
+        f"The model proposal, when available, is {context.checkpoint_root / (stage + '.candidate.yaml')}."
     )
-    if accepted is not None:
-        return accepted
-    last_error: Exception | None = None
-    for attempt in range(context.repair_attempts + 1):
-        attempt_context = replace(
-            context,
-            repair_attempts=0,
-            repair_feedback=None if last_error is None else str(last_error),
-            attempt_index=attempt,
-        )
+    review = context.human_review
+    explicitly_reviewed = review is not None and document_name in review.stages
+    if path.is_file():
         try:
-            document, record = produce(attempt_context)
+            document = validate(context.grounding, output_format.model_validate(yaml.safe_load(path.read_text())))
+        except (OSError, ValueError, yaml.YAMLError, GroundingError) as exc:
+            raise GroundingError(stage, [f"checkpoint is invalid: {exc}", recovery]) from exc
+        digest = sha256_json(document.model_dump(mode="json", exclude_unset=True))
+        try:
+            metadata = json.loads(metadata_path.read_text())
+            if any(metadata.get(key) != value for key, value in binding.items()):
+                raise ValueError("checkpoint inputs changed")
+            if metadata.get("document_digest") != digest or metadata.get("status") not in {
+                "model_draft", "human_reviewed",
+            }:
+                raise ValueError("checkpoint was edited or not accepted")
+            record = ModelCallRecord(**metadata["call"])
+            if not explicitly_reviewed:
+                return document, replace(record, served_from_cache=True)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            if not explicitly_reviewed:
+                raise GroundingError(stage, ["checkpoint metadata is missing, invalid, or stale", recovery]) from None
+        record = _checkpoint_record(
+            context, stage=stage, prompt_version=prompt_version, task=task,
+            output_format=output_format, document=document,
+        )
+    else:
+        rejected_path = context.checkpoint_root / f"{stage}.rejected.txt"
+        if explicitly_reviewed or metadata_path.exists() or rejected_path.exists():
+            raise GroundingError(stage, ["corrected canonical file is required before resuming", recovery])
+        try:
+            document, record = produce(context)
         except (AuthoringModelError, GroundingError) as exc:
-            last_error = exc
-            if context.checkpoint_root is not None:
-                write_text_atomic(
-                    _stage_error_text(stage, attempt, exc),
-                    context.checkpoint_root / f"{stage}.attempt-{attempt}.rejected.txt",
-                )
-            if attempt < context.repair_attempts:
-                continue
-            if context.checkpoint_root is not None:
-                path = context.checkpoint_root / f"{stage}.attempt-{attempt}.candidate.yaml"
-                accepted_path = context.checkpoint_root / f"{document_name}.yaml"
-                exc.add_note(
-                    f"Edit {path} and save the reviewed result as {accepted_path}, then rerun to resume."
-                )
-            raise
-        if context.checkpoint_root is not None:
-            dumped = document.model_dump(mode="json")
-            _write_yaml(
-                dumped,
-                context.checkpoint_root / f"{document_name}.yaml",
+            write_text_atomic(
+                f"stage: {stage}\nerror: {exc}\n{recovery}\n",
+                context.checkpoint_root / f"{stage}.rejected.txt",
             )
-            write_canonical_json(
-                {
-                    "schema_version": "bfcl-draft-checkpoint-v1",
-                    "evidence_digest": context.evidence.digest,
-                    "document_digest": sha256_json(dumped),
-                    "call": record.as_dict(),
-                },
-                context.checkpoint_root / f"{document_name}.checkpoint.json",
-            )
-        return document, record
-    raise AssertionError("unreachable drafting stage loop")
+            write_canonical_json({**binding, "status": "rejected"}, metadata_path)
+            # Surface the recovery through the CLI's JSON error, not only a traceback note.
+            raise GroundingError(stage, [str(exc), recovery]) from exc
+        write_canonical_yaml(document.model_dump(mode="json", exclude_unset=True), path)
+    metadata = {
+        **binding,
+        "status": "human_reviewed" if explicitly_reviewed else "model_draft",
+        "document_digest": sha256_json(document.model_dump(mode="json", exclude_unset=True)),
+        "call": record.as_dict(),
+    }
+    if explicitly_reviewed:
+        metadata["human_review"] = {
+            "reviewed_by": review.reviewed_by,
+            "reviewed_at": review.reviewed_at,
+        }
+    write_canonical_json(metadata, metadata_path)
+    return document, record
 
 
 def draft_coverage_plan(
@@ -409,6 +376,7 @@ def draft_all(context: DraftingContext) -> DraftBundle:
         validate=validate_coverage_plan,
         produce=draft_coverage_plan,
     )
+    context = replace(context, coverage_digest=sha256_json(coverage.model_dump(mode="json", exclude_unset=True)))
     cases, cases_record = _run_stage(
         context,
         stage="mcp_validation_cases",

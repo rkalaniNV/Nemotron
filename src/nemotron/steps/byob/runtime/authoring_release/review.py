@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from nemotron.steps.byob.runtime.authoring_release.contracts import ReleaseAdapter
+from nemotron.steps.byob.runtime.authoring_release.trust import packet_trust, trust_fields
 from nemotron.steps.byob.runtime.authoring_release.versions import (
     MCP_REVIEW_APPROVAL_VERSION_V1,
     MCP_REVIEW_PACKET_VERSION_V1,
@@ -253,6 +254,7 @@ class ReviewPacketV2:
                 "adapter_review must be a mapping",
                 recovery="rebuild the packet with a registered adapter",
             )
+        packet_trust(self.document)
         for label, identity in (("blockers", "blocker_id"), ("risks", "risk_id")):
             canonical = _canonical_mappings(
                 self.document[label],
@@ -358,6 +360,7 @@ def build_review_packet(
     adapter: ReleaseAdapter,
     pack_root: Path,
     source_digests: Mapping[str, str],
+    trust_mode: str = "compliance",
 ) -> ReviewPacketV2:
     canonical_digests = {
         key: _validate_digest(value, f"source_digests.{key}")
@@ -396,6 +399,9 @@ def build_review_packet(
         "blockers": blockers,
         "risks": risks,
     }
+    trust = trust_fields(trust_mode)
+    if trust:
+        document["adapter_review"]["authoring_trust"] = trust
     document["record_digest"] = sha256_json(document)
     packet = ReviewPacketV2(document)
     packet.verify()

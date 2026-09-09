@@ -55,6 +55,64 @@ def test_resume_from_expected_trace_reconstructs_equivalent_output(tmp_path: Pat
     assert pq.read_table(resumed).to_pylist() == first_rows
 
 
+@pytest.mark.parametrize("stage", ["expected_trace", "executable_replay"])
+def test_interrupted_generation_resumes_completed_tasks_without_reexecution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, stage: str,
+) -> None:
+    import importlib
+
+    import pyarrow.parquet as pq
+
+    module = importlib.import_module(f"nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.{stage}")
+    name = "build_expected_calls" if stage == "expected_trace" else "replay_task"
+    original = getattr(module, name)
+    config = _config(tmp_path)
+    expected_rows = pq.read_table(generate_bfcl(config)).to_pylist()
+    attempted = []
+
+    def interrupted(*args, **kwargs):
+        task = args[1] if stage == "expected_trace" else args[3]
+        attempted.append(task["task_id"])
+        if len(attempted) == 2:
+            raise KeyboardInterrupt
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        generate_bfcl(config)
+    completed_task = attempted[0]
+    attempted.clear()
+
+    def resumed(*args, **kwargs):
+        task = args[1] if stage == "expected_trace" else args[3]
+        attempted.append(task["task_id"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, resumed)
+    benchmark = generate_bfcl(config, skip_until=stage)
+    assert completed_task not in attempted
+    assert attempted
+    assert pq.read_table(benchmark).to_pylist() == expected_rows
+    assert f"BFCL {stage} resumed 1/" in capsys.readouterr().err
+
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import checkpoint
+
+    metadata = checkpoint.runtime_metadata()
+    with monkeypatch.context() as drift:
+        drift.setattr(checkpoint, "runtime_metadata", lambda: {
+            **metadata, "pipeline_source_hash": "sha256:" + "0" * 64,
+        })
+        with pytest.raises(CheckpointError, match="incompatible"):
+            generate_bfcl(config, skip_until=stage)
+    record = next((benchmark.parent / "stage_cache/checkpoints/partial" / stage).rglob("*.json"))
+    document = json.loads(record.read_text())
+    document["result"]["tampered"] = True
+    record.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="invalid task checkpoint"):
+        generate_bfcl(config, skip_until=stage)
+    assert not benchmark.exists()
+
+
 def _io_cache_entry(request_hash: str) -> str:
     from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 

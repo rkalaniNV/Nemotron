@@ -29,6 +29,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from nemotron.steps.byob.runtime.authoring_release.trust import pack_trust
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.bfcl_json_export import (
     BfclJsonArtifact,
     write_bfcl_json,
@@ -799,6 +800,12 @@ def run_final_output(
             source = "deterministic surface guards"
             recovery = "inspect stage_cache/rendered_conversations.parquet"
         raise RuntimeError(f"BFCL final_output has no publication rows after {source}; {recovery}")
+    trust = pack_trust(pack.paths.pack_root)
+    if trust:
+        for row in rows:
+            row["gold_eligible"] = False
+        for row in published:
+            row["gold_eligible"] = False
     held_out = held_out_policy(pack)
     held_out_scan_report: dict[str, Any] | None = None
     held_out_hits: dict[str, bool] | None = None
@@ -912,6 +919,8 @@ def run_final_output(
         if artifact_path.is_file():
             lineage_artifacts[artifact_name.rsplit(".", 1)[0]] = {"content_hash": _file_hash(artifact_path)}
     gold_ineligibility_reasons: list[str] = []
+    if trust:
+        gold_ineligibility_reasons.append("unofficial_authoring_release")
     if tier != "gold":
         gold_ineligibility_reasons.append("pack_tier_not_gold")
     if config.lineage.policy == "smoke_no_publication":
@@ -970,6 +979,7 @@ def run_final_output(
     )
     manifest = {
         "schema_version": schema_version,
+        **trust,
         # The timestamp is part of the id: two runs of the same config are different
         # runs, and a manifest that cannot be told from its predecessor is not lineage.
         "run_id": (
@@ -1007,7 +1017,10 @@ def run_final_output(
         "prompt_bundle_hash": prompt_bundle["prompt_bundle_hash"],
         "tier": tier,
         "gold_eligible": (
-            tier == "gold" and config.lineage.policy != "smoke_no_publication" and stage_eleven_gold_eligible
+            not trust
+            and tier == "gold"
+            and config.lineage.policy != "smoke_no_publication"
+            and stage_eleven_gold_eligible
         ),
         "gold_ineligibility_reasons": gold_ineligibility_reasons,
         "lineage_policy": config.lineage.policy,

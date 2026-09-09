@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, get_args
@@ -40,6 +41,7 @@ from nemotron.steps.byob.runtime.pack_authoring.compile_assertions import (
     CompilationError,
     compile_assertions,
 )
+from nemotron.steps.byob.runtime.pack_authoring.drafts import DraftReview
 from nemotron.steps.byob.runtime.pack_authoring.grounding import (
     Grounding,
     GroundingError,
@@ -997,31 +999,23 @@ class _RepairingCaller(_FakeCaller):
         )
 
 
-def test_drafting_checkpoints_a_rejection_and_repairs_it_once(tmp_path: Path) -> None:
+def test_drafting_stops_for_human_correction_on_first_rejection(tmp_path: Path) -> None:
     bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
     caller = _RepairingCaller()
 
-    result = run_drafting(
-        bundle_path,
-        approval_path,
-        tmp_path / "out",
-        MODEL,
-        caller=caller,
-        allow_legacy_v1_model_exposure=True,
-    )
-
-    assert caller.coverage_attempts == 2
-    assert caller.stages[:2] == ["mcp_coverage_plan", "mcp_coverage_plan"]
-    rejected = result.draft_root / "mcp_coverage_plan.attempt-0.candidate.yaml"
-    feedback = result.draft_root / "mcp_coverage_plan.attempt-0.rejected.txt"
+    output = tmp_path / "out"
+    with pytest.raises(GroundingError, match="human must correct"):
+        run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+    assert caller.coverage_attempts == 1
+    assert caller.stages == ["mcp_coverage_plan"]
+    rejected = output / "drafts" / "mcp_coverage_plan.candidate.yaml"
+    feedback = output / "drafts" / "mcp_coverage_plan.rejected.txt"
     assert yaml.safe_load(rejected.read_text(encoding="utf-8"))["tools"][0]["tool"] == "invented_tool"
     assert "not a published tool" in feedback.read_text(encoding="utf-8")
-    repair_input = json.loads(caller.prompts["mcp_coverage_plan"])
-    assert "not a published tool" in repair_input["repair_feedback"]
-    assert (result.draft_root / "coverage_plan.yaml").exists()
+    assert not (output / "drafts" / "coverage_plan.yaml").exists()
 
 
-def test_drafting_stops_after_one_repair_and_leaves_editable_artifacts(
+def test_failed_stage_does_not_repeat_model_calls_on_resume(
     tmp_path: Path,
 ) -> None:
     bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
@@ -1038,9 +1032,11 @@ def test_drafting_stops_after_one_repair_and_leaves_editable_artifacts(
             allow_legacy_v1_model_exposure=True,
         )
 
-    assert caller.coverage_attempts == 2
-    assert (output / "drafts" / "mcp_coverage_plan.attempt-1.candidate.yaml").exists()
-    assert (output / "drafts" / "mcp_coverage_plan.attempt-1.rejected.txt").exists()
+    with pytest.raises(GroundingError, match="corrected canonical file"):
+        run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+    assert caller.coverage_attempts == 1
+    assert (output / "drafts" / "mcp_coverage_plan.candidate.yaml").exists()
+    assert (output / "drafts" / "mcp_coverage_plan.rejected.txt").exists()
 
 
 def test_a_reviewed_rejected_candidate_resumes_without_recalling_that_stage(
@@ -1063,6 +1059,9 @@ def test_a_reviewed_rejected_candidate_resumes_without_recalling_that_stage(
         encoding="utf-8",
     )
 
+    with pytest.raises(GroundingError, match="metadata is missing, invalid, or stale"):
+        run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+
     resumed = run_drafting(
         bundle_path,
         approval_path,
@@ -1070,12 +1069,19 @@ def test_a_reviewed_rejected_candidate_resumes_without_recalling_that_stage(
         MODEL,
         caller=caller,
         allow_legacy_v1_model_exposure=True,
+        human_review=DraftReview(("coverage_plan",), "reviewer@example.test", "2026-09-09T12:00:00Z"),
     )
 
-    assert caller.coverage_attempts == 2
+    assert caller.coverage_attempts == 1
     coverage_call = resumed.provenance.document["calls"][0]
     assert coverage_call["source"] == "human_checkpoint"
     assert coverage_call["model_canonical"] == "human-reviewed"
+    checkpoint = json.loads((output / "drafts" / "coverage_plan.checkpoint.json").read_text())
+    assert checkpoint["human_review"]["reviewed_by"] == "reviewer@example.test"
+    assert checkpoint["evidence_digest"] == resumed.evidence.digest
+    calls_before = list(caller.stages)
+    run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+    assert caller.stages == calls_before
 
 
 def test_a_full_drafting_run_writes_drafts_provenance_and_compiled_assertions(
@@ -2051,11 +2057,19 @@ def test_normalized_evidence_change_forces_new_model_request_keys(
         source_bundle_path=first_inputs[3],
         migration_record_path=first_inputs[4],
     )
+    # Reuse model I/O, not authored files bound to different evidence. Stale
+    # authored checkpoints require human review, never implicit regeneration.
+    second_output = tmp_path / "second-out"
+    second_output.mkdir()
+    shutil.copyfile(
+        tmp_path / "shared-out" / "authoring_io_cache.jsonl",
+        second_output / "authoring_io_cache.jsonl",
+    )
     second_caller = _FakeCaller()
     second = run_drafting(
         second_inputs[0],
         second_inputs[1],
-        tmp_path / "shared-out",
+        second_output,
         MODEL,
         caller=second_caller,
         certification_report_path=second_inputs[2],

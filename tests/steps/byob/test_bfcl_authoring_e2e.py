@@ -150,6 +150,7 @@ def _approved_release(
     *,
     tier: str = "A2",
     pack_source: Path | None = None,
+    trust_mode: str = "compliance",
 ) -> tuple[FrozenReleaseV2, Path, Path]:
     root = tmp_path / adapter_kind
     root.mkdir(parents=True)
@@ -164,6 +165,7 @@ def _approved_release(
     packet = build_review_packet(
         adapter=adapter,
         pack_root=pack,
+        trust_mode=trust_mode,
         source_digests={
             "certification_report": _digest(source_record),
             "model_exposure_authorization": _digest(source_record),

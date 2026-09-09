@@ -30,6 +30,7 @@ from nemotron.steps.byob.runtime.authoring_release.freeze import (
     load_frozen_release,
 )
 from nemotron.steps.byob.runtime.authoring_release.review import load_json_mapping
+from nemotron.steps.byob.runtime.authoring_release.trust import TRUST_FIELDS
 
 
 class AuthoringHandoffError(RuntimeError):
@@ -120,11 +121,23 @@ def handoff_frozen_release(
             recovery="publish from the exact sealed release",
         )
     ineligibility = manifest.get("gold_ineligibility_reasons")
+    trust = {name: release.manifest[name] for name in TRUST_FIELDS if name in release.manifest}
+    unofficial = bool(trust)
+    if {name: manifest[name] for name in TRUST_FIELDS if name in manifest} != trust or (unofficial and (
+        manifest.get("official_publishable") is not False
+        or not isinstance(ineligibility, list)
+        or "unofficial_authoring_release" not in ineligibility
+    )):
+        raise AuthoringHandoffError(
+            "publication_trust_mismatch",
+            "development/candidate publication must retain its reviewed unofficial status",
+            recovery="publish through the authoring-aware final-output stage",
+        )
     if (
         manifest.get("tier") != "gold"
-        or manifest.get("gold_eligible") is not True
+        or manifest.get("gold_eligible") is not (not unofficial)
         or not isinstance(ineligibility, list)
-        or ineligibility
+        or (bool(ineligibility) and not unofficial)
     ):
         raise AuthoringHandoffError(
             "publication_not_gold_eligible",

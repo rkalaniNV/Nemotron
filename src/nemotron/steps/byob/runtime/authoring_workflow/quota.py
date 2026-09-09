@@ -99,8 +99,8 @@ class RunQuotaSnapshot(_StrictModel):
 
 
 DEFAULT_AUTHORING_QUOTA = RunQuotaLimits(
-    # Four primary stages plus one visible, bounded repair for each stage.
-    max_provider_calls=8,
+    # Four proposals; invalid authored files require human correction, never model repair.
+    max_provider_calls=4,
     max_token_units=8_000_000,
     max_batch_size=1,
     max_wall_time_ms=15 * 60 * 1000,

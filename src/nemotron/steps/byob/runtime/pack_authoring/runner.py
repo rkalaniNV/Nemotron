@@ -23,11 +23,11 @@ would be loaded by the pipeline as though a human had written it.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from nemotron.steps.byob.runtime.authoring_workflow.quota import (
@@ -41,6 +41,8 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
 )
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_text,
+    write_canonical_json,
+    write_canonical_yaml,
     write_text_atomic,
 )
 from nemotron.steps.byob.runtime.pack_authoring.authorization import (
@@ -63,6 +65,7 @@ from nemotron.steps.byob.runtime.pack_authoring.compile_assertions import (
 from nemotron.steps.byob.runtime.pack_authoring.drafts import (
     DraftBundle,
     DraftingContext,
+    DraftReview,
     draft_all,
 )
 from nemotron.steps.byob.runtime.pack_authoring.model_client import (
@@ -71,6 +74,7 @@ from nemotron.steps.byob.runtime.pack_authoring.model_client import (
 )
 from nemotron.steps.byob.runtime.pack_authoring.provenance import (
     DraftProvenance,
+    ProvenanceError,
     build_draft_provenance,
     write_draft_provenance,
 )
@@ -100,18 +104,6 @@ class DraftingResult:
         return self.output_root / DRAFT_DIRECTORY_NAME
 
 
-def _dump_yaml(document: object) -> str:
-    return str(
-        yaml.safe_dump(
-            document,
-            sort_keys=True,
-            default_flow_style=False,
-            allow_unicode=True,
-            width=100,
-        )
-    )
-
-
 def run_drafting(
     bundle_path: Path,
     approval_path: Path,
@@ -137,6 +129,7 @@ def run_drafting(
     allow_legacy_v1_model_exposure: bool = False,
     quota_limits: RunQuotaLimits = DEFAULT_AUTHORING_QUOTA,
     resolved_authoring_config_digest: str | None = None,
+    human_review: DraftReview | None = None,
 ) -> DraftingResult:
     """Draft the pack artifacts an approved evidence bundle can support."""
     evidence = load_evidence_bundle(
@@ -187,6 +180,22 @@ def run_drafting(
     approval = load_approval(approval_path, evidence)
 
     root = output_root.resolve()
+    model_path = root / "drafting_model.json"
+    if model_path.exists():
+        if json.loads(model_path.read_text(encoding="utf-8")) != model.as_provenance():
+            raise ProvenanceError(
+                "drafting model changed: resume with the original model identity and settings; "
+                "use a separate output directory for a different model"
+            )
+    else:
+        if any((root / DRAFT_DIRECTORY_NAME).glob("*")):
+            raise ProvenanceError(
+                f"{model_path} is missing for existing drafts; a human must restore the original "
+                "model declaration (the model object from draft_provenance.json), not relabel its assistance"
+            )
+        # Record exposure before even a rejected first proposal can exist. Human
+        # corrections keep this identity in the final provenance's model object.
+        write_canonical_json(model.as_provenance(), model_path)
     quota = RunQuota(quota_limits)
     context = DraftingContext(
         evidence=evidence,
@@ -196,7 +205,7 @@ def run_drafting(
         caller=caller,
         quota=quota,
         checkpoint_root=root / DRAFT_DIRECTORY_NAME,
-        repair_attempts=1,
+        human_review=human_review,
     )
     drafts = draft_all(context)
 
@@ -213,7 +222,7 @@ def run_drafting(
 
     draft_root = root / DRAFT_DIRECTORY_NAME
     for name, document in drafts.as_documents().items():
-        write_text_atomic(_dump_yaml(document), draft_root / f"{name}.yaml")
+        write_canonical_yaml(document, draft_root / f"{name}.yaml")
 
     assertions_path: Path | None = None
     if source is not None:
