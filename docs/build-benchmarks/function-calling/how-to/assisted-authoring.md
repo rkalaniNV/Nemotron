@@ -21,6 +21,58 @@ cases, and held-out policy with the same create-contract-example-validate struct
 
 This page is the walkthrough. `src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md` is the matching command-level reference: it lists every subcommand and refusal code, and its invocations are executed as smoke cases by the test suite, so consult it when you need exact arguments rather than the shape of the flow.
 
+## Developer Lane: Start With Four Inputs
+
+For a local development benchmark, the minimum inputs are a workspace, a reviewed
+`tools.json`, a domain brief, and the output language. `prepare` defaults to trust mode
+`dev` and deliberately produces a non-executable source scaffold:
+
+```bash
+python -m nemotron.steps.byob.scripts.bfcl_author prepare \
+  --workspace /tmp/my-bfcl-work \
+  --tools ./tools.json \
+  --brief ./domain-brief.txt \
+  --language vi \
+  --pack-id my_domain
+```
+
+Review `/tmp/my-bfcl-work/source/backend.py` and `fixtures.json`. Intake will not
+execute the package until every `BFCL-TODO` marker is removed and the strict source
+check passes. Then author from the recorded profile; certificate paths and the
+not-applicable held-out declaration are workspace plumbing, not developer inputs:
+
+```bash
+BFCL_ENABLE_LOCAL_PYTHON=1 python -m nemotron.steps.byob.scripts.bfcl_author --ci author \
+  --workspace /tmp/my-bfcl-work \
+  --required-tier A2 \
+  --probe-plan ./probe-plan-reviewed.json \
+  --allow-model-exposure \
+  --reviewed-by developer@example.com
+
+python -m nemotron.steps.byob.scripts.bfcl_author draft \
+  --workspace /tmp/my-bfcl-work \
+  --model-provider <DATA_DESIGNER_PROVIDER> \
+  --model <DEPLOYED_MODEL_NAME>
+```
+
+The four drafting stages checkpoint independently. Each invalid response receives one
+repair with the exact validation findings. If that repair fails, edit the named
+`*.candidate.yaml`, save it under the canonical name printed in the error (for example
+`drafts/validation_cases.yaml`), and rerun `draft`. Accepted or human-reviewed stages
+resume without another provider call.
+
+Trust modes have intentionally different release meaning:
+
+| Mode | Source/evidence plumbing | Human approval | Release meaning |
+| --- | --- | --- | --- |
+| `dev` | Workspace-local and automatic | Explicit model-exposure consent plus final human review | Runnable and evaluable, `development_unsealed`, never official |
+| `release` | Workspace-local source evidence | One final approval and release signing identity | Candidate for normal publication |
+| `compliance` | Every existing certificate, authorization, and approval input remains explicit | Existing separated gates | Existing signed compliance path |
+
+Existing `author` sessions without a prepared profile or explicit trust mode continue
+to default to `compliance`; the developer default applies only to the new `prepare`
+entry point.
+
 :::{tip}
 To watch the whole flow run before you prepare a source of your own, use the
 credential-free assisted-authoring walkthrough. It needs no credentials and no

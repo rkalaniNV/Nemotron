@@ -174,8 +174,8 @@ def _parser() -> argparse.ArgumentParser:
         help="Run source intake from the normal source + brief inputs",
     )
     _add_workspace(author)
-    author.add_argument("--source", required=True, metavar="PATH_OR_FILE_URI")
-    author.add_argument("--brief", type=Path, required=True)
+    author.add_argument("--source", metavar="PATH_OR_FILE_URI")
+    author.add_argument("--brief", type=Path)
     author.add_argument(
         "--adapter",
         choices=("auto", "local_python", "http_package", "mcp_mode_a"),
@@ -662,11 +662,22 @@ def _run_prepare(args: argparse.Namespace, remainder: list[str]) -> None:
 
 
 def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
-    source = _source_path(args.source)
-    brief = args.brief.resolve()
+    profile = _load_authoring_profile(args.workspace)
+    source_value = args.source or (profile.get("source") if profile is not None else None)
+    brief_value = args.brief or (
+        Path(str(profile["domain_brief"]))
+        if profile is not None and profile.get("domain_brief")
+        else None
+    )
+    if source_value is None or brief_value is None:
+        raise SystemExit(2)
+    source = _source_path(str(source_value))
+    brief = Path(brief_value).resolve()
+    if profile is not None:
+        args.pack_id = args.pack_id or profile.get("pack_id")
+        args.pack_version = args.pack_version or profile.get("pack_version")
     held_out = _held_out_arguments(args)
     trust_mode = _trust_mode(args)
-    profile = _load_authoring_profile(args.workspace)
     intake_remainder = list(remainder)
     private_flag = "--certification-private-key" in intake_remainder
     key_id_flag = "--certification-key-id" in intake_remainder
