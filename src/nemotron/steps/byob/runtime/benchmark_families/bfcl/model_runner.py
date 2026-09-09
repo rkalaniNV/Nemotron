@@ -26,9 +26,10 @@ from typing import Any
 from pydantic import BaseModel
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+from nemotron.steps.byob.runtime.pack_authoring.model_client import AuthoringModelError
 
 
-class StructuredModelGenerationError(RuntimeError):
+class StructuredModelGenerationError(AuthoringModelError):
     """A stable BFCL error for a structured record Data Designer dropped."""
 
     def __init__(self, stage_name: str, details: Sequence[str]) -> None:

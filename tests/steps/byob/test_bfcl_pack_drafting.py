@@ -972,6 +972,77 @@ class _FakeCaller:
         return {stage_name: self.responses[stage_name]}
 
 
+class _RepairingCaller(_FakeCaller):
+    def __init__(self, *, repair_succeeds: bool = True) -> None:
+        super().__init__()
+        self.coverage_attempts = 0
+        self.repair_succeeds = repair_succeeds
+
+    def __call__(self, run_dir, *, stage_name, requests, prompt, model_config, **kwargs):
+        if stage_name == "mcp_coverage_plan":
+            self.coverage_attempts += 1
+            if self.coverage_attempts == 1 or not self.repair_succeeds:
+                invalid = _coverage_response()
+                invalid["tools"][0]["tool"] = "invented_tool"
+                self.responses[stage_name] = invalid
+            else:
+                self.responses[stage_name] = _coverage_response()
+        return super().__call__(
+            run_dir,
+            stage_name=stage_name,
+            requests=requests,
+            prompt=prompt,
+            model_config=model_config,
+            **kwargs,
+        )
+
+
+def test_drafting_checkpoints_a_rejection_and_repairs_it_once(tmp_path: Path) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    caller = _RepairingCaller()
+
+    result = run_drafting(
+        bundle_path,
+        approval_path,
+        tmp_path / "out",
+        MODEL,
+        caller=caller,
+        allow_legacy_v1_model_exposure=True,
+    )
+
+    assert caller.coverage_attempts == 2
+    assert caller.stages[:2] == ["mcp_coverage_plan", "mcp_coverage_plan"]
+    rejected = result.draft_root / "mcp_coverage_plan.attempt-0.candidate.yaml"
+    feedback = result.draft_root / "mcp_coverage_plan.attempt-0.rejected.txt"
+    assert yaml.safe_load(rejected.read_text(encoding="utf-8"))["tools"][0]["tool"] == "invented_tool"
+    assert "not a published tool" in feedback.read_text(encoding="utf-8")
+    repair_input = json.loads(caller.prompts["mcp_coverage_plan"])
+    assert "not a published tool" in repair_input["repair_feedback"]
+    assert (result.draft_root / "coverage_plan.yaml").exists()
+
+
+def test_drafting_stops_after_one_repair_and_leaves_editable_artifacts(
+    tmp_path: Path,
+) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    caller = _RepairingCaller(repair_succeeds=False)
+    output = tmp_path / "out"
+
+    with pytest.raises(GroundingError, match="invented_tool"):
+        run_drafting(
+            bundle_path,
+            approval_path,
+            output,
+            MODEL,
+            caller=caller,
+            allow_legacy_v1_model_exposure=True,
+        )
+
+    assert caller.coverage_attempts == 2
+    assert (output / "drafts" / "mcp_coverage_plan.attempt-1.candidate.yaml").exists()
+    assert (output / "drafts" / "mcp_coverage_plan.attempt-1.rejected.txt").exists()
+
+
 def test_a_full_drafting_run_writes_drafts_provenance_and_compiled_assertions(
     tmp_path: Path,
 ) -> None:

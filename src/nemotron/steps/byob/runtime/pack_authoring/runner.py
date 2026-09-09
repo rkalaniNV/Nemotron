@@ -195,6 +195,8 @@ def run_drafting(
         run_dir=root / "model_runs",
         caller=caller,
         quota=quota,
+        checkpoint_root=root / DRAFT_DIRECTORY_NAME,
+        repair_attempts=1,
     )
     drafts = draft_all(context)
 

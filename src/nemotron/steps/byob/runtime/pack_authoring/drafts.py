@@ -15,11 +15,9 @@
 
 """The four authoring calls, each validated against the evidence before it is believed.
 
-Every generator has the same shape: build the fenced payload, make one cached structured
-call, parse the response into its schema, then hand it to `grounding.py`. A response that
-fails grounding raises rather than being repaired, and nothing retries. A retry loop here
-would quietly reward whichever attempt happened to pass, which is how an unreviewed claim
-gets into a pack; a refusal with the full list of violations is something a human can act on.
+Each accepted stage is checkpointed immediately.  A rejected candidate is retained next
+to its validation feedback and may receive one explicit repair attempt.  The retry is part
+of BFCL's visible authoring policy rather than Data Designer's hidden restart loop.
 
 The order is a dependency, not a preference. Coverage decides what the benchmark is trying
 to exercise, and the other three refer to it, so it is produced first and passed forward as
@@ -28,16 +26,19 @@ input rather than being re-derived three times with three chances to disagree.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import BaseModel, ValidationError
 
 from nemotron.steps.byob.runtime.authoring_workflow.quota import RunQuota
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
     ImmutableModelIOCache,
 )
+from nemotron.steps.byob.runtime.pack_authoring.artifacts import write_text_atomic
 from nemotron.steps.byob.runtime.pack_authoring.bundle import EvidenceView
 from nemotron.steps.byob.runtime.pack_authoring.grounding import (
     Grounding,
@@ -49,6 +50,7 @@ from nemotron.steps.byob.runtime.pack_authoring.grounding import (
 )
 from nemotron.steps.byob.runtime.pack_authoring.model_client import (
     AuthoringModel,
+    AuthoringModelError,
     ModelCallRecord,
     StructuredCaller,
     call_structured,
@@ -102,6 +104,10 @@ class DraftingContext:
     run_dir: Path
     caller: StructuredCaller | None = None
     quota: RunQuota | None = None
+    checkpoint_root: Path | None = None
+    repair_attempts: int = 0
+    repair_feedback: str | None = None
+    attempt_index: int = 0
 
     @property
     def grounding(self) -> Grounding:
@@ -130,6 +136,12 @@ def _call(
     columns: dict[str, str],
     output_format: type[BaseModel],
 ) -> tuple[Any, ModelCallRecord]:
+    if context.repair_feedback is not None:
+        task = (
+            f"{task}\n\nThis is a single repair attempt. Correct every issue in "
+            "{{ repair_feedback }} and return the complete corrected document."
+        )
+        columns = {**columns, "repair_feedback": context.repair_feedback}
     response, record = call_structured(
         context.model,
         stage_name=stage,
@@ -143,7 +155,68 @@ def _call(
         caller=context.caller,
         quota=context.quota,
     )
-    return _parse(stage, response, output_format), record
+    parsed = _parse(stage, response, output_format)
+    if context.checkpoint_root is not None:
+        _write_yaml(
+            parsed.model_dump(mode="json"),
+            context.checkpoint_root / f"{stage}.attempt-{context.attempt_index}.candidate.yaml",
+        )
+    return parsed, record
+
+
+def _write_yaml(document: object, path: Path) -> Path:
+    payload = yaml.safe_dump(
+        document,
+        sort_keys=True,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=100,
+    )
+    return write_text_atomic(str(payload), path)
+
+
+def _stage_error_text(stage: str, attempt: int, exc: Exception) -> str:
+    return f"stage: {stage}\nattempt: {attempt}\nerror: {exc}\n"
+
+
+def _run_stage(
+    context: DraftingContext,
+    *,
+    stage: str,
+    document_name: str,
+    produce: Callable[[DraftingContext], tuple[Any, ModelCallRecord]],
+) -> tuple[Any, ModelCallRecord]:
+    """Run, validate, checkpoint, and at most once repair one drafting stage."""
+    last_error: Exception | None = None
+    for attempt in range(context.repair_attempts + 1):
+        attempt_context = replace(
+            context,
+            repair_attempts=0,
+            repair_feedback=None if last_error is None else str(last_error),
+            attempt_index=attempt,
+        )
+        try:
+            document, record = produce(attempt_context)
+        except (AuthoringModelError, GroundingError) as exc:
+            last_error = exc
+            if context.checkpoint_root is not None:
+                write_text_atomic(
+                    _stage_error_text(stage, attempt, exc),
+                    context.checkpoint_root / f"{stage}.attempt-{attempt}.rejected.txt",
+                )
+            if attempt < context.repair_attempts:
+                continue
+            if context.checkpoint_root is not None:
+                path = context.checkpoint_root / f"{stage}.attempt-{attempt}.candidate.yaml"
+                exc.add_note(f"Rejected candidate, when available, is editable at {path}")
+            raise
+        if context.checkpoint_root is not None:
+            _write_yaml(
+                document.model_dump(mode="json"),
+                context.checkpoint_root / f"{document_name}.yaml",
+            )
+        return document, record
+    raise AssertionError("unreachable drafting stage loop")
 
 
 def draft_coverage_plan(
@@ -219,11 +292,31 @@ def draft_assertion_specs(
 
 
 def draft_all(context: DraftingContext) -> DraftBundle:
-    """Run the four calls in dependency order."""
-    coverage, coverage_record = draft_coverage_plan(context)
-    cases, cases_record = draft_validation_cases(context, coverage)
-    templates, templates_record = draft_task_templates(context, coverage)
-    assertions, assertions_record = draft_assertion_specs(context, coverage)
+    """Run the four calls in dependency order, checkpointing every accepted stage."""
+    coverage, coverage_record = _run_stage(
+        context,
+        stage="mcp_coverage_plan",
+        document_name="coverage_plan",
+        produce=draft_coverage_plan,
+    )
+    cases, cases_record = _run_stage(
+        context,
+        stage="mcp_validation_cases",
+        document_name="validation_cases",
+        produce=lambda active: draft_validation_cases(active, coverage),
+    )
+    templates, templates_record = _run_stage(
+        context,
+        stage="mcp_task_templates",
+        document_name="task_templates",
+        produce=lambda active: draft_task_templates(active, coverage),
+    )
+    assertions, assertions_record = _run_stage(
+        context,
+        stage="mcp_assertion_specs",
+        document_name="assertion_specs",
+        produce=lambda active: draft_assertion_specs(active, coverage),
+    )
     return DraftBundle(
         coverage=coverage,
         validation_cases=cases,
