@@ -1,10 +1,10 @@
 # QA Runbook: GA_v2 Feature Validation
 
 This runbook defines how the features introduced on `GA_v2` are validated before
-release signoff. It covers evaluation, Persona MCQ synthetic data generation,
-long-context chat SDG, and tokenizer extension, together with the supporting
-`nemo_runspec`, environment-template, step-catalog, and conversion changes those
-features depend on.
+release signoff. It covers text curation, evaluation, Persona MCQ synthetic data
+generation, long-context chat SDG, and tokenizer extension, together with the
+supporting `nemo_runspec`, environment-template, step-catalog, and conversion
+changes those features depend on.
 
 ## Contents
 
@@ -22,6 +22,13 @@ features depend on.
   - [SETUP-003 Install Isolated Long-Context Environment](#setup-003-install-isolated-long-context-environment)
   - [SETUP-004 Snapshot CLI And Step Metadata](#setup-004-snapshot-cli-and-step-metadata)
   - [SETUP-005 Run New Offline Regression Suites](#setup-005-run-new-offline-regression-suites)
+- [Text Curation](#text-curation)
+  - [CUR-001 Discover Curate Steps, Flow, And Dependencies](#cur-001-discover-curate-steps-flow-and-dependencies)
+  - [CUR-002 Run All Six CPU Smoke Paths](#cur-002-run-all-six-cpu-smoke-paths)
+  - [CUR-003 Measure, Approve, Apply, And Reject Corpus Drift](#cur-003-measure-approve-apply-and-reject-corpus-drift)
+  - [CUR-004 Validate Multilingual Signal And Language-Pack Safety](#cur-004-validate-multilingual-signal-and-language-pack-safety)
+  - [CUR-005 Decontaminate Before Building Nested Subsets](#cur-005-decontaminate-before-building-nested-subsets)
+  - [CUR-006 Real-Corpus Release Run](#cur-006-real-corpus-release-run)
 - [Evaluation](#evaluation)
   - [EVAL-001 Discover Modes, Suites, Tasks, And Profiles](#eval-001-discover-modes-suites-tasks-and-profiles)
   - [EVAL-002 Direct-Mode Internal Dry Run And Provenance](#eval-002-direct-mode-internal-dry-run-and-provenance)
@@ -131,6 +138,12 @@ the diff and add coverage for any new files before signoff.
 
 In-scope feature groups:
 
+- Text curation:
+  - all six registered `curate/*` steps and the unregistered six-step flow;
+  - content-derived ingest identity, profiling, approved-policy filtering,
+    independent audit, holdout decontamination, and deterministic nested subsets;
+  - Unicode-safe signals, explicit language-pack capabilities, corpus/policy
+    fingerprints, manifests, ledgers, and cross-step artifact lineage.
 - Evaluation:
   - expanded `eval/model_eval` launcher behavior;
   - direct mode on Local and Lepton profiles, executed live; Slurm and
@@ -156,7 +169,7 @@ In-scope feature groups:
   - language profiles, conversion handoff, remote profiles, and failure guards.
 
 Supporting changes to `nemo_runspec`, environment templates, the step catalog,
-and conversion runner are in scope wherever the four feature groups depend on
+and conversion runner are in scope wherever the five feature groups depend on
 them.
 
 Out of scope:
@@ -181,11 +194,33 @@ Out of scope:
 
 | Changed area | Primary cases |
 | --- | --- |
+| `src/nemotron/steps/curate/**`, Curator runtime packaging, and curation artifact types | `CUR-001` through `CUR-005` |
 | `src/nemotron/steps/eval/model_eval/**`, `src/nemo_runspec/**`, eval profiles | `EVAL-001` through `EVAL-011` |
 | `src/nemotron/steps/sdg/persona_mcq/**`, Persona plugin and profiles | `PMC-001` through `PMC-011` |
 | `use-case-examples/long-context-chat-sdg/**` | `LCSDG-001` through `LCSDG-011` |
 | Super3 128K/256K SFT configs and metadata | `LCSFT-001` through `LCSFT-003` |
 | `src/nemotron/steps/tokenizer_extension/**`, converter change and profiles | `TOK-001` through `TOK-013` |
+
+## Tooling Notes
+
+Three environment behaviours cost time during execution and can be mistaken for
+product failures. None is a defect in this repository.
+
+- **A Hugging Face streaming fetch can exit 134 after succeeding.** Interpreter
+  teardown after `load_dataset(..., streaming=True)` can raise
+  `PyGILState_Release: thread state must be current when releasing`, which
+  aborts the process with SIGABRT once every row has already been written.
+  Verify a fetch by reading back the row count and checksum of what landed, not
+  by the exit status.
+- **The `fasttext` Python wrapper cannot predict under NumPy 2.**
+  `model.predict()` raises `ValueError: Unable to avoid copy while creating an
+  array as requested` from inside `FastText.py`. This affects QA diagnostic
+  scripts that call fasttext directly; the curate steps wrap the model
+  differently and are unaffected. Diagnose language composition by measuring
+  script share over the kept and rejected sets instead.
+- **`lep job log` takes the job id via `-i`.** There is no `-n` or `--name`
+  option; `lep job list` shows the id. Retrieval may still return nothing — see
+  the log-collection criterion in `EVAL-009`.
 
 ## Runbook Rules
 
@@ -469,6 +504,583 @@ Success criteria:
 Evidence to collect: pytest output, duration, environment/package snapshot, and
 exit status.
 
+## Text Curation
+
+The curate category provides six independently runnable steps plus a Python
+flow driver. The highest-risk contract is not whether a command exits
+successfully; it is whether the measured corpus, approved policy, filtered
+corpus, audit, decontaminated corpus, and subset tiers retain one verifiable
+identity.
+
+Three guards refuse a run that looks reasonable. Each is correct behaviour;
+none is a defect. Expect them, and do not file them:
+
+- **Not enough CPU.** The filter builds one Ray stage per gate, so a
+  three-threshold policy needs 5.5 CPUs and Ray reserves one more. On an 8-core
+  host `ray: {num_cpus: 8}` fits a small policy; `num_cpus: 6` does not. The
+  error arrives from inside Curator and names no config key.
+- **Parquet is not filter input.** `curate/nemo_curator` reads `.jsonl`,
+  `.json` or `.ndjson` only. A real corpus arrives as parquet, so run
+  `curate/ingest` first to mint ids and normalise to JSONL — the filter refuses
+  the parquet and names the fix. The packaged fixtures are already JSONL, so
+  this only appears the first time a case is pointed at a real corpus.
+- **Stale output.** The filter does not clear its output directory, so a second
+  run into a populated `filtered_jsonl/` is refused rather than appending a
+  second corpus that every later step would read as one.
+- **Incomparable identity spaces.** Decontamination refuses a holdout that is
+  keyed off a field the training split never uses. `shared_id_space` defaults to
+  true because the holdout is meant to be a split of the SAME corpus. A holdout
+  taken from a separately published benchmark shares no key space with the
+  training corpus, so exact identity matching would return a guaranteed zero
+  rather than a measured one — near-duplicate detection across two corpora needs
+  the similarity pass, not the identity pass.
+
+Use one fresh root for these cases:
+
+```bash
+export CURATE_QA="$QA_ROOT/artifacts/curate-pr45"
+export CURATE_SRC="$PWD/src/nemotron/steps/curate/nemo_curator"
+mkdir -p "$CURATE_QA"/{configs,data,logs,metadata,outputs}
+```
+
+### CUR-001 Discover Curate Steps, Flow, And Dependencies
+
+Prerequisites: Python 3.11 or newer.
+
+```bash
+uv sync --extra curate --group dev
+
+uv run python - <<'PY'
+import importlib.metadata as md
+import sys
+
+assert sys.version_info >= (3, 11), sys.version
+for package in ("nemotron", "nemo-curator", "pyyaml"):
+    print(package, md.version(package))
+PY
+
+uv run nemotron steps list --category curate \
+  | tee "$CURATE_QA/metadata/steps-list.txt"
+
+for STEP in ingest profile nemo_curator audit decontamination subset; do
+  uv run nemotron steps show "curate/$STEP" --json \
+    > "$CURATE_QA/metadata/curate_${STEP}.json"
+done
+
+# The flow is intentionally a Python driver, not a registered step.
+! uv run nemotron steps show curate/flow
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow --help \
+  > "$CURATE_QA/metadata/flow-help.txt"
+
+uv run pytest -q \
+  tests/steps/curate \
+  tests/steps/test_curator_runtime_bootstrap.py \
+  tests/steps/test_run_cmd_runtime_preflight.py \
+  | tee "$CURATE_QA/logs/offline-tests.txt"
+```
+
+Success criteria:
+
+- Exactly these six step IDs are discoverable: `curate/ingest`,
+  `curate/profile`, `curate/nemo_curator`, `curate/audit`,
+  `curate/decontamination`, and `curate/subset`.
+- `curate/flow` is not advertised as a registered step, while the module driver
+  exposes `--config` and `--plan`.
+- The CPU `curate` extra installs the pinned text runtime. It does not silently
+  select the CUDA decontamination stack.
+- Step manifests declare the actual prepared, filtered, decontaminated,
+  policy, manifest, ledger, audit, and subset artifact cascade.
+- All curate-focused tests pass with no skip caused by a missing CPU dependency.
+  GPU-only skips are recorded separately and never counted as CPU coverage.
+
+Evidence to collect: PR/base SHAs, Python and package versions, step JSON,
+flow help, test output, skipped-test reasons, and `uv.lock` checksum.
+
+### CUR-002 Run All Six CPU Smoke Paths
+
+Prerequisites: `CUR-001`. These commands override container-oriented fixture
+paths with absolute checkout paths so the same cases run locally.
+
+```bash
+export CURATE_FIX="$(realpath "$CURATE_SRC")"
+export CURATE_SMOKE="$CURATE_QA/outputs/smoke"
+mkdir -p "$CURATE_SMOKE"
+
+uv run nemotron steps run curate/ingest -c tiny \
+  input="$CURATE_FIX/profile/data/tiny/*.jsonl" \
+  output_dir="$CURATE_SMOKE/ingest"
+
+uv run nemotron steps run curate/profile -c en \
+  output_dir="$CURATE_SMOKE/profile"
+
+uv run nemotron steps run curate/nemo_curator -c tiny \
+  input_glob="$CURATE_FIX/profile/data/tiny/*.jsonl" \
+  output_dir="$CURATE_SMOKE/filter" \
+  emit_manifest="$CURATE_SMOKE/filter/run_manifest.json" \
+  emit_ledger="$CURATE_SMOKE/filter/curation_ledger.json"
+
+uv run nemotron steps run curate/audit -c tiny \
+  target_glob="$CURATE_FIX/audit/data/tiny/*.jsonl" \
+  declared_manifest="$CURATE_FIX/audit/data/tiny/run_manifest.json" \
+  digest_root="$CURATE_FIX/audit/data/tiny" \
+  output_dir="$CURATE_SMOKE/audit"
+
+uv run nemotron steps run curate/decontamination -c tiny \
+  train_glob="$CURATE_FIX/decontamination/data/tiny/train.jsonl" \
+  holdout_glob="$CURATE_FIX/decontamination/data/tiny/holdout.jsonl" \
+  work_dir="$CURATE_SMOKE/decontamination/cache" \
+  output_dir="$CURATE_SMOKE/decontamination"
+
+uv run nemotron steps run curate/subset -c tiny \
+  input_glob="$CURATE_FIX/subset/data/tiny/corpus.jsonl" \
+  output_dir="$CURATE_SMOKE/subset"
+
+uv run python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["CURATE_SMOKE"])
+required = (
+    root / "ingest/ingest_report.json",
+    root / "profile/profile_report.json",
+    root / "profile/candidate_policies.yaml",
+    root / "profile/sample_manifest.json",
+    root / "filter/run_manifest.json",
+    root / "filter/curation_ledger.json",
+    root / "audit/audit_report.json",
+    root / "decontamination/train_decontaminated.jsonl",
+    root / "decontamination/decontamination_report.json",
+    root / "subset/plan.json",
+    root / "subset/subset_report.json",
+)
+missing = [str(path) for path in required if not path.is_file()]
+assert not missing, missing
+
+manifest = json.loads((root / "filter/run_manifest.json").read_text())
+audit = json.loads((root / "audit/audit_report.json").read_text())
+decon = json.loads((root / "decontamination/decontamination_report.json").read_text())
+assert manifest.get("completed_at"), manifest
+assert audit.get("passed") is True, audit
+assert "NOT measured" in decon["similarity"]["note"], decon
+PY
+```
+
+Success criteria:
+
+- Every registered step completes through its real runner, not only `--dry-run`.
+- Ingest emits stable IDs plus `ingest_report.json`; reordering or resharding the
+  input does not change content-derived IDs.
+- Profile emits a report, human-readable summary, sample manifest, and a
+  `candidate_policies.yaml` whose `approved` field is false.
+- Filter emits a completed manifest and ledger, and preserves the source text
+  byte-for-byte rather than truncating it during classification.
+- Audit reports `passed: true` for the packaged declaration.
+- CPU decontamination explicitly says in `similarity.note` that similarity was
+  not measured; it never turns a skipped GPU comparison into a zero-overlap
+  claim.
+- Subset emits one corpus per requested word budget, and each report labels the
+  unit as words because no tokenizer was configured.
+
+Evidence to collect: commands, logs, artifact tree, all reports/manifests,
+input/output row counts, text checksums, and selected document IDs.
+
+### CUR-003 Measure, Approve, Apply, And Reject Corpus Drift
+
+Prerequisites: a representative SQA corpus with stable source metadata and a
+reviewed language pack. Use at least 1,000 documents; smoke data can validate
+plumbing but cannot justify a production threshold.
+
+Copy `vi_c4_measure.yaml` and `vi_c4_apply.yaml` into `$CURATE_QA/configs`.
+Edit only the copies. Point both at the same corpus, text/ID/source fields,
+language, and language-pack root. Use separate output roots:
+`$CURATE_QA/outputs/measure` and `$CURATE_QA/outputs/apply`. In the apply copy,
+set `approve.from` to
+`$CURATE_QA/outputs/measure/profile/candidate_policies.yaml`; this avoids
+deleting the measurement run's artifacts. Keep profile enabled only in the
+measure copy.
+
+```bash
+export CURATE_MEASURE_CFG="$CURATE_QA/configs/measure.yaml"
+export CURATE_APPLY_CFG="$CURATE_QA/configs/apply.yaml"
+export CURATE_MEASURE_OUT="$CURATE_QA/outputs/measure"
+export CURATE_APPLY_OUT="$CURATE_QA/outputs/apply"
+
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+  --config "$CURATE_MEASURE_CFG" --plan
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+  --config "$CURATE_MEASURE_CFG"
+
+uv run python - <<'PY'
+import os
+from pathlib import Path
+import yaml
+
+root = Path(os.environ["CURATE_MEASURE_OUT"])
+candidate = yaml.safe_load((root / "profile/candidate_policies.yaml").read_text())
+assert candidate["approved"] is False
+assert candidate["corpus"]["fingerprint"].startswith("sha256:")
+assert candidate["profile_digest"].startswith("sha256:")
+print(root / "profile/profile_summary.md")
+PY
+```
+
+Review `profile_summary.md`, the per-signal retention curves, rejected samples,
+and the combined policy simulation. Then put the selected measured thresholds
+and the reviewer evidence into the apply copy's `approve` block.
+
+```bash
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+  --config "$CURATE_APPLY_CFG" --plan
+
+# Planning validates the approval but must not publish it.
+test ! -e "$CURATE_APPLY_OUT/policy/approved_policy.yaml"
+
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+  --config "$CURATE_APPLY_CFG"
+
+uv run python - <<'PY'
+import json
+import os
+from pathlib import Path
+import yaml
+
+root = Path(os.environ["CURATE_APPLY_OUT"])
+policy = yaml.safe_load((root / "policy/approved_policy.yaml").read_text())
+manifest = json.loads((root / "filtered_jsonl/run_manifest.json").read_text())
+flow = json.loads((root / "flow_report.json").read_text())
+assert policy["approved"] is True
+assert policy["thresholds"]
+assert manifest["policy"]["status"] == "approved"
+assert manifest["policy"]["thresholds_applied"] == len(policy["thresholds"])
+assert flow["policy_promoted"] is True
+assert flow["policy_applied"] is True
+assert flow["policy_status"] == "approved"
+assert flow["audit_passed"] is True
+PY
+```
+
+For the negative arm, copy the approved config to a new output root and point it
+at a copy of the corpus with one document's text changed while retaining its ID.
+The run must fail:
+
+```bash
+export CURATE_DRIFT_CFG="$CURATE_QA/configs/apply-corpus-drift.yaml"
+! uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+    --config "$CURATE_DRIFT_CFG"
+```
+
+Success criteria:
+
+- The measurement flow writes only an unapproved candidate policy.
+- Each approved threshold has a documented reviewer decision and comes from a
+  signal actually profiled on this corpus. Off-grid choices are called out and
+  are not reported with invented retention numbers.
+- The approved policy preserves corpus fingerprint, profile digest, scoring
+  implementation version, language-pack identity, threshold direction, and
+  reviewer evidence.
+- The apply manifest and flow report agree that the policy was promoted,
+  approved, and applied, and the ledger/audit reconcile every removed row.
+- A changed corpus is rejected before filtering applies the old policy. No
+  completed filter manifest or approved-policy artifact is published for the
+  drifted run.
+- `allow_unvalidated_policy` is not used in the release-signoff arm. If tested
+  separately, its manifest status is `override_unvalidated`, never `approved`.
+
+Evidence to collect: both configs, plan files, profile report/summary,
+candidate and approved policies, corpus fingerprints, reviewer rationale,
+filter manifest, ledger, audit and flow reports, and drift-arm error text.
+
+### CUR-004 Validate Multilingual Signal And Language-Pack Safety
+
+Prerequisites: `CUR-001`. The `x-test-*` language packs are implementation
+fixtures only; use them to exercise behavior, not as production packs.
+
+```bash
+cat > "$CURATE_QA/data/unicode.jsonl" <<'EOF'
+{"id":"vi-nfc","source":"qa","text":"Tiếng Việt là ngôn ngữ chính thức của Việt Nam, được viết bằng chữ Quốc ngữ."}
+{"id":"vi-nfd","source":"qa","text":"Tiếng Việt là ngôn ngữ chính thức của Việt Nam, được viết bằng chữ Quốc ngữ."}
+{"id":"hi","source":"qa","text":"यह एक परीक्षण वाक्य है। भारत एक विशाल देश है जिसमें अनेक भाषाएँ बोली जाती हैं।"}
+{"id":"hi-digits","source":"qa","text":"वर्ष २०२६ में कुल १५०० उदाहरण जाँचे गए।"}
+EOF
+
+export CURATE_TEST_PACKS="$PWD/tests/steps/curate/fixtures/langpacks"
+
+uv run nemotron steps run curate/profile -c default \
+  input_glob="$CURATE_QA/data/unicode.jsonl" \
+  output_dir="$CURATE_QA/outputs/profile-vi" \
+  language=x-test-vi \
+  langpack_dir="$CURATE_TEST_PACKS" \
+  'signals=[unicode_alpha_numeric,script_ratio,diacritic_ratio,sentence_end_ratio]'
+
+uv run nemotron steps run curate/profile -c default \
+  input_glob="$CURATE_QA/data/unicode.jsonl" \
+  output_dir="$CURATE_QA/outputs/profile-hi" \
+  language=x-test-hi \
+  langpack_dir="$CURATE_TEST_PACKS" \
+  'signals=[unicode_alpha_numeric,script_ratio,sentence_end_ratio]'
+
+# Hindi deliberately does not declare diacritic_ratio support.
+! uv run nemotron steps run curate/profile -c default \
+    input_glob="$CURATE_QA/data/unicode.jsonl" \
+    output_dir="$CURATE_QA/outputs/profile-hi-unsupported" \
+    language=x-test-hi \
+    langpack_dir="$CURATE_TEST_PACKS" \
+    'signals=[diacritic_ratio]'
+
+uv run pytest -q \
+  tests/steps/curate/test_signals.py \
+  tests/steps/curate/test_langpack.py \
+  tests/steps/curate/test_registry.py \
+  | tee "$CURATE_QA/logs/multilingual-contracts.txt"
+```
+
+Success criteria:
+
+- NFC and NFD forms of equivalent Vietnamese text receive equivalent scores;
+  profiling never rewrites the original text bytes.
+- `unicode_alpha_numeric` accepts Unicode letter, number, all combining-mark,
+  ZWJ, and ZWNJ categories required by Vietnamese and Indic text.
+- Script ratio is described as a script-composition signal, not language ID;
+  English and Vietnamese sharing Latin script is not reported as separation.
+- A named pack-backed signal that the pack does not declare fails clearly. When
+  all supported signals are auto-selected, unsupported signals are skipped with
+  an explicit warning rather than fabricated scores.
+- Language-pack tag, capability declarations, source files, licenses, and
+  content hash are validated and recorded in the profile/policy lineage.
+- The ASCII-bound content signals are capability-gated, not silently computed.
+  Against a pack that does not declare the capability, the profile SKIPS the
+  signal and says why, rather than scoring it on a false premise:
+  `numbers_ratio` requires `ascii_digits`, `punctuation` requires
+  `ascii_punctuation`, and `non_alpha_numeric` requires `ascii_alphabet`.
+  Confirm each appears as a `NOTE: skipped <signal>: requires [...]` line in
+  `profile_summary.md` for a non-ASCII pack, and that none of them carries a
+  threshold in the approve block for that corpus. A signal that scores instead
+  of skipping is a defect: `numbers_ratio` reads 0.0000 on Devanagari-digit text
+  that reads non-zero in ASCII, and `punctuation` scores 1.000 on Hindi
+  terminated correctly with `।`.
+
+Evidence to collect: fixture bytes/checksums, both profile reports and warnings,
+per-document scores, pack metadata/hash, unsupported-signal error, and tests.
+
+### CUR-005 Decontaminate Before Building Nested Subsets
+
+This CPU case proves the cross-step order and identity path. It creates a
+holdout from one document in the packaged subset corpus, passes the source
+corpus through the filter, removes the held-out identity, and only then builds
+the tiers.
+
+```bash
+export CURATE_CASCADE="$CURATE_QA/outputs/cascade"
+sed -n '1p' "$CURATE_FIX/subset/data/tiny/corpus.jsonl" \
+  > "$CURATE_QA/data/holdout.jsonl"
+
+cat > "$CURATE_QA/configs/cascade.yaml" <<EOF
+corpus:
+  input: $CURATE_FIX/subset/data/tiny/corpus.jsonl
+  text_field: text
+  id_field: id
+  source_field: source
+  language: en
+  langpack_dir: $CURATE_FIX/data/langpacks
+output_root: $CURATE_CASCADE
+steps:
+  ingest: {enabled: false}
+  profile: {enabled: false}
+  filter:
+    enabled: true
+    mode: filter
+    language_codes: []
+    quality_filters: {}
+    domains: []
+    models: {}
+    dataset: null
+  audit:
+    enabled: true
+    mode: all
+    comparison_fields: [id]
+  decontamination:
+    enabled: true
+    holdout: $CURATE_QA/data/holdout.jsonl
+    skip_similarity: true
+  subset:
+    enabled: true
+    token_budgets: [1000, 2500, 4500]
+    tokenizer: null
+    quality_score_field: null
+    length_bands: [20, 60]
+    seed: 0
+approve: null
+EOF
+
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+  --config "$CURATE_QA/configs/cascade.yaml" --plan
+
+uv run python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["CURATE_CASCADE"])
+plan = json.loads((root / "flow_plan.json").read_text())
+steps = {entry["key"]: entry for entry in plan["steps"]}
+assert steps["decontamination"]["enabled"] is True
+assert steps["subset"]["enabled"] is True
+assert steps["subset"]["config"]["input_glob"] == str(
+    root / "decontaminated/train_decontaminated.jsonl"
+)
+PY
+
+uv run python -m nemotron.steps.curate.nemo_curator.scripts.run_flow \
+  --config "$CURATE_QA/configs/cascade.yaml"
+
+uv run python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["CURATE_CASCADE"])
+holdout = json.loads(Path(os.environ["CURATE_QA"] + "/data/holdout.jsonl").read_text())
+blocked_id = holdout["id"]
+
+def ids(path):
+    return {
+        json.loads(line)["id"]
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+
+decontaminated = ids(root / "decontaminated/train_decontaminated.jsonl")
+tier_paths = sorted((root / "subset").glob("budget_*_words/subset.jsonl"))
+tiers = [ids(path) for path in tier_paths]
+assert tier_paths, "no subset tiers"
+assert blocked_id not in decontaminated
+assert all(blocked_id not in tier for tier in tiers)
+assert all(smaller <= larger for smaller, larger in zip(tiers, tiers[1:])), tier_paths
+
+decon = json.loads((root / "decontaminated/decontamination_report.json").read_text())
+subset = json.loads((root / "subset/subset_report.json").read_text())
+flow = json.loads((root / "flow_report.json").read_text())
+assert "NOT measured" in decon["similarity"]["note"]
+assert flow["status"] == "ok"
+assert flow["audit_passed"] is True
+assert subset["tiers"]
+PY
+```
+
+Success criteria:
+
+- `flow_plan.json` schedules decontamination before subset and points subset at
+  the single committed `train_decontaminated.jsonl`, not the pre-decontamination
+  corpus or a directory that can also match report sidecars.
+- The held-out document is never modified or emitted as output. Its matching
+  training identity is removed and named in `decontamination_report.json`.
+- No subset tier reintroduces a removed ID, every smaller tier is a subset of
+  every larger tier, and repeated runs with the same seed select identical IDs.
+- Plan/report counts, token shortfall, per-stratum deviation, manifest, ledger,
+  and audit reconcile. Missing or duplicate IDs fail before publishing tiers.
+- On a GPU-capable release host, repeat the case with `nemotron[curate-gpu]` and
+  `skip_similarity: false`; record verified Jaccard pairs, unverifiable pairs,
+  threshold, shingling, normalization, and candidate-recall evidence. If no GPU
+  is available, only that similarity arm is `BLOCKED`; the CPU identity/order
+  arm remains required.
+
+Evidence to collect: cascade config, plan, flow report, filter manifest/ledger,
+audit report, decontamination report and retained corpus, subset plan/report,
+tier ID sets/checksums, and GPU-arm report or named blocker.
+
+### CUR-006 Real-Corpus Release Run
+
+Every case above runs on packaged fixtures, which proves the machinery but
+cannot show how the module behaves on real text. This case runs the release
+chain once, on a real multilingual web corpus, and is the only case here that
+needs the network.
+
+Keep it small. The point is that real text exercises paths synthetic fixtures do
+not — a real corpus arrives as parquet, carries boilerplate and mixed scripts,
+and produces retention figures a human has to read before approving anything.
+
+Prerequisites: network access, roughly 8 CPUs, and about 250 MB of disk
+(380 MB with the optional language-ID arm). No GPU. Datasets are ungated;
+`HF_TOKEN` only avoids rate limits. If the environment is offline, record this
+case `BLOCKED (no network)` — every other curate case still runs.
+
+```bash
+export CURATE_REAL="$CURATE_QA/real"
+mkdir -p "$CURATE_REAL"/{corpora,holdout,out}
+
+uv run python - <<'PY'
+import os, pathlib, pandas as pd
+from datasets import load_dataset
+root = pathlib.Path(os.environ["CURATE_REAL"]) / "corpora"
+# c4 carries real web noise; wikipedia is clean prose and acts as the
+# false-rejection control. Both expose hi/en/vi and neither is gated.
+for repo, cfg, n, name in [("allenai/c4", "hi", 2000, "c4-hi"),
+                           ("wikimedia/wikipedia", "20231101.hi", 2000, "wiki-hi")]:
+    dest = root / name
+    if dest.exists():
+        continue
+    dest.mkdir(parents=True)
+    rows = []
+    for i, row in enumerate(load_dataset(repo, cfg, split="train", streaming=True)):
+        if i >= n:
+            break
+        rows.append(row)
+    pd.DataFrame(rows).to_parquet(dest / "part_0.parquet", index=False)
+    print(f"{name}: {len(rows)} docs")
+PY
+```
+
+Verify the fetch by reading back row counts and checksums, not by exit status:
+interpreter teardown after a streaming download can abort with SIGABRT once
+every row has already been written.
+
+Run the two passes described in `CUR-003` against `c4-hi`, using a fixture
+language pack (`x-test-hi`) and `curate/ingest` to normalise parquet to JSONL.
+For decontamination, carve the holdout out of the filtered corpus so both splits
+share one id space. Then apply the same approved policy to `wiki-hi`.
+
+Success criteria:
+
+- `curate/ingest` mints ids for a corpus that carries none, and the filter reads
+  its JSONL output. Pointing the filter at the parquet directly is refused.
+- The profile skips every signal the pack does not support and says why. On a
+  Devanagari pack that includes `numbers_ratio`, `punctuation` and
+  `non_alpha_numeric`, which are ASCII-bound.
+- The release run executes ingest, filter, audit, decontamination and subset in
+  that order, with every cross-step path derived from one `output_root`.
+- The removed set equals the planted holdout exactly, no removed document
+  appears in any subset tier, and the ledger balances.
+- Every surviving document is byte-identical to its ingested form.
+- **False-rejection control:** the same policy applied to `wiki-hi` retains
+  substantially more than it does on `c4-hi`. Clean encyclopaedic prose being
+  cut heavily means the policy is too aggressive whatever its C4 retention says.
+- Retention is reported per gate, and a human could defend each threshold from
+  the profile alone.
+
+Optional language-ID arm — the one failure mode fixtures cannot reproduce.
+Fetch `lid.176.bin` (131,266,198 bytes) from
+`https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin`, record
+its checksum, then filter `c4-hi` twice: once with `language_codes: [HI]` and
+once with a deliberately foreign code. Both runs must exit 0 with balanced
+ledgers, and `filtered_by_reason` must name `language_code`. Retention is the
+only signal that separates the correct run from the catastrophic one, which is
+precisely why this is worth measuring. Skip the arm if the model is unavailable
+and record it unqualified.
+
+Reference observations from a 2,000-document C4-hi slice, for orientation only —
+these move with the slice and are not assertions: ingest 2,000 → filter 1,976
+(24 removed, attributed to `latin_ratio` and `boilerplate_hits`) → decontaminate
+1,826 → tiers cut only from the survivors. Language-ID retention was 73.7% under
+`HI` against 0.1% under a foreign code; the rejected documents had a median
+Devanagari share of 0.000 against 0.888 for those kept, so the gate was removing
+genuinely non-Devanagari content rather than misfiring.
+
+Evidence to collect: dataset ids, row counts and checksums, both profile
+reports, the approved policy, flow report, ledger, audit report, decontamination
+report, subset report, the two retention figures, and the language-ID model
+checksum when that arm runs.
+
 ## Evaluation
 
 ### EVAL-001 Discover Modes, Suites, Tasks, And Profiles
@@ -742,12 +1354,15 @@ Success criteria:
   you edited: a tester who writes `secret_vars` by hand will never observe
   that the shipped default forwards the token in plaintext.
 - Lepton log collection is enabled on the job spec unless explicitly set.
-- Logs are actually RETRIEVABLE after the job reaches a terminal state — for a
-  job that succeeded AND for one that failed. Enabling collection on the spec is
-  necessary but not sufficient: verify by fetching the log post-mortem and
-  confirming it contains the harness output. A fetch that returns nothing (for
-  example "Connection stopped.") fails this criterion even though the spec looks
-  correct and the unit tests pass.
+- Job output is recoverable after the job reaches a terminal state, for a job
+  that succeeded AND for one that failed. Enabling collection on the spec is
+  necessary but not sufficient. Note that `lep job log` retrieval also depends
+  on the caller's network path to the log backend: on some hosts it returns
+  "Connection stopped." for terminated AND running jobs even with collection
+  correctly enabled, so an empty fetch is not by itself a product defect. Verify
+  the spec carries log collection, then read the durable per-task `harness.log`
+  and `summary.json` from the shared output directory. Record which of the two
+  paths produced the evidence.
 - A digest-pinned image reports `harness.image_pinned_by_digest=true`; a tag is
   correctly reported as unpinned.
 
@@ -1989,6 +2604,15 @@ GA_v2 feature signoff requires:
 - `SETUP-001` through `SETUP-005`, `SEC-001`, and `REP-001` pass.
 - Every in-scope step is discoverable and every checked-in config parses.
 - All new offline tests pass in clean, correctly isolated environments.
+- One real-corpus release run completes on an ungated public corpus, or is
+  recorded `BLOCKED (no network)`. Fixture cases prove the machinery; they
+  cannot show how the module behaves on real text.
+- All six curate steps are exposed, all six CPU smoke paths pass, a policy is
+  measured and deliberately approved against the same corpus fingerprint, and
+  a drifted corpus is refused. Unicode/language-pack guards pass, audit
+  reconciles the filter ledger, and every subset tier is cut only from the
+  decontaminated corpus. The GPU similarity arm may be `BLOCKED` only when the
+  required GPU runtime is unavailable; the CPU identity/order arm must pass.
 - At least one live direct evaluation smoke passes on a remote backend, with
   durable summary/manifest/log artifacts and no credential leak.
 - Both a base/completions and instruct/chat evaluation path are validated; each
