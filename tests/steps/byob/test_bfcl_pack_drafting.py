@@ -446,8 +446,41 @@ def test_a_literal_is_only_allowed_where_the_schema_pins_the_value_set() -> None
 
     outside = copy.deepcopy(grounded.model_dump(mode="json"))
     outside["cases"][0]["arguments"][1]["literal"] = "tonnes"
-    with pytest.raises(GroundingError, match="not in the schema enum"):
+    with pytest.raises(GroundingError, match="does not satisfy the parameter schema"):
         validate_validation_cases(_grounding(), ValidationCasePlan.model_validate(outside))
+
+
+@pytest.mark.parametrize(
+    ("name", "schema", "literal"),
+    [
+        ("confirm", {"type": "boolean"}, False),
+        ("count", {"type": "integer", "minimum": 1}, 2),
+        ("ratio", {"type": "number", "minimum": 0}, 1.5),
+    ],
+)
+def test_native_json_scalar_literals_are_not_stringified(
+    name: str,
+    schema: dict[str, Any],
+    literal: bool | int | float,
+) -> None:
+    tools = copy.deepcopy(_default_tools())
+    lookup_schema = tools[0]["untrusted_schemas"]["parameters"]
+    lookup_schema["properties"][name] = schema
+    plan = ValidationCasePlan.model_validate(
+        {
+            "cases": [
+                _case(
+                    arguments=[
+                        {"name": "id", "source": "fixture", "literal": None, "note": None},
+                        {"name": name, "source": "literal", "literal": literal, "note": None},
+                    ]
+                )
+            ]
+        }
+    )
+    assert validate_validation_cases(_grounding(_bundle_document(tools=tools)), plan) is plan
+    assert plan.model_dump(mode="json")["cases"][0]["arguments"][1]["literal"] == literal
+    assert type(plan.model_dump(mode="json")["cases"][0]["arguments"][1]["literal"]) is type(literal)
 
 
 def _error_case(unit: dict[str, Any]) -> ValidationCasePlan:
@@ -479,19 +512,20 @@ def test_an_invalid_literal_is_only_allowed_where_the_schema_refuses_the_value()
     with pytest.raises(GroundingError, match="no declared reason to reject it"):
         validate_validation_cases(_grounding(), permitted)
 
-    # `id` is an unconstrained string, so nothing in the schema makes any value invalid.
+    # `id` is a string, so a native null is grounded as a value its schema rejects.
     unconstrained = _error_case({"name": "unit", "source": "fixture", "literal": None, "note": None})
     loosened = copy.deepcopy(unconstrained.model_dump(mode="json"))
     loosened["cases"][0]["arguments"][0] = {
         "name": "id",
         "source": "invalid_literal",
-        "literal": "anything",
+        "literal": None,
         "note": None,
     }
-    with pytest.raises(GroundingError, match="pins no enum, boolean, or numeric type"):
-        validate_validation_cases(_grounding(), ValidationCasePlan.model_validate(loosened))
+    assert validate_validation_cases(
+        _grounding(), ValidationCasePlan.model_validate(loosened)
+    )
 
-    missing = _error_case({"name": "unit", "source": "invalid_literal", "literal": None, "note": None})
+    missing = _error_case({"name": "unit", "source": "invalid_literal", "note": None})
     with pytest.raises(GroundingError, match="requires the value the tool must reject"):
         validate_validation_cases(_grounding(), missing)
 

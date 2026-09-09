@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_runner import (
+    StructuredModelGenerationError,
+    _GenerationWarningCapture,
     read_structured_responses,
 )
 
@@ -70,3 +73,27 @@ def test_a_struct_field_null_in_every_row_still_reads_back(tmp_path: Path) -> No
     assert all(entry["blocked_on"] == [] for entry in drafted)
     # Seed columns are skipped rather than paid for a second time.
     assert set(records[0]) == {"request_id", "response"}
+
+
+def test_structured_generation_error_preserves_the_original_schema_failure() -> None:
+    capture = _GenerationWarningCapture()
+    capture.emit(
+        logging.LogRecord(
+            name="data_designer",
+            level=logging.WARNING,
+            pathname=__file__,
+            lineno=1,
+            msg=(
+                "Generation for record at index 0 failed in column 'response' "
+                "(schema validation). Detail: False is not valid under any schema"
+            ),
+            args=(),
+            exc_info=None,
+        )
+    )
+
+    error = StructuredModelGenerationError("mcp_validation_cases", capture.details)
+
+    assert error.stage_name == "mcp_validation_cases"
+    assert "False is not valid" in str(error)
+    assert "parquet-files" not in str(error)
