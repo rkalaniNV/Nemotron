@@ -22,6 +22,32 @@ should point into that local snapshot. Crawling, full extraction, and
 deduplication are out of scope here — use a dedicated Curator recipe for
 those.
 
+## How The Stages Combine
+
+Four rules, because guessing any of them wrong costs a corpus.
+
+**Enabled stages run in the order printed above and combine with AND.** A
+document reaches the writer only if it passes *every* enabled stage. Each stage
+sees only what the previous one passed, so the stages are a sequence of gates,
+not a scoring committee.
+
+**Within a list-valued knob the entries are OR.** `language_codes: [VI, EN]`
+keeps a document whose predicted label is *either*. The comparison is
+case-folded, and a label carrying a script suffix matches on the part before the
+underscore, so `ZH` selects `zh_Hans`. `domains` behaves the same way: a
+document is kept if its label is any one of the listed domains.
+
+**There is no voting and no N-of-M.** A single failing stage removes the
+document. Nothing anywhere counts how many gates a document passed.
+
+**`mode` is not a safety switch.** It governs *only* how an approved policy's
+signals are applied. It does not make the run non-destructive: with
+`mode: annotate`, the language, word-count and domain stages still drop
+documents, because those gates are built independently of `mode`. To score
+without removing anything, leave `language_codes`, `quality_filters` and
+`domains` unset — or use `annotate_domains: true`, which labels every document
+and drops none.
+
 ## Applying A Profiled Policy
 
 `curate/profile` measures what a threshold would remove. This step is where an
@@ -44,21 +70,35 @@ Signal names in a policy resolve through the closed allowlist in
 `../runtime/registry.py`. A policy file is a document people paste between
 machines, so it can never name an import path.
 
-`mode` decides what reaches the writer:
+`mode` decides what **the policy's own signals** do. It does not govern the
+language, word-count or domain stages, which drop rows under every mode — see
+[How The Stages Combine](#how-the-stages-combine).
 
-| `mode` | Rows | Columns added |
+| `mode` | Rows the *policy* removes | Columns added |
 |---|---|---|
 | `filter` | rejected rows dropped | none — scores discarded after use |
-| `annotate` | all kept | `__<signal>` for every row |
+| `annotate` | none — the policy removes nothing | `__<signal>` for every row |
 | `both` | rejected rows dropped | `__<signal>` for the survivors |
 
 Use `annotate` when you want to re-threshold later without re-reading the
 corpus, and `filter` to keep the historical column set exactly.
 
+`mode: annotate` on a config that also sets `language_codes`, `quality_filters`
+or `domains` still returns fewer rows than it read. That is not the policy
+removing them.
+
 Nemotron does not bundle production language packs. When a policy uses
 pack-backed signals, set `heuristic_filters.langpack_dir` to the reviewed pack
 root used by this run. The policy carries its content hash; the loaded word
 lists and character set must match that hash or the run stops.
+
+To build a pack for a language that does not have one, follow
+[data/langpacks/ADDING_A_LANGUAGE.md](data/langpacks/ADDING_A_LANGUAGE.md).
+
+To add a measurement the shipped set does not have -- a custom domain filter,
+a script-specific heuristic -- follow [ADDING_A_SIGNAL.md](ADDING_A_SIGNAL.md):
+subclass the local base, implement scoring and retention, register the signal,
+and name it from a policy.
 
 `heuristic_filters.langpack_content_hash` may additionally pin the expected
 hash in the run config, but it does not replace `langpack_dir`.

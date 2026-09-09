@@ -772,10 +772,22 @@ def test_the_worked_example_names_a_language_and_explicit_pack_root(name) -> Non
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
-def test_non_english_examples_require_an_external_pack_root(name) -> None:
-    cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
+def test_the_worked_example_points_at_a_pack_root_that_has_its_language(name) -> None:
+    """The example must be runnable as shipped.
 
-    assert cfg["corpus"]["langpack_dir"] == "./langpacks"
+    This used to assert the literal "./langpacks" -- an external directory no
+    user has -- while the config declared `language: vi` and only `en` shipped.
+    Running it gave LanguagePackNotFoundError, and the suite stayed green because
+    the sibling test substituted the x-test-vi fixture. Pinning the property
+    rather than the string is what makes that unrepeatable.
+    """
+    from nemotron.steps.curate.nemo_curator.runtime import langpack
+
+    cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
+    root = Path(cfg["corpus"]["langpack_dir"])
+
+    assert cfg["corpus"]["langpack_dir"], "langpack_dir has no default and must be explicit"
+    assert langpack.load(cfg["corpus"]["language"], root).language_tag == cfg["corpus"]["language"]
 
 
 @pytest.mark.parametrize("name", EXAMPLE_CONFIGS)
@@ -791,11 +803,11 @@ def test_the_worked_example_only_names_signals_its_pack_supports(name) -> None:
 
     cfg = yaml.safe_load((STEP_DIR / "config" / f"{name}.yaml").read_text(encoding="utf-8"))
     language = cfg["corpus"]["language"]
-    pack = (
-        langpack.load("en", PACKAGE_PACKS)
-        if language == "en"
-        else langpack.load(f"x-test-{language}", LANGPACK_FIXTURES)
-    )
+    # The SHIPPED pack for the language the config names -- not the x-test-*
+    # fixture. Substituting the fixture validated the worked example against a
+    # pack no user has: vi_c4_measure.yaml declared `language: vi` while only
+    # `en` shipped, so the example could not be run and this test still passed.
+    pack = langpack.load(language, PACKAGE_PACKS)
     named = cfg["steps"]["profile"].get("signals") or []
 
     for signal_name in named:
@@ -1199,8 +1211,17 @@ def test_a_source_column_in_the_raw_data_satisfies_it(tmp_path) -> None:
 
 
 def test_the_check_does_not_fire_when_ingest_is_disabled(tmp_path) -> None:
-    """Without ingest the corpus already carries whatever column it carries."""
-    cfg = _ingest_cfg(tmp_path, source_field="type")
+    """Without ingest the corpus already carries whatever column it carries.
+
+    The corpus is JSONL rather than the parquet _ingest_cfg builds: with ingest
+    disabled every step reads the raw corpus as JSONL, so preflight now refuses a
+    parquet corpus there. That refusal is a different check from the source_field
+    one under test here, and it would mask it.
+    """
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "raw" / "part.jsonl").write_text('{"id":"a","text":"x","type":"s"}\n', encoding="utf-8")
+
+    cfg = _ingest_cfg(tmp_path, source_field="type", input=str(tmp_path / "raw" / "*.jsonl"))
     cfg["steps"]["ingest"]["enabled"] = False
 
     resolved, _, _ = run_flow.plan(cfg, dry_run=True)

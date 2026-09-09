@@ -290,12 +290,48 @@ class RowDigest:
         return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
 
-#: Extensions a bare directory is taken to mean. Applied only when the caller
-#: names a directory: a glob or an explicit file says what it wants, and
-#: second-guessing it would silently drop files the user pointed at. Without the
-#: filter a stray ``README.md`` beside the shards would reach
-#: :func:`ingest.detect_format` and stop the run.
+#: Extensions taken to be corpus when a directory is RECURSED INTO. That happens
+#: only when the caller names a bare directory: a glob or an explicit file says
+#: what it wants, and second-guessing it would silently drop files the user
+#: pointed at. Without the filter a stray ``README.md`` beside the shards would
+#: reach :func:`ingest.detect_format` and stop the run.
 CORPUS_EXTENSIONS = ("jsonl", "json", "ndjson", "parquet", "pq")
+
+#: What a JSONL reader parses. ``.ndjson`` is included because this category
+#: already treats it as JSONL -- :func:`ingest.detect_format` groups it with
+#: ``.jsonl`` and ``.json``.
+JSONL_READER_EXTENSIONS = (".jsonl", ".json", ".ndjson")
+
+#: Corpus formats that resolve but need ``curate/ingest`` to normalise them first.
+INGEST_ONLY_EXTENSIONS = (".parquet", ".pq")
+
+
+def partition_by_reader(paths: Iterable[str]) -> tuple[list[str], list[str]]:
+    """Split resolved paths into (readable as JSONL, needs ingest first).
+
+    Lives here rather than in the filter step so that preflight and the runtime
+    apply ONE rule, not merely one resolver. They shared ``expand_inputs`` and
+    still disagreed: preflight counted a parquet shard as corpus, and the step
+    then dropped it (when JSONL sat beside it) or refused (when it did not). That
+    is "validate one corpus, process another" with an extra step, which is the
+    thing the shared resolver exists to stop.
+
+    ``run_flow`` must import this without importing the filter step, which pulls
+    in Curator at module scope -- preflight has to answer "can this run start?"
+    before any cluster exists.
+
+    Anything in neither list is a companion a broad glob swept up -- a README, a
+    ``_SUCCESS`` marker -- and is not corpus in either direction.
+    """
+    readable, ingest_only = [], []
+    for path in paths:
+        suffix = Path(path).suffix.casefold()
+        if suffix in JSONL_READER_EXTENSIONS:
+            readable.append(str(path))
+        elif suffix in INGEST_ONLY_EXTENSIONS:
+            ingest_only.append(str(path))
+    return readable, ingest_only
+
 
 # Reports and accounting artifacts are JSON, but they are not corpus shards.
 # A bare directory means "discover the corpus under here", so including one of
@@ -355,8 +391,19 @@ def explain_no_match(pattern: str | list[str]) -> str:
     return "\n".join(lines)
 
 
-def expand_inputs(pattern: str | list[str] | None) -> list[str]:
+def _is_corpus_file(path: Path, denied: frozenset[str]) -> bool:
+    """Whether discovery under a directory should take this file as corpus."""
+    return path.is_file() and path.suffix.lstrip(".").casefold() in CORPUS_EXTENSIONS and path.name not in denied
+
+
+def expand_inputs(pattern: str | list[str] | None, *, allow_sidecars: bool = False) -> list[str]:
     """Resolve a corpus reference the way every curate step already does.
+
+    ``allow_sidecars`` is for the one caller whose reference legitimately names
+    an accounting artifact rather than a corpus: ``curate/audit``'s
+    ``ledger_glob`` points *at* ``curation_ledger.json`` on purpose. It is an
+    explicit opt-in rather than a looser default because the denylist is what
+    stops a previous run's own metadata being read back as corpus rows.
 
     A glob, a bare directory, or a list of either. One implementation because
     the alternative was demonstrated: ``run_flow`` grew its own bare
@@ -376,22 +423,34 @@ def expand_inputs(pattern: str | list[str] | None) -> list[str]:
     if not pattern:
         return []
     patterns = [pattern] if isinstance(pattern, str) else list(pattern)
+    denied = frozenset() if allow_sidecars else CORPUS_SIDECAR_NAMES
     found: list[str] = []
     for item in patterns:
         item = str(item)
         if any(ch in item for ch in "*?["):
-            found.extend(glob.glob(item, recursive=True))
+            # A glob says what it wants, so CORPUS_EXTENSIONS does not narrow the
+            # FILES it matches. The sidecar denylist is a different rule and does
+            # apply: the flow writes run_manifest.json and curation_ledger.json
+            # *into* the corpus directory, and the documented reuse pattern points
+            # a later run at that directory, so `filtered_jsonl/*.json*` would
+            # otherwise read a previous run's own accounting back in as corpus
+            # rows -- and, because the manifest is pretty-printed, charge it as
+            # unparsable damage.
+            # A glob match that is a DIRECTORY is not recursed into. Doing so was
+            # tried and reverted: it changed what every pre-existing `<root>/*`
+            # config resolves to across all six resolvers, and turned a working
+            # `input: ./raw/*` over a parquet corpus with a converted/ subdirectory
+            # into an IngestError ("cannot infer one format"). A partitioned corpus
+            # is named by its bare directory -- `input: ./root` -- which has always
+            # recursed and still does.
+            found.extend(p for p in glob.glob(item, recursive=True) if Path(p).name not in denied)
             continue
         path = Path(item)
         if path.is_dir():
             # Every corpus extension, not just .jsonl: ingest reads parquet too,
             # and matching only .jsonl made `input: ./raw/` over a parquet corpus
             # resolve to nothing and report an empty corpus as though read.
-            found.extend(
-                str(p)
-                for p in path.rglob("*")
-                if p.suffix.lstrip(".").casefold() in CORPUS_EXTENSIONS and p.name not in CORPUS_SIDECAR_NAMES
-            )
+            found.extend(str(p) for p in path.rglob("*") if _is_corpus_file(p, denied))
         else:
             found.append(item)
     return sorted({f for f in found if Path(f).is_file()})

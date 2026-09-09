@@ -58,7 +58,7 @@ from typing import Any, cast
 
 import yaml
 
-from nemotron.steps.curate.nemo_curator.runtime import integrity
+from nemotron.steps.curate.nemo_curator.runtime import integrity, langpack
 from nemotron.steps.curate.nemo_curator.runtime import manifest as run_manifest
 from nemotron.steps.curate.nemo_curator.runtime import policy as policy_module
 from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
@@ -470,6 +470,47 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
             f"corpus.input matched no files: {corpus_input}\n"
             + textwrap.indent(integrity.explain_no_match(corpus_input), "    ")
         )
+    elif (
+        corpus_input
+        and not materialised_at_runtime
+        and not any(r.plan.key == "ingest" and r.enabled for r in resolved)
+    ):
+        # With ingest off, every downstream step reads the raw corpus AS JSONL.
+        # `expand_inputs` resolves parquet because ingest reads it, so preflight
+        # accepted a parquet corpus and the filter then refused it -- preflight
+        # validating one set and the runtime processing another, which is the
+        # divergence the shared resolver exists to remove. The same rule the step
+        # applies is applied here, from the same module, before any work is done.
+        readable, ingest_only = integrity.partition_by_reader(integrity.expand_inputs(corpus_input))
+        if not readable and ingest_only:
+            problems.append(
+                f"corpus.input resolves to {len(ingest_only)} file(s) no step can read as JSONL: "
+                f"{', '.join(sorted(ingest_only)[:5])}. Enable steps.ingest to normalise the corpus, "
+                "or point corpus.input at JSONL."
+            )
+
+    # An ASCII- or whitespace-dependent gate against a language that does not
+    # work that way. The signal registry already refuses this for profile
+    # signals, but steps.filter.quality_filters bypasses the registry entirely,
+    # so the same measurement was still reachable through a different door.
+    # Refused here, before any step runs, because the flow is where the language
+    # and the gate are both in view.
+    corpus_cfg = cfg.get("corpus") or {}
+    filter_cfg = dict((cfg.get("steps") or {}).get("filter") or {})
+    quality = filter_cfg.get("quality_filters") or {}
+    if corpus_cfg.get("language") and corpus_cfg.get("langpack_dir") and quality:
+        try:
+            pack = langpack.load(corpus_cfg["language"], corpus_cfg["langpack_dir"])
+        except (langpack.LanguagePackNotFoundError, langpack.LanguagePackInvalidError):
+            pack = None
+        if pack is not None:
+            if not pack.supports("word_segmentation") and {"min_words", "max_words"} & set(quality):
+                problems.append(
+                    f"steps.filter.quality_filters sets min_words/max_words, but the "
+                    f"{pack.language_tag!r} pack does not declare word_segmentation. WordCountFilter "
+                    "splits on whitespace this script does not use, so it would measure one word per "
+                    "document. Remove those keys, or declare word_segmentation in the pack."
+                )
 
     # A typo under steps: would otherwise drop a whole stage the author asked
     # for, and the run would report success having never attempted it.

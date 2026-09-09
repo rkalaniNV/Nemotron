@@ -62,14 +62,15 @@ plausible numbers for the wrong language, which is worse than refusing to start.
 
 A pack is data — word lists, a character set, boilerplate patterns, a fold map —
 plus a declaration of what can meaningfully be measured for that language. See
-[../data/langpacks/SPEC.md](../data/langpacks/SPEC.md) to author one.
+[../data/langpacks/SPEC.md](../data/langpacks/SPEC.md) for the file format, and
+[../data/langpacks/ADDING_A_LANGUAGE.md](../data/langpacks/ADDING_A_LANGUAGE.md)
+for the procedure around it.
 
-Nemotron ships one **opt-in English reference pack** under
-`../data/langpacks/en/`, sourced from Snowball and Unicode CLDR 48 with pinned
-content hashes and license texts. It supplies score inputs, not filtering
-thresholds, and neither the language nor its directory is selected by default.
-Run `-c en` to choose it explicitly. For another language, set `langpack_dir`
-to a reviewed pack root owned by your corpus workflow.
+Nemotron ships three **opt-in example packs** under `../data/langpacks/` —
+`en/`, `vi/` and `hi/`. They supply score inputs, not filtering thresholds, and
+neither the language nor its directory is selected by default. Run `-c en` to
+choose the English one explicitly. For another language, set `langpack_dir` to
+a reviewed pack root owned by your corpus workflow.
 
 The `x-test-*` packs under `tests/steps/curate/fixtures/langpacks/` validate the
 implementation but are not installed, user defaults, or claims of supported
@@ -99,7 +100,7 @@ where to read about what it measures.
 Which of the three groups a signal is in decides what it costs to use on a new
 corpus, and whether its number means the same thing there as it did here.
 
-**Language-agnostic (7).** The rule is defined over Unicode or over characters
+**Language-agnostic (6).** The rule is defined over Unicode or over characters
 that mean the same thing in every script, so the measurement transfers and there
 is nothing to supply.
 
@@ -114,13 +115,12 @@ what the profile is for.
 |---|---|---|
 | `bullet_ratio` | `max` | ratio |
 | `ellipsis` | `max` | ratio |
-| `numbers_ratio` | `max` | ratio |
 | `parentheses_ratio` | `max` | ratio |
 | `unicode_alpha_numeric` | `max` | ratio |
 | `urls_ratio` | `max` | ratio |
 | `white_space` | `max` | ratio |
 
-**Language-dependent, and it says so (9).** These declare a
+**Language-dependent, and it says so (17).** These declare a
 requirement and are skipped with a note when the pack does not meet it, so a
 corpus never gets a number the pack could not support.
 
@@ -134,22 +134,31 @@ corpus never gets a number the pack could not support.
 | `sentence_end_ratio` | `min` | ratio | `sentence_end_ratio` |
 | `stopword_ratio` | `min` | ratio | `stopword_ratio` |
 | `stopword_ratio_folded` | `min` | ratio | `stopword_ratio_folded` |
+| `max_word_length` | `max` | characters | `word_segmentation` |
+| `mean_word_length` | `interval` | characters | `word_segmentation` |
+| `numbers_ratio` | `max` | ratio | `ascii_digits` |
+| `punctuation` | `max` | ratio | `ascii_punctuation` |
+| `repeating_duplicate_ngrams` | `max` | ratio | `word_segmentation` |
+| `symbol_to_word` | `max` | ratio | `word_segmentation` |
 | `token_count` | `interval` | tokens | `tokenizer` |
+| `word_count` | `interval` | words | `word_segmentation` |
+| `words_with_alphabets` | `min` | ratio | `word_segmentation` |
 
-**Language-dependent without declaring it (8).** These need no pack,
-so they run everywhere — and quietly measure something else outside the languages
-they were written for. Read them on a new corpus before gating on them.
+**Language-dependent without declaring it (1).** One signal is left here, and
+it is here because the answer is a replacement rather than a capability:
+`non_alpha_numeric` is Curator's own filter and `unicode_alpha_numeric` is
+the Unicode-correct version of the same measurement. Use that one.
+
+The other eight signals that used to sit in this group -- the whitespace- and
+ASCII-dependent ones -- now declare `word_segmentation`, `ascii_digits` or
+`ascii_punctuation` and have moved to the group above. A pack that does not
+declare the capability skips them with a named warning, and a config that
+names one explicitly is refused. Documenting the hazard was not enough: the
+measurement stayed available and a policy could still ask for it.
 
 | signal | bound | units | the assumption |
 |---|---|---|---|
-| `max_word_length` | `max` | characters | the longest whitespace-separated run |
-| `mean_word_length` | `interval` | characters | characters per whitespace-separated word |
 | `non_alpha_numeric` | `max` | ratio | counts only `[a-zA-Z0-9\n?!,.]` as content |
-| `punctuation` | `max` | ratio | looks for `.`, `!`, `?` only |
-| `repeating_duplicate_ngrams` | `max` | ratio | n-grams over whitespace-separated words |
-| `symbol_to_word` | `max` | ratio | symbols per whitespace-separated word |
-| `word_count` | `interval` | words | documents, in whitespace-separated words |
-| `words_with_alphabets` | `min` | ratio | share of whitespace-separated words containing a letter |
 
 The last group is where a threshold silently stops meaning what it meant.
 Measured on 20,000 C4 documents per language:
@@ -184,19 +193,19 @@ verified direction and a retention curve. What each one measures is documented i
 |---|---|---|---|
 | `bullet_ratio` | `max` | ratio | — |
 | `ellipsis` | `max` | ratio | — |
-| `max_word_length` | `max` | characters | — |
-| `mean_word_length` | `interval` | characters | — |
+| `max_word_length` | `max` | characters | `word_segmentation` |
+| `mean_word_length` | `interval` | characters | `word_segmentation` |
 | `non_alpha_numeric` | `max` | ratio | — |
-| `numbers_ratio` | `max` | ratio | — |
+| `numbers_ratio` | `max` | ratio | `ascii_digits` |
 | `parentheses_ratio` | `max` | ratio | — |
-| `punctuation` | `max` | ratio | — |
-| `repeating_duplicate_ngrams` | `max` | ratio | — |
-| `symbol_to_word` | `max` | ratio | — |
+| `punctuation` | `max` | ratio | `ascii_punctuation` |
+| `repeating_duplicate_ngrams` | `max` | ratio | `word_segmentation` |
+| `symbol_to_word` | `max` | ratio | `word_segmentation` |
 | `token_count` | `interval` | tokens | `tokenizer` |
 | `urls_ratio` | `max` | ratio | — |
 | `white_space` | `max` | ratio | — |
-| `word_count` | `interval` | words | — |
-| `words_with_alphabets` | `min` | ratio | — |
+| `word_count` | `interval` | words | `word_segmentation` |
+| `words_with_alphabets` | `min` | ratio | `word_segmentation` |
 
 ### Implemented here (9)
 
@@ -347,6 +356,28 @@ and are written by hand with both bounds.
 
 The sample is reproducible from `(seed, max_total_docs)` — hash-bottom-k, never
 Python's salted `hash()`.
+
+## Adding A Signal
+
+The allowlist above is closed: a config names a registered signal and never an
+import path. To extend it -- a custom domain filter, or any measurement a
+`DocumentFilter` can express -- see
+[../ADDING_A_SIGNAL.md](../ADDING_A_SIGNAL.md).
+
+## After The Thresholds Are Approved
+
+This step measures distributions; it does not and cannot say a threshold is
+correct. Once a person has approved one, check it against labelled documents:
+
+```bash
+uv run --extra curate python -m nemotron.steps.curate.nemo_curator.scripts.run_evaluate \
+  --policy <output_root>/policy/approved_policy.yaml \
+  --labelled <labelled.jsonl> --langpack-dir <pack root>
+```
+
+It reports false-rejection and noise-removal rates per failure mode and per
+signal. See [../../README.md](../../README.md) § Checking A Policy Against
+Labelled Documents.
 
 ## Repository Layout
 

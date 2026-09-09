@@ -330,3 +330,138 @@ def test_the_language_dependence_tables_cover_every_signal_exactly_once() -> Non
     assert set(listed) == set(r.SIGNALS), (
         f"missing {sorted(set(r.SIGNALS) - set(listed))}, stale {sorted(set(listed) - set(r.SIGNALS))}"
     )
+
+
+def test_a_signal_whose_notes_admit_an_ascii_or_whitespace_assumption_is_in_the_third_group() -> None:
+    """Partition alone does not say the group is RIGHT.
+
+    `numbers_ratio` sat in the language-agnostic table -- "the measurement
+    transfers and there is nothing to supply" -- while its own registry note
+    read "Counts [0-9] only ... reads 0 on such text" for Devanagari and Thai
+    digits. The partition test above passed throughout, because a signal in
+    exactly one group satisfies it wherever that group is.
+
+    KNOWN LIMIT of the first half: it can only see a signal that documents its
+    own restriction, and fifteen of the group-three signals carry no `notes` at
+    all (word_count, mean_word_length, symbol_to_word, words_with_alphabets and
+    others). A new signal added there without a note is still invisible to it.
+    Closing that properly means writing those notes -- worth doing, and tracked
+    separately -- so the second half below is deliberately machine-derivable and
+    covers every signal regardless of documentation.
+    """
+    import re
+
+    readme = (STEP_DIR / "profile" / "README.md").read_text(encoding="utf-8")
+    section = readme[readme.index("### Language dependence") : readme.index("### Wrapping a Curator filter")]
+    third = section[section.index("**Language-dependent without declaring it") :]
+    third_group = set(re.findall(r"^\| `([a-z_]+)` \| `(?:min|max|interval)`", third, re.M))
+
+    # A note may mention ASCII to describe THIS signal's limit, or to contrast
+    # itself with another signal that has one. Only the first is a misfiling:
+    # `unicode_alpha_numeric` says "Curator's version is ASCII-only" precisely
+    # because it is the Unicode-correct replacement, and it belongs in group one.
+    own_limit = re.compile(r"counts (?:only )?\[|\[0-9\] only|looks for `|whitespace-separated", re.I)
+    contrast = re.compile(r"unicode-correct|replacement for", re.I)
+
+    # A documented hazard must be HANDLED, one of two ways: gated behind a
+    # capability the pack has to declare, or listed in the undeclared group so a
+    # reader is warned. Being in neither is the defect -- that is a signal whose
+    # own note admits it breaks on some scripts, running for every language with
+    # nothing anywhere saying so. `numbers_ratio` was exactly that.
+    unhandled = sorted(
+        name
+        for name, signal in r.SIGNALS.items()
+        if signal.notes
+        and own_limit.search(signal.notes)
+        and not contrast.search(signal.notes)
+        and name not in third_group
+        and not signal.requires
+    )
+
+    # Second, machine-derivable half. Group two is defined by declaring a
+    # requirement, so a signal with `requires` cannot belong to group three; this
+    # part needs no notes and therefore covers every signal, including the
+    # fifteen group-three entries that carry none.
+    declared_but_filed_undeclared = sorted(n for n in third_group if r.SIGNALS[n].requires)
+    assert not declared_but_filed_undeclared, (
+        f"these declare a requirement, so they belong in the 'and it says so' group: {declared_but_filed_undeclared}"
+    )
+
+    assert not unhandled, (
+        "these signals document an ASCII or whitespace assumption but neither declare a "
+        f"capability nor appear in the 'without declaring it' group: {unhandled}"
+    )
+
+
+# -- the extension point ---------------------------------------------------------
+
+
+def test_registering_a_signal_makes_it_namable_from_a_policy(monkeypatch) -> None:
+    """The four steps the reviewer named, end to end: write it, score, register,
+    reference. The last one is what makes the first three useful."""
+    monkeypatch.setattr(r, "SIGNALS", dict(r.SIGNALS))
+
+    signal = r.register(
+        r.Signal(
+            name="domain_confidence",
+            factory=lambda **kw: kw,
+            direction="min",
+            units="ratio",
+            grid=r.Grid(0.0, 1.0, 64),
+            threshold_params=("min_confidence",),
+        )
+    )
+
+    assert r.SIGNALS["domain_confidence"] is signal
+    chosen, _ = r.resolve(["domain_confidence"], capabilities=set())
+    assert [s.name for s in chosen] == ["domain_confidence"]
+    assert signal.build(0.62) == {"min_confidence": 0.62}, "the policy bound maps onto the named parameter"
+
+
+def test_redefining_a_registered_name_is_refused(monkeypatch) -> None:
+    """A dict assignment would let the second definition win while reports still
+    named the first -- a number credited to a measurement that did not make it."""
+    monkeypatch.setattr(r, "SIGNALS", dict(r.SIGNALS))
+
+    with pytest.raises(r.SignalAlreadyRegisteredError, match="already registered"):
+        r.register(
+            r.Signal(
+                name="word_count",
+                factory=lambda **kw: None,
+                direction="min",
+                units="words",
+                grid=r.Grid(0, 10, 4),
+                threshold_params=("min_words",),
+            )
+        )
+
+
+def test_a_name_a_config_could_not_write_is_refused(monkeypatch) -> None:
+    monkeypatch.setattr(r, "SIGNALS", dict(r.SIGNALS))
+
+    with pytest.raises(ValueError, match="valid identifier"):
+        r.register(
+            r.Signal(
+                name="my filter",
+                factory=lambda **kw: None,
+                direction="min",
+                units="ratio",
+                grid=r.Grid(0, 1, 4),
+                threshold_params=("x",),
+            )
+        )
+
+
+def test_the_extension_point_is_documented_and_reachable() -> None:
+    """Guidance nobody can find is guidance nobody has."""
+    curate = STEP_DIR.parent
+    doc = STEP_DIR / "ADDING_A_SIGNAL.md"
+
+    assert doc.is_file()
+    text = doc.read_text(encoding="utf-8")
+    for needed in ("score_document", "keep_document", "register(", "threshold_params", "thresholds:"):
+        assert needed in text, f"the procedure does not cover {needed}"
+    assert "_Base" in text, "subclassing DocumentFilter directly loses NFC enforcement; say so"
+
+    for readme in (curate / "README.md", STEP_DIR / "README.md", STEP_DIR / "profile" / "README.md"):
+        assert "ADDING_A_SIGNAL" in readme.read_text(encoding="utf-8"), readme

@@ -448,3 +448,102 @@ def test_a_real_corpus_still_fingerprints(tmp_path) -> None:
     write(tmp_path / "a.jsonl", '{"id":"1","text":"hello"}')
 
     assert integrity.corpus_fingerprint(f"{tmp_path}/*.jsonl", "text", "id").startswith("sha256:")
+
+
+# -- the sidecar denylist has exactly one exemption ---------------------------
+
+
+def test_a_ledger_glob_still_finds_the_ledger(tmp_path) -> None:
+    """curate/audit points AT curation_ledger.json on purpose.
+
+    The denylist that stops a corpus reference reading a previous run's
+    accounting would otherwise silently empty the audit's ledger list, and the
+    audit would pass while reporting "no ledger_glob" -- losing the attribution
+    it was asked for without ever failing.
+    """
+    # A realistic run directory: shards beside the accounting, not a directory
+    # holding the ledger alone. With only the ledger present, allow_sidecars=True
+    # would look right merely because there was nothing else to return.
+    (tmp_path / "run1").mkdir()
+    write(tmp_path / "run1" / "part_0.jsonl", '{"text":"a"}')
+    (tmp_path / "run1" / "curation_ledger.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "run1" / "run_manifest.json").write_text("{}", encoding="utf-8")
+
+    for reference in (str(tmp_path / "**" / "curation_ledger.json"), str(tmp_path)):
+        exempt = [Path(p).name for p in integrity.expand_inputs(reference, allow_sidecars=True)]
+        default = [Path(p).name for p in integrity.expand_inputs(reference)]
+
+        assert "curation_ledger.json" in exempt, reference
+        assert "curation_ledger.json" not in default, f"still excluded by default: {reference}"
+
+
+def test_the_audit_finds_the_ledger_through_its_own_entry_point(tmp_path) -> None:
+    """Drives run_audit.audit(), not run_audit.expand().
+
+    The previous version of this test called expand() and supplied
+    allow_sidecars=True itself, so it never reached the call site it was meant to
+    pin: reverting run_audit.py's `allow_sidecars=True` left it green. The
+    exemption only matters if the audit asks for it, so the audit has to be what
+    asks here.
+    """
+    import json
+
+    from nemotron.steps.curate.nemo_curator.scripts import run_audit
+
+    target = tmp_path / "out"
+    target.mkdir()
+    write(target / "part_0.jsonl", '{"id":"a","text":"x"}')
+    (target / "curation_ledger.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "stage": "curate/nemo_curator",
+                "source": None,
+                "n_input": 1,
+                "n_success": 1,
+                "n_filtered": 0,
+                "n_failed": 0,
+                "n_quarantined": 0,
+                "n_accounted": 1,
+                "balanced": True,
+                "filtered_by_reason": {},
+                "failed_units": [],
+                "quarantined_units": [],
+                "notes": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_audit.audit(
+        {
+            "target_glob": str(target),
+            "ledger_glob": str(target / "*ledger.json"),
+            "mode": "integrity",
+        }
+    )
+
+    # A ledger that resolved is one the audit read: either it attributes, or it
+    # reports the file as unreadable. What must NOT happen is the "no ledger_glob"
+    # branch, where the audit passes having quietly lost the attribution it was
+    # asked for -- which is what the sidecar denylist caused before the exemption.
+    unresolved = [f for f in report["findings"] if "no ledger_glob" in str(f)]
+    assert not unresolved, report["findings"]
+    assert report.get("attribution", {}).get("available") is not False, report.get("attribution")
+
+
+def test_a_glob_is_not_recursed_into_but_a_bare_directory_is(tmp_path) -> None:
+    """A partitioned corpus is named by its directory, not by `<root>/*`.
+
+    Recursing into glob-matched directories was tried and reverted: it changed
+    what every pre-existing `<root>/*` config resolved to across all six
+    resolvers, and turned a working `input: ./raw/*` over a parquet corpus with a
+    converted/ subdirectory into an IngestError. The bare-directory spelling has
+    always recursed and is the supported way to name a partitioned corpus.
+    """
+    for part in ("part=1", "part=2"):
+        (tmp_path / part).mkdir()
+        write(tmp_path / part / "shard.jsonl", '{"text":"a"}')
+
+    assert integrity.expand_inputs(str(tmp_path / "*")) == [], "a glob match that is a directory is not a file"
+    assert len(integrity.expand_inputs(str(tmp_path))) == 2, "the bare directory still recurses"

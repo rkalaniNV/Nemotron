@@ -33,6 +33,12 @@ supports = [
     "script_ratio",
     "stopword_ratio",
     "sentence_end_ratio",
+    # English is space-delimited and writes numbers and sentence
+    # punctuation in ASCII, so the word- and ASCII-based signals mean
+    # what they say here.
+    "word_segmentation",
+    "ascii_digits",
+    "ascii_punctuation",
 ]
 
 [notes]

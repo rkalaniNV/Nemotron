@@ -22,7 +22,14 @@ boilerplate = { file = "boilerplate.txt", n = 12, origin = "observed on English 
 sentence_terminators = [".", "!", "?"]
 
 [capabilities]
-supports = ["script_ratio", "stopword_ratio", "boilerplate_hits", "sentence_end_ratio"]
-
+supports = [
+    "script_ratio",
+    "stopword_ratio",
+    "boilerplate_hits",
+    "sentence_end_ratio",
+    "word_segmentation",
+    "ascii_digits",
+    "ascii_punctuation",
+]
 [notes]
 absent_capabilities = """diacritic_ratio and stopword_ratio_folded are not declared. English does not have a productive system of removable marks; measuring their density would score loanwords, not orthographic quality."""

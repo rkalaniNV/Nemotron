@@ -24,7 +24,7 @@ from nemotron.steps.curate.nemo_curator.runtime import registry as r
 FIXTURES = Path(__file__).parent / "fixtures" / "langpacks"
 RUNTIME = Path(langpack.__file__).parent
 PACKAGE_PACKS = RUNTIME.parent / "data" / "langpacks"
-FIXTURE_LANGUAGES = ("en", "hi", "ja", "th", "vi")
+FIXTURE_LANGUAGES = ("en", "hi", "vi")
 
 
 def load_fixture(language: str) -> langpack.LanguagePack:
@@ -34,15 +34,65 @@ def load_fixture(language: str) -> langpack.LanguagePack:
 # -- packaged reference and private validation fixtures -----------------------
 
 
-def test_only_the_opt_in_english_reference_pack_is_bundled() -> None:
-    assert langpack.available(PACKAGE_PACKS) == ["en"]
+#: The packs that ship. Three example languages, chosen because they break
+#: different assumptions: en is unmarked Latin, vi is Latin whose NFD produces
+#: only Mn marks, hi is an abugida whose matras span Mn and Mc with Mc in the
+#: majority. Japanese and Thai were removed -- their charset alone was 21,298
+#: lines -- and the evidence they carried is inline in test_unsegmented_scripts.py.
+SHIPPED_PACKS = ("en", "hi", "vi")
 
+
+def test_exactly_three_example_packs_are_bundled() -> None:
+    assert langpack.available(PACKAGE_PACKS) == list(SHIPPED_PACKS)
+
+
+def test_the_english_reference_pack_reports_what_it_carries() -> None:
     pack = langpack.load("en", PACKAGE_PACKS)
+
     assert pack.pack_id == "en-reference-snowball-cldr48"
     assert pack.language_tag == "en"
     assert len(pack.stopwords) == 174
     assert len(pack.charset) == 52
-    assert pack.capabilities == {"script_ratio", "stopword_ratio", "sentence_end_ratio"}
+    assert pack.capabilities == {
+        "script_ratio",
+        "stopword_ratio",
+        "sentence_end_ratio",
+        # English is space-delimited and writes numbers and sentence marks in
+        # ASCII, so the word- and ASCII-based signals are valid for it.
+        "word_segmentation",
+        "ascii_digits",
+        "ascii_punctuation",
+    }
+
+
+@pytest.mark.parametrize("tag", SHIPPED_PACKS)
+def test_every_shipped_pack_names_the_directory_it_lives_in(tag) -> None:
+    """The identity N1 pins, checked against what actually ships."""
+    assert langpack.load(tag, PACKAGE_PACKS).language_tag == tag
+
+
+@pytest.mark.parametrize("tag", SHIPPED_PACKS)
+def test_every_shipped_list_records_where_it_came_from(tag) -> None:
+    """Minimum provenance for a public repository: one line per list.
+
+    Full provenance -- upstream URL, checksum, licence text -- is held only by
+    the `en` reference pack, which was derived from published upstream sources.
+    The vi and hi packs were assembled for this repository, so origin and licence
+    are what there is to record and what must not go missing.
+    """
+    pack = langpack.load(tag, PACKAGE_PACKS)
+
+    assert pack.sources, f"{tag} declares no sources, so nothing it reads is attributable"
+    for name, source in pack.sources.items():
+        assert source.get("origin"), f"{tag}/{name}: no origin"
+        assert source.get("license"), f"{tag}/{name}: no license"
+
+
+@pytest.mark.parametrize("tag", SHIPPED_PACKS)
+def test_every_shipped_pack_says_it_is_not_a_default(tag) -> None:
+    """A bundled pack is example data. Nothing selects it implicitly, and the
+    pack has to say so where a reader of the report will see it."""
+    assert "scope" in langpack.load(tag, PACKAGE_PACKS).notes, f"{tag} has no scope note"
 
 
 @pytest.mark.parametrize("language", FIXTURE_LANGUAGES)
@@ -84,10 +134,11 @@ def test_hindi_declares_fewer_capabilities_than_vietnamese() -> None:
     assert hi.capabilities < vi.capabilities
 
 
-@pytest.mark.parametrize("tag", ["en", "ja", "th"])
-def test_en_ja_th_omit_diacritic_ratio(tag) -> None:
-    """English loanword accents, Japanese dakuten and Thai tone marks are not
-    removable orthography. Measuring their density would be the Hindi trap."""
+@pytest.mark.parametrize("tag", ["en"])
+def test_a_pack_without_removable_marks_omits_diacritic_ratio(tag) -> None:
+    """English loanword accents are not removable orthography; measuring their
+    density would be the Devanagari trap. The Japanese and Thai cases moved to
+    test_unsegmented_scripts.py when those fixtures were removed."""
     pack = load_fixture(tag)
     assert "diacritic_ratio" not in pack.capabilities
     assert "stopword_ratio_folded" not in pack.capabilities
@@ -97,8 +148,6 @@ def test_en_ja_th_omit_diacritic_ratio(tag) -> None:
     "tag,text",
     [
         ("en", "The weather is nice today."),
-        ("ja", "今日は良い天気です。"),
-        ("th", "วันนี้อากาศดีมาก"),
     ],
 )
 def test_a_correct_sentence_is_own_script(tag, text) -> None:
@@ -444,26 +493,6 @@ def test_editing_a_word_list_changes_the_hash(tmp_path) -> None:
 # exists to make. Hindi, which does use spaces, scores zero on 25.9% and those
 # are genuinely foreign-language documents, so it keeps the capability.
 
-UNSEGMENTED_SCRIPTS = ("ja", "th")
-
-
-@pytest.mark.parametrize("tag", UNSEGMENTED_SCRIPTS)
-def test_an_unsegmented_script_does_not_declare_stopword_ratio(tag) -> None:
-    pack = load_fixture(tag)
-
-    assert not pack.supports("stopword_ratio"), (
-        f"{tag} tokenises on whitespace it does not use; declaring the capability "
-        "produces a clean-looking distribution over nothing"
-    )
-
-
-@pytest.mark.parametrize("tag", UNSEGMENTED_SCRIPTS)
-def test_the_reason_is_recorded_in_the_pack(tag) -> None:
-    """A capability removed without a recorded measurement invites re-adding it."""
-    pack = load_fixture(tag)
-
-    assert "stopword_ratio_not_declared" in pack.notes
-
 
 @pytest.mark.parametrize("tag", ("vi", "en", "hi"))
 def test_a_space_separated_script_keeps_stopword_ratio(tag) -> None:
@@ -473,11 +502,91 @@ def test_a_space_separated_script_keeps_stopword_ratio(tag) -> None:
 def test_pack_notes_reach_the_report() -> None:
     """A caveat that stays in the file is not a caveat.
 
-    The ja pack recorded the whitespace-tokenisation problem all along; describe()
-    dropped it, so every report showed a stopword distribution that was 93.7%
-    exact zeros with nothing saying why.
+    The removed ja pack recorded the whitespace-tokenisation problem all along;
+    describe() dropped it, so every report showed a stopword distribution that
+    was 93.7% exact zeros with nothing saying why. The shipped hi pack records
+    why it declines diacritic_ratio, so it carries the same obligation.
     """
-    described = load_fixture("ja").describe()
+    described = langpack.load("hi", PACKAGE_PACKS).describe()
 
     assert "notes" in described
-    assert described["notes"], "the ja pack has notes and they must be carried"
+    assert described["notes"], "the hi pack has notes and they must be carried"
+
+
+# -- the three identities must agree ------------------------------------------
+#
+# A pack has three names: the tag the config asked for, the directory it was
+# found in, and the language_tag inside pack.toml. Every shipped fixture sets
+# all three equal, so the happy path is structurally incapable of catching a
+# disagreement -- which is why this bug survived a green suite.
+
+
+def test_a_pack_whose_manifest_names_another_language_is_rejected(tmp_path) -> None:
+    """Asking for vi must not return a pack that calls itself ja.
+
+    The content_hash gate is not a backstop for this: a pack mislabelled from
+    the first profile onward hashes consistently with itself.
+    """
+    import shutil
+
+    copy = tmp_path / "x-test-vi"
+    shutil.copytree(FIXTURES / "x-test-vi", copy)
+    manifest = copy / "pack.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('language_tag = "x-test-vi"', 'language_tag = "x-test-ja"'),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(langpack.LanguagePackInvalidError, match="declares language_tag"):
+        langpack.load("x-test-vi", tmp_path)
+
+
+def test_a_case_variant_tag_still_loads(tmp_path) -> None:
+    """BCP-47 tags are case-insensitive; tightening this to exact equality is a bug.
+
+    The directory is looked up by exact name -- on a case-sensitive filesystem
+    it has to be -- so this pins the *comparison*: a manifest that spells the
+    same tag with different case is the same language, not a mismatch. An exact
+    comparison would reject this correct pack.
+    """
+    import shutil
+
+    copy = tmp_path / "pt-BR"
+    shutil.copytree(FIXTURES / "x-test-en", copy)
+    manifest = copy / "pack.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('language_tag = "x-test-en"', 'language_tag = "pt-br"'),
+        encoding="utf-8",
+    )
+
+    pack = langpack.load("pt-BR", tmp_path)
+
+    # Returned under the name it was FOUND by, not the manifest's spelling. That
+    # spelling is what run_profile stamps into candidate_policies.yaml, and the
+    # filter run reloads the pack with it -- so letting 'pt-br' escape produced a
+    # profile that succeeded and a policy the next step could not load.
+    assert pack.language_tag == "pt-BR"
+    assert langpack.load(pack.language_tag, tmp_path).content_hash == pack.content_hash, (
+        "the tag a pack reports must be one that loads it again"
+    )
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "x-test-vi/../x-test-ja",
+        "./x-test-ja",
+        "sub/x-test-ja",
+        "..",
+    ],
+)
+def test_a_language_tag_may_not_be_a_path(tag) -> None:
+    """A tag names a directory under the root. A path escapes it."""
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="not a path"):
+        langpack.load(tag, FIXTURES)
+
+
+def test_an_absolute_path_tag_cannot_escape_the_langpack_root(tmp_path) -> None:
+    """The sharpest form: an absolute tag ignored langpack_dir entirely."""
+    with pytest.raises(langpack.LanguagePackNotFoundError, match="not a path"):
+        langpack.load(str(FIXTURES / "x-test-hi"), tmp_path)

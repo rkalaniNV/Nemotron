@@ -30,6 +30,7 @@ on a plain CI host so its metadata can be tested without the framework present.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -193,6 +194,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "symbol_to_word": Signal(
         name="symbol_to_word",
+        requires=("word_segmentation",),
         curator_default=(0.1,),
         factory=_string("SymbolsToWordsFilter"),
         direction="max",
@@ -202,6 +204,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "numbers_ratio": Signal(
         name="numbers_ratio",
+        requires=("ascii_digits",),
         curator_default=(0.15,),
         factory=_string("NumbersFilter"),
         direction="max",
@@ -251,6 +254,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "max_word_length": Signal(
         name="max_word_length",
+        requires=("word_segmentation",),
         curator_default=(1000,),
         factory=_string("LongWordFilter"),
         direction="max",
@@ -260,6 +264,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "punctuation": Signal(
         name="punctuation",
+        requires=("ascii_punctuation",),
         curator_default=(0.85,),
         factory=_string("PunctuationFilter"),
         direction="max",
@@ -283,6 +288,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "words_with_alphabets": Signal(
         name="words_with_alphabets",
+        requires=("word_segmentation",),
         curator_default=(0.8,),
         factory=_string("WordsWithoutAlphabetsFilter"),
         direction="min",
@@ -292,6 +298,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "repeating_duplicate_ngrams": Signal(
         name="repeating_duplicate_ngrams",
+        requires=("word_segmentation",),
         curator_default=(0.2,),
         factory=_repetition("RepeatingDuplicateNGramsFilter"),
         direction="max",
@@ -302,6 +309,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "word_count": Signal(
         name="word_count",
+        requires=("word_segmentation",),
         curator_default=(50, 100000),
         factory=_string("WordCountFilter"),
         direction="interval",
@@ -314,6 +322,7 @@ SIGNALS: dict[str, Signal] = {
     ),
     "mean_word_length": Signal(
         name="mean_word_length",
+        requires=("word_segmentation",),
         curator_default=(3, 10),
         factory=_string("MeanWordLengthFilter"),
         direction="interval",
@@ -455,7 +464,112 @@ SIGNALS.update(
     }
 )
 
+
 #: Signals that need the loaded language pack handed to their constructor.
+#: Which bound keys a policy may set, per signal direction. Enforced rather than
+#: inferred: ``min``/``max`` zipped positionally onto ``threshold_params`` maps a
+#: ``max:`` bound onto a ``min_*`` parameter and silently inverts the gate, so a
+#: policy meaning "drop above 0.9" keeps exactly the documents it meant to drop.
+BOUND_KEYS: dict[str, tuple[str, ...]] = {
+    "min": ("min",),
+    "max": ("max",),
+    "interval": ("min", "max"),
+}
+
+
+def threshold_bounds(signal: Signal, entry: dict) -> tuple[float, ...]:
+    """Map a policy entry's ``min``/``max`` onto the signal's threshold parameters.
+
+    Refuses a bound the signal's direction cannot express. The alternative —
+    accepting whatever keys are present and zipping them positionally — produces
+    a working pipeline that gates the wrong way round, which no test of the
+    pipeline's *shape* can catch.
+    """
+    expected = BOUND_KEYS.get(signal.direction)
+    if expected is None:
+        raise ValueError(f"{signal.name}: unknown direction {signal.direction!r}")
+
+    present = tuple(key for key in ("min", "max") if key in entry)
+    if not present:
+        # Deliberately no fallback to signal.curator_default. Those defaults are
+        # Curator's, tuned on English, and 15 of the 24 signals carry one; for
+        # non_alpha_numeric it is 0.25, the ASCII-regex threshold that retains
+        # 1.40% of a Vietnamese corpus. Substituting it for a bound the author
+        # forgot to write turns one missing line of YAML into a run that deletes
+        # 98.6% of the data and reports success. The value stays on the signal
+        # and is still reported by curate/profile, where a person can see it and
+        # decide; it is just never applied on their behalf.
+        raise ValueError(
+            f"{signal.name} names a threshold but sets neither min nor max, so there is no "
+            "bound to apply. Give it an explicit min or max — a shipped default would be "
+            "Curator's English-tuned value, which is not a decision this policy made."
+        )
+
+    wrong = [key for key in present if key not in expected]
+    if wrong:
+        raise ValueError(
+            f"{signal.name} is a {signal.direction}-direction signal and takes "
+            f"{' and '.join(expected)}, but the policy sets {wrong[0]!r}. Applying it as "
+            f"{expected[0]!r} would invert the gate and keep exactly the documents the "
+            "policy meant to drop."
+        )
+    if len(present) != len(expected):
+        missing = [key for key in expected if key not in present]
+        raise ValueError(
+            f"{signal.name} gates from both sides and needs {' and '.join(expected)}; "
+            f"the policy omits {missing[0]!r}. A two-sided gate given one bound would fix "
+            "the other at an unstated value and attribute all of the effect to the one set."
+        )
+    raw_values = tuple(entry[key] for key in expected)
+    for key, value in zip(expected, raw_values, strict=True):
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+            raise ValueError(f"{signal.name} {key} must be a finite number, got {value!r}")
+    values = tuple(float(value) for value in raw_values)
+    if expected == ("min", "max") and values[0] > values[1]:
+        raise ValueError(f"{signal.name} min must not be greater than max, got {values[0]!r} > {values[1]!r}")
+    return values
+
+
+class SignalAlreadyRegisteredError(ValueError):
+    """A name in the allowlist is being redefined."""
+
+
+def register(signal: Signal) -> Signal:
+    """Add a signal to the allowlist. The only sanctioned way to extend it.
+
+    Registration is a CODE act on purpose. A config may name a registered signal
+    and nothing else -- it can never name an import path, because a config is a
+    document people paste between machines and one that can name a class is one
+    that can execute arbitrary code on whoever pastes it. That property is pinned
+    by ``test_config_cannot_name_an_import_path``. So who may register is decided
+    by what is installed and imported, not by the config.
+
+    Call it at import time from a module the run imports before the step reads
+    its config -- for an in-tree signal, from this module. Out of tree, import
+    your module before invoking the step.
+
+    Redefining an existing name is refused rather than silently overwriting:
+    ``SIGNALS`` is a dict, and a plain assignment would let a second definition
+    win with the report still naming the first, which is a number attributed to a
+    measurement that did not produce it.
+    """
+    if not isinstance(signal, Signal):
+        raise TypeError(f"register() takes a Signal, got {type(signal).__name__}")
+    if signal.name in SIGNALS:
+        raise SignalAlreadyRegisteredError(
+            f"{signal.name!r} is already registered. Pick another name, or edit the existing "
+            "definition -- overwriting it would leave reports naming a signal that no longer "
+            "computed them."
+        )
+    if not signal.name.isidentifier():
+        raise ValueError(
+            f"{signal.name!r} is not a usable signal name: a config names it as a bare key, so it "
+            "must be a valid identifier."
+        )
+    SIGNALS[signal.name] = signal
+    return signal
+
+
 PACK_SIGNALS = frozenset(
     {
         "script_ratio",

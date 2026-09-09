@@ -4,10 +4,15 @@ A language pack is **data**. Nothing in `runtime/` knows any language exists —
 character sets, word lists, patterns and fold maps all arrive from here. Adding
 a language means adding a directory, not editing code.
 
-Nemotron ships one opt-in English reference pack in `en/`, built from the
-Snowball stopword list and Unicode CLDR 48 exemplar characters. Its source
-content hashes, transformations, and license texts are stored beside it. It is
-not an implicit language, pack root, threshold set, or quality claim.
+Nemotron ships three opt-in example packs — `en/`, `vi/` and `hi/` — chosen
+because they break different assumptions: English is unmarked Latin, Vietnamese
+is Latin whose NFD produces only `Mn` marks, and Hindi is an abugida whose
+matras span `Mn` and `Mc` with `Mc` in the majority. The `en` pack is built from
+the Snowball stopword list and Unicode CLDR 48 exemplar characters, with source
+content hashes, transformations and license texts stored beside it; `vi` and
+`hi` were assembled for this repository and record origin and licence per list.
+None of them is an implicit language, pack root, threshold set, or quality
+claim.
 
 For another language, a pack is a reviewed, versioned input owned by the corpus
 workflow using it; point `langpack_dir` at that external directory. The
@@ -20,12 +25,22 @@ private-use validation fixtures, not defaults or claims of supported languages.
 <langpack-dir>/<bcp47-tag>/
 ├── pack.toml        the manifest
 ├── stopwords.txt    one function word per line
-├── charset.txt      one character per line
+├── charset.txt      one character per line (see below)
 └── boilerplate.txt  one regular expression per line
 ```
 
 Blank lines and lines starting with `#` are ignored in every `.txt` file, so
 each can carry its own provenance header.
+
+`charset.txt` is parsed as the **union of every character on every non-comment
+line** — `frozenset("".join(lines))`. One per line is the readable convention,
+not a rule, so two consequences are worth stating because neither raises:
+
+- **Ranges are not expanded.** A line reading `a-z` contributes exactly `a`,
+  `-` and `z`, so the pack silently gains a hyphen and 24 of the 26 letters are
+  missing. Write the characters out.
+- **`#` and the space character cannot be members.** A line starting with `#` is
+  a comment, and a line that is only a space is stripped to nothing.
 
 The directory name is a **BCP-47 tag** (`vi`, `hi`, `pt-BR`), not an ISO 639-1
 code. Private-use tags (`x-…`) are valid and are what test fixtures use.
@@ -69,6 +84,27 @@ meaningfully be measured for, and a signal whose capability is undeclared is
 | `boilerplate_hits` | `boilerplate` | `boilerplate_hits` |
 | `sentence_end_ratio` | `sentence_terminators` | `sentence_end_ratio` |
 
+Three more are assertions about the **writing system** rather than claims to
+carry a file, so they have no `Needs` column and the loader cannot check them.
+They must be declared by someone who knows the language, and they exist because
+documenting a hazard was not enough — the measurement stayed available and a
+policy could still name it:
+
+| Capability | Assert it when | Withholding it disables |
+|---|---|---|
+| `word_segmentation` | words are delimited by whitespace | `word_count`, `mean_word_length`, `max_word_length`, `symbol_to_word`, `words_with_alphabets`, `repeating_duplicate_ngrams` |
+| `ascii_digits` | numbers are written with `[0-9]` | `numbers_ratio` |
+| `ascii_punctuation` | sentences use ASCII `.`, `!`, `?` | `punctuation` |
+
+A pack that does not declare one has those signals skipped with a named warning
+during profiling, and a config or policy that asks for one by name is refused.
+The shipped `hi` pack is the worked example: Hindi **does** delimit words with
+whitespace, so it declares `word_segmentation`; its digits are Devanagari and its
+sentences end with the danda, so it declares neither ASCII capability. Declaring
+all three because they look harmless puts a whitespace word count on a script
+that has no word boundaries — 39% of a Japanese corpus removed for having no
+spaces.
+
 Declaring a capability without the data behind it is rejected at load. It would
 otherwise fill a report with zeroes, which reads as a finding about the corpus
 rather than a hole in the pack.
@@ -99,13 +135,19 @@ undercount to be corrected with a lower threshold: the signal cannot distinguish
 exists to make. Declaring it would produce a clean-looking distribution over
 nothing.
 
-Record the measurement in the pack, in a key beside `supports`, so the omission
-reads as a decision rather than an oversight:
+Record the measurement in the pack's `[notes]` table, so the omission reads as a
+decision rather than an oversight:
 
 ```toml
+[notes]
 stopword_ratio_not_declared = """Measured on 20,000 C4-ja documents: 93.7% score
 EXACTLY zero, and 87.9% of those are correct Japanese (script_ratio > 0.5)."""
 ```
+
+`[notes]` is a top-level table and is the only place a note is read from. A key
+placed inside `[capabilities]` beside `supports` is **silently ignored** — the
+loader reads `capabilities.supports` and nothing else from that table, so the
+measurement would never reach `describe()` or any report.
 
 A morphological tokeniser — MeCab for Japanese, pythainlp for Thai — would change
 this, but it is a runtime change rather than a pack change. When one exists the

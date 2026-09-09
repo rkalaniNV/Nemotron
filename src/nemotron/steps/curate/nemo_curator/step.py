@@ -29,9 +29,7 @@
 from __future__ import annotations
 
 import argparse
-import glob as globlib
 import hashlib
-import math
 import os
 from ast import literal_eval
 from copy import deepcopy
@@ -46,7 +44,9 @@ from nemo_curator.pipeline import Pipeline
 from nemo_curator.stages.text.io.reader import JsonlReader
 from nemo_curator.stages.text.io.writer import JsonlWriter
 
+from nemotron.steps.curate.nemo_curator.runtime import integrity as _integrity
 from nemotron.steps.curate.nemo_curator.runtime import manifest as run_manifest
+from nemotron.steps.curate.nemo_curator.runtime import registry as _registry
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 
@@ -100,12 +100,15 @@ def reader_fields(cfg: dict) -> list[str]:
     return unique_fields
 
 
-#: Extensions the reader will pick up from a directory. Curator's own discovery
-#: is used when it is importable; this list is the fallback, and it is wider than
-#: ``.jsonl`` because a directory of ``.json`` line-files is a common shape and
-#: missing it would report a manifest input count of zero for a run that read
-#: everything.
-JSONL_EXTENSIONS = (".jsonl", ".json")
+#: What ``JsonlReader`` can parse, and what needs ``curate/ingest`` first.
+#:
+#: Re-exported, not redefined. Preflight applies the same rule from the same
+#: place (``run_flow`` imports ``integrity``, never this module -- importing it
+#: would pull in Curator before preflight can answer "can this run start?").
+#: Owning a private copy here is what let preflight count a parquet shard as
+#: corpus while this step dropped or refused it: one resolver, two rules.
+READER_EXTENSIONS = _integrity.JSONL_READER_EXTENSIONS
+INGEST_ONLY_EXTENSIONS = _integrity.INGEST_ONLY_EXTENSIONS
 
 # Pandas otherwise infers a column-wide numeric or datetime dtype. That changes
 # identifiers such as "001" to 1 before the first pipeline stage sees them.
@@ -113,55 +116,42 @@ JSONL_READ_KWARGS = {"dtype": False, "convert_dates": False}
 
 
 def resolve_inputs(input_glob: str | list[str]) -> list[str]:
-    """Expand the reader's ``file_paths`` the way the reader itself would.
+    """Expand the corpus reference. One resolver for the whole category.
 
-    The manifest's input counts are only meaningful if this sees the same files
-    the pipeline read. Curator's own ``get_all_file_paths_under`` is preferred
-    for exactly that reason; the local fallback exists so the manifest can still
-    be written when it is unavailable.
+    This was a sixth, private copy of the resolver with its own rules: a
+    narrower extension list (no ``ndjson``, no ``parquet``) and no sidecar
+    denylist at all, plus a Curator ``get_all_file_paths_under`` branch that
+    applied a third contract again whenever Curator happened to be importable.
+    Preflight resolves with :func:`integrity.expand_inputs`, so this step
+    validated one corpus and filtered another: point a run at a previous run's
+    output directory -- the documented reuse pattern -- and preflight saw the
+    two shards while this saw the shards *plus* ``run_manifest.json`` and
+    ``curation_ledger.json``, then charged the pretty-printed manifest to the
+    corpus as unparsable rows. The shipped fixture ``audit/data/tiny/`` is
+    already enough to show the divergence.
+
+    ``integrity.expand_inputs`` is now the single contract; its docstring states
+    the inclusion rules. What this step can *read* is a separate question, and
+    :data:`READER_EXTENSIONS` answers it at the point of use rather than by
+    quietly dropping files during resolution.
     """
-    try:
-        from nemo_curator.utils.file_utils import get_all_file_paths_under
-    except Exception:  # noqa: BLE001 - the fallback below is the point
-        get_all_file_paths_under = None
+    return _integrity.expand_inputs(input_glob)
 
-    patterns = [input_glob] if isinstance(input_glob, str) else list(input_glob)
-    recurse = isinstance(input_glob, str)
-    paths: list[str] = []
-    for pattern in patterns:
-        pattern = str(pattern)
-        if get_all_file_paths_under is not None:
-            try:
-                paths.extend(
-                    get_all_file_paths_under(
-                        pattern,
-                        recurse_subdirectories=recurse,
-                        keep_extensions=list(JSONL_EXTENSIONS),
-                    )
-                )
-            except FileNotFoundError:
-                pass
-            continue
 
-        candidate = Path(pattern)
-        if any(ch in pattern for ch in "*?["):
-            paths.extend(
-                path
-                for path in globlib.glob(pattern, recursive=recurse)
-                if Path(path).suffix.casefold() in JSONL_EXTENSIONS
-            )
-            continue
-        if candidate.is_file():
-            if candidate.suffix.casefold() in JSONL_EXTENSIONS:
-                paths.append(pattern)
-            continue
-        if candidate.is_dir():
-            iterator = candidate.rglob("*") if recurse else candidate.glob("*")
-            paths.extend(
-                str(path) for path in iterator if path.is_file() and path.suffix.casefold() in JSONL_EXTENSIONS
-            )
+def readable_inputs(input_glob: str | list[str]) -> list[str]:
+    """The resolved corpus, narrowed to what this step's reader can parse.
 
-    return sorted({p for p in paths if Path(p).is_file()})
+    One helper rather than three call sites, because they disagreed: ``run``
+    narrowed while ``emit_manifest`` and ``emit_ledger`` re-resolved wide, so the
+    same config produced two different corpora depending on which function asked,
+    and the audit consumed the wider count.
+
+    Non-corpus companions a broad glob sweeps up -- ``README.md``, ``_SUCCESS``
+    -- are dropped here, which is what this step did before the resolver was
+    shared. Corpus formats the reader cannot parse are NOT dropped; they are left
+    in the caller's hands so it can refuse by name.
+    """
+    return [p for p in resolve_inputs(input_glob) if Path(p).suffix.casefold() in READER_EXTENSIONS]
 
 
 #: Minimum FastText confidence for a language prediction to be trusted. Matches
@@ -241,7 +231,9 @@ def _resolve_policy(cfg: dict[str, Any], input_files: list[str] | None = None) -
     declared_fingerprint = (document.get("corpus") or {}).get("fingerprint")
     actual_fingerprint = declared_fingerprint
     if input_files is not None or "input_glob" in cfg:
-        resolved_inputs = input_files if input_files is not None else resolve_inputs(cfg["input_glob"])
+        # readable_inputs: the policy fingerprint must cover the files the
+        # reader actually reads, not the companions a glob swept up.
+        resolved_inputs = input_files if input_files is not None else readable_inputs(cfg["input_glob"])
         actual_fingerprint = integrity.corpus_fingerprint(
             resolved_inputs,
             cfg["text_field"],
@@ -317,13 +309,60 @@ PACK_REQUIREMENTS: frozenset[str] = frozenset(
     }
 )
 
+#: Capabilities that assert something about the WRITING SYSTEM rather than name
+#: data in the pack. Deliberately NOT in PACK_REQUIREMENTS: that set drives pack
+#: loading and the ``content_hash`` check, and a hash exists because thresholds
+#: are calibrated against a pack's word lists and character set. A ``word_count``
+#: bound is calibrated against no such thing, so demanding a hash for it would
+#: refuse a policy for a reason that does not apply to it.
+#:
+#: They are enforced where they actually bite: ``registry.resolve`` refuses them
+#: at profile time, which always has a pack, and ``quality_filters`` -- the other
+#: door, which bypasses the registry entirely -- is checked against the pack by
+#: :func:`_refuse_word_filter_without_segmentation` and by the flow's preflight.
+ORTHOGRAPHY_REQUIREMENTS: frozenset[str] = frozenset({"word_segmentation", "ascii_digits", "ascii_punctuation"})
+
 #: Everything this step knows how to supply. A signal declaring anything else is
 #: refused by name rather than reaching ``Signal.build`` and failing on a missing
 #: keyword argument — the failure mode that let ``token_count`` through.
-KNOWN_REQUIREMENTS: frozenset[str] = PACK_REQUIREMENTS | {"tokenizer"}
+KNOWN_REQUIREMENTS: frozenset[str] = PACK_REQUIREMENTS | ORTHOGRAPHY_REQUIREMENTS | {"tokenizer"}
 
 
-def load_policy_pack(langpack_spec: dict, needed_by: list[str]) -> Any:
+def _refuse_word_filter_without_segmentation(cfg: dict) -> None:
+    """Refuse ``min_words``/``max_words`` for a language that does not use spaces.
+
+    Refuse rather than silently disable. A filter quietly dropped is a corpus the
+    user did not ask for and cannot reconstruct -- the same reasoning that made
+    ``curator_default`` fail loudly instead of substituting 0.25. The message
+    names the pack, the capability and the two ways forward.
+
+    Only fires when the run declares a pack. Without one there is no language to
+    be wrong about, and a config that predates this keeps its behaviour.
+    """
+    from nemotron.steps.curate.nemo_curator.runtime import langpack as langpack_module
+
+    block = cfg.get("heuristic_filters") or {}
+    tag = block.get("language_tag") or block.get("language")
+    root = block.get("langpack_dir")
+    if not tag or not root:
+        return
+    try:
+        pack = langpack_module.load(tag, root)
+    except (langpack_module.LanguagePackNotFoundError, langpack_module.LanguagePackInvalidError):
+        # Resolving the pack is not this check's job; whoever needs it will fail
+        # with a better message than one about word counts.
+        return
+    if pack.supports("word_segmentation"):
+        return
+    raise ValueError(
+        f"quality_filters sets min_words/max_words, but the {pack.language_tag!r} pack does not "
+        "declare word_segmentation: WordCountFilter splits on whitespace this script does not use, "
+        "so it would measure one word per document. Remove min_words and max_words, or declare "
+        "word_segmentation in the pack if the language really is space-delimited."
+    )
+
+
+def load_policy_pack(langpack_spec: dict, needed_by: list[str], *, require_hash: bool = True) -> Any:
     """Load the language pack a policy was derived from.
 
     Half the registry's signals are parameterised by a pack — their word lists,
@@ -348,6 +387,12 @@ def load_policy_pack(langpack_spec: dict, needed_by: list[str]) -> Any:
         )
 
     pack = langpack.load(tag, langpack_spec.get("langpack_dir"))
+    if not require_hash:
+        # The pack was loaded to answer "does this language work that way?", not
+        # to supply word lists. A word_count bound is calibrated against no pack
+        # content, so demanding the hash would refuse a policy for a reason that
+        # does not apply to it.
+        return pack
     declared = langpack_spec.get("content_hash")
     if not declared:
         # Required, not merely compared when present. A policy that does not say
@@ -369,68 +414,12 @@ def load_policy_pack(langpack_spec: dict, needed_by: list[str]) -> Any:
     return pack
 
 
-#: Which bound keys a policy may set, per signal direction. Enforced rather than
-#: inferred: ``min``/``max`` zipped positionally onto ``threshold_params`` maps a
-#: ``max:`` bound onto a ``min_*`` parameter and silently inverts the gate, so a
-#: policy meaning "drop above 0.9" keeps exactly the documents it meant to drop.
-BOUND_KEYS: dict[str, tuple[str, ...]] = {
-    "min": ("min",),
-    "max": ("max",),
-    "interval": ("min", "max"),
-}
-
-
-def threshold_bounds(signal: Any, entry: dict) -> tuple[float, ...]:
-    """Map a policy entry's ``min``/``max`` onto the signal's threshold parameters.
-
-    Refuses a bound the signal's direction cannot express. The alternative —
-    accepting whatever keys are present and zipping them positionally — produces
-    a working pipeline that gates the wrong way round, which no test of the
-    pipeline's *shape* can catch.
-    """
-    expected = BOUND_KEYS.get(signal.direction)
-    if expected is None:
-        raise ValueError(f"{signal.name}: unknown direction {signal.direction!r}")
-
-    present = tuple(key for key in ("min", "max") if key in entry)
-    if not present:
-        # Deliberately no fallback to signal.curator_default. Those defaults are
-        # Curator's, tuned on English, and 15 of the 24 signals carry one; for
-        # non_alpha_numeric it is 0.25, the ASCII-regex threshold that retains
-        # 1.40% of a Vietnamese corpus. Substituting it for a bound the author
-        # forgot to write turns one missing line of YAML into a run that deletes
-        # 98.6% of the data and reports success. The value stays on the signal
-        # and is still reported by curate/profile, where a person can see it and
-        # decide; it is just never applied on their behalf.
-        raise ValueError(
-            f"{signal.name} names a threshold but sets neither min nor max, so there is no "
-            "bound to apply. Give it an explicit min or max — a shipped default would be "
-            "Curator's English-tuned value, which is not a decision this policy made."
-        )
-
-    wrong = [key for key in present if key not in expected]
-    if wrong:
-        raise ValueError(
-            f"{signal.name} is a {signal.direction}-direction signal and takes "
-            f"{' and '.join(expected)}, but the policy sets {wrong[0]!r}. Applying it as "
-            f"{expected[0]!r} would invert the gate and keep exactly the documents the "
-            "policy meant to drop."
-        )
-    if len(present) != len(expected):
-        missing = [key for key in expected if key not in present]
-        raise ValueError(
-            f"{signal.name} gates from both sides and needs {' and '.join(expected)}; "
-            f"the policy omits {missing[0]!r}. A two-sided gate given one bound would fix "
-            "the other at an unstated value and attribute all of the effect to the one set."
-        )
-    raw_values = tuple(entry[key] for key in expected)
-    for key, value in zip(expected, raw_values, strict=True):
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
-            raise ValueError(f"{signal.name} {key} must be a finite number, got {value!r}")
-    values = tuple(float(value) for value in raw_values)
-    if expected == ("min", "max") and values[0] > values[1]:
-        raise ValueError(f"{signal.name} min must not be greater than max, got {values[0]!r} > {values[1]!r}")
-    return values
+#: Re-exported from the registry, not redefined. The evaluator applies the
+#: same policy bounds without importing this module, which pulls in Curator at
+#: module scope -- and two mappings of min/max onto threshold parameters is two
+#: chances to invert a gate.
+BOUND_KEYS = _registry.BOUND_KEYS
+threshold_bounds = _registry.threshold_bounds
 
 
 def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_spec: dict | None = None) -> list[Any]:
@@ -478,7 +467,32 @@ def policy_stages(thresholds: list[dict], text_field: str, mode: str, langpack_s
     # Load the pack once, and only if something actually needs it, so a policy of
     # pack-free signals still runs on a machine with no packs installed.
     pack_backed = sorted({n for n in named if signal_registry.SIGNALS[n].requires})
-    pack = load_policy_pack(spec, pack_backed) if requirements & PACK_REQUIREMENTS else None
+    # Every requirement a pack answers, not only the data-backed ones. Loading
+    # only for PACK_REQUIREMENTS left the orthographic capabilities unchecked on
+    # this path: registry.resolve refuses `numbers_ratio` for a Hindi pack at
+    # profile time, and policy_stages built it anyway, because ascii_digits is
+    # not a data requirement and so never loaded a pack to ask.
+    pack_capabilities = requirements & (PACK_REQUIREMENTS | ORTHOGRAPHY_REQUIREMENTS)
+    pack = (
+        load_policy_pack(spec, pack_backed, require_hash=bool(requirements & PACK_REQUIREMENTS))
+        if pack_capabilities
+        else None
+    )
+    if pack is not None:
+        unmet = sorted(
+            f"{name} needs {req}"
+            for name in named
+            for req in signal_registry.SIGNALS[name].requires
+            if req in pack_capabilities and not pack.supports(req)
+        )
+        if unmet:
+            raise ValueError(
+                f"policy names signal(s) the {pack.language_tag!r} pack does not support: "
+                f"{unmet}. curate/profile refuses these for this language; applying them here "
+                "would measure something the language does not do -- a word count on a script "
+                "without spaces, or an ASCII digit ratio on one that writes numbers otherwise. "
+                "Remove the threshold, or declare the capability in the pack if it really applies."
+            )
 
     tokenizer = spec.get("tokenizer")
     if "tokenizer" in requirements and not tokenizer:
@@ -631,6 +645,12 @@ def build_pipeline(
     if has_word_filter:
         if not all(key in quality_filters for key in ("min_words", "max_words")):
             raise ValueError("quality_filters must set both min_words and max_words to enable WordCountFilter")
+        # quality_filters does not go through the signal registry, so the
+        # capability gate that stops `word_count` running on an unsegmented
+        # script does not reach WordCountFilter. Same measurement, same hazard,
+        # different door. Checked only when this run has a pack to ask: a config
+        # with no language declared keeps its historical behaviour exactly.
+        _refuse_word_filter_without_segmentation(cfg)
         _, ScoreFilter = text_filter_stages()  # noqa: N806 -- these are Curator stage classes, not variables
         from nemo_curator.stages.text.filters.heuristic import WordCountFilter
 
@@ -708,9 +728,33 @@ def run(cfg: dict) -> dict[str, Any]:
         if cfg.get("dataset"):
             snapshot_download(**cfg["dataset"])
 
-        input_files = resolve_inputs(cfg["input_glob"])
+        resolved = resolve_inputs(cfg["input_glob"])
+        if not resolved:
+            raise ValueError(f"input_glob {cfg['input_glob']!r} matched no corpus files")
+
+        # NARROW BEFORE REFUSING. The failure handler below writes a manifest and
+        # a ledger from `input_files`, so a raise taken while it still held the
+        # wide list charged the corpus with unparsable rows from a file the step
+        # never read -- the exact damage this narrowing exists to prevent.
+        input_files = [p for p in resolved if Path(p).suffix.casefold() in READER_EXTENSIONS]
+
+        # A corpus format the reader cannot parse is a user error worth stopping
+        # for -- but only when it is the WHOLE corpus. A stray parquet beside the
+        # JSONL shards is the shape a Hugging Face snapshot has, and refusing it
+        # aborted runs that worked before the resolver was shared.
         if not input_files:
-            raise ValueError(f"input_glob {cfg['input_glob']!r} matched no .jsonl or .json files")
+            wrong_format = sorted(p for p in resolved if Path(p).suffix.casefold() in INGEST_ONLY_EXTENSIONS)
+            if wrong_format:
+                raise ValueError(
+                    f"input_glob {cfg['input_glob']!r} resolved {len(wrong_format)} file(s) this step "
+                    f"cannot read: {', '.join(wrong_format[:5])}. curate/nemo_curator reads "
+                    f"{' or '.join(READER_EXTENSIONS)}. Run curate/ingest first to normalise the "
+                    "corpus to JSONL, or narrow input_glob."
+                )
+            raise ValueError(
+                f"input_glob {cfg['input_glob']!r} matched {len(resolved)} file(s) but none this "
+                f"step can read. curate/nemo_curator reads {' or '.join(READER_EXTENSIONS)}."
+            )
 
         # Curator's writer names shards by content hash, so a second run into the
         # same directory adds to it instead of replacing the previous corpus.
@@ -929,7 +973,10 @@ def emit_ledger(
     from nemotron.steps.curate.nemo_curator.runtime import ledger as ledger_module
 
     source_field = cfg.get("source_field")
-    resolved_inputs = input_files if input_files is not None else resolve_inputs(cfg["input_glob"])
+    # readable_inputs, not resolve_inputs: run() narrows to what the reader
+    # parses, and an emitter that re-resolved wide described a different
+    # corpus from the one filtered -- a number the audit consumes.
+    resolved_inputs = input_files if input_files is not None else readable_inputs(cfg["input_glob"])
     input_counts = run_manifest.count_jsonl(resolved_inputs, source_field)
     output_files = sorted(str(p) for p in Path(cfg["output_dir"]).rglob("*.jsonl"))
     output_counts = run_manifest.count_jsonl(output_files, source_field)
@@ -1010,7 +1057,10 @@ def emit_manifest(
     source_field = cfg.get("source_field")
     output_files = sorted(str(p) for p in Path(cfg["output_dir"]).rglob("*.jsonl"))
 
-    resolved_inputs = input_files if input_files is not None else resolve_inputs(cfg["input_glob"])
+    # readable_inputs, not resolve_inputs: run() narrows to what the reader
+    # parses, and an emitter that re-resolved wide described a different
+    # corpus from the one filtered -- a number the audit consumes.
+    resolved_inputs = input_files if input_files is not None else readable_inputs(cfg["input_glob"])
     input_counts = run_manifest.count_jsonl(resolved_inputs, source_field)
     output_counts = run_manifest.count_jsonl(output_files, source_field)
 

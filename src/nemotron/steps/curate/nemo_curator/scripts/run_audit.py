@@ -50,14 +50,14 @@ class ConfigError(ValueError):
     """
 
 
-def expand(pattern: str | list[str] | None) -> list[str]:
+def expand(pattern: str | list[str] | None, *, allow_sidecars: bool = False) -> list[str]:
     """Expand a glob, a directory, or a literal path.
 
     Delegates rather than repeating the logic: this was a second copy that
     matched only ``*.jsonl`` inside a directory, so the same reference resolved
     to different corpora depending on which step read it.
     """
-    return integrity.expand_inputs(pattern)
+    return integrity.expand_inputs(pattern, allow_sidecars=allow_sidecars)
 
 
 def _nested(document: Any, *keys: str) -> Any:
@@ -281,7 +281,12 @@ def audit(cfg: dict[str, Any]) -> dict[str, Any]:
     # can only do so because the producer wrote down what it did at the time.
     # Reading the output afterwards cannot distinguish a record removed by a
     # language filter from one lost with a shard.
-    ledger_paths = expand(cfg.get("ledger_glob"))
+    # The only reference in the category that names an accounting artifact on
+    # purpose: ledger_glob points AT curation_ledger.json, which every other
+    # caller must exclude. Without the opt-in a glob spelling resolves to
+    # nothing and the audit reports "no ledger_glob" -- it would still pass,
+    # having quietly lost the attribution it was asked for.
+    ledger_paths = expand(cfg.get("ledger_glob"), allow_sidecars=True)
     if not ledger_paths:
         report["attribution"] = {
             "available": False,

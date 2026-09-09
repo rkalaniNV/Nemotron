@@ -101,6 +101,50 @@ Two worked examples show the two halves, and are meant to be copied:
    and write down in `evidence` what you actually looked at.
 5. Delete `filtered_jsonl/`, `audit/` and `subset/`, then run `vi_c4_apply`.
 6. Check `flow_report.json`: `policy_applied`, `audit_passed`, and the warnings.
+7. Check the thresholds kept the right documents, not merely a plausible number
+   of them: label a held-out set and run
+   [`curate/evaluate`](#checking-a-policy-against-labelled-documents). Retention
+   alone cannot tell a gate that dropped 7% of junk from one that dropped 7% of
+   your best material.
+
+## Extending It
+
+- A language the shipped packs do not cover:
+  [ADDING_A_LANGUAGE.md](nemo_curator/data/langpacks/ADDING_A_LANGUAGE.md)
+- A measurement the shipped signals do not make, including a custom domain
+  filter: [ADDING_A_SIGNAL.md](nemo_curator/ADDING_A_SIGNAL.md)
+
+## Checking A Policy Against Labelled Documents
+
+`curate/profile` reports what a threshold *removes*. Nothing in the six steps
+reports whether removing it was *right* — that needs documents a person has
+labelled, and two rates that fail in opposite directions:
+
+- **false rejection** — of documents labelled `keep`, how many the policy dropped
+- **noise removal** — of documents labelled `drop`, how many the policy dropped
+
+A gate that removes nothing is perfect on the first; one that removes everything
+is perfect on the second. Either number alone is worthless.
+
+```bash
+uv run --extra curate python -m nemotron.steps.curate.nemo_curator.scripts.run_evaluate \
+  --policy ./output/vi/policy/approved_policy.yaml \
+  --labelled ./eval/vi.jsonl \
+  --langpack-dir ./src/nemotron/steps/curate/nemo_curator/data/langpacks \
+  --report ./output/vi/evaluation.json
+```
+
+Like the flow, this is a module rather than a registered step: it measures a
+policy the steps produce rather than being one of them, and it runs without NeMo
+Curator so it works in CI.
+
+Read the per-phenomenon table rather than the headline — an aggregate over a
+mostly-clean set reports a good number while rejecting every OCR-noised document
+in it. The per-signal table names the threshold to move.
+
+The labelled format, the six failure modes it must cover, and worked example sets
+are in
+[ADDING_A_LANGUAGE.md](nemo_curator/data/langpacks/ADDING_A_LANGUAGE.md) § 8.
 
 ## Guardrails
 
@@ -112,8 +156,10 @@ Two worked examples show the two halves, and are meant to be copied:
   gates after they have already run.
 - `corpus.language` has no default. A wrong default silently produces wrong
   numbers, which is worse than an error.
-- No production language pack is bundled. Only an opt-in English reference pack
-  ships; supply a reviewed pack root for anything else.
+- No production language pack is bundled. Three opt-in example packs ship
+  (`en`, `vi`, `hi`); supply a reviewed pack root for anything else. To build one, follow
+  [ADDING_A_LANGUAGE.md](nemo_curator/data/langpacks/ADDING_A_LANGUAGE.md) — the
+  end-to-end procedure from an empty directory to an approved threshold.
 - Gate one thing in one place. Declaring the same gate in both
   `quality_filters` and the policy builds two stages for it, and the per-gate
   breakdown is then discarded as `unattributed` rather than published wrong.

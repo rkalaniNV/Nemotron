@@ -372,12 +372,42 @@ def test_manifest_and_ledger_cannot_share_an_artifact_path(tmp_path, monkeypatch
     assert artifact_path.read_text(encoding="utf-8") == '{"old":"artifact"}\n'
 
 
-def test_input_accounting_uses_only_reader_supported_extensions(tmp_path, monkeypatch) -> None:
+def test_the_filter_resolves_with_the_shared_resolver_not_a_private_one(tmp_path, monkeypatch) -> None:
+    """Resolution is one contract for the whole category; reading is this step's own limit.
+
+    This used to assert the opposite -- that the filter step silently narrowed a
+    glob to the extensions its reader happens to support. That private rule is
+    exactly what let preflight validate one corpus while this step processed
+    another, so the assertion is inverted on purpose: the resolver returns what
+    the shared contract says, and anything unreadable is refused by name below
+    rather than dropped here.
+    """
+    from nemotron.steps.curate.nemo_curator.runtime import integrity
+
     step = _stub_curator(monkeypatch)
     (tmp_path / "accepted.jsonl").write_text('{"text":"kept"}\n', encoding="utf-8")
     (tmp_path / "ignored.txt").write_text('{"text":"not read"}\n', encoding="utf-8")
 
-    assert [path.rsplit("/", 1)[-1] for path in step.resolve_inputs(str(tmp_path / "*"))] == ["accepted.jsonl"]
+    assert step.resolve_inputs(str(tmp_path / "*")) == integrity.expand_inputs(str(tmp_path / "*"))
+
+
+def test_a_file_the_reader_cannot_read_is_refused_by_name(tmp_path, monkeypatch) -> None:
+    """A parquet corpus resolves and preflight accepts it; this step must say so out loud.
+
+    Handing it to JsonlReader would read binary as text and report the damage as
+    corpus, which is the failure the shared resolver exists to prevent.
+    """
+    step = _stub_curator(monkeypatch)
+    (tmp_path / "part_0.parquet").write_bytes(b"PAR1")
+
+    with pytest.raises(ValueError, match="cannot read"):
+        step.run(
+            {
+                "input_glob": str(tmp_path),
+                "output_dir": str(tmp_path / "out"),
+                "text_field": "text",
+            }
+        )
 
 
 def test_real_jsonl_reader_preserves_string_ids_and_mixed_metadata(tmp_path) -> None:
@@ -509,3 +539,21 @@ def test_project_python_floor_matches_the_curate_runtime() -> None:
         project = tomllib.load(handle)
 
     assert project["project"]["requires-python"].startswith(">=3.11")
+
+
+def test_a_companion_file_beside_the_shards_does_not_abort_the_run(tmp_path, monkeypatch) -> None:
+    """`input: ./out/*` on a corpus with a README beside it worked before and must still work.
+
+    Refusing every non-readable file the shared resolver returns would stop a run
+    that has always succeeded. A README is not corpus and never was; only a
+    recognised corpus format in the wrong step earns a refusal.
+    """
+    step = _stub_curator(monkeypatch)
+    (tmp_path / "part_0.jsonl").write_text('{"text":"kept"}\n', encoding="utf-8")
+    (tmp_path / "README.md").write_text("notes", encoding="utf-8")
+    (tmp_path / "_SUCCESS").write_text("", encoding="utf-8")
+
+    # Asserted on the narrowing rather than by running the pipeline: `run` needs
+    # Curator to get past the reader, so `pytest.raises(Exception)` here passed
+    # only on a machine without it -- a verdict about the environment, not the code.
+    assert [p.rsplit("/", 1)[-1] for p in step.readable_inputs(str(tmp_path / "*"))] == ["part_0.jsonl"]

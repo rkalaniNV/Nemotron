@@ -42,7 +42,9 @@ corpus:
   language: vi
   # Only an opt-in English reference pack is bundled. Supply your reviewed
   # Vietnamese pack root; six signals below cannot run without it.
-  langpack_dir: ./langpacks
+  # The shipped vi example pack. Point this at your own reviewed pack root
+  # for a production run; the bundled pack is example data, not a default.
+  langpack_dir: ./src/nemotron/steps/curate/nemo_curator/data/langpacks
 
 output_root: ./output/vi
 

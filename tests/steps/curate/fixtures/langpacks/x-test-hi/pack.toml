@@ -27,8 +27,13 @@ sentence_terminators = ["।", "॥", ".", "!", "?"]
 # No fold_map. Devanagari matras are obligatory vowels, not removable marks.
 
 [capabilities]
-supports = ["script_ratio", "stopword_ratio", "boilerplate_hits", "sentence_end_ratio"]
-
+supports = [
+    "script_ratio",
+    "stopword_ratio",
+    "boilerplate_hits",
+    "sentence_end_ratio",
+    "word_segmentation",
+]
 [notes]
 absent_capabilities = """diacritic_ratio and stopword_ratio_folded are not declared, and that \
 is the finding rather than a shortfall. Vietnamese tone marks strip to degraded but readable \

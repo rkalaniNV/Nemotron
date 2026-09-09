@@ -70,7 +70,7 @@ default = "null"
 
 [[parameters]]
 name = "mode"
-description = "How an approved policy is applied. filter drops rows and discards the scores, adding no columns — the shape the existing word-count gate already has. annotate scores every row and drops none. both drops rows and keeps each score in __<signal> for the survivors. Only applies when heuristic_filters names a policy; absent reproduces current behaviour."
+description = "How an approved policy is applied. filter drops rows and discards the scores, adding no columns — the shape the existing word-count gate already has. annotate scores every row and the POLICY drops none -- it is not a non-destructive mode: language_codes, quality_filters and domains are built independently of mode and still drop rows under it. both drops rows and keeps each score in __<signal> for the survivors. Only applies when heuristic_filters names a policy; absent reproduces current behaviour."
 default = "filter"
 choices = ["filter", "annotate", "both"]
 
@@ -116,8 +116,8 @@ default = []
 
 [[parameters]]
 name = "quality_filters"
-description = "Optional quality settings. min_langid_score applies when language filtering is enabled; min_words and max_words enable WordCountFilter and must be provided together."
-default = { min_langid_score = 0.3, min_words = 50, max_words = 5000 }
+description = "Optional quality settings. min_langid_score applies when language filtering is enabled. min_words and max_words enable Curator's WordCountFilter and must be provided together; they are NOT shipped as defaults because WordCountFilter splits on whitespace, which removes 39% of a Japanese corpus and 33% of a Thai one for having no spaces. A run that declares a language pack is refused unless the pack declares word_segmentation."
+default = { min_langid_score = 0.3 }
 
 [[parameters]]
 name = "models"
@@ -186,6 +186,18 @@ recovery = "Relax language/domain/word-count filters or inspect the input_glob r
 [[errors]]
 name = "input_glob_no_matches"
 recovery = "Check that input_glob exists inside the container. For packaged tiny data use /nemo_run/code/src/nemotron/steps/curate/nemo_curator/data/tiny.jsonl."
+
+[[errors]]
+name = "input_is_not_readable_here"
+recovery = "The shared resolver returns parquet because curate/ingest reads it; this step reads .jsonl, .json and .ndjson. Run curate/ingest to normalise the corpus, or narrow input_glob past the parquet. A stray parquet BESIDE readable shards is not an error and is skipped."
+
+[[errors]]
+name = "input_has_nothing_readable"
+recovery = "input_glob matched files but none this step can parse. Check the glob is not pointing at a directory of reports or archives, and that the corpus has been through curate/ingest."
+
+[[errors]]
+name = "langpack_tag_mismatch"
+recovery = "The pack directory name and the language_tag inside its pack.toml must be the same tag. Rename the directory to match the manifest, or correct pack.language_tag. A pack filed under the wrong name puts one language's word lists behind another language's profile."
 
 [[errors]]
 name = "missing_language_model"

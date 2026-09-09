@@ -190,6 +190,17 @@ def _resolvers():
             key = f"{module_name}.{attr}"
             found[key] = (fn, _RESOLVER_ARGS.get(key, ()))
 
+    # The filter step lives at a different import path from the five runners, so
+    # a scan that only walked ``scripts.*`` missed it -- and it was the one that
+    # still carried a private resolver with a narrower extension list and no
+    # sidecar denylist. It is also the step that rewrites the corpus, so it is
+    # the one where a disagreement does damage rather than mis-reporting.
+    step_module = importlib.import_module("nemotron.steps.curate.nemo_curator.step")
+    for attr in ("expand", "resolve_inputs"):
+        fn = getattr(step_module, attr, None)
+        if fn is not None:
+            found[f"step.{attr}"] = (fn, ())
+
     return {name: (lambda ref, f=fn, a=args: f(ref, *a)) for name, (fn, args) in found.items()}
 
 
@@ -198,14 +209,34 @@ def test_the_resolver_scan_finds_every_step() -> None:
     names = set(_resolvers())
 
     assert "run_profile.expand" in names, "the one that was missed when this was a hand-written list"
-    assert len(names) >= 4, f"only found {sorted(names)}"
+    assert "step.resolve_inputs" in names, "the filter step -- missed while it still had a private resolver"
+    assert len(names) >= 6, f"only found {sorted(names)}"
+
+
+#: Files that are not corpus but land in a corpus directory anyway. The flow
+#: writes its own accounting into the directory it filters into, and the
+#: documented reuse pattern then points the next run at that directory.
+_SIDECARS = ("run_manifest.json", "curation_ledger.json")
+_NOT_CORPUS = ("_SUCCESS", "README.md", "notes.txt")
 
 
 def _corpus(tmp_path):
+    """A corpus directory in the shape a real reuse run actually sees.
+
+    This used to hold two clean ``.jsonl`` shards, which is why the agreement
+    tests below passed while two resolvers disagreed: with nothing but shards
+    present there is nothing for them to disagree about.
+    """
     root = tmp_path / "corpus"
     root.mkdir()
     for name in ("part_0.jsonl", "part_1.jsonl"):
         (root / name).write_text('{"id":"x","text":"y"}\n', encoding="utf-8")
+    (root / "part_2.ndjson").write_text('{"id":"z","text":"w"}\n', encoding="utf-8")
+    (root / "part_3.parquet").write_bytes(b"PAR1")
+    for name in _SIDECARS:
+        (root / name).write_text('{\n  "not": "a corpus row"\n}\n', encoding="utf-8")
+    for name in _NOT_CORPUS:
+        (root / name).write_text("x", encoding="utf-8")
     return root
 
 
@@ -215,7 +246,14 @@ def test_every_step_resolves_a_directory_to_the_same_corpus(tmp_path) -> None:
     resolved = {name: sorted(fn(str(root))) for name, fn in _resolvers().items()}
 
     assert len({tuple(v) for v in resolved.values()}) == 1, resolved
-    assert len(next(iter(resolved.values()))) == 2
+    # Asserted by content, not just by agreement: every resolver being wrong in
+    # the same way would satisfy mutual agreement on its own.
+    assert [p.rsplit("/", 1)[-1] for p in next(iter(resolved.values()))] == [
+        "part_0.jsonl",
+        "part_1.jsonl",
+        "part_2.ndjson",
+        "part_3.parquet",
+    ]
 
 
 def test_every_step_resolves_a_glob_to_the_same_corpus(tmp_path) -> None:
@@ -224,6 +262,25 @@ def test_every_step_resolves_a_glob_to_the_same_corpus(tmp_path) -> None:
     resolved = {name: sorted(fn(f"{root}/**/*.jsonl")) for name, fn in _resolvers().items()}
 
     assert len({tuple(v) for v in resolved.values()}) == 1, resolved
+
+
+@pytest.mark.parametrize("spelling", ["{root}", "{root}/*", "{root}/*.json*"])
+def test_no_resolver_reads_a_previous_runs_accounting_as_corpus(tmp_path, spelling) -> None:
+    """The reviewer's scenario: validate one corpus, process another.
+
+    ``run_manifest.json`` is pretty-printed, so a resolver that sweeps it in
+    charges a clean corpus with unparsable rows -- and the step that did so was
+    the filter, the one that rewrites the corpus, while preflight had already
+    validated the list without it.
+    """
+    root = _corpus(tmp_path)
+    reference = spelling.format(root=root)
+
+    resolved = {name: sorted(fn(reference)) for name, fn in _resolvers().items()}
+
+    assert len({tuple(v) for v in resolved.values()}) == 1, resolved
+    for name, paths in resolved.items():
+        assert not [p for p in paths if p.rsplit("/", 1)[-1] in _SIDECARS], f"{name} read its own accounting"
 
 
 # -- one user mistake, one kind of refusal -------------------------------------

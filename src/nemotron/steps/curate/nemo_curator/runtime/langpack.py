@@ -38,7 +38,7 @@ import re
 import tomllib
 import unicodedata
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +54,25 @@ KNOWN_CAPABILITIES = frozenset(
         "stopword_ratio_folded",
         "boilerplate_hits",
         "sentence_end_ratio",
+        # -- orthographic assertions, backed by no file --------------------------
+        #
+        # These three answer questions about the writing system rather than about
+        # data in the pack, and they exist so that a filter which is wrong for a
+        # language is refused rather than run. Documenting the hazard was not
+        # enough: the measurements stayed available and a policy could still name
+        # them.
+        #
+        #: Words are delimited by whitespace. Every signal that counts "words"
+        #: splits on it, so a script that does not (Japanese, Thai) measures one
+        #: token per sentence -- a clean-looking distribution over nothing.
+        "word_segmentation",
+        #: Numbers are written with [0-9]. Devanagari and Thai digits are Unicode
+        #: category Nd and satisfy str.isdigit(), but do not match [0-9], so an
+        #: ASCII-only numeric ratio reads 0 on correct text.
+        "ascii_digits",
+        #: Sentences and clauses are punctuated with ASCII '.', '!' and '?'.
+        #: Hindi ends sentences with the danda, which matches none of them.
+        "ascii_punctuation",
     }
 )
 
@@ -172,6 +191,15 @@ def load_pack(directory: str | Path) -> LanguagePack:
     for key in ("pack_id", "language_tag", "version"):
         if not pack.get(key):
             raise LanguagePackInvalidError(f"{manifest_path}: pack.{key} is required")
+    # Type-checked, not just truthy: an unquoted `language_tag = 22` or `= true`
+    # is a manifest defect like any other and must be reported as one. Left
+    # unchecked it reached the tag comparison in load() and raised AttributeError,
+    # which no CLI handler catches -- a raw traceback and exit 1 instead of the
+    # named message and exit 2 every other manifest defect gets.
+    if not isinstance(pack.get("language_tag"), str):
+        raise LanguagePackInvalidError(
+            f"{manifest_path}: pack.language_tag must be a string, got {type(pack['language_tag']).__name__}"
+        )
 
     declared = raw.get("capabilities", {}).get("supports")
     if not isinstance(declared, list) or not declared:
@@ -267,6 +295,13 @@ CAPABILITY_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "stopword_ratio_folded": ("stopwords", "fold_map"),
     "boilerplate_hits": ("boilerplate",),
     "sentence_end_ratio": ("sentence_terminators",),
+    # Deliberately empty: word_segmentation, ascii_digits and ascii_punctuation
+    # are assertions about the writing system, not claims to carry a file. There
+    # is nothing for the loader to check them against, which is why they must be
+    # declared by a human who knows the language rather than inferred.
+    "word_segmentation": (),
+    "ascii_digits": (),
+    "ascii_punctuation": (),
 }
 
 
@@ -303,6 +338,15 @@ def load(language_tag: str, langpack_dir: str | Path | None) -> LanguagePack:
 
     There is deliberately no default language. A wrong default silently produces
     wrong numbers for a corpus, which is worse than an error.
+
+    Three identities have to agree before a pack is usable: the tag the caller
+    asked for, the directory it was found in, and the ``language_tag`` inside
+    ``pack.toml``. The tag check below makes the first two identical by
+    construction, so the manifest comparison then pins all three. Neither is
+    redundant with the ``content_hash`` gate in ``step.load_policy_pack``: a
+    hash certifies "the same bytes as when this was approved", never "the right
+    language", so a pack mislabelled from the first profile onward is
+    internally consistent and sails through it.
     """
     if not language_tag:
         raise LanguagePackNotFoundError(
@@ -310,10 +354,43 @@ def load(language_tag: str, langpack_dir: str | Path | None) -> LanguagePack:
             "wrong numbers. Set it to the BCP-47 tag of the corpus."
         )
 
+    # A tag names a directory directly under the root; it is not a path. Without
+    # this, 'x-test-vi/../x-test-ja' and an absolute path both load, the second
+    # escaping langpack_dir entirely, and the pack that comes back has nothing
+    # to do with what the config asked for.
+    if language_tag != Path(language_tag).name or language_tag in {".", ".."}:
+        raise LanguagePackNotFoundError(
+            f"language must be a BCP-47 tag, not a path: {language_tag!r}. "
+            "The tag names a directory directly under the langpack root."
+        )
+
     root = resolve_dir(langpack_dir)
     candidate = root / language_tag
     if candidate.is_dir():
-        return load_pack(candidate)
+        pack = load_pack(candidate)
+        # Compared case-insensitively because RFC 5646 tags are case-insensitive:
+        # 'pt-BR' is a convention, not an identity, and on a case-insensitive
+        # filesystem `language: pt-br` finds the pt-BR directory. Exact equality
+        # would reject that correct pack and turn this guard into a portability
+        # bug. lower() rather than casefold() because BCP-47 is ASCII by grammar.
+        if pack.language_tag.lower() == language_tag.lower() and pack.language_tag != candidate.name:
+            # Accepted, but the spellings differ. The manifest spelling is what
+            # run_profile stamps into candidate_policies.yaml, and the filter run
+            # later calls load() with it -- which on a case-sensitive filesystem
+            # finds nothing, so a profile that scanned the whole corpus emits a
+            # policy the next step refuses. Return the pack under the name it was
+            # found by; content_hash is over file bytes, so this does not disturb it.
+            pack = replace(pack, language_tag=candidate.name)
+        if pack.language_tag.lower() != language_tag.lower():
+            raise LanguagePackInvalidError(
+                f"{candidate / 'pack.toml'}: requested language {language_tag!r} but the pack "
+                f"declares language_tag {pack.language_tag!r}. The directory name is the tag "
+                f"(see data/langpacks/SPEC.md). A pack filed under the wrong name puts "
+                f"{pack.language_tag!r} word lists and character set behind a {language_tag!r} "
+                f"profile, and profile_report.json and candidate_policies.yaml would both name "
+                f"{pack.language_tag!r} while the config asked for {language_tag!r}."
+            )
+        return pack
 
     available = sorted(p.name for p in root.iterdir() if (p / "pack.toml").is_file()) if root.is_dir() else []
     raise LanguagePackNotFoundError(

@@ -32,4 +32,7 @@ supports = [
     "stopword_ratio_folded",
     "boilerplate_hits",
     "sentence_end_ratio",
+    "word_segmentation",
+    "ascii_digits",
+    "ascii_punctuation",
 ]

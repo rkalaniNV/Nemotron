@@ -549,9 +549,19 @@ def test_the_correct_bound_still_builds_the_gate_it_says(step) -> None:
 
 
 def test_an_interval_signal_needs_both_bounds(step) -> None:
-    """One bound would fix the other at an unstated value."""
+    """One bound would fix the other at an unstated value.
+
+    The pack is supplied because word_count now declares word_segmentation: a
+    policy naming a word-based signal has to say which language it believes it is
+    gating, or the capability cannot be checked at all.
+    """
     with pytest.raises(ValueError, match="gates from both sides"):
-        step.policy_stages([{"signal": "word_count", "min": 50}], "text", "filter")
+        step.policy_stages(
+            [{"signal": "word_count", "min": 50}],
+            "text",
+            "filter",
+            {"language_tag": "x-test-vi", "langpack_dir": str(LANGPACK_FIXTURES)},
+        )
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), "0.5", True])
@@ -570,6 +580,7 @@ def test_pipeline_refuses_inverted_interval_bounds(step) -> None:
             [{"signal": "word_count", "min": 5000, "max": 50}],
             "text",
             "filter",
+            {"language_tag": "x-test-vi", "langpack_dir": str(LANGPACK_FIXTURES)},
         )
 
 
@@ -662,6 +673,37 @@ def test_a_policy_omitting_the_pack_hash_is_refused(step) -> None:
             "text",
             "filter",
             {"language_tag": "x-test-vi", "langpack_dir": str(LANGPACK_FIXTURES)},
+        )
+
+
+def test_a_matching_hash_does_not_license_a_mislabelled_pack(step, tmp_path) -> None:
+    """The content_hash gate is not a tag gate, and must not be mistaken for one.
+
+    A hash certifies "the same bytes that were approved", never "the right
+    language". A pack mislabelled from the first profile onward is internally
+    self-consistent, so it carries its OWN valid hash and sails through the hash
+    check -- which is exactly why the tag has to be compared separately. This
+    test exists to record that the two guards answer different questions.
+    """
+    import shutil
+
+    copy = tmp_path / "x-test-vi"
+    shutil.copytree(LANGPACK_FIXTURES / "x-test-vi", copy)
+    manifest = copy / "pack.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('language_tag = "x-test-vi"', 'language_tag = "x-test-ja"'),
+        encoding="utf-8",
+    )
+    mislabelled = langpack.load_pack(copy)
+
+    with pytest.raises(langpack.LanguagePackInvalidError, match="declares language_tag"):
+        step.load_policy_pack(
+            {
+                "language_tag": "x-test-vi",
+                "langpack_dir": str(tmp_path),
+                "content_hash": mislabelled.content_hash,
+            },
+            ["stopword_ratio"],
         )
 
 

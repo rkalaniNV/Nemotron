@@ -33,8 +33,10 @@ supports = [
     "stopword_ratio_folded",
     "boilerplate_hits",
     "sentence_end_ratio",
+    "word_segmentation",
+    "ascii_digits",
+    "ascii_punctuation",
 ]
-
 [notes]
 folded_stopwords = """Folding merges distinct stopwords together — mà, má, mã and mạ all become ma. \
 The collision count is reported alongside any folded figure, because it is a property of the \

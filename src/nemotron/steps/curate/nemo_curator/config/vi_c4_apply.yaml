@@ -29,7 +29,9 @@ corpus:
   source_value: c4_vi
   metadata_fields: [id, source, url]
   language: vi
-  langpack_dir: ./langpacks
+  # The shipped vi example pack. Point this at your own reviewed pack root
+  # for a production run; the bundled pack is example data, not a default.
+  langpack_dir: ./src/nemotron/steps/curate/nemo_curator/data/langpacks
 
 output_root: ./output/vi
 
