@@ -62,6 +62,8 @@ def test_the_english_reference_pack_reports_what_it_carries() -> None:
         "word_segmentation",
         "ascii_digits",
         "ascii_punctuation",
+        # Curator's ASCII content class is valid on an ASCII alphabet, and only there.
+        "ascii_alphabet",
     }
 
 

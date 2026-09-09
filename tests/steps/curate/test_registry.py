@@ -188,10 +188,13 @@ def test_build_rejects_the_wrong_number_of_thresholds() -> None:
 
 def test_naming_nothing_selects_everything_the_run_supports() -> None:
     chosen, warnings = r.resolve(None, capabilities=set())
-    # With no pack loaded, every pack signal is skipped along with token_count.
+    # With no pack loaded, every capability-gated signal is skipped along with
+    # token_count -- including non_alpha_numeric, which counts only
+    # [a-zA-Z0-9\n?!,.] as content and so needs ascii_alphabet.
 
     names = {s.name for s in chosen}
-    assert "non_alpha_numeric" in names
+    assert "white_space" in names, "a genuinely script-agnostic signal still runs"
+    assert "non_alpha_numeric" not in names, "the ASCII content class is not universal"
     assert "token_count" not in names, "token_count needs a tokenizer"
     assert any("token_count" in w for w in warnings)
 

@@ -181,6 +181,7 @@ def _local(class_name: str) -> Callable[..., Any]:
 SIGNALS: dict[str, Signal] = {
     "non_alpha_numeric": Signal(
         name="non_alpha_numeric",
+        requires=("ascii_alphabet",),
         curator_default=(0.25,),
         factory=_string("NonAlphaNumericFilter"),
         direction="max",

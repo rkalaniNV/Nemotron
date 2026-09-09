@@ -166,13 +166,19 @@ def promote(
     never produced. Anyone promoting a policy had to hand-write it and discover
     the schema by being rejected.
 
-    This closes that gap **without** weakening the gate. ``approval`` may carry
-    ``approver``, ``date`` and ``evidence`` and none of them is required: a name
-    in a YAML file proves nothing a machine can act on. What the gate rests on
-    is the corpus fingerprint, the profile digest, the scorer version and the
-    direction of every bound — checks that refuse a wrong run. ``approval`` is a
-    required argument with no default: this function cannot be asked for an
-    approved policy without being told who approved it and on what evidence.
+    This closes that gap without weakening the gate. Most of what the gate rests
+    on is machine-checkable — the corpus fingerprint, the profile digest, the
+    scorer version and the direction of every bound — and those checks refuse a
+    wrong run in a way a signature never could.
+
+    ``approver`` and ``evidence`` are required all the same, and the reason is
+    not that a name proves something to a machine. It is that ``approved: true``
+    is an artifact claiming a person decided. Letting it be written with nobody
+    named and nothing cited makes the claim untrue, and every document that
+    carries it downstream — the manifest's ``approved`` state, the flow report —
+    inherits the untruth. A run with no one to name is not unapprovable: leave
+    the policy unapproved, or set ``allow_unvalidated_policy``, which proceeds
+    and records ``override_unvalidated`` instead of laundering it as approval.
     The thresholds are the caller's choice too — a band is a range, and picking a
     number inside it is the judgement the profile explicitly declines to make.
 
@@ -189,6 +195,16 @@ def promote(
         )
     if not thresholds:
         raise PolicyNotPromotableError("no thresholds chosen; an approved policy that gates nothing is not one")
+
+    missing = [field for field in ("approver", "evidence") if not str(approval.get(field) or "").strip()]
+    if missing:
+        raise PolicyNotPromotableError(
+            f"approval is missing {missing}. `approved: true` is an artifact claiming a person "
+            "decided; writing it with nobody named and nothing cited makes that claim untrue, and "
+            "the manifest and flow report inherit it. Name an approver and cite the evidence you "
+            "looked at, or leave the policy unapproved and set allow_unvalidated_policy, which "
+            "records the override instead of laundering it as an approval."
+        )
 
     from nemotron.steps.curate.nemo_curator.runtime import registry as signal_registry
 
@@ -293,13 +309,25 @@ def validate_approved_policy(document: Any) -> list[str]:
     if not _sha256_digest(profile_digest):
         problems.append("profile_digest must be a sha256 digest")
 
-    # approver / date / evidence are recorded when given and never required.
-    # They say who decided and why, which is useful to a reader and worth
-    # nothing to a machine — a name in a YAML file proves no more than an empty
-    # field does. What IS enforced below is everything a machine can actually
-    # check: the corpus fingerprint, the profile digest, the scorer version, and
-    # the direction of every bound. Those refuse a wrong run; a signature cannot.
+    # approver and evidence are required when the document claims approval, and
+    # checked here as well as in promote() because a policy can be hand-written.
+    # Not because a signature proves anything to a machine -- the fingerprint,
+    # the profile digest, the scorer version and the direction of every bound do
+    # that work, and they refuse a wrong run in a way a name never could. The
+    # reason is narrower: `approved: true` asserts that a person decided, the
+    # manifest and the flow report repeat that assertion downstream, and an
+    # assertion nobody stands behind should not be writable. `date` stays
+    # optional -- it is provenance, not accountability.
     approval = document.get("approval")
+    if document.get("approved") is True:
+        block = approval if isinstance(approval, dict) else {}
+        for field in ("approver", "evidence"):
+            if not str(block.get(field) or "").strip():
+                problems.append(
+                    f"approval.{field} is required when approved is true: an approval nobody is "
+                    "named on is a claim the artifacts repeat and no one made. Leave the policy "
+                    "unapproved, or use allow_unvalidated_policy, which records the override."
+                )
     if approval is not None and not isinstance(approval, dict):
         problems.append("approval must be a mapping when present")
     elif isinstance(approval, dict) and approval.get("method") is not None:

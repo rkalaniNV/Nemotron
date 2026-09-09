@@ -320,7 +320,9 @@ PACK_REQUIREMENTS: frozenset[str] = frozenset(
 #: at profile time, which always has a pack, and ``quality_filters`` -- the other
 #: door, which bypasses the registry entirely -- is checked against the pack by
 #: :func:`_refuse_word_filter_without_segmentation` and by the flow's preflight.
-ORTHOGRAPHY_REQUIREMENTS: frozenset[str] = frozenset({"word_segmentation", "ascii_digits", "ascii_punctuation"})
+ORTHOGRAPHY_REQUIREMENTS: frozenset[str] = frozenset(
+    {"word_segmentation", "ascii_digits", "ascii_punctuation", "ascii_alphabet"}
+)
 
 #: Everything this step knows how to supply. A signal declaring anything else is
 #: refused by name rather than reaching ``Signal.build`` and failing on a missing

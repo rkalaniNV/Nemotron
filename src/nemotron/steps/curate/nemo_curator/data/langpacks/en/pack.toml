@@ -39,6 +39,7 @@ supports = [
     "word_segmentation",
     "ascii_digits",
     "ascii_punctuation",
+    "ascii_alphabet",
 ]
 
 [notes]

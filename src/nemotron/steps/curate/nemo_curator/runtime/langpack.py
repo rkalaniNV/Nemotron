@@ -73,6 +73,12 @@ KNOWN_CAPABILITIES = frozenset(
         #: Sentences and clauses are punctuated with ASCII '.', '!' and '?'.
         #: Hindi ends sentences with the danda, which matches none of them.
         "ascii_punctuation",
+        #: The alphabet itself is ASCII a-zA-Z. Curator's NonAlphaNumericFilter
+        #: counts only [a-zA-Z0-9\n?!,.] as content, so on any other alphabet
+        #: correct text scores as junk: the same Vietnamese sentence scores 0.214
+        #: through unicode_alpha_numeric and 0.429 through this one, and 0.429 is
+        #: rejected at the shipped 0.25 default. Only English declares it.
+        "ascii_alphabet",
     }
 )
 
@@ -302,6 +308,7 @@ CAPABILITY_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "word_segmentation": (),
     "ascii_digits": (),
     "ascii_punctuation": (),
+    "ascii_alphabet": (),
 }
 
 

@@ -169,9 +169,13 @@ def _config(tmp_path, **overrides):
         "text_field": "text",
         "source_field": "source",
         "id_field": "id",
+        # unicode_alpha_numeric, not non_alpha_numeric: the pack is Vietnamese
+        # and the ASCII signal is gated behind ascii_alphabet, which it does not
+        # declare. That refusal is the behaviour under test elsewhere; here the
+        # signal is only a vehicle for profiling.
         "language": "x-test-vi",
         "langpack_dir": str(LANGPACK_FIXTURES),
-        "signals": ["non_alpha_numeric", "word_count"],
+        "signals": ["unicode_alpha_numeric", "word_count"],
         "max_total_docs": 0,
         "seed": 0,
     }
@@ -198,7 +202,7 @@ def test_an_interval_signal_reports_a_surface(tmp_path, curator_stub) -> None:
 
 
 def test_a_one_sided_signal_reports_a_curve_and_bands(tmp_path, curator_stub) -> None:
-    report, _, _ = run_profile.build_report(_config(tmp_path, signals=["non_alpha_numeric"]))
+    report, _, _ = run_profile.build_report(_config(tmp_path, signals=["unicode_alpha_numeric"]))
 
     entry = report["signals"][0]
     assert entry["retention"]["kind"] == "curve"
@@ -308,7 +312,7 @@ def test_the_digest_ignores_provenance(tmp_path, curator_stub) -> None:
 
 def test_the_digest_still_follows_the_measurements(tmp_path, curator_stub) -> None:
     one, _, _ = run_profile.build_report(_config(tmp_path, signals=["word_count"]))
-    other, _, _ = run_profile.build_report(_config(tmp_path, signals=["non_alpha_numeric"]))
+    other, _, _ = run_profile.build_report(_config(tmp_path, signals=["unicode_alpha_numeric"]))
 
     assert one["profile_digest"] != other["profile_digest"]
 
@@ -403,7 +407,7 @@ def test_the_sample_manifest_records_population_and_weight(tmp_path, curator_stu
 
 def test_the_report_states_what_curators_default_would_keep(tmp_path, curator_stub) -> None:
     """The finding the step exists to surface."""
-    report, _, _ = run_profile.build_report(_config(tmp_path, signals=["non_alpha_numeric"]))
+    report, _, _ = run_profile.build_report(_config(tmp_path, signals=["unicode_alpha_numeric"]))
 
     default = report["signals"][0]["curator_default"]
     assert default["thresholds"] == [0.25]
@@ -429,7 +433,9 @@ def test_a_corpus_without_the_source_field_says_so(tmp_path, curator_stub) -> No
     shard = tmp_path / "in.jsonl"
     shard.write_text('{"id":"1","text":"a document with words"}\n', encoding="utf-8")
 
-    report, _, _ = run_profile.build_report(_config(tmp_path, input_glob=str(shard), signals=["non_alpha_numeric"]))
+    report, _, _ = run_profile.build_report(
+        _config(tmp_path, input_glob=str(shard), signals=["unicode_alpha_numeric"])
+    )
 
     assert any("shard path" in note for note in report["notes"])
 
@@ -470,7 +476,9 @@ def test_unparsable_lines_are_counted_and_noted(tmp_path, curator_stub) -> None:
         encoding="utf-8",
     )
 
-    report, _, _ = run_profile.build_report(_config(tmp_path, input_glob=str(shard), signals=["non_alpha_numeric"]))
+    report, _, _ = run_profile.build_report(
+        _config(tmp_path, input_glob=str(shard), signals=["unicode_alpha_numeric"])
+    )
 
     assert report["corpus"]["unparsable_lines"] == 1
     assert report["corpus"]["damaged_shards"] == 1

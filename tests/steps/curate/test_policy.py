@@ -171,17 +171,29 @@ def test_an_approval_must_say_how_it_was_reached() -> None:
     assert any("approval.method" in p for p in problems)
 
 
-def test_a_policy_needs_no_signature() -> None:
-    """approver / date / evidence say who decided and why — useful to a reader,
-    worth nothing to a machine. A name in a YAML file refuses no wrong run.
+def test_an_approved_policy_must_name_someone_and_cite_evidence() -> None:
+    """Checked here as well as in promote(), because a policy can be hand-written.
 
-    What the gate rests on is checked elsewhere and is not optional: the corpus
-    fingerprint, the profile digest, the scorer version, and the direction of
-    every bound.
+    Most of the gate is machine-checkable and stays that way -- the corpus
+    fingerprint, the profile digest, the scorer version, the direction of every
+    bound -- and none of it depends on a name. What a name is for is narrower:
+    `approved: true` asserts a person decided, the manifest and the flow report
+    repeat that assertion, and an assertion nobody stands behind should not be
+    writable. `date` remains optional; it is provenance, not accountability.
     """
     problems = policy.validate_approved_policy(_approved(approval=None))
 
-    assert not any("approver" in p or "evidence" in p or "date" in p for p in problems)
+    assert any("approver" in p for p in problems)
+    assert any("evidence" in p for p in problems)
+    assert not any("approval.date" in p for p in problems), "date is provenance, not a gate"
+
+
+def test_an_unapproved_policy_needs_no_signature() -> None:
+    """The escape that keeps the requirement honest: not claiming approval costs
+    nothing, so there is never a reason to write one nobody stands behind."""
+    problems = policy.validate_approved_policy(_approved(approved=False, approval=None))
+
+    assert not any("approver" in p or "evidence" in p for p in problems)
 
 
 def test_an_approval_that_is_present_must_still_be_a_mapping() -> None:
@@ -401,12 +413,27 @@ def test_promote_cannot_be_asked_for_an_approval_it_was_not_given() -> None:
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
 
 
-def test_promote_accepts_thresholds_with_no_signature() -> None:
-    """The minimum a user must write is the thresholds themselves."""
+def test_promote_refuses_an_approval_nobody_is_named_on() -> None:
+    """`approved: true` asserts a person decided.
+
+    Written with nobody named and nothing cited, that assertion is untrue, and
+    the manifest and the flow report repeat it downstream. This test used to
+    assert the opposite -- that thresholds alone were enough -- which is what let
+    the documentation and the code disagree about the same contract.
+    """
+    with pytest.raises(policy.PolicyNotPromotableError, match="approver"):
+        policy.promote(
+            _candidate_with_bands(),
+            thresholds=[{"signal": "unicode_alpha_numeric", "max": 0.30}],
+            approval={},
+        )
+
+
+def test_promote_accepts_an_approval_that_names_someone_and_cites_evidence() -> None:
     document, _ = policy.promote(
         _candidate_with_bands(),
         thresholds=[{"signal": "unicode_alpha_numeric", "max": 0.30}],
-        approval={},
+        approval={"approver": "reviewer@example.test", "evidence": "read 200 dropped documents"},
     )
 
     assert document["approved"] is True

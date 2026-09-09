@@ -120,7 +120,7 @@ what the profile is for.
 | `urls_ratio` | `max` | ratio |
 | `white_space` | `max` | ratio |
 
-**Language-dependent, and it says so (17).** These declare a
+**Language-dependent, and it says so (18).** These declare a
 requirement and are skipped with a note when the pack does not meet it, so a
 corpus never gets a number the pack could not support.
 
@@ -136,6 +136,7 @@ corpus never gets a number the pack could not support.
 | `stopword_ratio_folded` | `min` | ratio | `stopword_ratio_folded` |
 | `max_word_length` | `max` | characters | `word_segmentation` |
 | `mean_word_length` | `interval` | characters | `word_segmentation` |
+| `non_alpha_numeric` | `max` | ratio | `ascii_alphabet` |
 | `numbers_ratio` | `max` | ratio | `ascii_digits` |
 | `punctuation` | `max` | ratio | `ascii_punctuation` |
 | `repeating_duplicate_ngrams` | `max` | ratio | `word_segmentation` |
@@ -144,21 +145,20 @@ corpus never gets a number the pack could not support.
 | `word_count` | `interval` | words | `word_segmentation` |
 | `words_with_alphabets` | `min` | ratio | `word_segmentation` |
 
-**Language-dependent without declaring it (1).** One signal is left here, and
-it is here because the answer is a replacement rather than a capability:
-`non_alpha_numeric` is Curator's own filter and `unicode_alpha_numeric` is
-the Unicode-correct version of the same measurement. Use that one.
+**Language-dependent without declaring it (0).** Empty, and that is the
+point of the column above. Every signal whose measurement assumes a writing
+system now says which assumption it makes, so a pack that does not hold it
+skips the signal with a named warning and a config that asks for it by name
+is refused.
 
-The other eight signals that used to sit in this group -- the whitespace- and
-ASCII-dependent ones -- now declare `word_segmentation`, `ascii_digits` or
-`ascii_punctuation` and have moved to the group above. A pack that does not
-declare the capability skips them with a named warning, and a config that
-names one explicitly is refused. Documenting the hazard was not enough: the
-measurement stayed available and a policy could still ask for it.
-
-| signal | bound | units | the assumption |
-|---|---|---|---|
-| `non_alpha_numeric` | `max` | ratio | counts only `[a-zA-Z0-9\n?!,.]` as content |
+`non_alpha_numeric` was the last entry here. Curator counts only
+`[a-zA-Z0-9\n?!,.]` as content, so on any other alphabet correct text scores
+as junk: one ordinary Vietnamese sentence scores 0.214 through
+`unicode_alpha_numeric` and 0.429 through this one, and 0.429 is rejected at
+the shipped 0.25 default. Having a correct replacement was not enough --
+profile still offered the broken signal for every language and a policy could
+still promote it. It now requires `ascii_alphabet`, which only English
+declares.
 
 The last group is where a threshold silently stops meaning what it meant.
 Measured on 20,000 C4 documents per language:

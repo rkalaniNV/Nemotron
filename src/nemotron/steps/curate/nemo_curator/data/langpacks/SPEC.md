@@ -95,15 +95,19 @@ policy could still name it:
 | `word_segmentation` | words are delimited by whitespace | `word_count`, `mean_word_length`, `max_word_length`, `symbol_to_word`, `words_with_alphabets`, `repeating_duplicate_ngrams` |
 | `ascii_digits` | numbers are written with `[0-9]` | `numbers_ratio` |
 | `ascii_punctuation` | sentences use ASCII `.`, `!`, `?` | `punctuation` |
+| `ascii_alphabet` | the alphabet itself is ASCII `a-zA-Z` | `non_alpha_numeric` |
 
 A pack that does not declare one has those signals skipped with a named warning
 during profiling, and a config or policy that asks for one by name is refused.
 The shipped `hi` pack is the worked example: Hindi **does** delimit words with
 whitespace, so it declares `word_segmentation`; its digits are Devanagari and its
 sentences end with the danda, so it declares neither ASCII capability. Declaring
-all three because they look harmless puts a whitespace word count on a script
-that has no word boundaries — 39% of a Japanese corpus removed for having no
-spaces.
+them because they look harmless puts a whitespace word count on a script that
+has no word boundaries — 39% of a Japanese corpus removed for having no spaces —
+or Curator's ASCII content class on an alphabet that is not ASCII, which scores
+one ordinary Vietnamese sentence at 0.429 against a shipped default of 0.25.
+Only English declares `ascii_alphabet`; use `unicode_alpha_numeric` instead,
+which accepts Unicode categories L, N and M.
 
 Declaring a capability without the data behind it is rejected at load. It would
 otherwise fill a report with zeroes, which reads as a finding about the corpus

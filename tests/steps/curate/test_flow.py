@@ -427,24 +427,33 @@ def test_the_fingerprint_check_can_be_waived_only_explicitly(tmp_path) -> None:
     assert Path(paths["approved_policy"]).is_file()
 
 
-def test_an_approval_needs_only_its_thresholds(tmp_path) -> None:
-    """approver/date/evidence are recorded when given and never required.
+def test_an_approval_with_nobody_named_is_refused(tmp_path) -> None:
+    """The flow writes the artifact that claims approval, so it is refused here too.
 
-    A name in a YAML file refuses no wrong run. The checks that do — corpus
-    fingerprint, profile digest, scorer version, bound direction — are enforced
-    regardless of who signed.
+    This test used to assert the opposite. The machine-checkable fields -- corpus
+    fingerprint, profile digest, scorer version, bound direction -- still do the
+    work of refusing a wrong run and none of them needs a name. What a name is
+    for is that `approved: true` asserts a person decided; written with nobody
+    named, the manifest and the flow report repeat an assertion no one made.
     """
     cfg = profiled(tmp_path)
     cfg["approve"] = approve_block(approver=None, date=None, evidence=None)
+    resolved, paths = run_flow.derive(cfg)
+
+    with pytest.raises(Exception, match="approver"):
+        run_flow.materialise_policy(cfg, resolved, paths)
+
+
+def test_an_approval_that_names_someone_is_written(tmp_path) -> None:
+    cfg = profiled(tmp_path)
+    cfg["approve"] = approve_block(approver="reviewer@example.test", evidence="read 200 dropped documents")
     resolved, paths = run_flow.derive(cfg)
 
     run_flow.materialise_policy(cfg, resolved, paths)
 
     written = yaml.safe_load(Path(paths["approved_policy"]).read_text(encoding="utf-8"))
     assert written["approved"] is True
-    assert "approver" not in (written.get("approval") or {}), (
-        "a null field would record nothing while looking like provenance"
-    )
+    assert written["approval"]["approver"] == "reviewer@example.test"
 
 
 def test_an_approval_with_no_thresholds_is_refused(tmp_path) -> None:

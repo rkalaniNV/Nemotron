@@ -237,15 +237,34 @@ def test_a_candidate_policy_is_refused(step, tmp_path) -> None:
     assert "approved must be true" in message, "the error must name the unmet field"
 
 
-def test_a_policy_with_no_approval_block_still_runs(step, tmp_path) -> None:
-    """The block is optional; the machine-checkable fields around it are not."""
+def test_a_policy_with_no_approval_block_is_refused(step, tmp_path) -> None:
+    """A policy can be hand-written, so the filter checks it too.
+
+    The block used to be optional here while three shipped documents told users
+    it was required. Enforcing it is the half of that contradiction the reviewer
+    asked for; allow_unvalidated_policy remains the way through, and records the
+    override rather than laundering it as an approval.
+    """
     document = approved_policy()
     del document["approval"]
     path = write_policy(tmp_path, document)
 
-    thresholds, _, _ = step.resolve_policy({"heuristic_filters": {"approved_policy": str(path)}})
+    with pytest.raises(ValueError, match="approver"):
+        step.resolve_policy({"heuristic_filters": {"approved_policy": str(path)}})
 
-    assert thresholds, "thresholds are what make a policy executable"
+
+def test_the_override_carries_a_policy_with_no_approval_block(step, tmp_path) -> None:
+    """Refusing without an escape would make an unsigned policy unrunnable rather
+    than honestly labelled."""
+    document = approved_policy()
+    del document["approval"]
+    path = write_policy(tmp_path, document)
+
+    thresholds, _, _ = step.resolve_policy(
+        {"heuristic_filters": {"approved_policy": str(path), "allow_unvalidated_policy": True}}
+    )
+
+    assert thresholds, "the override proceeds; the manifest records it as override_unvalidated"
 
 
 def test_the_override_proceeds_and_warns_naming_the_policy(step, tmp_path) -> None:
