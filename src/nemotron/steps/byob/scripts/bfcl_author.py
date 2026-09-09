@@ -32,6 +32,9 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from nemotron.steps.byob.runtime.authoring_workflow.cache_retention import (
     CACHE_PURGE_AUDIT_FILE_NAME,
     infer_authoring_cache_path,
@@ -106,6 +109,8 @@ _DELEGATES = {
 # the evidence, so for that adapter the certified source tree assembly binds is that
 # directory rather than the intake declaration the operator named.
 _MCP_INTAKE_PACK = ("intake", "pack")
+AUTHORING_PROFILE_FILE = "authoring_profile.json"
+TRUST_MODES = ("dev", "release", "compliance")
 
 
 class GuidedCliError(ValueError):
@@ -144,6 +149,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ci", action="store_true", help="Never request interactive input")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    prepare = subparsers.add_parser(
+        "prepare",
+        help="Create a review-gated executable-source scaffold from tools + domain brief",
+    )
+    _add_workspace(prepare)
+    prepare.add_argument("--tools", type=Path, required=True)
+    prepare.add_argument("--brief", type=Path, required=True)
+    prepare.add_argument("--language", required=True)
+    prepare.add_argument("--source-output", type=Path)
+    prepare.add_argument("--pack-id")
+    prepare.add_argument("--pack-version", default="0.1.0")
+    prepare.add_argument("--trust-mode", choices=TRUST_MODES, default="dev")
+    prepare.add_argument("--draft-with-model", action="store_true")
+    prepare.add_argument("--model-alias")
+    prepare.add_argument("--model-provider")
+    prepare.add_argument("--model")
+    prepare.add_argument("--model-canonical-id")
+    prepare.add_argument("--request-timeout", type=int, default=600)
+
     author = subparsers.add_parser(
         "author",
         help="Run source intake from the normal source + brief inputs",
@@ -157,17 +181,25 @@ def _parser() -> argparse.ArgumentParser:
         default="auto",
     )
     author.add_argument("--policy", type=Path)
+    author.add_argument("--language")
     author.add_argument("--pack-id")
     author.add_argument("--pack-version")
     author.add_argument("--confirm-pack-id", action="store_true")
     author.add_argument("--confirm-pack-version", action="store_true")
     author.add_argument("--required-tier", choices=("A0", "A1", "A2"))
+    author.add_argument("--trust-mode", choices=TRUST_MODES)
+    author.add_argument(
+        "--allow-model-exposure",
+        action="store_true",
+        help="Explicitly consent to sending reviewed evidence to the authoring model",
+    )
+    author.add_argument("--reviewed-by")
     # Held-out status has to be settled before the first model call, so it is declared
     # here rather than passed through to whichever intake command runs.
-    held_out = author.add_mutually_exclusive_group(required=True)
+    held_out = author.add_mutually_exclusive_group()
     held_out.add_argument("--held-out-policy", type=Path)
     held_out.add_argument("--held-out-not-applicable-reason")
-    author.add_argument("--held-out-reviewed-by", required=True)
+    author.add_argument("--held-out-reviewed-by")
     author.add_argument("--held-out-content", type=Path)
 
     resume = subparsers.add_parser("resume", help="Verify a session and permitted next step")
@@ -312,6 +344,22 @@ def _required_path_argument(arguments: list[str], name: str) -> Path:
     return Path(raw).resolve()
 
 
+def _has_argument(arguments: list[str], name: str) -> bool:
+    return name in arguments
+
+
+def _argument_value(arguments: list[str], name: str) -> str | None:
+    try:
+        return arguments[arguments.index(name) + 1]
+    except (ValueError, IndexError):
+        return None
+
+
+def _with_default_argument(arguments: list[str], name: str, value: str | Path) -> None:
+    if not _has_argument(arguments, name):
+        arguments += [name, str(value)]
+
+
 def _current_session(
     args: argparse.Namespace,
     command: AuthoringCommand,
@@ -443,8 +491,78 @@ def _source_path(value: str) -> Path:
     return Path(urllib.parse.unquote(parsed.path)).resolve()
 
 
+def _load_authoring_profile(workspace: Path) -> dict[str, Any] | None:
+    path = workspace.resolve() / AUTHORING_PROFILE_FILE
+    if not path.is_file():
+        return None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GuidedCliError(
+            "authoring_profile_invalid",
+            f"cannot read {path}: {exc}",
+            recovery="rerun prepare or remove the invalid profile",
+        ) from exc
+    if not isinstance(document, dict) or document.get("trust_mode") not in TRUST_MODES:
+        raise GuidedCliError(
+            "authoring_profile_invalid",
+            f"{path} does not declare a supported trust_mode",
+            recovery="rerun prepare or pass --trust-mode explicitly",
+        )
+    return document
+
+
+def _trust_mode(args: argparse.Namespace) -> str:
+    explicit = getattr(args, "trust_mode", None)
+    if explicit is not None:
+        return str(explicit)
+    profile = _load_authoring_profile(args.workspace)
+    return str(profile["trust_mode"]) if profile is not None else "compliance"
+
+
+def _local_certification_arguments(workspace: Path) -> list[str]:
+    """Create a workspace-scoped development key without making it a user input."""
+    key_root = workspace.resolve() / ".trust"
+    private_path = key_root / "source-certification-private.pem"
+    public_path = key_root / "source-certification-public.pem"
+    if not private_path.is_file() or not public_path.is_file():
+        key_root.mkdir(parents=True, exist_ok=True)
+        key = Ed25519PrivateKey.generate()
+        private_path.write_bytes(
+            key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+        private_path.chmod(0o600)
+        public_path.write_bytes(
+            key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+        )
+    return [
+        "--certification-private-key",
+        str(private_path),
+        "--certification-key-id",
+        "workspace-development",
+    ]
+
+
 def _held_out_arguments(args: argparse.Namespace) -> list[str]:
     """Render the settled held-out decision for whichever intake command runs."""
+    trust_mode = _trust_mode(args)
+    if args.held_out_policy is None and args.held_out_not_applicable_reason is None:
+        if trust_mode == "compliance":
+            raise SystemExit(2)
+        args.held_out_not_applicable_reason = (
+            "Development benchmark: no reserved held-out content was supplied."
+        )
+    if args.held_out_reviewed_by is None:
+        if trust_mode == "compliance":
+            raise SystemExit(2)
+        args.held_out_reviewed_by = args.reviewed_by or "developer"
     if args.held_out_content is not None and args.held_out_policy is None:
         raise GuidedCliError(
             "held_out_content_unbound",
@@ -464,10 +582,88 @@ def _held_out_arguments(args: argparse.Namespace) -> list[str]:
     return arguments
 
 
+def _run_prepare(args: argparse.Namespace, remainder: list[str]) -> None:
+    """Materialize generated source files and stop before any code can execute."""
+    workspace = args.workspace.resolve()
+    source = (args.source_output or workspace / "source").resolve()
+    arguments = [
+        "--tools",
+        str(args.tools.resolve()),
+        "--output",
+        str(source),
+        "--dependency-lock",
+    ]
+    if args.draft_with_model:
+        arguments += [
+            "--draft-with-model",
+            "--domain-brief",
+            str(args.brief.resolve()),
+            "--model-alias",
+            str(args.model_alias or ""),
+            "--model-provider",
+            str(args.model_provider or ""),
+            "--model",
+            str(args.model or ""),
+            "--model-canonical-id",
+            str(args.model_canonical_id or ""),
+            "--request-timeout",
+            str(args.request_timeout),
+        ]
+    _delegate(
+        "nemotron.steps.byob.scripts.scaffold_source_package",
+        [*arguments, *remainder],
+    )
+    profile = {
+        "schema_version": "bfcl-authoring-profile-v1",
+        "trust_mode": args.trust_mode,
+        "language": args.language,
+        "source": str(source),
+        "tools": str(args.tools.resolve()),
+        "domain_brief": str(args.brief.resolve()),
+        "pack_id": args.pack_id,
+        "pack_version": args.pack_version,
+        "model_exposure_consented": False,
+        "release_status": (
+            "development_unsealed" if args.trust_mode == "dev" else "not_released"
+        ),
+        "official_publishable": args.trust_mode != "dev",
+    }
+    profile_path = write_canonical_json(profile, workspace / AUTHORING_PROFILE_FILE)
+    _print(
+        {
+            "status": "source_review_required",
+            "trust_mode": args.trust_mode,
+            "source": str(source),
+            "profile": str(profile_path),
+            "review_marker": "BFCL-TODO",
+            "next": (
+                "Review backend.py and fixtures.json, remove every BFCL review/TODO "
+                "marker, then run author."
+            ),
+        }
+    )
+
+
 def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
     source = _source_path(args.source)
     brief = args.brief.resolve()
     held_out = _held_out_arguments(args)
+    trust_mode = _trust_mode(args)
+    profile = _load_authoring_profile(args.workspace)
+    intake_remainder = list(remainder)
+    private_flag = "--certification-private-key" in intake_remainder
+    key_id_flag = "--certification-key-id" in intake_remainder
+    if private_flag != key_id_flag:
+        raise GuidedCliError(
+            "certification_key_incomplete",
+            "certification private key and key id must be supplied together",
+            recovery="supply both flags, or omit both in dev/release mode",
+        )
+    if trust_mode != "compliance" and not private_flag:
+        intake_remainder += _local_certification_arguments(args.workspace)
+    language = args.language or (profile.get("language") if profile is not None else None)
+    if language is not None and "--domain-brief-language" not in intake_remainder:
+        intake_remainder += ["--domain-brief-language", str(language)]
     adapter = cast(
         AdapterKind,
         _detect_adapter(source) if args.adapter == "auto" else args.adapter,
@@ -527,7 +723,7 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
                     "--resolved-authoring-config",
                     str(config_path),
                     *held_out,
-                    *remainder,
+                    *intake_remainder,
                 ],
             )
         else:
@@ -551,7 +747,7 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
                     "--resolved-authoring-config",
                     str(config_path),
                     *held_out,
-                    *remainder,
+                    *intake_remainder,
                 ],
             )
         _commit_intake_session(
@@ -563,6 +759,17 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
             evidence_path=output / "evidence_bundle.json",
             resolved_config_digest=resolved.resolved_authoring_config_digest,
             lease=lease,
+        )
+        if profile is not None and args.allow_model_exposure:
+            updated = dict(profile)
+            updated["model_exposure_consented"] = True
+            updated["model_exposure_consented_by"] = args.reviewed_by or "developer"
+            write_canonical_json(updated, workspace / AUTHORING_PROFILE_FILE)
+    if trust_mode != "compliance" and args.allow_model_exposure:
+        _advance_developer_consent(
+            args,
+            output=output,
+            actor=args.reviewed_by or "developer",
         )
 
 
@@ -659,6 +866,88 @@ def _commit_intake_session(
     )
 
 
+def _advance_developer_consent(
+    args: argparse.Namespace,
+    *,
+    output: Path,
+    actor: str,
+) -> None:
+    """Translate one dev/release exposure consent into the legacy session bindings."""
+    workspace = args.workspace.resolve()
+    authorization_args = argparse.Namespace(
+        workspace=workspace,
+        tenant_id=args.tenant_id,
+        run_id=args.run_id,
+        subject=output / "model_exposure_subject.json",
+        authorized_by=actor,
+        organizational_policy_digest=None,
+        output=workspace / "model_exposure_consent.json",
+    )
+    gate, resumed = _current_session(args, "authorize_exposure")
+    with resumed:
+        authorization_path = _run_authorize(
+            authorization_args,
+            lease=resumed.lease,
+        )
+        _commit_transition(
+            args,
+            gate,
+            resumed,
+            phase="exposure_authorized",
+            updates={
+                "exposure_authorization": bind_artifact(
+                    workspace,
+                    authorization_path,
+                    digest_kind="canonical_json",
+                )
+            },
+        )
+
+    evidence = load_source_evidence(output / "evidence_bundle.json")
+    brief_report = json.loads(
+        (output / "domain_brief_redaction.json").read_text(encoding="utf-8")
+    )
+    findings = sorted(
+        f"{finding['location']}:{finding['code']}"
+        for finding in brief_report.get("advisory", [])
+    )
+    approval_args = argparse.Namespace(
+        workspace=workspace,
+        tenant_id=args.tenant_id,
+        run_id=args.run_id,
+        approved_by=f"dev-consent:{actor}",
+        source_bundle_digest=evidence.bundle_digest,
+        normalized_bundle_digest=evidence.bundle_digest,
+        migration_record_digest=None,
+        acknowledge_warning=[],
+        acknowledge_finding=findings,
+        note="Generated from explicit --allow-model-exposure consent; not release approval.",
+        output=workspace / "development_evidence_consent.json",
+    )
+    gate, resumed = _current_session(args, "approve_evidence")
+    with resumed:
+        approval_path, evidence_digest = _run_evidence_approval(
+            approval_args,
+            lease=resumed.lease,
+        )
+        _commit_transition(
+            args,
+            gate,
+            resumed,
+            phase="evidence_approved",
+            updates={
+                "approval": ApprovalBinding(
+                    artifact=bind_artifact(
+                        workspace,
+                        approval_path,
+                        digest_kind="canonical_json",
+                    ),
+                    evidence_digest=evidence_digest,
+                )
+            },
+        )
+
+
 def _declared_source(workspace: Path, declaration_path: Path, adapter_kind: str) -> Path:
     """Return the certified source tree assembly should bind, per adapter shape."""
     if adapter_kind == "mcp_mode_a":
@@ -715,6 +1004,56 @@ def _assemble_arguments(
             ),
         ]
     return [*arguments, *remainder]
+
+
+def _developer_draft_arguments(
+    args: argparse.Namespace,
+    remainder: list[str],
+) -> list[str]:
+    """Fill verified workspace inputs for the dev/release drafting lane."""
+    if _trust_mode(args) == "compliance":
+        return remainder
+    profile = _load_authoring_profile(args.workspace)
+    if profile is None or not profile.get("model_exposure_consented"):
+        raise GuidedCliError(
+            "model_exposure_consent_required",
+            "dev/release drafting requires explicit --allow-model-exposure consent at authoring",
+            recovery="rerun author with --allow-model-exposure and --reviewed-by",
+        )
+    arguments = list(remainder)
+    workspace = args.workspace.resolve()
+    intake = workspace / "intake"
+    defaults: tuple[tuple[str, Path | str], ...] = (
+        ("--bundle", intake / "evidence_bundle.json"),
+        ("--certification-report", intake / "adapter_certification.json"),
+        ("--source-observations", intake / "source_observations.json"),
+        ("--domain-brief-source", intake / "domain_brief.source.txt"),
+        ("--domain-brief-report", intake / "domain_brief_redaction.json"),
+        ("--held-out-redaction-report", intake / "held_out_redaction.json"),
+        ("--certification-public-key", workspace / ".trust" / "source-certification-public.pem"),
+        ("--certification-key-id", "workspace-development"),
+        ("--exposure-authorization", workspace / "model_exposure_consent.json"),
+        ("--approval", workspace / "development_evidence_consent.json"),
+        ("--output", workspace / "drafting"),
+        ("--model-alias", "author"),
+    )
+    for name, value in defaults:
+        _with_default_argument(arguments, name, value)
+    model = _argument_value(arguments, "--model")
+    if model is None:
+        raise GuidedCliError(
+            "authoring_model_required",
+            "dev/release drafting still needs --model",
+            recovery="pass the deployed authoring model name and --model-provider",
+        )
+    if _argument_value(arguments, "--model-provider") is None:
+        raise GuidedCliError(
+            "authoring_model_provider_required",
+            "dev/release drafting still needs --model-provider",
+            recovery="pass the configured Data Designer provider name",
+        )
+    _with_default_argument(arguments, "--model-canonical-id", model)
+    return arguments
 
 
 def _run_resume(args: argparse.Namespace) -> None:
@@ -902,7 +1241,9 @@ def main() -> None:
     parser = _parser()
     args, remainder = parser.parse_known_args()
     try:
-        if args.command == "author":
+        if args.command == "prepare":
+            _run_prepare(args, remainder)
+        elif args.command == "author":
             _run_author(args, remainder)
         elif args.command == "resume":
             if remainder:
@@ -1083,6 +1424,7 @@ def main() -> None:
                         },
                     )
         elif args.command == "draft":
+            remainder = _developer_draft_arguments(args, remainder)
             if "--resolved-authoring-config" in remainder:
                 raise GuidedCliError(
                     "resolved_config_override_forbidden",

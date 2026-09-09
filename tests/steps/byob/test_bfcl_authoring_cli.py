@@ -53,6 +53,7 @@ def test_help_lists_commands_and_separate_approval_boundaries() -> None:
     help_text = bfcl_author._parser().format_help()
 
     for command in (
+        "prepare",
         "author",
         "resume",
         "answer",
@@ -68,6 +69,52 @@ def test_help_lists_commands_and_separate_approval_boundaries() -> None:
     assert "Pre-model authorization" in help_text
     assert "final release approval" in help_text
     assert "CI mode never prompts" in help_text
+
+
+def test_prepare_is_a_four_input_dev_entry_and_stops_for_source_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tools = tmp_path / "tools.json"
+    tools.write_text("[]\n", encoding="utf-8")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("Evaluate hotel booking.\n", encoding="utf-8")
+    observed: dict[str, Any] = {}
+    monkeypatch.setattr(
+        bfcl_author,
+        "_delegate",
+        lambda module, arguments: observed.update(module=module, arguments=arguments),
+    )
+    workspace = tmp_path / "workspace"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bfcl_author.py",
+            "prepare",
+            "--workspace",
+            str(workspace),
+            "--tools",
+            str(tools),
+            "--brief",
+            str(brief),
+            "--language",
+            "en",
+        ],
+    )
+
+    bfcl_author.main()
+
+    output = json.loads(capsys.readouterr().out)
+    profile = json.loads((workspace / bfcl_author.AUTHORING_PROFILE_FILE).read_text(encoding="utf-8"))
+    assert output["status"] == "source_review_required"
+    assert output["trust_mode"] == "dev"
+    assert profile["release_status"] == "development_unsealed"
+    assert profile["official_publishable"] is False
+    assert profile["language"] == "en"
+    assert observed["module"] == "nemotron.steps.byob.scripts.scaffold_source_package"
+    assert "--dependency-lock" in observed["arguments"]
 
 
 @pytest.mark.parametrize(
@@ -104,6 +151,7 @@ def test_author_detects_conventional_adapter_and_delegates(
 
     monkeypatch.setattr(bfcl_author, "_delegate", delegate)
     monkeypatch.setattr(bfcl_author, "_commit_intake_session", lambda **_kwargs: None)
+    monkeypatch.setattr(bfcl_author, "_advance_developer_consent", lambda *_args, **_kwargs: None)
     monkeypatch.setenv(
         (
             "BFCL_ENABLE_LOCAL_PYTHON"
@@ -153,6 +201,106 @@ def test_author_detects_conventional_adapter_and_delegates(
     assert (tmp_path / "workspace" / "resolved_authoring_config.json").is_file()
     assert not (tmp_path / "workspace" / ".locks" / "default" / "authoring.lock").read_text(
         encoding="utf-8"
+    )
+
+
+def test_prepared_dev_authoring_hides_certification_and_held_out_plumbing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    source = workspace / "source"
+    source.mkdir(parents=True)
+    (source / "backend.py").write_text("# reviewed\n", encoding="utf-8")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("Evaluate inventory lookup.\n", encoding="utf-8")
+    write_canonical_json(
+        {
+            "schema_version": "bfcl-authoring-profile-v1",
+            "trust_mode": "dev",
+            "language": "vi",
+            "source": str(source),
+            "model_exposure_consented": False,
+        },
+        workspace / bfcl_author.AUTHORING_PROFILE_FILE,
+    )
+    observed: dict[str, Any] = {}
+    monkeypatch.setattr(
+        bfcl_author,
+        "_delegate",
+        lambda module, arguments: observed.update(module=module, arguments=arguments),
+    )
+    monkeypatch.setattr(bfcl_author, "_commit_intake_session", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        bfcl_author,
+        "_advance_developer_consent",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setenv("BFCL_ENABLE_LOCAL_PYTHON", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bfcl_author.py",
+            "--ci",
+            "author",
+            "--workspace",
+            str(workspace),
+            "--source",
+            str(source),
+            "--brief",
+            str(brief),
+            "--pack-id",
+            "inventory",
+            "--pack-version",
+            "1.0.0",
+            "--allow-model-exposure",
+            "--reviewed-by",
+            "developer@example.test",
+        ],
+    )
+
+    bfcl_author.main()
+
+    arguments = observed["arguments"]
+    assert "--certification-private-key" in arguments
+    assert arguments[arguments.index("--certification-key-id") + 1] == "workspace-development"
+    assert arguments[arguments.index("--held-out-reviewed-by") + 1] == "developer@example.test"
+    assert "Development benchmark" in arguments[
+        arguments.index("--held-out-not-applicable-reason") + 1
+    ]
+    assert arguments[arguments.index("--domain-brief-language") + 1] == "vi"
+    profile = json.loads(
+        (workspace / bfcl_author.AUTHORING_PROFILE_FILE).read_text(encoding="utf-8")
+    )
+    assert profile["model_exposure_consented"] is True
+
+
+def test_dev_draft_needs_only_model_and_provider_after_consent(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    write_canonical_json(
+        {
+            "schema_version": "bfcl-authoring-profile-v1",
+            "trust_mode": "dev",
+            "model_exposure_consented": True,
+        },
+        workspace / bfcl_author.AUTHORING_PROFILE_FILE,
+    )
+    args = type("Args", (), {"workspace": workspace, "trust_mode": None})()
+
+    arguments = bfcl_author._developer_draft_arguments(
+        args,
+        ["--model", "mistral-small-24b", "--model-provider", "openai"],
+    )
+
+    assert arguments[arguments.index("--model-alias") + 1] == "author"
+    assert arguments[arguments.index("--model-canonical-id") + 1] == "mistral-small-24b"
+    assert arguments[arguments.index("--bundle") + 1].endswith(
+        "intake/evidence_bundle.json"
+    )
+    assert arguments[arguments.index("--output") + 1].endswith("workspace/drafting")
+    assert arguments[arguments.index("--approval") + 1].endswith(
+        "workspace/development_evidence_consent.json"
     )
 
 
