@@ -538,7 +538,7 @@ none is a defect. Expect them, and do not file them:
 Use one fresh root for these cases:
 
 ```bash
-export CURATE_QA="$QA_ROOT/artifacts/curate-pr45"
+export CURATE_QA="$QA_ROOT/artifacts/curate"
 export CURATE_SRC="$PWD/src/nemotron/steps/curate/nemo_curator"
 mkdir -p "$CURATE_QA"/{configs,data,logs,metadata,outputs}
 ```
@@ -548,7 +548,7 @@ mkdir -p "$CURATE_QA"/{configs,data,logs,metadata,outputs}
 Prerequisites: Python 3.11 or newer.
 
 ```bash
-uv sync --extra curate --group dev
+uv sync --extra curate --extra xenna --group dev
 
 uv run python - <<'PY'
 import importlib.metadata as md
@@ -601,6 +601,22 @@ flow help, test output, skipped-test reasons, and `uv.lock` checksum.
 Prerequisites: `CUR-001`. These commands override container-oriented fixture
 paths with absolute checkout paths so the same cases run locally.
 
+`curate/nemo_curator` starts a real local Ray cluster (a separate `ray start
+--head` subprocess) and connects to it by address rather than running
+in-process. When Ray auto-packages the driver's working directory to ship to
+that cluster, it respects `.gitignore` with no override — so if this step is
+run from a bare `uv run` checkout, Ray silently excludes the whole gitignored
+`.venv` (where `cosmos_xenna`/`nemo_curator` actually live) and every worker
+task fails with `ModuleNotFoundError: No module named 'cosmos_xenna'`, even
+though the driver process itself imports fine. `ingest`, `profile`, `audit`,
+`decontamination`, and `subset` are plain CPU steps with no Ray dependency and
+are unaffected. Run `curate/nemo_curator` (and any `run_flow` invocation with
+`filter` enabled, e.g. `CUR-003`/`CUR-005`) inside
+`nvcr.io/nvidia/nemo-curator:26.02` — the same container the `lepton_curate`
+profile in `steps/env/env_toml/config/lepton.yaml` uses for production — where
+dependencies are system site-packages outside the packaged working directory,
+not a gitignored local venv Ray can silently drop.
+
 ```bash
 export CURATE_FIX="$(realpath "$CURATE_SRC")"
 export CURATE_SMOKE="$CURATE_QA/outputs/smoke"
@@ -613,7 +629,10 @@ uv run nemotron steps run curate/ingest -c tiny \
 uv run nemotron steps run curate/profile -c en \
   output_dir="$CURATE_SMOKE/profile"
 
-uv run nemotron steps run curate/nemo_curator -c tiny \
+# The filter starts Ray, and Ray resolves its worker interpreter independently
+# of the launcher. Without both extras the worker dies with
+# `ModuleNotFoundError: No module named 'cosmos_xenna'` from inside a Ray task.
+uv run --extra curate --extra xenna nemotron steps run curate/nemo_curator -c tiny \
   input_glob="$CURATE_FIX/profile/data/tiny/*.jsonl" \
   output_dir="$CURATE_SMOKE/filter" \
   emit_manifest="$CURATE_SMOKE/filter/run_manifest.json" \
@@ -660,7 +679,7 @@ assert not missing, missing
 manifest = json.loads((root / "filter/run_manifest.json").read_text())
 audit = json.loads((root / "audit/audit_report.json").read_text())
 decon = json.loads((root / "decontamination/decontamination_report.json").read_text())
-assert manifest.get("completed_at"), manifest
+assert manifest["producer"]["completed_at"], manifest
 assert audit.get("passed") is True, audit
 assert "NOT measured" in decon["similarity"]["note"], decon
 PY
@@ -691,9 +710,44 @@ Prerequisites: a representative SQA corpus with stable source metadata and a
 reviewed language pack. Use at least 1,000 documents; smoke data can validate
 plumbing but cannot justify a production threshold.
 
+Use the corpus fetched in `CUR-006`; nothing smaller than that satisfies the
+1,000-document minimum, and the fixtures under `$CURATE_FIX` hold 40.
+
 Copy `vi_c4_measure.yaml` and `vi_c4_apply.yaml` into `$CURATE_QA/configs`.
 Edit only the copies. Point both at the same corpus, text/ID/source fields,
-language, and language-pack root. Use separate output roots:
+language, and language-pack root.
+
+Four more settings in those copies are specific to the shipped Vietnamese
+example and must be changed too. The first is the one that matters:
+
+- **`steps.filter.language_codes`.** This is NOT the same setting as
+  `corpus.language`: the first decides what to KEEP, the second selects the pack
+  used to MEASURE. Leaving the example's `[VI]` while pointing the corpus at
+  another language removes essentially every document — 2,000 in, 0 kept, with
+  the ledger reporting `balanced: true` and the filter step exiting 0. Only the
+  audit catches it, and only because it cannot key an empty corpus.
+- **`steps.*.models.fasttext_langid`** is the relative path `./models/lid.176.bin`
+  and will not resolve. Point it at a real copy (`CUR-006` records the URL and
+  expected size) or remove the key to profile without a language breakdown.
+- **`steps.profile.models.tokenizer`** pins a Hugging Face repo and revision.
+  Warm it once before the run — a cold cache can fail the profile with a
+  connection error even when the repo is reachable and ungated.
+- **`corpus.id_prefix` and `corpus.source_value`** still say Vietnamese.
+- **`steps.subset.token_budgets`** are `[100000000, 500000000]`, sized for the
+  full Vietnamese corpus. On a 2,000-document sample every tier is the whole
+  corpus.
+- **`steps.subset.quality_score_field`** is `__script_ratio`, which only exists
+  if `script_ratio` is one of the thresholds you approved. Approve that signal,
+  or unset the field, or the subset step fails after the filter has already run.
+- **`approve.thresholds`** must be replaced with grid points from YOUR profile,
+  and `approver` plus `evidence` are required. `approve.from` alone is refused:
+  "an approval that gates nothing is not one".
+
+Size the host before running the apply pass. The filter builds one Ray stage per
+gate, so a policy of three thresholds plus the language and word-count gates
+needs 8.5 CPUs while an 8-core host exposes 7. Either give the run a larger host
+or approve fewer thresholds; the error surfaces from inside Curator and names no
+config key. Use separate output roots:
 `$CURATE_QA/outputs/measure` and `$CURATE_QA/outputs/apply`. In the apply copy,
 set `approve.from` to
 `$CURATE_QA/outputs/measure/profile/candidate_policies.yaml`; this avoids
@@ -838,7 +892,11 @@ uv run pytest -q \
 Success criteria:
 
 - NFC and NFD forms of equivalent Vietnamese text receive equivalent scores;
-  profiling never rewrites the original text bytes.
+  profiling never rewrites the original text bytes. Check this by profiling the
+  two Vietnamese rows ALONE: every signal must place both documents in one
+  histogram bin and report an identical p1 through p99. Profiling them alongside
+  the Hindi rows hides the answer, because the spread you see is then between
+  languages rather than between normalisation forms.
 - `unicode_alpha_numeric` accepts Unicode letter, number, all combining-mark,
   ZWJ, and ZWNJ categories required by Vietnamese and Indic text.
 - Script ratio is described as a script-composition signal, not language ID;
@@ -1052,9 +1110,25 @@ Success criteria:
 - The removed set equals the planted holdout exactly, no removed document
   appears in any subset tier, and the ledger balances.
 - Every surviving document is byte-identical to its ingested form.
-- **False-rejection control:** the same policy applied to `wiki-hi` retains
-  substantially more than it does on `c4-hi`. Clean encyclopaedic prose being
-  cut heavily means the policy is too aggressive whatever its C4 retention says.
+- **False-rejection control.** Do NOT try to apply the approved policy to
+  `wiki-hi`: an approval is bound to the corpus it was measured on, so the
+  fingerprint gate refuses it at the filter and every document lands in
+  `n_failed` with an empty `filtered_by_reason`. That refusal is correct
+  behaviour, not a finding.
+
+  Run `curate/profile` on `wiki-hi` separately instead, and compare the
+  retention each corpus reports for the SAME signal at the SAME threshold. Clean
+  encyclopaedic prose should retain at least as much as noisy web text. If a
+  threshold cuts Wikipedia harder than C4, it is keying on something other than
+  quality, whatever its C4 retention says.
+
+  Observed on 2,000-document slices, for orientation only:
+
+  | signal | threshold | c4-hi retains | wiki-hi retains |
+  | --- | --- | --- | --- |
+  | `latin_ratio` | `max 0.7619` | 0.9900 | 0.9990 |
+  | `script_ratio` | `min 0.0` | 1.0000 | 1.0000 |
+  | `boilerplate_hits` | `max 1.0` | 0.9980 | 0.9980 |
 - Retention is reported per gate, and a human could defend each threshold from
   the profile alone.
 

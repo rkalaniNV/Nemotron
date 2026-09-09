@@ -134,6 +134,7 @@ translate = [
 evaluator = ["nemo-evaluator-launcher>=0.2.6,<0.3"]
 curate = [
     "nemo-curator @ git+https://github.com/NVIDIA-NeMo/Curator.git@main ; python_version>='3.11' and python_version<'3.14'",
+    "cosmos-xenna",
     "huggingface_hub>=0.20.0; python_version>='3.11'",
     "pyyaml>=6.0; python_version>='3.11'",
 ]
@@ -335,6 +336,7 @@ venv-name = "curate"
 extra-index-urls = ["https://pypi.nvidia.com"]
 omit-packages = ["nemo-curator"]
 required-imports = [
+    "cosmos_xenna",
     "huggingface_hub",
     "nemo_curator",
     "yaml",
