@@ -95,6 +95,7 @@ class ModelCallRecord:
     output_schema_hash: str
     model_canonical: str
     served_from_cache: bool
+    source: str = "model"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -106,6 +107,7 @@ class ModelCallRecord:
             "output_schema_hash": self.output_schema_hash,
             "model_canonical": self.model_canonical,
             "served_from_cache": self.served_from_cache,
+            "source": self.source,
         }
 
 

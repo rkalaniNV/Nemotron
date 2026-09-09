@@ -26,6 +26,7 @@ input rather than being re-derived three times with three chances to disagree.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -38,7 +39,11 @@ from nemotron.steps.byob.runtime.authoring_workflow.quota import RunQuota
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.model_io_cache import (
     ImmutableModelIOCache,
 )
-from nemotron.steps.byob.runtime.pack_authoring.artifacts import write_text_atomic
+from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
+    sha256_json,
+    write_canonical_json,
+    write_text_atomic,
+)
 from nemotron.steps.byob.runtime.pack_authoring.bundle import EvidenceView
 from nemotron.steps.byob.runtime.pack_authoring.grounding import (
     Grounding,
@@ -66,6 +71,7 @@ from nemotron.steps.byob.runtime.pack_authoring.prompts import (
     VALIDATION_CASE_PROMPT_VERSION,
     VALIDATION_CASE_TASK,
     build_evidence_payload,
+    prompt_hash,
 )
 from nemotron.steps.byob.runtime.pack_authoring.schemas import (
     AssertionSpecPlan,
@@ -179,14 +185,101 @@ def _stage_error_text(stage: str, attempt: int, exc: Exception) -> str:
     return f"stage: {stage}\nattempt: {attempt}\nerror: {exc}\n"
 
 
+def _checkpoint_record(
+    context: DraftingContext,
+    *,
+    stage: str,
+    prompt_version: str,
+    task: str,
+    output_format: type[BaseModel],
+    document: BaseModel,
+) -> ModelCallRecord:
+    dumped = document.model_dump(mode="json")
+    return ModelCallRecord(
+        stage=stage,
+        prompt_version=prompt_version,
+        prompt_hash=prompt_hash(prompt_version, AUTHORING_SYSTEM_PROMPT, task),
+        request_hash=sha256_json({"human_checkpoint": dumped}),
+        input_hash=sha256_json({"evidence_digest": context.evidence.digest}),
+        output_schema_hash=sha256_json(output_format.model_json_schema()),
+        model_canonical="human-reviewed",
+        served_from_cache=False,
+        source="human_checkpoint",
+    )
+
+
+def _load_accepted_checkpoint(
+    context: DraftingContext,
+    *,
+    stage: str,
+    prompt_version: str,
+    task: str,
+    document_name: str,
+    output_format: type[BaseModel],
+    validate: Callable[[Grounding, Any], Any],
+) -> tuple[Any, ModelCallRecord] | None:
+    if context.checkpoint_root is None:
+        return None
+    path = context.checkpoint_root / f"{document_name}.yaml"
+    if not path.is_file():
+        return None
+    try:
+        document = output_format.model_validate(
+            yaml.safe_load(path.read_text(encoding="utf-8"))
+        )
+        document = validate(context.grounding, document)
+    except (OSError, ValueError, ValidationError, GroundingError) as exc:
+        raise GroundingError(
+            stage,
+            [f"reviewed checkpoint {path} is invalid: {exc}"],
+        ) from exc
+    digest = sha256_json(document.model_dump(mode="json"))
+    metadata_path = context.checkpoint_root / f"{document_name}.checkpoint.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("evidence_digest") != context.evidence.digest:
+            return None
+        if metadata.get("document_digest") != digest:
+            raise ValueError("checkpoint was edited")
+        record = replace(
+            ModelCallRecord(**metadata["call"]),
+            served_from_cache=True,
+        )
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        record = _checkpoint_record(
+            context,
+            stage=stage,
+            prompt_version=prompt_version,
+            task=task,
+            output_format=output_format,
+            document=document,
+        )
+    return document, record
+
+
 def _run_stage(
     context: DraftingContext,
     *,
     stage: str,
+    prompt_version: str,
+    task: str,
     document_name: str,
+    output_format: type[BaseModel],
+    validate: Callable[[Grounding, Any], Any],
     produce: Callable[[DraftingContext], tuple[Any, ModelCallRecord]],
 ) -> tuple[Any, ModelCallRecord]:
     """Run, validate, checkpoint, and at most once repair one drafting stage."""
+    accepted = _load_accepted_checkpoint(
+        context,
+        stage=stage,
+        prompt_version=prompt_version,
+        task=task,
+        document_name=document_name,
+        output_format=output_format,
+        validate=validate,
+    )
+    if accepted is not None:
+        return accepted
     last_error: Exception | None = None
     for attempt in range(context.repair_attempts + 1):
         attempt_context = replace(
@@ -208,12 +301,25 @@ def _run_stage(
                 continue
             if context.checkpoint_root is not None:
                 path = context.checkpoint_root / f"{stage}.attempt-{attempt}.candidate.yaml"
-                exc.add_note(f"Rejected candidate, when available, is editable at {path}")
+                accepted_path = context.checkpoint_root / f"{document_name}.yaml"
+                exc.add_note(
+                    f"Edit {path} and save the reviewed result as {accepted_path}, then rerun to resume."
+                )
             raise
         if context.checkpoint_root is not None:
+            dumped = document.model_dump(mode="json")
             _write_yaml(
-                document.model_dump(mode="json"),
+                dumped,
                 context.checkpoint_root / f"{document_name}.yaml",
+            )
+            write_canonical_json(
+                {
+                    "schema_version": "bfcl-draft-checkpoint-v1",
+                    "evidence_digest": context.evidence.digest,
+                    "document_digest": sha256_json(dumped),
+                    "call": record.as_dict(),
+                },
+                context.checkpoint_root / f"{document_name}.checkpoint.json",
             )
         return document, record
     raise AssertionError("unreachable drafting stage loop")
@@ -296,25 +402,41 @@ def draft_all(context: DraftingContext) -> DraftBundle:
     coverage, coverage_record = _run_stage(
         context,
         stage="mcp_coverage_plan",
+        prompt_version=COVERAGE_PROMPT_VERSION,
+        task=COVERAGE_TASK,
         document_name="coverage_plan",
+        output_format=CoveragePlan,
+        validate=validate_coverage_plan,
         produce=draft_coverage_plan,
     )
     cases, cases_record = _run_stage(
         context,
         stage="mcp_validation_cases",
+        prompt_version=VALIDATION_CASE_PROMPT_VERSION,
+        task=VALIDATION_CASE_TASK,
         document_name="validation_cases",
+        output_format=ValidationCasePlan,
+        validate=validate_validation_cases,
         produce=lambda active: draft_validation_cases(active, coverage),
     )
     templates, templates_record = _run_stage(
         context,
         stage="mcp_task_templates",
+        prompt_version=TASK_TEMPLATE_PROMPT_VERSION,
+        task=TASK_TEMPLATE_TASK,
         document_name="task_templates",
+        output_format=TaskTemplatePlan,
+        validate=validate_task_templates,
         produce=lambda active: draft_task_templates(active, coverage),
     )
     assertions, assertions_record = _run_stage(
         context,
         stage="mcp_assertion_specs",
+        prompt_version=ASSERTION_PROMPT_VERSION,
+        task=ASSERTION_TASK,
         document_name="assertion_specs",
+        output_format=AssertionSpecPlan,
+        validate=validate_assertion_specs,
         produce=lambda active: draft_assertion_specs(active, coverage),
     )
     return DraftBundle(

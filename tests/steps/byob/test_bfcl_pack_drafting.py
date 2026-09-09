@@ -1043,6 +1043,41 @@ def test_drafting_stops_after_one_repair_and_leaves_editable_artifacts(
     assert (output / "drafts" / "mcp_coverage_plan.attempt-1.rejected.txt").exists()
 
 
+def test_a_reviewed_rejected_candidate_resumes_without_recalling_that_stage(
+    tmp_path: Path,
+) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    caller = _RepairingCaller(repair_succeeds=False)
+    output = tmp_path / "out"
+    with pytest.raises(GroundingError):
+        run_drafting(
+            bundle_path,
+            approval_path,
+            output,
+            MODEL,
+            caller=caller,
+            allow_legacy_v1_model_exposure=True,
+        )
+    (output / "drafts" / "coverage_plan.yaml").write_text(
+        yaml.safe_dump(_coverage_response(), sort_keys=True),
+        encoding="utf-8",
+    )
+
+    resumed = run_drafting(
+        bundle_path,
+        approval_path,
+        output,
+        MODEL,
+        caller=caller,
+        allow_legacy_v1_model_exposure=True,
+    )
+
+    assert caller.coverage_attempts == 2
+    coverage_call = resumed.provenance.document["calls"][0]
+    assert coverage_call["source"] == "human_checkpoint"
+    assert coverage_call["model_canonical"] == "human-reviewed"
+
+
 def test_a_full_drafting_run_writes_drafts_provenance_and_compiled_assertions(
     tmp_path: Path,
 ) -> None:
