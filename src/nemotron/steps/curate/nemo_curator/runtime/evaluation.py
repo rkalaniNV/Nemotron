@@ -63,6 +63,19 @@ PHENOMENA = (
     "langid_error",
 )
 
+#: Modes this harness labels but does not exercise. The rate reported for one is
+#: real -- it is what the policy's signals did to those documents -- but it is
+#: not evidence about the mode itself, and a table row with a percentage in it
+#: reads like evidence. ``langid_error`` needs the FastText model actually run
+#: against the document; the harness deliberately loads no models, so the label
+#: describes the document rather than testing the pipeline's handling of it.
+NOT_EXERCISED = {
+    "langid_error": (
+        "the FastText language gate is not run by this harness, so this row shows how the "
+        "policy's own signals treat these documents, not whether language-ID errors are handled"
+    )
+}
+
 
 class EvaluationDataError(ValueError):
     """The labelled set does not meet the contract."""
@@ -138,6 +151,8 @@ class Report:
                 "false_rejection_rate": _rate(sum(1 for j in keeps if not j.kept), len(keeps)),
                 "noise_removal_rate": _rate(sum(1 for j in drops if not j.kept), len(drops)),
             }
+            if phenomenon in NOT_EXERCISED:
+                out[phenomenon]["not_exercised"] = NOT_EXERCISED[phenomenon]
         return out
 
     def by_signal(self) -> dict[str, dict[str, int]]:

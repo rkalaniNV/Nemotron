@@ -415,3 +415,28 @@ def test_the_report_records_what_it_was_computed_from(tmp_path) -> None:
 
     assert len(written["policy_sha256"]) == 64
     assert all(len(d) == 64 for d in written["labelled_sets"].values())
+
+
+def test_a_mode_the_harness_does_not_exercise_says_so_in_the_report() -> None:
+    """A table row with a percentage in it reads like evidence.
+
+    The harness loads no models, so `langid_error` labels the kind of document
+    rather than testing how language-ID errors are handled -- and the summary
+    that claimed end-to-end coverage of it was wrong. The rate is real; what it
+    is evidence OF has to be stated where the rate appears.
+    """
+    documents = evaluation.read_labelled([LABELLED / "vi.jsonl"])
+
+    report = evaluation.evaluate(documents, [{"signal": "script_ratio", "min": 0.3}], pack=_pack("vi"))
+    row = report.by_phenomenon()["langid_error"]
+
+    assert "not_exercised" in row
+    assert "FastText" in row["not_exercised"]
+
+
+def test_a_mode_the_harness_does_exercise_carries_no_such_caveat() -> None:
+    documents = evaluation.read_labelled([LABELLED / "vi.jsonl"])
+
+    report = evaluation.evaluate(documents, [{"signal": "script_ratio", "min": 0.3}], pack=_pack("vi"))
+
+    assert "not_exercised" not in report.by_phenomenon()["ocr_noise"]

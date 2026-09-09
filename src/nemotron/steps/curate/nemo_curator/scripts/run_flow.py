@@ -481,12 +481,35 @@ def preflight(cfg: dict, resolved: list[Resolved], paths: dict[str, str]) -> lis
         # validating one set and the runtime processing another, which is the
         # divergence the shared resolver exists to remove. The same rule the step
         # applies is applied here, from the same module, before any work is done.
-        readable, ingest_only = integrity.partition_by_reader(integrity.expand_inputs(corpus_input))
-        if not readable and ingest_only:
+        resolved_files = integrity.expand_inputs(corpus_input)
+        readable, ingest_only = integrity.partition_by_reader(resolved_files)
+        if not readable:
+            # Emptiness is judged on what the steps will READ, not on what the
+            # reference resolves to. Judging it on the raw list let a directory
+            # holding only a README pass preflight and fail in the step -- the
+            # exact shape preflight exists to catch, and the reason its own
+            # docstring says a preflight that disagrees with the resolver is
+            # worse than none.
+            detail = (
+                f" {len(ingest_only)} of them need curate/ingest first: {', '.join(sorted(ingest_only)[:5])}."
+                if ingest_only
+                else ""
+            )
             problems.append(
-                f"corpus.input resolves to {len(ingest_only)} file(s) no step can read as JSONL: "
-                f"{', '.join(sorted(ingest_only)[:5])}. Enable steps.ingest to normalise the corpus, "
-                "or point corpus.input at JSONL."
+                f"corpus.input resolves to {len(resolved_files)} file(s), none of which any step "
+                f"can read as JSONL.{detail} Enable steps.ingest to normalise the corpus, or point "
+                "corpus.input at JSONL."
+            )
+        elif len(readable) != len(resolved_files):
+            # Accepted, because a Hugging Face snapshot legitimately keeps both
+            # formats side by side. Named, because preflight validated a corpus
+            # larger than the one the run will process, and silence there is how
+            # a half-converted corpus becomes a partial run nobody notices.
+            skipped = sorted(set(resolved_files) - set(readable))
+            warnings.append(
+                f"corpus.input resolves to {len(resolved_files)} file(s) but the steps will read "
+                f"{len(readable)}: {', '.join(Path(p).name for p in skipped[:5])} "
+                f"{'is' if len(skipped) == 1 else 'are'} not JSONL and will be skipped."
             )
 
     # An ASCII- or whitespace-dependent gate against a language that does not

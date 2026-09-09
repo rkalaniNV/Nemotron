@@ -126,11 +126,17 @@ def _format(report: dict[str, Any]) -> str:
         "",
         f"{'phenomenon':<16}{'docs':>6}{'false rej':>12}{'noise rem':>12}",
     ]
+    caveats = []
     for name, row in report["by_phenomenon"].items():
+        mark = " *" if row.get("not_exercised") else ""
         lines.append(
             f"{name:<16}{row['documents']:>6}{pct(row['false_rejection_rate']):>12}"
-            f"{pct(row['noise_removal_rate']):>12}"
+            f"{pct(row['noise_removal_rate']):>12}{mark}"
         )
+        if row.get("not_exercised"):
+            caveats.append(f"  * {name}: {row['not_exercised']}")
+    if caveats:
+        lines += [""] + caveats
     if report["by_signal"]:
         lines += ["", f"{'signal':<28}{'rejected keep':>14}{'rejected drop':>14}"]
         for name, row in report["by_signal"].items():

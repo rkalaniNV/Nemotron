@@ -200,6 +200,10 @@ SHAPES = {
     "jsonl-only": {"part_0.jsonl": b'{"id":"a","text":"x"}\n'},
     "parquet-beside-jsonl": {"part_0.jsonl": b'{"id":"a","text":"x"}\n', "part_0.parquet": b"PAR1"},
     "jsonl-and-companions": {"part_0.jsonl": b'{"id":"a","text":"x"}\n', "README.md": b"notes", "_SUCCESS": b""},
+    # Resolves to a file and reads none. Preflight used to accept it and the step
+    # then refused -- and no shape in this table could see that, which is why the
+    # divergence survived a green suite twice.
+    "companions-only": {"README.md": b"notes", "_SUCCESS": b""},
 }
 
 
@@ -235,18 +239,35 @@ def _runtime_accepts(step, corpus: Path) -> bool:
 
 
 @pytest.mark.parametrize("shape", sorted(SHAPES))
-def test_preflight_and_the_runtime_agree_on_every_corpus_shape(step, tmp_path, shape) -> None:
-    """The literal wording of the requirement: identical inclusion rules.
+@pytest.mark.parametrize("spelling", ["{root}", "{root}/*"])
+def test_preflight_validates_the_same_files_the_runtime_reads(step, tmp_path, shape, spelling) -> None:
+    """The literal wording: "validate one corpus but process another".
 
-    parquet-only is the case that used to diverge -- preflight accepted it and
-    the filter refused, after the flow had printed its plan.
+    This used to compare VERDICTS -- does the run start? -- and reported
+    agreement on that basis. Agreeing to start is not the same as agreeing on
+    the corpus: preflight validated `[README.md, part_0.jsonl]` while the
+    runtime read `[part_0.jsonl]`, on a shape this file already covered, and
+    the test could not see it. Both spellings are checked because a bare
+    directory and a glob resolve by different rules.
     """
+    from nemotron.steps.curate.nemo_curator.runtime import integrity
+
     corpus = tmp_path / "corpus"
     corpus.mkdir()
     for name, content in SHAPES[shape].items():
         (corpus / name).write_bytes(content)
+    reference = spelling.format(root=corpus)
 
-    assert _preflight_accepts(corpus) == _runtime_accepts(step, corpus), shape
+    resolved = integrity.expand_inputs(reference)
+    readable, _ = integrity.partition_by_reader(resolved)
+    runtime = step.readable_inputs(reference)
+
+    # What the runtime reads is exactly what preflight's own rule says it will.
+    assert sorted(runtime) == sorted(readable), shape
+
+    # And preflight refuses precisely when that set is empty, so it never
+    # validates a run the step will not perform.
+    assert _preflight_accepts(corpus) is bool(readable), shape
 
 
 def test_a_parquet_corpus_is_accepted_when_ingest_will_convert_it(step, tmp_path) -> None:
