@@ -75,6 +75,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfi
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_json,
     write_canonical_json,
+    write_text_atomic,
 )
 from nemotron.steps.byob.runtime.pack_authoring.authorization import (
     ExposureSubject,
@@ -550,6 +551,22 @@ def _local_certification_arguments(workspace: Path) -> list[str]:
     ]
 
 
+def _preflight_workspace(workspace: Path, *, run_id: str) -> None:
+    """Fail before probes/model calls if atomic workspace writes are unsupported."""
+    target = workspace.resolve() / ".preflight" / f"{run_id}.atomic-write"
+    try:
+        write_text_atomic("bfcl-workspace-preflight\n", target)
+        if target.read_text(encoding="utf-8") != "bfcl-workspace-preflight\n":
+            raise OSError("atomic preflight content did not round-trip")
+        target.unlink()
+    except OSError as exc:
+        raise GuidedCliError(
+            "workspace_atomic_writes_unsupported",
+            f"workspace {workspace.resolve()} failed its atomic-write preflight: {exc}",
+            recovery="choose a local writable workspace; publish outputs may remain on shared storage",
+        ) from exc
+
+
 def _held_out_arguments(args: argparse.Namespace) -> list[str]:
     """Render the settled held-out decision for whichever intake command runs."""
     trust_mode = _trust_mode(args)
@@ -669,6 +686,7 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
         _detect_adapter(source) if args.adapter == "auto" else args.adapter,
     )
     workspace = args.workspace.resolve()
+    _preflight_workspace(workspace, run_id=args.run_id)
     output = workspace / "intake"
     resolved = resolve_authoring_config(
         adapter_kind=adapter,
@@ -760,10 +778,14 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
             resolved_config_digest=resolved.resolved_authoring_config_digest,
             lease=lease,
         )
-        if profile is not None and args.allow_model_exposure:
+        if profile is not None:
             updated = dict(profile)
-            updated["model_exposure_consented"] = True
-            updated["model_exposure_consented_by"] = args.reviewed_by or "developer"
+            updated["pack_id"] = resolved.semantic_payload.pack_id.value
+            updated["pack_version"] = resolved.semantic_payload.pack_version.value
+            updated["language"] = language or updated.get("language", "en")
+            if args.allow_model_exposure:
+                updated["model_exposure_consented"] = True
+                updated["model_exposure_consented_by"] = args.reviewed_by or "developer"
             write_canonical_json(updated, workspace / AUTHORING_PROFILE_FILE)
     if trust_mode != "compliance" and args.allow_model_exposure:
         _advance_developer_consent(

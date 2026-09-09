@@ -304,6 +304,22 @@ def test_dev_draft_needs_only_model_and_provider_after_consent(tmp_path: Path) -
     )
 
 
+def test_workspace_preflight_reports_shared_filesystem_failure_before_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unsupported(*_args: object, **_kwargs: object) -> Path:
+        raise OSError("operation not supported")
+
+    monkeypatch.setattr(bfcl_author, "write_text_atomic", unsupported)
+    with pytest.raises(
+        bfcl_author.GuidedCliError,
+        match="workspace_atomic_writes_unsupported",
+    ) as refused:
+        bfcl_author._preflight_workspace(tmp_path, run_id="test")
+    assert "local writable workspace" in refused.value.recovery
+
+
 def test_author_detects_mcp_and_delegates_existing_intake(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
