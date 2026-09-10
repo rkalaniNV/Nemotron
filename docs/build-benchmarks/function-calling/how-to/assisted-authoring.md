@@ -422,14 +422,24 @@ The command loads the exact review packet from the verified session. The approva
 defaults to `<workspace>/release_approval.json`, the frozen release to
 `<workspace>/release`, and omitted `--freeze-inputs` and `--config` paths to
 `<workspace>/freeze_inputs.json` and `<workspace>/publication.yaml`. It automatically
-checks the packet digest, blockers, validation evidence, independent certification,
-pre-model authorization, question state, and exact risk set. Interactive use shows one
-summary and asks for one confirmation. CI never prompts, so add
-`--ci --confirm-reviewed-content` only after the same review has happened outside the
-job.
+checks the packet digest, blockers, Gold validation evidence, independently verified
+A2 certification, pre-model authorization, question state, and the exact risk set, and
+refuses before asking the reviewer anything if one of them does not hold.
+
+What remains is the judgment a machine cannot make: domain semantics, descriptions and
+snapshots, stated assumptions, held-out treatment, and the reported risks. Interactive
+use prints one summary of those and asks for one confirmation.
+`--confirm-reviewed-content` records that same decision without a prompt and is
+required under `--ci`, so pass it only after the review has happened. Because `--ci`
+is a dispatcher option, place it before the subcommand:
+`bfcl_author --ci release ... --confirm-reviewed-content`.
 
 Prepare `publication.yaml` with {doc}`publish-a-release`; the guided `release` command
 runs that reviewed configuration after it freezes the approved pack.
+
+One seal identity covers both steps: `--signing-key-id` seals the frozen release and
+verifies it again at publication, so the granular flow's separate `--seal-key-id` is
+not repeated here.
 
 Projects may also put `signing_key_id`, `seal_issuer`, `seal_public_key`, and a
 `signing_key_env` reference under `release` in the reviewed authoring policy. The
@@ -443,6 +453,16 @@ intermediate phase remains separately committed, so a freeze or publication fail
 can resume from the last successful phase without asking for the same approval again.
 Publication reruns fresh Gold validation and does not trust the validation evidence
 recorded during review.
+
+The streamlined command writes a v3 approval whose `checklist_sources` maps each item
+to `machine` or `human`; the signed digest therefore preserves how every decision was
+made. The granular approval command continues to write and freeze compatible v2
+records, so existing releases do not need migration.
+
+Approval, freeze, and publication use separate short workspace leases: each next phase
+re-verifies the committed bindings, and a long publication run does not turn the whole
+sequence into one unrecoverable transaction. Delegated progress is streamed to stderr
+while stdout remains one machine-readable combined JSON verdict.
 
 The granular `approve --boundary release`, `freeze`, and `publish` commands remain
 available for custom signing, revocation, or operational workflows. A rebuilt review
