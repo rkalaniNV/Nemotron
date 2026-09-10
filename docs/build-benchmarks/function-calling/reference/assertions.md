@@ -33,6 +33,17 @@ such as tool-called, tool-not-called, and tool-called-after. It does not accept
 arbitrary model-written Python. Assertions requiring custom state or result semantics
 remain human-authored.
 
+The specification's `assertion_id` and the exported Python callable are related but
+not identical: the compiler prefixes the callable with `assert_`. For example,
+`tool_called_lookup` becomes `assert_tool_called_lookup`. A reviewed supplement's
+`success_assertions` must name the compiled callable shown in `assertions.py`; naming
+only the specification id produces `supplement_assertion_unknown`.
+
+Review that the model produced at least one direct tool-called assertion for every
+published tool that a task template may exercise independently. Order assertions are
+useful for genuine dependencies, but they do not replace direct capability coverage
+and must never compare one tool with itself.
+
 ## Function Contract
 
 Use this explicit keyword-only signature:

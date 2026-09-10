@@ -13,6 +13,7 @@ Field-level and artifact-level detail for `nemotron steps run byob/bfcl` with th
 
 Oracle Pack Inputs <oracle-pack-inputs>
 Domain Brief <domain-brief>
+Data Designer Provider Configuration <data-designer-provider>
 Probe Plan <probe-plan>
 Manifest <manifest>
 Tool Catalog And Fixtures <tools-and-fixtures>
@@ -45,6 +46,14 @@ Required files, manifest fields, fill order, and how tool names connect the pack
 Required assisted-authoring context, content boundaries, safety rules, and a complete example.
 +++
 {bdg-secondary}`authoring input`
+:::
+
+:::{grid-item-card} {octicon}`gear;1.5em;sd-mr-1` Data Designer provider configuration
+:link: data-designer-provider
+:link-type: doc
+Provider registry, endpoint, model identity, and credential environment-variable setup for model-assisted flows.
++++
+{bdg-secondary}`model configuration`
 :::
 
 :::{grid-item-card} {octicon}`beaker;1.5em;sd-mr-1` Probe plan

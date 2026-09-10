@@ -92,8 +92,8 @@ same catalog rather than a second invented library.
 flowchart TB
   START["Domain interface, state,<br/>behavior, and intents"]
   Q{"How will the pack<br/>semantics be authored?"}
-  MANUAL["Manual<br/>author writes every pack file"]
-  SOURCE["Model-assisted<br/>developer supplies an executable source"]
+  MANUAL["Manual<br/>operator writes every pack file"]
+  SOURCE["Model-assisted<br/>operator supplies an executable source"]
   INTAKE["Certify source and<br/>approve model exposure"]
   DRAFT["Model proposes bounded<br/>declarative drafts"]
   REVIEW["Human reviews semantics<br/>and release packet"]
@@ -311,6 +311,30 @@ call interface, while the brief explains which capabilities and business behavio
 matter together. Command-level intake, drafting, and freeze details are in
 {doc}`assisted-authoring`.
 
+### Know Which Files The Operator Owns
+
+An operator may enter the optional scaffold lane with only a reviewed `tools.json`
+and `domain-brief.txt`, but those two files do not contain executable domain truth.
+The scaffold writes proposals for `backend.py` and `fixtures.json`; the operator must
+complete and review them before intake. The operator also reviews or supplies the
+probe plan, held-out decision, semantic supplement, and run configurations.
+
+The pipeline owns evidence bundles, model-draft provenance, candidate-pack
+provenance, validation reports, approval records, frozen releases, Parquet tables,
+and manifests. Correct an operator-owned input and rerun its gate instead of editing
+a generated downstream artifact.
+
+The model-assisted handoff is therefore:
+
+```text
+operator: tools.json + domain-brief.txt
+  → pipeline: source scaffold proposal
+  → operator: reviewed backend.py + fixtures.json + probe-plan.json
+  → pipeline: certified evidence + bounded model drafts
+  → operator: reviewed-supplement.yaml + release approval
+  → pipeline: candidate pack + Gold validation + frozen publication
+```
+
 Create a certification key before intake:
 
 ```bash
@@ -446,7 +470,8 @@ Enable live inspection of a local Python source:
 export BFCL_ENABLE_LOCAL_PYTHON=1
 ```
 
-Then trigger the guided flow:
+Create the reviewed one-approval policy shown in {doc}`assisted-authoring`, including
+the held-out and `pre_model` blocks, then trigger the guided flow:
 
 ```bash
 uv run python -m nemotron.steps.byob.scripts.bfcl_author \
@@ -455,11 +480,10 @@ uv run python -m nemotron.steps.byob.scripts.bfcl_author \
   --source /srv/sources/library \
   --brief /srv/sources/library-domain-brief.txt \
   --adapter local_python \
+  --policy /srv/bfcl/policies/library-authoring.yaml \
   --pack-id library_catalog \
   --pack-version 0.1.0 \
   --required-tier A2 \
-  --held-out-not-applicable-reason "The library fixtures are public synthetic data." \
-  --held-out-reviewed-by reviewer@example.test \
   --certification-private-key /srv/bfcl/keys/certification-private.pem \
   --certification-key-id library-authoring \
   --probe-plan /srv/sources/library-probe-plan.json
@@ -469,33 +493,31 @@ Intake writes fingerprinted, transport-neutral evidence and derives A0, A1, or A
 from observations. A Gold release needs A2. Neither a reviewer nor a model can promote
 an under-certified source.
 
-### 6. Cross The Two Human Boundaries
+### 6. Apply Policy, Then Review And Release Once
 
 Continue with the commands that `bfcl_author` reports for the current session:
 
 ```text
 answer open questions, when present
-→ authorize the exact sanitized evidence for model exposure
-→ approve that evidence
+→ apply the reviewed pre-model policy
 → draft bounded proposals
 → assemble them with a reviewed semantic supplement
 → build and inspect the release review packet
-→ approve that exact release
-→ freeze
-→ publish
+→ release: approve, freeze, and publish
 ```
 
-These are two trust boundaries implemented by three human or policy records:
+These are still two trust boundaries, but the normal clean-evidence path needs only one
+per-run human approval:
 
-- **Pre-model:** exposure authorization and evidence approval happen before drafting
-  and decide whether a model may read one exact evidence subject.
+- **Pre-model:** `apply-policy` produces separate exposure and clean-evidence records
+  bound to the reusable organizational policy digest.
 - **Release approval** happens after fresh candidate validation and decides whether
-  one exact reviewed pack may be frozen and published.
+  one exact reviewed pack may be frozen and published; this is the operator's one
+  per-run approval.
 
-The boundaries require distinct decisions and digest-bound artifacts, not two distinct
-people. The same named person may act at multiple gates unless organizational policy
-requires separation of duties; exposure may also be authorized by an organizational
-policy digest. Editing an upstream artifact invalidates downstream approvals.
+Unresolved gaps, migrated evidence, and advisory findings fall back to explicit
+`authorize` and `approve --boundary evidence` commands. Editing an upstream artifact
+invalidates downstream policy records and approvals.
 
 ### 7. Review The Semantic Supplement And Assemble
 
@@ -557,18 +579,18 @@ The CLI binds the session's evidence, drafts, and source automatically. Assembly
 refuses any supplement tool or assertion that cannot be traced back to certified
 evidence and compiled drafts.
 
-### 8. Review, Freeze, And Publish
+### 8. Review And Release
 
 The remaining guided commands build a deterministic review packet from independently
 verified certification, fresh validation, answered questions, and the complete
-candidate pack. A reviewer approves the packet digest, then `freeze` seals the exact
-pack and sidecars. `publish` reruns fresh Gold validation and the ordinary
-`stage=all` generation pipeline rather than trusting an earlier verdict.
+candidate pack. The `release` command asks for one confirmation of the packet's
+semantics and risks, then records approval, freezes the exact pack and sidecars, and
+reruns fresh Gold validation plus the ordinary `stage=all` generation pipeline.
 
 Follow {doc}`assisted-authoring` for the remaining command-level sequence and
 `src/nemotron/steps/byob/references/bfcl-authoring-user-guide.md` for every required
 argument and refusal code. Those pages are the sources of truth for authorize, draft,
-review, freeze, and publish. The `_demo.py` walkthrough above is not a production
+review, and release. The `_demo.py` walkthrough above is not a production
 launcher.
 
 ## Where Both Paths Meet
@@ -597,7 +619,7 @@ reviewed Oracle Pack
   → render surfaces and derive expected calls
   → validate schemas and replay against the oracle
   → optionally check quality, deduplicate, and balance
-  → atomically publish benchmark.parquet and run_manifest.json
+  → atomically publish benchmark_raw.parquet + benchmark.parquet + run_manifest.json
 ```
 
 {doc}`../explanation/pipeline-worked-example` follows one task through those
@@ -638,8 +660,8 @@ source.
 
 Before scoring a candidate:
 
-1. Produce a publication run with {doc}`publish-a-release`, or Path B `publish` after
-   freeze, so the manifest can record `gold_eligible: true`.
+1. Produce a publication run with {doc}`publish-a-release`, or use Path B `release`
+   after review, so the manifest can record `gold_eligible: true`.
 2. Confirm the publication tree still contains `run_manifest.json`,
    `benchmark.parquet`, and `benchmark_raw.parquet`.
 3. For executable mode, keep the exact Oracle Pack whose fingerprint the publication

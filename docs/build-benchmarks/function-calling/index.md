@@ -141,6 +141,7 @@ artifacts, and the symptom-to-fix index.
 | --- | --- |
 | {doc}`reference/oracle-pack-inputs` | Required pack files, manifest fields, fill order, and cross-file tool lineage |
 | {doc}`reference/domain-brief` | Human-owned assisted-authoring context, content, and safety rules |
+| {doc}`reference/data-designer-provider` | Provider registry, endpoint, model identity, and credential environment-variable setup |
 | {doc}`reference/probe-plan` | Intake probe cases, A2 coverage, timeout cleanup, and `check_probe_plan` |
 | {doc}`reference/manifest` | Manifest paths, languages, shared text, confirmation vocabulary, and examples |
 | {doc}`reference/tools-and-fixtures` | Public tool schemas, deterministic records, and fixture-slot contracts |
@@ -164,7 +165,10 @@ artifacts, and the symptom-to-fix index.
 - A Nemotron clone with dependencies installed, including the `byob` extra from `uv sync --extra byob`.
 - An Oracle Pack. To learn the flow first, use the bundled `src/nemotron/steps/byob/data/tiny_oracle_pack`, which exists to exercise the plumbing quickly.
 - For evaluation, a candidate model endpoint and its credentials. Generation itself calls no model unless you explicitly enable a model-authored surface role.
-- For the assisted authoring flows, a model endpoint for drafting and the corresponding feature flag, as described in {doc}`how-to/assisted-authoring`.
+- For assisted authoring, configure a drafting model through
+  {doc}`reference/data-designer-provider` and enable the source adapter through a
+  reviewed policy or the environment variable described in
+  {doc}`how-to/assisted-authoring`.
 
 ## Quick Start
 
