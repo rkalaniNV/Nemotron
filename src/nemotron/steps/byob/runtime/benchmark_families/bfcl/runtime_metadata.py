@@ -82,7 +82,15 @@ def _in_pipeline_worktree() -> bool:
     # A wheel installed in <unrelated-repo>/.venv is physically below that repo,
     # but its bytes were not sourced from the repo's HEAD. Only tracked source may
     # inherit the surrounding checkout's revision.
-    return _git("ls-files", "--error-unmatch", "--", marker) == marker
+    #
+    # ``marker`` is relative to the toplevel, but git reads a pathspec relative to
+    # the process cwd, which is this file's directory. Without ``:(top)`` the probe
+    # asks about a path that exists nowhere and answers "untracked" for every real
+    # checkout, which silently drops the revision from every run manifest.
+    return (
+        _git("ls-files", "--error-unmatch", "--full-name", "--", f":(top){marker}")
+        == marker
+    )
 
 
 def _dependency_lock_hash() -> str | None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1289,6 +1290,74 @@ def test_run_manifest_records_smoke_lineage_and_artifact_hashes(tiny_run) -> Non
         assert manifest["artifacts"][artifact]["content_hash"].startswith("sha256:")
     assert manifest["stage_counts"]["replay_passed"] == manifest["stage_counts"]["published"]
     assert (output_dir / "benchmark_raw.parquet").exists()
+
+
+def test_runtime_metadata_reports_the_revision_of_a_tracked_source_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tracked checkout must not read as untracked to the provenance probe.
+
+    Git resolves a pathspec against the process cwd, and the probe runs from the
+    package directory while the marker names a path relative to the toplevel. A
+    pathspec that ignores that matches nothing, so every real checkout looks
+    untracked and the manifest ships ``pipeline_git_sha: null``, which leaves an
+    operator holding a published pack that no revision claims.
+    """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import runtime_metadata as module
+
+    package_root = tmp_path / "src" / "nemotron" / "steps" / "byob"
+    package_root.mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    for arguments in (
+        ("init",),
+        ("config", "user.email", "pipeline@example.invalid"),
+        ("config", "user.name", "pipeline"),
+        ("add", "."),
+        ("commit", "-m", "pipeline source"),
+    ):
+        subprocess.run(["git", *arguments], cwd=tmp_path, check=True, capture_output=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    # Real git, run from the deep cwd the pipeline uses, is what decides whether
+    # the marker resolves. A stub answering by path string would pass the probe
+    # the framing bug it is supposed to catch.
+    def probe(*arguments: str) -> str | None:
+        result = subprocess.run(
+            ["git", *arguments], cwd=package_root, capture_output=True, text=True
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    monkeypatch.setattr(module, "_step_package_root", lambda: package_root)
+    monkeypatch.setattr(module, "_git", probe)
+    for name in ("GIT_COMMIT", "CI_COMMIT_SHA"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert module._in_pipeline_worktree() is True
+    assert module.runtime_metadata()["pipeline_git_sha"] == head
+
+
+def test_manifest_and_checkpoint_read_one_pipeline_identity() -> None:
+    """Two answers to "which pipeline ran" cannot stay equal by coincidence.
+
+    A resume compares the checkpoint identity against the current one, so a
+    second private copy of the source hash reports drift on an unchanged tree,
+    and a narrower copy stays silent when shared runtime code did change.
+    """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import checkpoint
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.runtime_metadata import (
+        runtime_metadata,
+    )
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages import final_output
+
+    assert final_output.runtime_metadata is runtime_metadata
+    assert checkpoint.runtime_metadata is runtime_metadata
 
 
 def test_prepare_invalidates_a_previous_publication_before_rewriting_lineage(
