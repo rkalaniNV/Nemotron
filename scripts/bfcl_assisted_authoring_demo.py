@@ -304,7 +304,7 @@ DRAFT_RESPONSES: dict[str, dict[str, Any]] = {
                 "tool": "rebuild_catalog_index",
                 "kind": "success",
                 "intent": "Refresh the index without walking every shelf.",
-                "arguments": [{"name": "full", "source": "literal", "literal": "false"}],
+                "arguments": [{"name": "full", "source": "literal", "literal": False}],
                 "expectation": "The index is refreshed and reports how many books it saw.",
                 "blocked_on": [],
             },
@@ -1066,6 +1066,12 @@ def main() -> None:
             str(release_approval),
             "--output",
             str(release_root),
+            "--signing-key",
+            str(private_key),
+            "--signing-key-id",
+            KEY_ID,
+            "--seal-issuer",
+            "bfcl-demo",
         ]
     )
 
@@ -1090,6 +1096,12 @@ def main() -> None:
             str(release_root),
             "--config",
             str(publication_config),
+            "--seal-issuer",
+            "bfcl-demo",
+            "--seal-public-key",
+            str(public_key),
+            "--seal-key-id",
+            KEY_ID,
         ]
     )
     published = workspace / "generated" / "bfcl-demo"

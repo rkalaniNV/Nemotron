@@ -41,6 +41,10 @@ StructuredCaller = Callable[..., dict[str, dict[str, Any]]]
 class AuthoringModelError(Exception):
     """Raised when the authoring model cannot be used or did not answer."""
 
+    def __init__(self, message: str, *, response: Any = None) -> None:
+        super().__init__(message)
+        self.response = response
+
 
 @dataclass(frozen=True)
 class AuthoringModel:
@@ -95,6 +99,7 @@ class ModelCallRecord:
     output_schema_hash: str
     model_canonical: str
     served_from_cache: bool
+    source: str = "model"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -106,6 +111,7 @@ class ModelCallRecord:
             "output_schema_hash": self.output_schema_hash,
             "model_canonical": self.model_canonical,
             "served_from_cache": self.served_from_cache,
+            "source": self.source,
         }
 
 
@@ -166,6 +172,9 @@ def call_structured(
         output_schema=schema,
         seed=model.seed,
     )
+    # Older cached responses materialized omitted fields as null. They cannot prove
+    # literal presence, so keep them intact but use a new normalization namespace.
+    key = sha256_json({"normalization": "preserve-unset-v2", "request_hash": key})
     input_hash = sha256_json(model_input)
     record = ModelCallRecord(
         stage=stage_name,
@@ -181,11 +190,13 @@ def call_structured(
     cached = cache.get(key)
     if cached is not None:
         try:
-            validated = output_format.model_validate(cached).model_dump(mode="json")
-        except ValidationError:
-            # Old clients could persist a schema-invalid provider draft. Remove only the
-            # exact invalid observation so the same request can recover on this run.
-            cache.invalidate(key, expected_response=cached)
+            validated = output_format.model_validate(cached).model_dump(mode="json", exclude_unset=True)
+        except ValidationError as exc:
+            # A cache is an observation, not permission to ask a model to repair it.
+            raise AuthoringModelError(
+                f"{stage_name} cached response is invalid; human correction is required",
+                response=cached,
+            ) from exc
         else:
             if quota is not None:
                 quota.record_cache_hit(batch_size=1)
@@ -219,9 +230,16 @@ def call_structured(
     if quota is not None:
         quota.check_after_provider_call()
     try:
-        validated = output_format.model_validate(response).model_dump(mode="json")
+        validated = output_format.model_validate(response).model_dump(mode="json", exclude_unset=True)
     except ValidationError as exc:
-        raise AuthoringModelError(f"{stage_name} returned a response outside the requested output schema") from exc
+        details = "; ".join(
+            f"{'.'.join(map(str, error['loc']))}: {error['msg']}"
+            for error in exc.errors(include_input=False, include_url=False, include_context=False)
+        )
+        raise AuthoringModelError(
+            f"{stage_name} returned a response outside the requested output schema: {details}",
+            response=response,
+        ) from exc
     cache.put(
         key,
         validated,

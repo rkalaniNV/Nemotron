@@ -271,6 +271,7 @@ def assemble_review(
     adapter_kind: AdapterKind,
     pack_root: Path,
     context: ReviewContext,
+    trust_mode: str = "compliance",
 ) -> AssembledReview:
     evidence = load_evidence_bundle(
         context.evidence_path,
@@ -562,6 +563,7 @@ def assemble_review(
         adapter=adapter,
         pack_root=pack_root,
         source_digests=source_digests,
+        trust_mode=trust_mode,
     )
     return AssembledReview(
         packet=packet,

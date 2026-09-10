@@ -33,6 +33,7 @@ from nemotron.steps.byob.runtime.authoring_workflow.resolved_config import (
     resolved_config_digest,
 )
 from nemotron.steps.byob.runtime.pack_authoring.bundle import BundleError
+from nemotron.steps.byob.runtime.pack_authoring.drafts import DraftReview
 from nemotron.steps.byob.runtime.pack_authoring.grounding import GroundingError
 from nemotron.steps.byob.runtime.pack_authoring.model_client import (
     AuthoringModel,
@@ -73,6 +74,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Reviewer approval naming the bundle digest and every flagged finding",
     )
     parser.add_argument("--output", type=Path, required=True, help="Directory for drafts")
+    parser.add_argument(
+        "--reviewed-draft", action="append", default=[],
+        choices=("coverage_plan", "validation_cases", "task_templates", "assertion_specs"),
+        help="Canonical draft file corrected and reviewed by a human; repeat for each file",
+    )
+    parser.add_argument("--draft-reviewed-by")
+    parser.add_argument("--draft-reviewed-at", help="Explicit ISO-8601 human review time with timezone")
     parser.add_argument("--model-alias", required=True)
     parser.add_argument("--model-provider", required=True)
     parser.add_argument("--model", required=True)
@@ -123,11 +131,19 @@ def main() -> None:
         request_timeout_s=args.request_timeout,
     )
     try:
+        review = None
+        if args.reviewed_draft or args.draft_reviewed_by or args.draft_reviewed_at:
+            if not (args.reviewed_draft and args.draft_reviewed_by and args.draft_reviewed_at):
+                raise ValueError(
+                    "corrected drafts require --reviewed-draft, --draft-reviewed-by and --draft-reviewed-at"
+                )
+            review = DraftReview(tuple(args.reviewed_draft), args.draft_reviewed_by, args.draft_reviewed_at)
         result = run_drafting(
             args.bundle,
             args.approval,
             args.output,
             model,
+            human_review=review,
             certification_report_path=args.certification_report,
             trusted_certification_keys=load_trusted_certification_key(
                 args.certification_public_key,

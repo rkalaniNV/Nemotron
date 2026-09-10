@@ -42,7 +42,9 @@ def canonical_json(value: Any) -> str:
 
 def encode_arguments(arguments: dict[str, Any]) -> dict[str, str]:
     """Encode a call's arguments object for the Arrow map column."""
-    return {str(name): canonical_json(value) for name, value in arguments.items()}
+    # JSON checkpoints sort object keys; Arrow maps preserve insertion order.
+    # Canonicalize both fresh and resumed runs without changing argument values.
+    return {str(name): canonical_json(value) for name, value in sorted(arguments.items())}
 
 
 def decode_arguments(encoded: Any) -> dict[str, Any]:

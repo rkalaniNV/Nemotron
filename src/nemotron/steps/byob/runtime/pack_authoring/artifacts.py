@@ -24,8 +24,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.row_schema import canonical_json
 
@@ -44,10 +47,19 @@ def write_text_atomic(text: str, path: Path) -> Path:
     """Replace ``path`` with ``text`` in one step, or leave it untouched."""
     destination = path.resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+    descriptor, name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
+    temporary = Path(name)
     try:
-        temporary.write_text(text, encoding="utf-8")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, destination)
+        directory = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except OSError:
         temporary.unlink(missing_ok=True)
         raise
@@ -57,3 +69,11 @@ def write_text_atomic(text: str, path: Path) -> Path:
 def write_canonical_json(document: Any, path: Path) -> Path:
     """Write one JSON document in the canonical form its digest was taken over."""
     return write_text_atomic(canonical_json(document) + "\n", path)
+
+
+def write_canonical_yaml(document: Any, path: Path) -> Path:
+    """Use the same deterministic YAML representation for proposals and checkpoints."""
+    return write_text_atomic(
+        yaml.safe_dump(document, sort_keys=True, default_flow_style=False, allow_unicode=True, width=100),
+        path,
+    )

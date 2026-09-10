@@ -32,6 +32,13 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from nemotron.steps.byob.runtime.authoring_release.freeze import load_frozen_release
+from nemotron.steps.byob.runtime.authoring_release.review import REQUIRED_CHECKLIST_V2
+from nemotron.steps.byob.runtime.authoring_release.trust import trust_fields
+from nemotron.steps.byob.runtime.authoring_release.versions import (
+    FREEZE_MANIFEST_VERSION_V3,
+    FREEZE_MANIFEST_VERSION_V4,
+)
 from nemotron.steps.byob.runtime.authoring_workflow.cache_retention import (
     CACHE_PURGE_AUDIT_FILE_NAME,
     infer_authoring_cache_path,
@@ -58,12 +65,14 @@ from nemotron.steps.byob.runtime.authoring_workflow.resume import (
     ApprovalBinding,
     AuthoringCommand,
     AuthoringPhase,
+    AuthoringResumeError,
     AuthoringResumeGate,
     ResumedAuthoringSession,
     SessionBindings,
     bind_artifact,
     build_session_state,
 )
+from nemotron.steps.byob.runtime.authoring_workflow.workspace_keys import workspace_key_pair
 from nemotron.steps.byob.runtime.authoring_workflow.workspace_lock import (
     WorkspaceLease,
     WorkspaceLock,
@@ -72,6 +81,7 @@ from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfi
 from nemotron.steps.byob.runtime.pack_authoring.artifacts import (
     sha256_json,
     write_canonical_json,
+    write_text_atomic,
 )
 from nemotron.steps.byob.runtime.pack_authoring.authorization import (
     ExposureSubject,
@@ -88,6 +98,7 @@ from nemotron.steps.byob.runtime.pack_authoring.questions import (
     load_open_questions,
     write_evidence_revision,
 )
+from nemotron.steps.byob.runtime.release_seal import load_trusted_release_seal_key
 from nemotron.steps.byob.runtime.source_adapters.certification import AdapterTier
 from nemotron.steps.byob.runtime.source_adapters.evidence import load_source_evidence
 from nemotron.steps.byob.runtime.source_adapters.migration import (
@@ -106,6 +117,8 @@ _DELEGATES = {
 # the evidence, so for that adapter the certified source tree assembly binds is that
 # directory rather than the intake declaration the operator named.
 _MCP_INTAKE_PACK = ("intake", "pack")
+AUTHORING_PROFILE_FILE = "authoring_profile.json"
+TRUST_MODES = ("dev", "release", "compliance")
 
 
 class GuidedCliError(ValueError):
@@ -144,30 +157,57 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ci", action="store_true", help="Never request interactive input")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    prepare = subparsers.add_parser(
+        "prepare",
+        help="Create a review-gated executable-source scaffold from tools + domain brief",
+    )
+    _add_workspace(prepare)
+    prepare.add_argument("--tools", type=Path, required=True)
+    prepare.add_argument("--brief", type=Path, required=True)
+    prepare.add_argument("--language", required=True)
+    prepare.add_argument("--source-output", type=Path)
+    prepare.add_argument("--pack-id")
+    prepare.add_argument("--pack-version", default="0.1.0")
+    prepare.add_argument("--trust-mode", choices=TRUST_MODES, default="dev")
+    prepare.add_argument("--draft-with-model", action="store_true")
+    prepare.add_argument("--model-alias")
+    prepare.add_argument("--model-provider")
+    prepare.add_argument("--model")
+    prepare.add_argument("--model-canonical-id")
+    prepare.add_argument("--request-timeout", type=int, default=600)
+
     author = subparsers.add_parser(
         "author",
         help="Run source intake from the normal source + brief inputs",
     )
     _add_workspace(author)
-    author.add_argument("--source", required=True, metavar="PATH_OR_FILE_URI")
-    author.add_argument("--brief", type=Path, required=True)
+    author.add_argument("--source", metavar="PATH_OR_FILE_URI")
+    author.add_argument("--brief", type=Path)
     author.add_argument(
         "--adapter",
         choices=("auto", "local_python", "http_package", "mcp_mode_a"),
         default="auto",
     )
     author.add_argument("--policy", type=Path)
+    author.add_argument("--language")
     author.add_argument("--pack-id")
     author.add_argument("--pack-version")
     author.add_argument("--confirm-pack-id", action="store_true")
     author.add_argument("--confirm-pack-version", action="store_true")
     author.add_argument("--required-tier", choices=("A0", "A1", "A2"))
+    author.add_argument("--trust-mode", choices=TRUST_MODES)
+    author.add_argument(
+        "--allow-model-exposure",
+        action="store_true",
+        help="Explicitly consent to sending reviewed evidence to the authoring model",
+    )
+    author.add_argument("--reviewed-by")
     # Held-out status has to be settled before the first model call, so it is declared
     # here rather than passed through to whichever intake command runs.
-    held_out = author.add_mutually_exclusive_group(required=True)
+    held_out = author.add_mutually_exclusive_group()
     held_out.add_argument("--held-out-policy", type=Path)
     held_out.add_argument("--held-out-not-applicable-reason")
-    author.add_argument("--held-out-reviewed-by", required=True)
+    author.add_argument("--held-out-reviewed-by")
     author.add_argument("--held-out-content", type=Path)
 
     resume = subparsers.add_parser("resume", help="Verify a session and permitted next step")
@@ -233,8 +273,17 @@ def _parser() -> argparse.ArgumentParser:
         help="Record evidence approval or distinct final release approval",
     )
     _add_workspace(approve)
-    approve.add_argument("--boundary", choices=("evidence", "release"), required=True)
+    approve.add_argument("--boundary", choices=("evidence", "release"))
     approve.add_argument("--approved-by")
+    approve.add_argument("--reviewed-at")
+    approve.add_argument(
+        "--accept-reviewed-release",
+        action="store_true",
+        help=(
+            "Dev/release shortcut: approve every item in the exact review packet and "
+            "then freeze it with a workspace-local seal (rerun to resume a failed freeze)"
+        ),
+    )
     approve.add_argument("--source-bundle-digest")
     approve.add_argument("--normalized-bundle-digest")
     approve.add_argument("--migration-record-digest")
@@ -300,16 +349,30 @@ def _delegate(module_name: str, arguments: list[str]) -> None:
 
 
 def _required_path_argument(arguments: list[str], name: str) -> Path:
-    try:
-        index = arguments.index(name)
-        raw = arguments[index + 1]
-    except (ValueError, IndexError) as exc:
+    raw = _argument_value(arguments, name)
+    if raw is None:
         raise GuidedCliError(
             "guided_output_missing",
             f"delegated command requires {name} for session binding",
             recovery=f"provide {name} inside the guided workspace",
-        ) from exc
+        )
     return Path(raw).resolve()
+
+
+def _argument_value(arguments: list[str], name: str) -> str | None:
+    # Match argparse's last-occurrence behavior, including --option=value.
+    result = None
+    for index, argument in enumerate(arguments):
+        if argument.startswith(f"{name}="):
+            result = argument.split("=", 1)[1]
+        elif argument == name:
+            result = arguments[index + 1] if index + 1 < len(arguments) else None
+    return result
+
+
+def _with_default_argument(arguments: list[str], name: str, value: str | Path) -> None:
+    if not any(argument == name or argument.startswith(f"{name}=") for argument in arguments):
+        arguments += [name, str(value)]
 
 
 def _current_session(
@@ -443,8 +506,212 @@ def _source_path(value: str) -> Path:
     return Path(urllib.parse.unquote(parsed.path)).resolve()
 
 
+def _load_authoring_profile(workspace: Path) -> dict[str, Any] | None:
+    path = workspace.resolve() / AUTHORING_PROFILE_FILE
+    if not path.is_file():
+        return None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GuidedCliError(
+            "authoring_profile_invalid",
+            f"cannot read {path}: {exc}",
+            recovery="rerun prepare or remove the invalid profile",
+        ) from exc
+    if not isinstance(document, dict) or document.get("trust_mode") not in TRUST_MODES:
+        raise GuidedCliError(
+            "authoring_profile_invalid",
+            f"{path} does not declare a supported trust_mode",
+            recovery="rerun prepare or pass --trust-mode explicitly",
+        )
+    return document
+
+
+def _trust_mode(args: argparse.Namespace) -> str:
+    explicit = getattr(args, "trust_mode", None)
+    if explicit is not None:
+        return str(explicit)
+    profile = _load_authoring_profile(args.workspace)
+    return str(profile["trust_mode"]) if profile is not None else "compliance"
+
+
+def _local_certification_arguments(workspace: Path) -> list[str]:
+    """Create a workspace-scoped development key without making it a user input."""
+    private_path, _ = workspace_key_pair(workspace, "source-certification")
+    return [
+        "--certification-private-key",
+        str(private_path),
+        "--certification-key-id",
+        "workspace-development",
+    ]
+
+
+def _local_release_seal(workspace: Path) -> tuple[Path, Path, str, str]:
+    """Return a workspace-local seal for an unofficial developer release."""
+    private_path, public_path = workspace_key_pair(workspace, "release-seal")
+    return private_path, public_path, "workspace-development-release", "workspace-development"
+
+
+def _developer_release_approval_arguments(
+    args: argparse.Namespace,
+    remainder: list[str],
+) -> tuple[list[str], list[str] | None]:
+    """Collapse checklist acknowledgement and sealing into one explicit dev approval."""
+    if _trust_mode(args) == "compliance":
+        return remainder, None
+    if not args.accept_reviewed_release:
+        raise GuidedCliError(
+            "reviewed_release_acceptance_required",
+            "dev/release approval must explicitly accept the exact reviewed release",
+            recovery="review review_packet.json, then pass --accept-reviewed-release",
+        )
+    arguments = list(remainder)
+    workspace = args.workspace.resolve()
+    _with_default_argument(arguments, "--packet", workspace / "review_packet.json")
+    _with_default_argument(
+        arguments,
+        "--output",
+        args.output if args.output is not None else workspace / "release_approval.json",
+    )
+    if args.approved_by is not None:
+        _with_default_argument(arguments, "--approved-by", args.approved_by)
+    if args.reviewed_at is not None:
+        _with_default_argument(arguments, "--reviewed-at", args.reviewed_at)
+    if args.note is not None:
+        _with_default_argument(arguments, "--note", args.note)
+    for risk in args.acknowledge_finding:
+        arguments += ["--acknowledge-risk", risk]
+    for name in sorted(REQUIRED_CHECKLIST_V2):
+        flag = f"--accept-{name.replace('_', '-')}"
+        if flag not in arguments:
+            arguments.append(flag)
+    if _argument_value(arguments, "--approved-by") is None:
+        raise GuidedCliError(
+            "release_approver_required",
+            "final release approval needs --approved-by",
+            recovery="identify the human who reviewed the exact review packet",
+        )
+    if _argument_value(arguments, "--reviewed-at") is None:
+        raise GuidedCliError(
+            "release_review_time_required",
+            "final release approval needs --reviewed-at",
+            recovery="pass an ISO-8601 review timestamp",
+        )
+    private_key, _public_key, key_id, issuer = _local_release_seal(workspace)
+    freeze_arguments = [
+        "--freeze-inputs",
+        str(workspace / "freeze-inputs.json"),
+        "--approval",
+        str(_required_path_argument(arguments, "--output")),
+        "--output",
+        str(workspace / "release"),
+        "--signing-key",
+        str(private_key),
+        "--signing-key-id",
+        key_id,
+        "--seal-issuer",
+        issuer,
+    ]
+    return arguments, freeze_arguments
+
+
+def _developer_publish_arguments(args: argparse.Namespace, remainder: list[str]) -> list[str]:
+    """Fill local release and seal paths for the developer lane."""
+    mode = _trust_mode(args)
+    if mode == "compliance":
+        return remainder
+    arguments = list(remainder)
+    workspace = args.workspace.resolve()
+    _private_key, public_key, key_id, issuer = _local_release_seal(workspace)
+    _with_default_argument(arguments, "--release", workspace / "release")
+    _with_default_argument(arguments, "--seal-public-key", public_key)
+    _with_default_argument(arguments, "--seal-key-id", key_id)
+    _with_default_argument(arguments, "--seal-issuer", issuer)
+    manifest_path = _required_path_argument(arguments, "--release") / "freeze_manifest.json"
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected = trust_fields(mode)
+        if {name: manifest.get(name) for name in expected} != expected:
+            raise GuidedCliError(
+                "publication_trust_mismatch",
+                "developer publication requires a release sealed with this workspace's unofficial trust status",
+                recovery=(
+                    "rebuild the review packet and obtain human approval; "
+                    "do not reuse a pre-fix unlabelled release"
+                ),
+            )
+    # This is an early migration guard; the publisher still verifies the full seal.
+    return arguments
+
+
+def _developer_review_arguments(args: argparse.Namespace, remainder: list[str]) -> list[str]:
+    """Fill mechanical review inputs while leaving validation evidence explicit."""
+    trust_mode = _trust_mode(args)
+    requested_trust = _argument_value(remainder, "--trust-mode")
+    if requested_trust is not None and requested_trust != trust_mode:
+        raise GuidedCliError(
+            "authoring_trust_override_forbidden",
+            "review trust mode must match the authoring workspace profile",
+            recovery="review using the workspace's declared trust mode",
+        )
+    if trust_mode == "compliance":
+        return remainder
+    arguments = list(remainder)
+    workspace = args.workspace.resolve()
+    intake = workspace / "intake"
+    defaults: tuple[tuple[str, Path | str], ...] = (
+        ("--trust-mode", trust_mode),
+        ("--pack", workspace / "candidate" / "pack"),
+        ("--evidence", intake / "evidence_bundle.json"),
+        ("--certification-report", intake / "adapter_certification.json"),
+        ("--certification-public-key", workspace / ".trust" / "source-certification-public.pem"),
+        ("--certification-key-id", "workspace-development"),
+        ("--domain-brief-source", intake / "domain_brief.source.txt"),
+        ("--domain-brief-report", intake / "domain_brief_redaction.json"),
+        ("--held-out-redaction-report", intake / "held_out_redaction.json"),
+        ("--source-observations", intake / "source_observations.json"),
+        ("--intake-provenance", intake / "intake_provenance.json"),
+        ("--draft-provenance", workspace / "drafting" / "draft_provenance.json"),
+        ("--resolved-authoring-config", workspace / RESOLVED_AUTHORING_CONFIG_FILE),
+        ("--exposure-authorization", workspace / "model_exposure_consent.json"),
+        ("--evidence-approval", workspace / "development_evidence_consent.json"),
+        ("--output", workspace / "review_packet.json"),
+        ("--freeze-inputs-output", workspace / "freeze-inputs.json"),
+    )
+    for name, value in defaults:
+        _with_default_argument(arguments, name, value)
+    return arguments
+
+
+def _preflight_workspace(workspace: Path, *, run_id: str) -> None:
+    """Fail before probes/model calls if atomic workspace writes are unsupported."""
+    target = workspace.resolve() / ".preflight" / f"{run_id}.atomic-write"
+    try:
+        write_text_atomic("bfcl-workspace-preflight\n", target)
+        if target.read_text(encoding="utf-8") != "bfcl-workspace-preflight\n":
+            raise OSError("atomic preflight content did not round-trip")
+        target.unlink()
+    except OSError as exc:
+        raise GuidedCliError(
+            "workspace_atomic_writes_unsupported",
+            f"workspace {workspace.resolve()} failed its atomic-write preflight: {exc}",
+            recovery="choose a local writable workspace; publish outputs may remain on shared storage",
+        ) from exc
+
+
 def _held_out_arguments(args: argparse.Namespace) -> list[str]:
     """Render the settled held-out decision for whichever intake command runs."""
+    trust_mode = _trust_mode(args)
+    if args.held_out_policy is None and args.held_out_not_applicable_reason is None:
+        if trust_mode == "compliance":
+            raise SystemExit(2)
+        args.held_out_not_applicable_reason = (
+            "Development benchmark: no reserved held-out content was supplied."
+        )
+    if args.held_out_reviewed_by is None:
+        if trust_mode == "compliance":
+            raise SystemExit(2)
+        args.held_out_reviewed_by = args.reviewed_by or "developer"
     if args.held_out_content is not None and args.held_out_policy is None:
         raise GuidedCliError(
             "held_out_content_unbound",
@@ -464,15 +731,104 @@ def _held_out_arguments(args: argparse.Namespace) -> list[str]:
     return arguments
 
 
+def _run_prepare(args: argparse.Namespace, remainder: list[str]) -> None:
+    """Materialize generated source files and stop before any code can execute."""
+    workspace = args.workspace.resolve()
+    source = (args.source_output or workspace / "source").resolve()
+    arguments = [
+        "--tools",
+        str(args.tools.resolve()),
+        "--output",
+        str(source),
+        "--dependency-lock",
+    ]
+    if args.draft_with_model:
+        arguments += [
+            "--draft-with-model",
+            "--domain-brief",
+            str(args.brief.resolve()),
+            "--model-alias",
+            str(args.model_alias or ""),
+            "--model-provider",
+            str(args.model_provider or ""),
+            "--model",
+            str(args.model or ""),
+            "--model-canonical-id",
+            str(args.model_canonical_id or ""),
+            "--request-timeout",
+            str(args.request_timeout),
+        ]
+    _delegate(
+        "nemotron.steps.byob.scripts.scaffold_source_package",
+        [*arguments, *remainder],
+    )
+    profile = {
+        "schema_version": "bfcl-authoring-profile-v1",
+        "trust_mode": args.trust_mode,
+        "language": args.language,
+        "source": str(source),
+        "tools": str(args.tools.resolve()),
+        "domain_brief": str(args.brief.resolve()),
+        "pack_id": args.pack_id,
+        "pack_version": args.pack_version,
+        "model_exposure_consented": False,
+        "release_status": "not_released",
+        "official_publishable": args.trust_mode == "compliance",
+        **trust_fields(args.trust_mode),
+    }
+    profile_path = write_canonical_json(profile, workspace / AUTHORING_PROFILE_FILE)
+    _print(
+        {
+            "status": "source_review_required",
+            "trust_mode": args.trust_mode,
+            "source": str(source),
+            "profile": str(profile_path),
+            "review_marker": "BFCL-TODO",
+            "next": (
+                "Review backend.py and fixtures.json, remove every BFCL review/TODO "
+                "marker, then run author."
+            ),
+        }
+    )
+
+
 def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
-    source = _source_path(args.source)
-    brief = args.brief.resolve()
+    profile = _load_authoring_profile(args.workspace)
+    source_value = args.source or (profile.get("source") if profile is not None else None)
+    brief_value = args.brief or (
+        Path(str(profile["domain_brief"]))
+        if profile is not None and profile.get("domain_brief")
+        else None
+    )
+    if source_value is None or brief_value is None:
+        raise SystemExit(2)
+    source = _source_path(str(source_value))
+    brief = Path(brief_value).resolve()
+    if profile is not None:
+        args.pack_id = args.pack_id or profile.get("pack_id")
+        args.pack_version = args.pack_version or profile.get("pack_version")
     held_out = _held_out_arguments(args)
+    trust_mode = _trust_mode(args)
+    intake_remainder = list(remainder)
+    private_flag = "--certification-private-key" in intake_remainder
+    key_id_flag = "--certification-key-id" in intake_remainder
+    if private_flag != key_id_flag:
+        raise GuidedCliError(
+            "certification_key_incomplete",
+            "certification private key and key id must be supplied together",
+            recovery="supply both flags, or omit both in dev/release mode",
+        )
+    if trust_mode != "compliance" and not private_flag:
+        intake_remainder += _local_certification_arguments(args.workspace)
+    language = args.language or (profile.get("language") if profile is not None else None)
+    if language is not None and "--domain-brief-language" not in intake_remainder:
+        intake_remainder += ["--domain-brief-language", str(language)]
     adapter = cast(
         AdapterKind,
         _detect_adapter(source) if args.adapter == "auto" else args.adapter,
     )
     workspace = args.workspace.resolve()
+    _preflight_workspace(workspace, run_id=args.run_id)
     output = workspace / "intake"
     resolved = resolve_authoring_config(
         adapter_kind=adapter,
@@ -527,7 +883,7 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
                     "--resolved-authoring-config",
                     str(config_path),
                     *held_out,
-                    *remainder,
+                    *intake_remainder,
                 ],
             )
         else:
@@ -551,7 +907,7 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
                     "--resolved-authoring-config",
                     str(config_path),
                     *held_out,
-                    *remainder,
+                    *intake_remainder,
                 ],
             )
         _commit_intake_session(
@@ -563,6 +919,21 @@ def _run_author(args: argparse.Namespace, remainder: list[str]) -> None:
             evidence_path=output / "evidence_bundle.json",
             resolved_config_digest=resolved.resolved_authoring_config_digest,
             lease=lease,
+        )
+        if profile is not None:
+            updated = dict(profile)
+            updated["pack_id"] = resolved.semantic_payload.pack_id.value
+            updated["pack_version"] = resolved.semantic_payload.pack_version.value
+            updated["language"] = language or updated.get("language", "en")
+            if args.allow_model_exposure:
+                updated["model_exposure_consented"] = True
+                updated["model_exposure_consented_by"] = args.reviewed_by or "developer"
+            write_canonical_json(updated, workspace / AUTHORING_PROFILE_FILE)
+    if trust_mode != "compliance" and args.allow_model_exposure:
+        _advance_developer_consent(
+            args,
+            output=output,
+            actor=args.reviewed_by or "developer",
         )
 
 
@@ -659,6 +1030,144 @@ def _commit_intake_session(
     )
 
 
+def _authorize_transition(args: argparse.Namespace, authorization_args: argparse.Namespace) -> None:
+    gate, resumed = _current_session(args, "authorize_exposure")
+    with resumed:
+        output = _run_authorize(authorization_args, lease=resumed.lease)
+        _commit_transition(
+            args, gate, resumed, phase="exposure_authorized",
+            updates={"exposure_authorization": bind_artifact(
+                args.workspace, output, digest_kind="canonical_json",
+            )},
+        )
+
+
+def _evidence_approval_transition(args: argparse.Namespace, approval_args: argparse.Namespace) -> None:
+    gate, resumed = _current_session(args, "approve_evidence")
+    with resumed:
+        output, evidence_digest = _run_evidence_approval(approval_args, lease=resumed.lease)
+        _commit_transition(
+            args, gate, resumed, phase="evidence_approved",
+            updates={"approval": ApprovalBinding(
+                artifact=bind_artifact(args.workspace, output, digest_kind="canonical_json"),
+                evidence_digest=evidence_digest,
+            )},
+        )
+
+
+def _freeze_transition(
+    args: argparse.Namespace,
+    arguments: list[str],
+    *,
+    retry_approval_arguments: list[str] | None = None,
+) -> None:
+    gate, resumed = _current_session(args, "freeze")
+    with resumed:
+        output = _required_path_argument(arguments, "--output")
+        approval = None
+        if retry_approval_arguments is not None:
+            state = gate.load_state(resumed.verdict.session_digest)
+            for name, binding in (
+                ("--packet", state.bindings.review_packet),
+                ("--output", state.bindings.release_approval),
+            ):
+                requested = bind_artifact(
+                    args.workspace, _required_path_argument(retry_approval_arguments, name),
+                    digest_kind="canonical_json",
+                )
+                if requested != binding:
+                    raise GuidedCliError(
+                        "approved_release_changed",
+                        "freeze recovery must use the original approved packet and approval",
+                        recovery="restore the exact approved artifacts before rerunning approve",
+                    )
+            approval = json.loads(_required_path_argument(
+                retry_approval_arguments, "--output",
+            ).read_text(encoding="utf-8"))
+            for flag, field in (("--approved-by", "approved_by"), ("--reviewed-at", "reviewed_at")):
+                requested_value = _argument_value(retry_approval_arguments, flag)
+                if field == "approved_by" and requested_value is not None:
+                    requested_value = requested_value.strip()
+                if requested_value != approval[field]:
+                    raise GuidedCliError(
+                        "approved_release_changed",
+                        "freeze recovery cannot replace the recorded human approval",
+                        recovery="rerun approve with the original reviewer and review timestamp",
+                    )
+        if approval is not None and output.exists():
+            # A crash after the atomic freeze rename may leave a complete release
+            # before the session transition. Verify its seal and exact approval.
+            _, public_key, key_id, issuer = _local_release_seal(args.workspace)
+            release = load_frozen_release(
+                output,
+                trusted_seal_keys=load_trusted_release_seal_key(public_key, key_id=key_id),
+                expected_seal_issuer=issuer,
+            )
+            if (
+                release.manifest.get("schema_version") not in {
+                    FREEZE_MANIFEST_VERSION_V3, FREEZE_MANIFEST_VERSION_V4,
+                }
+                or release.manifest.get("review_approval_digest") != approval["approval_digest"]
+                or release.manifest.get("review_packet_digest") != approval["review_packet_digest"]
+            ):
+                raise GuidedCliError(
+                    "approved_release_changed",
+                    "existing frozen release does not match the recorded human approval",
+                    recovery="restore the exact approved release before rerunning approve",
+                )
+        else:
+            _delegate(_DELEGATES["freeze"], arguments)
+        _commit_transition(
+            args, gate, resumed, phase="frozen",
+            updates={"frozen_manifest": bind_artifact(
+                args.workspace, output / "freeze_manifest.json", digest_kind="canonical_json",
+            )},
+        )
+
+
+def _advance_developer_consent(
+    args: argparse.Namespace,
+    *,
+    output: Path,
+    actor: str,
+) -> None:
+    """Translate one dev/release exposure consent into the legacy session bindings."""
+    workspace = args.workspace.resolve()
+    authorization_args = argparse.Namespace(
+        workspace=workspace,
+        tenant_id=args.tenant_id,
+        run_id=args.run_id,
+        subject=output / "model_exposure_subject.json",
+        authorized_by=actor,
+        organizational_policy_digest=None,
+        output=workspace / "model_exposure_consent.json",
+    )
+    _authorize_transition(args, authorization_args)
+
+    evidence = load_source_evidence(output / "evidence_bundle.json")
+    brief_report = json.loads(
+        (output / "domain_brief_redaction.json").read_text(encoding="utf-8")
+    )
+    findings = sorted(
+        f"{finding['location']}:{finding['code']}"
+        for finding in brief_report.get("advisory", [])
+    )
+    approval_args = argparse.Namespace(
+        workspace=workspace,
+        tenant_id=args.tenant_id,
+        run_id=args.run_id,
+        approved_by=f"dev-consent:{actor}",
+        source_bundle_digest=evidence.bundle_digest,
+        normalized_bundle_digest=evidence.bundle_digest,
+        migration_record_digest=None,
+        acknowledge_warning=[],
+        acknowledge_finding=findings,
+        note="Generated from explicit --allow-model-exposure consent; not release approval.",
+        output=workspace / "development_evidence_consent.json",
+    )
+    _evidence_approval_transition(args, approval_args)
+
+
 def _declared_source(workspace: Path, declaration_path: Path, adapter_kind: str) -> Path:
     """Return the certified source tree assembly should bind, per adapter shape."""
     if adapter_kind == "mcp_mode_a":
@@ -715,6 +1224,56 @@ def _assemble_arguments(
             ),
         ]
     return [*arguments, *remainder]
+
+
+def _developer_draft_arguments(
+    args: argparse.Namespace,
+    remainder: list[str],
+) -> list[str]:
+    """Fill verified workspace inputs for the dev/release drafting lane."""
+    if _trust_mode(args) == "compliance":
+        return remainder
+    profile = _load_authoring_profile(args.workspace)
+    if profile is None or not profile.get("model_exposure_consented"):
+        raise GuidedCliError(
+            "model_exposure_consent_required",
+            "dev/release drafting requires explicit --allow-model-exposure consent at authoring",
+            recovery="rerun author with --allow-model-exposure and --reviewed-by",
+        )
+    arguments = list(remainder)
+    workspace = args.workspace.resolve()
+    intake = workspace / "intake"
+    defaults: tuple[tuple[str, Path | str], ...] = (
+        ("--bundle", intake / "evidence_bundle.json"),
+        ("--certification-report", intake / "adapter_certification.json"),
+        ("--source-observations", intake / "source_observations.json"),
+        ("--domain-brief-source", intake / "domain_brief.source.txt"),
+        ("--domain-brief-report", intake / "domain_brief_redaction.json"),
+        ("--held-out-redaction-report", intake / "held_out_redaction.json"),
+        ("--certification-public-key", workspace / ".trust" / "source-certification-public.pem"),
+        ("--certification-key-id", "workspace-development"),
+        ("--exposure-authorization", workspace / "model_exposure_consent.json"),
+        ("--approval", workspace / "development_evidence_consent.json"),
+        ("--output", workspace / "drafting"),
+        ("--model-alias", "author"),
+    )
+    for name, value in defaults:
+        _with_default_argument(arguments, name, value)
+    model = _argument_value(arguments, "--model")
+    if model is None:
+        raise GuidedCliError(
+            "authoring_model_required",
+            "dev/release drafting still needs --model",
+            recovery="pass the deployed authoring model name and --model-provider",
+        )
+    if _argument_value(arguments, "--model-provider") is None:
+        raise GuidedCliError(
+            "authoring_model_provider_required",
+            "dev/release drafting still needs --model-provider",
+            recovery="pass the configured Data Designer provider name",
+        )
+    _with_default_argument(arguments, "--model-canonical-id", model)
+    return arguments
 
 
 def _run_resume(args: argparse.Namespace) -> None:
@@ -902,7 +1461,9 @@ def main() -> None:
     parser = _parser()
     args, remainder = parser.parse_known_args()
     try:
-        if args.command == "author":
+        if args.command == "prepare":
+            _run_prepare(args, remainder)
+        elif args.command == "author":
             _run_author(args, remainder)
         elif args.command == "resume":
             if remainder:
@@ -1006,35 +1567,58 @@ def main() -> None:
                     },
                 )
         elif args.command == "authorize":
-            gate, resumed = _current_session(args, "authorize_exposure")
-            with resumed:
-                output = _run_authorize(args, lease=resumed.lease)
-                _commit_transition(
-                    args,
-                    gate,
-                    resumed,
-                    phase="exposure_authorized",
-                    updates={
-                        "exposure_authorization": bind_artifact(
-                            args.workspace,
-                            output,
+            _authorize_transition(args, args)
+        elif args.command == "approve":
+            boundary = args.boundary
+            if boundary is None:
+                if _trust_mode(args) == "compliance":
+                    raise GuidedCliError(
+                        "approval_boundary_required",
+                        "compliance sessions require an explicit approval boundary",
+                        recovery="pass --boundary evidence or --boundary release",
+                    )
+                boundary = "release"
+            if boundary == "release":
+                if _trust_mode(args) == "compliance":
+                    release_arguments = list(remainder)
+                    if args.approved_by is not None:
+                        release_arguments[:0] = ["--approved-by", args.approved_by]
+                    if args.reviewed_at is not None:
+                        release_arguments[:0] = ["--reviewed-at", args.reviewed_at]
+                    if args.output is not None:
+                        release_arguments[:0] = ["--output", str(args.output)]
+                    if args.note is not None:
+                        release_arguments[:0] = ["--note", args.note]
+                    for risk in reversed(args.acknowledge_finding):
+                        release_arguments[:0] = ["--acknowledge-risk", risk]
+                    freeze_arguments = None
+                else:
+                    release_arguments, freeze_arguments = _developer_release_approval_arguments(
+                        args,
+                        remainder,
+                    )
+                try:
+                    gate, resumed = _current_session(args, "approve_release")
+                except AuthoringResumeError as exc:
+                    if freeze_arguments is None or exc.code != "resume_command_not_permitted":
+                        raise
+                    _freeze_transition(
+                        args, freeze_arguments, retry_approval_arguments=release_arguments,
+                    )
+                    return
+                with resumed:
+                    if freeze_arguments is not None:
+                        state = gate.load_state(resumed.verdict.session_digest)
+                        packet = bind_artifact(
+                            args.workspace, _required_path_argument(release_arguments, "--packet"),
                             digest_kind="canonical_json",
                         )
-                    },
-                )
-        elif args.command == "approve":
-            if args.boundary == "release":
-                gate, resumed = _current_session(args, "approve_release")
-                release_arguments = list(remainder)
-                if args.approved_by is not None:
-                    release_arguments[:0] = ["--approved-by", args.approved_by]
-                if args.output is not None:
-                    release_arguments[:0] = ["--output", str(args.output)]
-                if args.note is not None:
-                    release_arguments[:0] = ["--note", args.note]
-                for risk in reversed(args.acknowledge_finding):
-                    release_arguments[:0] = ["--acknowledge-risk", risk]
-                with resumed:
+                        if packet != state.bindings.review_packet:
+                            raise GuidedCliError(
+                                "review_packet_changed",
+                                "final approval must use the packet bound by the review session",
+                                recovery="approve the exact reviewed packet or create a new review revision",
+                            )
                     _delegate(
                         "nemotron.steps.byob.scripts.approve_authoring_review",
                         release_arguments,
@@ -1053,6 +1637,8 @@ def main() -> None:
                             )
                         },
                     )
+                if freeze_arguments is not None:
+                    _freeze_transition(args, freeze_arguments)
             else:
                 if remainder:
                     raise GuidedCliError(
@@ -1060,29 +1646,9 @@ def main() -> None:
                         f"evidence approval received unknown arguments: {remainder!r}",
                         recovery="run bfcl_author.py approve --help",
                     )
-                gate, resumed = _current_session(args, "approve_evidence")
-                with resumed:
-                    output, evidence_digest = _run_evidence_approval(
-                        args,
-                        lease=resumed.lease,
-                    )
-                    _commit_transition(
-                        args,
-                        gate,
-                        resumed,
-                        phase="evidence_approved",
-                        updates={
-                            "approval": ApprovalBinding(
-                                artifact=bind_artifact(
-                                    args.workspace,
-                                    output,
-                                    digest_kind="canonical_json",
-                                ),
-                                evidence_digest=evidence_digest,
-                            )
-                        },
-                    )
+                _evidence_approval_transition(args, args)
         elif args.command == "draft":
+            remainder = _developer_draft_arguments(args, remainder)
             if "--resolved-authoring-config" in remainder:
                 raise GuidedCliError(
                     "resolved_config_override_forbidden",
@@ -1141,8 +1707,12 @@ def main() -> None:
                     },
                 )
         elif args.command == "review":
+            delegated = [
+                "--adapter-kind",
+                args.adapter_kind,
+                *_developer_review_arguments(args, remainder),
+            ]
             gate, resumed = _current_session(args, "review")
-            delegated = ["--adapter-kind", args.adapter_kind, *remainder]
             with resumed:
                 _delegate(_DELEGATES["review"], delegated)
                 output = _required_path_argument(delegated, "--output")
@@ -1160,24 +1730,9 @@ def main() -> None:
                     },
                 )
         elif args.command == "freeze":
-            gate, resumed = _current_session(args, "freeze")
-            with resumed:
-                _delegate(_DELEGATES["freeze"], remainder)
-                output = _required_path_argument(remainder, "--output")
-                _commit_transition(
-                    args,
-                    gate,
-                    resumed,
-                    phase="frozen",
-                    updates={
-                        "frozen_manifest": bind_artifact(
-                            args.workspace,
-                            output / "freeze_manifest.json",
-                            digest_kind="canonical_json",
-                        )
-                    },
-                )
+            _freeze_transition(args, remainder)
         elif args.command == "publish":
+            remainder = _developer_publish_arguments(args, remainder)
             gate, resumed = _current_session(args, "publish")
             with resumed:
                 _delegate(_DELEGATES["publish"], remainder)

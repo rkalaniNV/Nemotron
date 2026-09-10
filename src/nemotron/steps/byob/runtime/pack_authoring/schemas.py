@@ -28,9 +28,18 @@ expectation looks finished.
 
 from __future__ import annotations
 
-from typing import Any, Literal, get_args
+from typing import Any, Literal, TypeAlias, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    model_validator,
+)
 
 # One definition of what an identifier is, because two parties rely on it: the validator
 # refuses a draft that breaks it, and the model only learns it from the field description
@@ -79,6 +88,8 @@ ValueSource = Literal[
     "unresolved",
 ]
 
+JsonScalar: TypeAlias = StrictBool | StrictInt | StrictFloat | StrictStr | None
+
 
 class _Draft(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -126,11 +137,12 @@ class ArgumentPlan(_Draft):
 
     name: str = Field(description="Parameter name from the tool's own input schema")
     source: ValueSource
-    literal: str | None = Field(
+    literal: JsonScalar = Field(
         default=None,
         description=(
-            "The value itself: for source=literal when the parameter's own schema pins the "
-            "value set, and for source=invalid_literal when that schema refuses the value"
+            "The native JSON scalar value: for source=literal when the parameter's own "
+            "schema proves it valid, and for source=invalid_literal when that schema "
+            "refuses the value"
         ),
     )
     note: str | None = Field(

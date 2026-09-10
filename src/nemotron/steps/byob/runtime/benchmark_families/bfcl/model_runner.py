@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -25,6 +26,32 @@ from typing import Any
 from pydantic import BaseModel
 
 from nemotron.steps.byob.runtime.benchmark_families.bfcl.config import BfclConfig
+from nemotron.steps.byob.runtime.pack_authoring.model_client import AuthoringModelError
+
+
+class StructuredModelGenerationError(AuthoringModelError):
+    """A stable BFCL error for a structured record Data Designer dropped."""
+
+    def __init__(self, stage_name: str, details: Sequence[str]) -> None:
+        self.stage_name = stage_name
+        self.details = tuple(details)
+        joined = "\n".join(f"  - {detail}" for detail in self.details)
+        super().__init__(
+            f"{stage_name} rejected every structured response; no dataset was produced:\n{joined}"
+        )
+
+
+class _GenerationWarningCapture(logging.Handler):
+    """Retain record-level failures that Data Designer otherwise only logs."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.details: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if "Generation for record at index" in message:
+            self.details.append(" ".join(message.split()))
 
 
 def read_structured_responses(dataset_path: Path) -> list[dict[str, Any]]:
@@ -58,7 +85,9 @@ def run_structured_model(
 
     import pandas as pd
     from data_designer.config import DataDesignerConfigBuilder, LocalFileSeedSource
+    from data_designer.config.run_config import RunConfig
     from data_designer.interface import DataDesigner
+    from data_designer.interface.errors import DataDesignerGenerationError
 
     from nemotron.steps.byob.runtime.data_designer_utils import setup_model_config
 
@@ -98,11 +127,31 @@ def run_structured_model(
         designer = DataDesigner(
             artifact_path=str(run_dir / "artifacts" / "data_designer")
         )
-        designer.validate(builder)
-        created = designer.create(
-            config_builder=builder,
-            num_records=len(rows),
+        # Data Designer defaults to five whole-conversation restarts.  A schema bug then
+        # silently spends six requests before BFCL can report it.  BFCL owns its repair
+        # budget, so this adapter performs one observable request at a time.
+        designer.set_run_config(
+            RunConfig(
+                max_conversation_restarts=0,
+                max_conversation_correction_steps=0,
+            )
         )
+        designer.validate(builder)
+        warning_capture = _GenerationWarningCapture()
+        data_designer_logger = logging.getLogger(
+            "data_designer.engine.dataset_builders.dataset_builder"
+        )
+        data_designer_logger.addHandler(warning_capture)
+        try:
+            created = designer.create(
+                config_builder=builder,
+                num_records=len(rows),
+            )
+        except DataDesignerGenerationError as exc:
+            details = warning_capture.details or [" ".join(str(exc).split())]
+            raise StructuredModelGenerationError(stage_name, details) from exc
+        finally:
+            data_designer_logger.removeHandler(warning_capture)
         records = read_structured_responses(
             created.artifact_storage.final_dataset_path
         )

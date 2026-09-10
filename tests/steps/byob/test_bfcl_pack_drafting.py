@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, get_args
@@ -40,6 +41,7 @@ from nemotron.steps.byob.runtime.pack_authoring.compile_assertions import (
     CompilationError,
     compile_assertions,
 )
+from nemotron.steps.byob.runtime.pack_authoring.drafts import DraftReview
 from nemotron.steps.byob.runtime.pack_authoring.grounding import (
     Grounding,
     GroundingError,
@@ -446,8 +448,41 @@ def test_a_literal_is_only_allowed_where_the_schema_pins_the_value_set() -> None
 
     outside = copy.deepcopy(grounded.model_dump(mode="json"))
     outside["cases"][0]["arguments"][1]["literal"] = "tonnes"
-    with pytest.raises(GroundingError, match="not in the schema enum"):
+    with pytest.raises(GroundingError, match="does not satisfy the parameter schema"):
         validate_validation_cases(_grounding(), ValidationCasePlan.model_validate(outside))
+
+
+@pytest.mark.parametrize(
+    ("name", "schema", "literal"),
+    [
+        ("confirm", {"type": "boolean"}, False),
+        ("count", {"type": "integer", "minimum": 1}, 2),
+        ("ratio", {"type": "number", "minimum": 0}, 1.5),
+    ],
+)
+def test_native_json_scalar_literals_are_not_stringified(
+    name: str,
+    schema: dict[str, Any],
+    literal: bool | int | float,
+) -> None:
+    tools = copy.deepcopy(_default_tools())
+    lookup_schema = tools[0]["untrusted_schemas"]["parameters"]
+    lookup_schema["properties"][name] = schema
+    plan = ValidationCasePlan.model_validate(
+        {
+            "cases": [
+                _case(
+                    arguments=[
+                        {"name": "id", "source": "fixture", "literal": None, "note": None},
+                        {"name": name, "source": "literal", "literal": literal, "note": None},
+                    ]
+                )
+            ]
+        }
+    )
+    assert validate_validation_cases(_grounding(_bundle_document(tools=tools)), plan) is plan
+    assert plan.model_dump(mode="json")["cases"][0]["arguments"][1]["literal"] == literal
+    assert type(plan.model_dump(mode="json")["cases"][0]["arguments"][1]["literal"]) is type(literal)
 
 
 def _error_case(unit: dict[str, Any]) -> ValidationCasePlan:
@@ -479,19 +514,20 @@ def test_an_invalid_literal_is_only_allowed_where_the_schema_refuses_the_value()
     with pytest.raises(GroundingError, match="no declared reason to reject it"):
         validate_validation_cases(_grounding(), permitted)
 
-    # `id` is an unconstrained string, so nothing in the schema makes any value invalid.
+    # `id` is a string, so a native null is grounded as a value its schema rejects.
     unconstrained = _error_case({"name": "unit", "source": "fixture", "literal": None, "note": None})
     loosened = copy.deepcopy(unconstrained.model_dump(mode="json"))
     loosened["cases"][0]["arguments"][0] = {
         "name": "id",
         "source": "invalid_literal",
-        "literal": "anything",
+        "literal": None,
         "note": None,
     }
-    with pytest.raises(GroundingError, match="pins no enum, boolean, or numeric type"):
-        validate_validation_cases(_grounding(), ValidationCasePlan.model_validate(loosened))
+    assert validate_validation_cases(
+        _grounding(), ValidationCasePlan.model_validate(loosened)
+    )
 
-    missing = _error_case({"name": "unit", "source": "invalid_literal", "literal": None, "note": None})
+    missing = _error_case({"name": "unit", "source": "invalid_literal", "note": None})
     with pytest.raises(GroundingError, match="requires the value the tool must reject"):
         validate_validation_cases(_grounding(), missing)
 
@@ -936,6 +972,116 @@ class _FakeCaller:
         self.templates[stage_name] = prompt
         self.model_configs[stage_name] = model_config
         return {stage_name: self.responses[stage_name]}
+
+
+class _RepairingCaller(_FakeCaller):
+    def __init__(self, *, repair_succeeds: bool = True) -> None:
+        super().__init__()
+        self.coverage_attempts = 0
+        self.repair_succeeds = repair_succeeds
+
+    def __call__(self, run_dir, *, stage_name, requests, prompt, model_config, **kwargs):
+        if stage_name == "mcp_coverage_plan":
+            self.coverage_attempts += 1
+            if self.coverage_attempts == 1 or not self.repair_succeeds:
+                invalid = _coverage_response()
+                invalid["tools"][0]["tool"] = "invented_tool"
+                self.responses[stage_name] = invalid
+            else:
+                self.responses[stage_name] = _coverage_response()
+        return super().__call__(
+            run_dir,
+            stage_name=stage_name,
+            requests=requests,
+            prompt=prompt,
+            model_config=model_config,
+            **kwargs,
+        )
+
+
+def test_drafting_stops_for_human_correction_on_first_rejection(tmp_path: Path) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    caller = _RepairingCaller()
+
+    output = tmp_path / "out"
+    with pytest.raises(GroundingError, match="human must correct"):
+        run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+    assert caller.coverage_attempts == 1
+    assert caller.stages == ["mcp_coverage_plan"]
+    rejected = output / "drafts" / "mcp_coverage_plan.candidate.yaml"
+    feedback = output / "drafts" / "mcp_coverage_plan.rejected.txt"
+    assert yaml.safe_load(rejected.read_text(encoding="utf-8"))["tools"][0]["tool"] == "invented_tool"
+    assert "not a published tool" in feedback.read_text(encoding="utf-8")
+    assert not (output / "drafts" / "coverage_plan.yaml").exists()
+
+
+def test_failed_stage_does_not_repeat_model_calls_on_resume(
+    tmp_path: Path,
+) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    caller = _RepairingCaller(repair_succeeds=False)
+    output = tmp_path / "out"
+
+    with pytest.raises(GroundingError, match="invented_tool"):
+        run_drafting(
+            bundle_path,
+            approval_path,
+            output,
+            MODEL,
+            caller=caller,
+            allow_legacy_v1_model_exposure=True,
+        )
+
+    with pytest.raises(GroundingError, match="corrected canonical file"):
+        run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+    assert caller.coverage_attempts == 1
+    assert (output / "drafts" / "mcp_coverage_plan.candidate.yaml").exists()
+    assert (output / "drafts" / "mcp_coverage_plan.rejected.txt").exists()
+
+
+def test_a_reviewed_rejected_candidate_resumes_without_recalling_that_stage(
+    tmp_path: Path,
+) -> None:
+    bundle_path, approval_path = _write(tmp_path / "in", _bundle_document())
+    caller = _RepairingCaller(repair_succeeds=False)
+    output = tmp_path / "out"
+    with pytest.raises(GroundingError):
+        run_drafting(
+            bundle_path,
+            approval_path,
+            output,
+            MODEL,
+            caller=caller,
+            allow_legacy_v1_model_exposure=True,
+        )
+    (output / "drafts" / "coverage_plan.yaml").write_text(
+        yaml.safe_dump(_coverage_response(), sort_keys=True),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GroundingError, match="metadata is missing, invalid, or stale"):
+        run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+
+    resumed = run_drafting(
+        bundle_path,
+        approval_path,
+        output,
+        MODEL,
+        caller=caller,
+        allow_legacy_v1_model_exposure=True,
+        human_review=DraftReview(("coverage_plan",), "reviewer@example.test", "2026-09-09T12:00:00Z"),
+    )
+
+    assert caller.coverage_attempts == 1
+    coverage_call = resumed.provenance.document["calls"][0]
+    assert coverage_call["source"] == "human_checkpoint"
+    assert coverage_call["model_canonical"] == "human-reviewed"
+    checkpoint = json.loads((output / "drafts" / "coverage_plan.checkpoint.json").read_text())
+    assert checkpoint["human_review"]["reviewed_by"] == "reviewer@example.test"
+    assert checkpoint["evidence_digest"] == resumed.evidence.digest
+    calls_before = list(caller.stages)
+    run_drafting(bundle_path, approval_path, output, MODEL, caller=caller, allow_legacy_v1_model_exposure=True)
+    assert caller.stages == calls_before
 
 
 def test_a_full_drafting_run_writes_drafts_provenance_and_compiled_assertions(
@@ -1911,11 +2057,19 @@ def test_normalized_evidence_change_forces_new_model_request_keys(
         source_bundle_path=first_inputs[3],
         migration_record_path=first_inputs[4],
     )
+    # Reuse model I/O, not authored files bound to different evidence. Stale
+    # authored checkpoints require human review, never implicit regeneration.
+    second_output = tmp_path / "second-out"
+    second_output.mkdir()
+    shutil.copyfile(
+        tmp_path / "shared-out" / "authoring_io_cache.jsonl",
+        second_output / "authoring_io_cache.jsonl",
+    )
     second_caller = _FakeCaller()
     second = run_drafting(
         second_inputs[0],
         second_inputs[1],
-        tmp_path / "shared-out",
+        second_output,
         MODEL,
         caller=second_caller,
         certification_report_path=second_inputs[2],

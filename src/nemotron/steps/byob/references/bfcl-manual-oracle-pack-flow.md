@@ -164,7 +164,7 @@ oracle_runtime:
   clock: "REPLACE_WITH_FROZEN_ISO_8601_TIME"
   tool_timeout_s: 5.0
   assertion_timeout_s: 5.0
-  import_timeout_s: 10.0
+  import_timeout_s: 60.0
   reset_timeout_s: 5.0
   episode_timeout_s: 60.0
   worker: process

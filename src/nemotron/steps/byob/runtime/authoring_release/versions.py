@@ -21,6 +21,7 @@ REVIEW_PACKET_VERSION_V2: Literal["bfcl-authoring-review-packet-v2"] = "bfcl-aut
 REVIEW_APPROVAL_VERSION_V2: Literal["bfcl-authoring-review-approval-v2"] = "bfcl-authoring-review-approval-v2"
 FREEZE_MANIFEST_VERSION_V2: Literal["bfcl-authoring-frozen-release-v2"] = "bfcl-authoring-frozen-release-v2"
 FREEZE_MANIFEST_VERSION_V3: Literal["bfcl-authoring-frozen-release-v3"] = "bfcl-authoring-frozen-release-v3"
+FREEZE_MANIFEST_VERSION_V4: Literal["bfcl-authoring-frozen-release-v4"] = "bfcl-authoring-frozen-release-v4"
 
 MCP_REVIEW_PACKET_VERSION_V1 = "bfcl-mcp-review-packet-v1"
 MCP_REVIEW_APPROVAL_VERSION_V1 = "bfcl-mcp-review-approval-v1"

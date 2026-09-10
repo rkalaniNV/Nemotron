@@ -21,6 +21,14 @@ After the pack is Gold-eligible, continue with {doc}`publish-a-release`, optiona
 {doc}`translate`, and {doc}`run-evaluation`. Model assistance never earns a weaker
 validation standard.
 
+For the common case where the starting assets are only `tools.json` and a domain
+brief, use the four-input developer entry in {doc}`assisted-authoring`: workspace,
+tools, brief, and language. It creates a review-gated source, records a dev trust
+profile, and keeps certification file paths out of the command line. The generated
+source is not executable merely because scaffolding succeeded; `status:
+review_required`, `executable: false`, and `BFCL-TODO` remain until a human completes
+it.
+
 ## Understand The End-To-End Process
 
 Use the three guides as separate phases with explicit handoffs:

@@ -52,6 +52,7 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
     )
     parser.add_argument("--pack", type=Path, required=True)
+    parser.add_argument("--trust-mode", choices=("dev", "release", "compliance"), default="compliance")
     for name in (
         "evidence",
         "certification-report",
@@ -123,6 +124,7 @@ def main() -> None:
             adapter_kind=args.adapter_kind,
             pack_root=args.pack,
             context=context,
+            trust_mode=args.trust_mode,
         )
         packet_path = write_review_packet(assembled.packet, args.output)
         freeze_inputs_path = write_canonical_json(

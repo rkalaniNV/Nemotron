@@ -37,6 +37,9 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+from jsonschema import exceptions as jsonschema_exceptions
+from jsonschema.validators import validator_for
+
 from nemotron.steps.byob.runtime.pack_authoring.bundle import EvidenceView, ToolEvidence
 from nemotron.steps.byob.runtime.pack_authoring.compile_assertions import (
     COMPILABLE_PREDICATES,
@@ -276,30 +279,32 @@ def _check_literal(
     schema = tool.parameters.get("properties", {}).get(argument.name)
     if not isinstance(schema, dict):
         return [f"{slot}: cannot ground a literal against a missing parameter schema"]
-    if argument.literal is None:
+    if "literal" not in argument.model_fields_set:
         return [f"{slot}: source=literal requires a literal value"]
-    enum = schema.get("enum")
-    if isinstance(enum, list):
-        allowed = [str(value) for value in enum]
-        if argument.literal not in allowed:
-            return [f"{slot}: literal {argument.literal!r} is not in the schema enum {allowed}"]
-        return []
-    if schema.get("type") == "boolean":
-        if argument.literal not in {"true", "false"}:
-            return [f"{slot}: boolean literal must be 'true' or 'false'"]
+    try:
+        validator = validator_for(schema)
+        validator.check_schema(schema)
+        validation_error = next(validator(schema).iter_errors(argument.literal), None)
+    except jsonschema_exceptions.SchemaError:
+        return [f"{slot}: parameter schema is not valid JSON Schema"]
+    if validation_error is not None:
+        return [
+            f"{slot}: literal {argument.literal!r} does not satisfy the parameter schema: "
+            f"{validation_error.message}"
+        ]
+
+    declared = schema.get("type")
+    declared_types = set(declared) if isinstance(declared, list) else {declared}
+    if (
+        isinstance(schema.get("enum"), list)
+        or "const" in schema
+        or declared_types.intersection({"boolean", "integer", "number", "null"})
+    ):
         return []
     return [
-        f"{slot}: {argument.name!r} has no enum or boolean type, so a literal here would "
+        f"{slot}: {argument.name!r} has no enum, const, boolean, numeric, or null type, so a literal here would "
         "be invented domain data; name a fixture source instead"
     ]
-
-
-def _parses_as(value: str, declared: str) -> bool:
-    try:
-        number = float(value)
-    except ValueError:
-        return False
-    return number.is_integer() if declared == "integer" else True
 
 
 def _check_invalid_literal(
@@ -318,34 +323,19 @@ def _check_invalid_literal(
         return [
             f"{slot}: cannot ground an invalid literal against a missing parameter schema"
         ]
-    if argument.literal is None:
+    if "literal" not in argument.model_fields_set:
         return [f"{slot}: source=invalid_literal requires the value the tool must reject"]
-    enum = schema.get("enum")
-    if isinstance(enum, list):
-        if argument.literal in [str(value) for value in enum]:
-            return [
-                f"{slot}: {argument.literal!r} is in the schema enum {sorted(str(value) for value in enum)}, "
-                "so the tool has no declared reason to reject it"
-            ]
-        return []
-    declared = schema.get("type")
-    if declared == "boolean":
-        if argument.literal in {"true", "false"}:
-            return [
-                f"{slot}: {argument.literal!r} is a valid boolean, so the tool has no "
-                "declared reason to reject it"
-            ]
-        return []
-    if declared in {"integer", "number"}:
-        if _parses_as(argument.literal, str(declared)):
-            return [
-                f"{slot}: {argument.literal!r} is a valid {declared}, so the tool has no "
-                "declared reason to reject it"
-            ]
+    try:
+        validator = validator_for(schema)
+        validator.check_schema(schema)
+        validation_error = next(validator(schema).iter_errors(argument.literal), None)
+    except jsonschema_exceptions.SchemaError:
+        return [f"{slot}: parameter schema is not valid JSON Schema"]
+    if validation_error is not None:
         return []
     return [
-        f"{slot}: the schema for {argument.name!r} pins no enum, boolean, or numeric type, "
-        "so nothing in it makes this value invalid; name a fixture or absent_id source"
+        f"{slot}: {argument.literal!r} satisfies the parameter schema, so the tool has "
+        "no declared reason to reject it"
     ]
 
 
