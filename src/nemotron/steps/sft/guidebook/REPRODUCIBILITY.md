@@ -310,6 +310,156 @@ all are excluded from the denominator rather than counted either way.
 >   `relation: null`, so "at least N" versus "less than N" is decided at scoring
 >   time and an off-language model can satisfy them for free.
 
+### Running the benchmarks yourself
+
+MILU and GSM8K-Indic both ship in the evaluation container as **BYOB generative
+tasks**: the model is prompted normally over `/v1/chat/completions` and the
+answer is extracted from its response. Serve a checkpoint, point the container
+at it, and no part of the harness needs your weights.
+
+```
+nvcr.io/0807121055130118/dev/eval-container:1.0
+```
+
+Six task names cover the three languages in this study. The names are not
+symmetrical between the two benchmarks, so copy them rather than guessing:
+
+| Benchmark | English | Hindi | Malayalam | Dataset |
+|---|---|---|---|---|
+| MILU | `milu_english_chat` | `milu_hindi_chat` | `milu_malayalam_chat` | `ai4bharat/MILU` |
+| GSM8K-Indic | `gsm8k_indic_en` | `gsm8k_indic_hi` | `gsm8k_indic_ml` | `sarvamai/gsm8k-indic` |
+
+One command runs any of them — substitute `--eval_type` and the endpoint:
+
+```bash
+export EVAL_IMAGE=nvcr.io/0807121055130118/dev/eval-container:1.0
+export MODEL_URL=https://<your-host>/v1/chat/completions
+export MODEL_ID=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+export RESULTS=$PWD/results/milu_hindi_chat        # one directory per task
+export HF_TOKEN=hf_...                             # MILU only; see below
+mkdir -p "$RESULTS"
+
+docker run --rm --network host \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -e HF_TOKEN -e HF_HOME=/hf -v "$HOME/.cache/huggingface:/hf" \
+  -v "$RESULTS:$RESULTS" -w /tmp \
+  --entrypoint nemo-evaluator "$EVAL_IMAGE" \
+  run_eval --eval_type milu_hindi_chat \
+    --model_id "$MODEL_ID" --model_type chat --model_url "$MODEL_URL" \
+    --output_dir "$RESULTS" \
+    --overrides 'config.params.temperature=1.0,config.params.top_p=1.0,config.params.max_new_tokens=16384,config.params.parallelism=64,config.params.request_timeout=3600'
+```
+
+Scores land in `$RESULTS/<task>/byob_results.json` as `correct` (accuracy) and
+`parsed` (the share of responses an answer could be extracted from). **Read
+`parsed` every time.** A low value means the run measured truncation, not
+ability, and the accuracy beneath it is meaningless.
+
+> [!IMPORTANT]
+> **Always override `max_new_tokens`.** The tasks ship defaults of 512 (MILU)
+> and 1024 (GSM8K-Indic), chosen for non-reasoning models. A reasoning model
+> spends that budget inside its reasoning block and never reaches its final
+> answer — and the run does not fail. It completes, reports every request as
+> HTTP 200, and returns a near-zero score. Measured on
+> `NVIDIA-Nemotron-3-Nano-30B-A3B-BF16` over the same 100 `milu_english_chat`
+> samples, changing only this one setting:
+>
+> | `max_new_tokens` | `parsed` | `correct` |
+> |---:|---:|---:|
+> | 512 (task default) | 0.20 | 0.18 |
+> | 16384 (this study) | 0.97 | 0.90 |
+>
+> The accuracy collapse is almost entirely the parse failure: the model is not
+> worse at the questions, it is being cut off before it answers them.
+
+Four smaller things that cost time if you meet them cold:
+
+- **`HF_TOKEN` is required for MILU and not for GSM8K-Indic.** `ai4bharat/MILU`
+  is gated and the task streams the split from the Hub at run time, so an
+  unauthenticated run fails on the dataset load rather than on the evaluation.
+  `sarvamai/gsm8k-indic` is ungated.
+- **`milu_hindi_chat` and `milu_Hindi` are different benchmarks.** The
+  capitalised names are upstream lm-eval multiple-choice tasks scored by
+  loglikelihood; they declare `supported_endpoint_types: [completions]` and
+  cannot run against a chat endpoint. Every MILU number in this guidebook comes
+  from the lowercase `_chat` task.
+- **Give each task its own `--output_dir`.** The adapter caches responses under
+  the results root, so pointing two models or two tasks at one directory mixes
+  their caches.
+- **If the endpoint needs no auth, omit `--api-key-name` entirely.** Its value
+  is interpolated unquoted into a shell command, so a value containing a glob
+  character expands against the working directory and the run dies with
+  `unrecognized arguments:` followed by a list of your own filenames. When auth
+  is needed, pass the *name* of an environment variable holding the token,
+  never the token and never a masked placeholder copied out of a printed config.
+
+#### Through the `eval/model_eval` step
+
+The commands above call the harness directly, which is the shortest path and has
+no dependency beyond the container. The same six evaluations also run through
+this repo's `eval/model_eval` step in **direct mode**, which is what you want
+once you are sweeping checkpoints or submitting to a cluster: the step resolves
+the task, decoding and output paths from a config, and the backend comes from an
+environment profile rather than the command line.
+
+Two configs cover all six, each selecting its language from one variable:
+
+| Config | Variable | Values |
+|---|---|---|
+| `-c milu_chat` | `MILU_LANG` | `english`, `hindi`, `malayalam` |
+| `-c gsm8k_indic` | `GSM8K_LANG` | `en`, `hi`, `ml` |
+
+Locally, against an endpoint you are already serving:
+
+```bash
+export EVAL_HARNESS_IMAGE=nvcr.io/0807121055130118/dev/eval-container:1.0
+export EVAL_ENDPOINT_URL=https://<your-host>/v1/chat/completions
+export EVAL_MODEL_HANDLE=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+export EVAL_RESULTS_DIR=$PWD/results/milu_english_chat
+export HF_TOKEN=hf_...           # MILU only
+export MILU_LANG=english
+
+uv run nemotron steps run eval/model_eval -c milu_chat
+```
+
+On a cluster, the same command gains a profile and nothing else changes about
+what is measured:
+
+```bash
+export NEMOTRON_ENV_FILE=env.lepton.toml
+export EVAL_RESULTS_DIR=<shared-storage>/output/eval/milu_english_chat
+
+uv run nemotron steps run eval/model_eval -c milu_chat --batch lepton_eval_milu_chat
+```
+
+GSM8K-Indic is identical with `-c gsm8k_indic`, `GSM8K_LANG` and
+`--batch lepton_eval_gsm8k_indic`. Direct mode is CPU-only — the GPUs are
+wherever the model is served — so the profile requests a CPU shape.
+
+All six configurations resolve to the settings this study used:
+
+```
+milu_english_chat      type=chat  max_new_tokens=16384  temperature=1.0  top_p=1.0
+milu_hindi_chat        type=chat  max_new_tokens=16384  temperature=1.0  top_p=1.0
+milu_malayalam_chat    type=chat  max_new_tokens=16384  temperature=1.0  top_p=1.0
+gsm8k_indic_en         type=chat  max_new_tokens=16384  temperature=1.0  top_p=1.0
+gsm8k_indic_hi         type=chat  max_new_tokens=16384  temperature=1.0  top_p=1.0
+gsm8k_indic_ml         type=chat  max_new_tokens=16384  temperature=1.0  top_p=1.0
+```
+
+Two things the step needs that the raw container command does not:
+
+- **`EVAL_HARNESS_IMAGE` selects the image**, not `run.env.container_image` in a
+  profile. The step re-applies config-owned resource keys after merging the
+  profile, so an image set in a profile is ignored; the config wins by design,
+  and the resolved value is forwarded into the job so the run manifest and the
+  executor cannot disagree.
+- **A private registry needs an image pull secret.** The image above is in a
+  private NGC org, and a cluster pulls it before your container exists — so no
+  environment variable can authenticate it. Create a registry credential in the
+  platform (`nvcr.io`, username `$oauthtoken`, password an NGC key with access
+  to that org) and name it in the profile's `image_pull_secrets`.
+
 ---
 
 ## Adapting to a new language or domain
