@@ -122,12 +122,34 @@ def replay_task(
             "detail": f"replay produced non-JSON data: {exc}",
         }
 
-    failed = [item for item in first["assertions"] if not item.get("passed")]
+    # An assertion carries ``passed: False`` whenever it did not pass, and
+    # ``not_applicable`` is one of those cases: the pack declared a predicate that
+    # this episode gives nothing to judge. Reading it as a failure would drop a row
+    # the oracle replayed correctly, and it would refuse every ``final_answer``
+    # predicate outright, because generation has no candidate answer to read.
+    failed = [
+        item
+        for item in first["assertions"]
+        if not item.get("passed") and item.get("status") != "not_applicable"
+    ]
     if failed:
         return {
             "passed": False,
             "reason": "assertion_failed",
             "detail": "; ".join(f"{item['name']}: {item['detail']}" for item in failed),
+        }
+
+    # Success still has to be stated about this episode by something that ran. A
+    # task whose every predicate stood aside proved only that the calls executed.
+    if first["assertions"] and not any(
+        item.get("passed") for item in first["assertions"]
+    ):
+        return {
+            "passed": False,
+            "reason": "assertion_failed",
+            "detail": "; ".join(
+                f"{item['name']}: {item['detail']}" for item in first["assertions"]
+            ),
         }
 
     return {

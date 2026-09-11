@@ -98,6 +98,13 @@ checks; any stronger language-quality judgment must be declared separately rathe
 reported as exact match. See {doc}`pipeline-worked-example` for a missing-slot
 conversation and {doc}`../reference/eval-config` for the scoring fields.
 
+For a task whose terminal milestone is `final_answer`, executable assertions receive the
+candidate's earned terminal content under `task.candidate_evidence.final_answer`, together
+with its turn index and response hash. A pack may classify an assertion that reads this
+live evidence as `category: final_answer`; only those assertions contribute to
+`final_answer_success_rate`. The evaluator never substitutes the rendered gold sentence
+when the candidate did not produce a valid terminal answer.
+
 ## Artifacts
 
 Both modes publish through one writer, and the file set is immutable.

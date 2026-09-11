@@ -1012,11 +1012,51 @@ async def run_executable_episode(
                     reason_code = "episode.oracle_state_failed"
                     detail = str(exc)
             if final_state_hash is not None and status not in _FATAL_EXECUTION_STATUSES:
+                assertion_task = thaw_json(task.assertion_task)
+                terminal_turn_index = task.script.turns[-1].turn_index
+                terminal_turn = next(
+                    (
+                        turn
+                        for turn in reversed(log.turns)
+                        if turn.turn_index == terminal_turn_index
+                    ),
+                    None,
+                )
+                final_answer_expected = bool(
+                    task.assistant_milestones
+                    and task.assistant_milestones[-1].get("type") == "final_answer"
+                )
+                final_answer_turn = (
+                    terminal_turn
+                    if final_answer_expected
+                    and terminal_turn is not None
+                    and terminal_turn.advanced
+                    else None
+                )
+                assertion_task["candidate_evidence"] = {
+                    "schema_version": "1.0",
+                    "final_answer_expected": final_answer_expected,
+                    "final_answer": (
+                        thaw_json(final_answer_turn.assistant_content)
+                        if final_answer_turn is not None
+                        else None
+                    ),
+                    "final_answer_turn_index": (
+                        final_answer_turn.turn_index
+                        if final_answer_turn is not None
+                        else None
+                    ),
+                    "final_answer_response_hash": (
+                        final_answer_turn.response_hash
+                        if final_answer_turn is not None
+                        else None
+                    ),
+                }
                 for name in task.success_assertions:
                     try:
                         verdict = await oracle.run_assertion(
                             name,
-                            task=thaw_json(task.assertion_task),
+                            task=assertion_task,
                         )
                         # OracleSession is a protocol, so an adapter this driver
                         # did not write can answer with any shape. An unreadable

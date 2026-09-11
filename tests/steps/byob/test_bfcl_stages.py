@@ -1220,6 +1220,103 @@ def test_replay_attempts_use_identical_task_context() -> None:
     assert worker.task_ids == [TASK["task_id"], TASK["task_id"]]
 
 
+def _replay_with_assertion_verdicts(
+    verdicts: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Replay one task whose assertions answer exactly ``verdicts``."""
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl.stages.executable_replay import (
+        replay_task,
+    )
+
+    class VerdictWorker:
+        def run_episode(self, **kwargs: Any) -> list[Any]:
+            outputs: list[Any] = []
+            for step in kwargs["steps"]:
+                if step["op"] == "call_tool":
+                    outputs.append({})
+                elif step["op"] == "get_state":
+                    outputs.append({})
+                elif step["op"] == "run_assertion":
+                    outputs.append({"name": step["name"], **verdicts[step["name"]]})
+                else:
+                    outputs.append(None)
+            return outputs
+
+    config = SimpleNamespace(
+        oracle_runtime=SimpleNamespace(
+            clock="2026-03-02T09:00:00+07:00",
+            import_timeout_s=1.0,
+            reset_timeout_s=1.0,
+            tool_timeout_s=1.0,
+            assertion_timeout_s=1.0,
+            episode_timeout_s=5.0,
+        )
+    )
+    pack = SimpleNamespace(
+        manifest={},
+        fixtures={},
+        held_out=None,
+        paths=SimpleNamespace(
+            backend_path="backend.py",
+            assertions_path="assertions.py",
+            pack_root="pack",
+        ),
+    )
+    task = {**TASK, "seed": 7, "success_assertions": list(verdicts)}
+    return replay_task(VerdictWorker(), config, pack, task, [_call(thing_id="T-1")])
+
+
+def test_replay_keeps_a_task_whose_predicate_declared_itself_inapplicable() -> None:
+    verdict = _replay_with_assertion_verdicts(
+        {
+            "assert_thing_reported": {"status": "passed", "passed": True, "detail": None},
+            "assert_final_answer": {
+                "status": "not_applicable",
+                "passed": False,
+                "detail": "generation has no candidate answer to read",
+            },
+        }
+    )
+
+    assert verdict["passed"] is True
+    assert verdict["reason"] is None
+
+
+def test_replay_refuses_a_task_no_assertion_ever_judged() -> None:
+    verdict = _replay_with_assertion_verdicts(
+        {
+            "assert_final_answer": {
+                "status": "not_applicable",
+                "passed": False,
+                "detail": "generation has no candidate answer to read",
+            }
+        }
+    )
+
+    assert verdict["passed"] is False
+    assert verdict["reason"] == "assertion_failed"
+
+
+def test_replay_refuses_a_failed_assertion_beside_an_inapplicable_one() -> None:
+    verdict = _replay_with_assertion_verdicts(
+        {
+            "assert_thing_reported": {
+                "status": "failed",
+                "passed": False,
+                "detail": "missing result",
+            },
+            "assert_final_answer": {
+                "status": "not_applicable",
+                "passed": False,
+                "detail": "generation has no candidate answer to read",
+            },
+        }
+    )
+
+    assert verdict["passed"] is False
+    assert verdict["detail"] == "assert_thing_reported: missing result"
+
+
 def test_schema_validation_rejects_calls_the_template_did_not_expose() -> None:
     task = {**TASK, "tools_present": [], "required_tools": []}
     failures = validate_task(_Pack(TOOLS), task, [_call(thing_id="T-1")])

@@ -3374,6 +3374,108 @@ def test_declared_assertion_category_reaches_the_episode_and_its_metric(
     assert score.metric("final_answer_success_rate").not_applicable_reason == "metric.no_final_answer_assertion"
 
 
+def test_final_answer_category_receives_live_candidate_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class EvidenceOracle(_FakeOracle):
+        def __init__(self, identity: str) -> None:
+            super().__init__(identity)
+            self.assertion_tasks: list[dict[str, Any]] = []
+
+        async def run_assertion(self, name: str, *, task: dict[str, Any]) -> dict[str, Any]:
+            self.assertion_tasks.append(task)
+            return await super().run_assertion(name, task=task)
+
+    oracle_source = _oracle()
+    task = _with_assertions(
+        _task(oracle_source),
+        "assert_final_answer_reports_status",
+        category="final_answer",
+    )
+    oracle = EvidenceOracle(oracle_source.verification_identity)
+    episode = asyncio.run(
+        _drive_score_fixture(
+            tmp_path,
+            monkeypatch,
+            task=task,
+            oracle=oracle,
+            responses=[
+                _response_with_call({"book_id": "BK-100"}),
+                _text_response("BK-100 is available."),
+            ],
+        )
+    )
+    score = score_executable_episode(episode=episode, task=task, scoring=_scoring(), plan=_plan())
+
+    assert len(oracle.assertion_tasks) == 1
+    assertion_task = oracle.assertion_tasks[0]
+    assert assertion_task["task_id"] == TASK_ID
+    assert assertion_task["candidate_evidence"] == {
+        "schema_version": "1.0",
+        "final_answer_expected": True,
+        "final_answer": "BK-100 is available.",
+        "final_answer_turn_index": 1,
+        "final_answer_response_hash": episode.observed[-1].response_hash,
+    }
+    assert episode.assertions[0].category == "final_answer"
+    assert score.assertions[0].category == "final_answer"
+    assert score.metric("final_answer_success_rate").value == 1.0
+    assert score.metric("assertion_success_rate").value == 1.0
+    assert score.metric("state_match_rate").not_applicable_reason == "metric.no_state_assertion"
+
+
+def test_final_answer_assertion_receives_no_gold_fallback_when_terminal_turn_is_not_reached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class EvidenceOracle(_FakeOracle):
+        def __init__(self, identity: str) -> None:
+            super().__init__(identity)
+            self.assertion_task: dict[str, Any] | None = None
+
+        async def run_assertion(self, name: str, *, task: dict[str, Any]) -> dict[str, Any]:
+            self.assertion_task = task
+            return {
+                "name": name,
+                "status": "failed",
+                "passed": False,
+                "detail": "the candidate produced no terminal final answer",
+            }
+
+    oracle_source = _oracle()
+    task = _with_assertions(
+        _task(oracle_source),
+        "assert_final_answer_reports_status",
+        category="final_answer",
+    )
+    oracle = EvidenceOracle(oracle_source.verification_identity)
+    episode = asyncio.run(
+        _drive_score_fixture(
+            tmp_path,
+            monkeypatch,
+            task=task,
+            oracle=oracle,
+            responses=[_text_response("I will not call the required tool.")],
+        )
+    )
+    score = score_executable_episode(
+        episode=episode,
+        task=task,
+        scoring=_scoring(),
+        plan=_plan(),
+    )
+
+    assert episode.status == "candidate_mismatch"
+    assert oracle.assertion_task is not None
+    assert oracle.assertion_task["candidate_evidence"] == {
+        "schema_version": "1.0",
+        "final_answer_expected": True,
+        "final_answer": None,
+        "final_answer_turn_index": None,
+        "final_answer_response_hash": None,
+    }
+    assert score.metric("final_answer_success_rate").value == 0.0
+
+
 def test_a_metric_quotient_is_not_part_of_the_score_identity() -> None:
     metric = ExecutableMetricResult(
         metric="assertion_success_rate",
