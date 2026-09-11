@@ -96,22 +96,32 @@ you produce from these files can be compared against it:
 | Identity | Value |
 | --- | --- |
 | `run_id` | `bfcl_banking_vn_gold_paraphrase_v1_1392-20260901T233211455629Z-277950452534-cb1472102ab04cadb74be58666e1160b` |
-| pack `content_hash` | `sha256:c5bb5c39033c28dd4c6e5d7197e88db2801e85887458457088a16cccf7e740eb` |
+| pack `content_hash` | `sha256:f1d6ab3ae97df6c1090cd46031484aa1c4e5c91e87d3f5ccde346e3e7d645718` |
 | `benchmark.parquet` | `sha256:d40ba8d3ec5fd7778a42a0f4359feacfec14e6be08cf4a26de14c3ef922e58f6` |
 | `benchmark_raw.parquet` | `sha256:e988c246dccbafbf5a2c3638f2204a8de1c10da97f85160bffb3ddbc01ae1d94` |
 | `generation_config_hash` | `sha256:9dec917235992be2b2d888016ca27ecf9daab7a1f141abf530b7522ad577be48` |
 
-The pack in this checkout still hashes to the `content_hash` above, so this
-release is scoreable as it stands. `tests/steps/byob/test_bfcl_published_pack_fingerprint.py`
-pins that fact per file and fails at the commit that breaks it, rather than
-hours later inside someone else's eval.
+This release cannot be scored as it stands, and the reason is not an edit to
+the pack. The pack in this checkout is byte-identical to the one that produced
+the release, but it now hashes to
+`sha256:c5bb5c39033c28dd4c6e5d7197e88db2801e85887458457088a16cccf7e740eb`,
+because `0fbf9b8` replaced the fingerprint algorithm with the scheme named
+`bfcl-pack-fingerprint-v2`. An eval recomputes that aggregate and compares it to
+the `content_hash` above, so preflight reports `eval_source_oracle_pack_drift`
+for a pack that never drifted. Scoring this benchmark again means republishing
+it from these same files under the current contract.
 
-Of the rest, only the pack `content_hash` reproduces from this checkout. The
-config that produced this release has since been renamed and now declares an
-example `expt_name` and `output_dir` instead of the release's own, and that name
-reaches further than it looks: into the `run_id`, into the
-`generation_config_hash` that covers the whole config document, and into each
-row's `metadata` column and therefore both Parquet hashes. Restore the
+`tests/steps/byob/test_bfcl_published_pack_fingerprint.py` pins the pack per
+file, so an actual edit still fails at the commit that makes it rather than
+hours later inside someone else's eval. The same file records both aggregates,
+so the discrepancy above is stated rather than rediscovered.
+
+None of the other figures reproduces from this checkout either, for an
+unrelated reason. The config that produced this release has since been renamed
+and now declares an example `expt_name` and `output_dir` instead of the
+release's own, and that name reaches further than it looks: into the `run_id`,
+into the `generation_config_hash` that covers the whole config document, and
+into each row's `metadata` column and therefore both Parquet hashes. Restore the
 `expt_name` and `output_dir` recorded in that run's `run_manifest.json` if you
 need the identical artifact rather than an equivalent one. Nothing about what
 gets generated changed, so a run under the example names yields the same tasks,
@@ -120,9 +130,11 @@ calls, and mixes.
 The pack `content_hash` is the one that matters when reading these numbers as
 evidence about the pack files: the manifest recorded it from the eight pack
 files that generation actually loaded, so it ties those rows to that directory
-rather than to a copy that had drifted from it. Those eight files still hash to
-that value, and they do so only as long as the directory is left alone — which
-is why this document is not in it.
+rather than to a copy that had drifted from it. Those eight files are still the
+files it was recorded from, which the guard test's per-file map confirms even
+though the aggregate they now fold into is the `bfcl-pack-fingerprint-v2` one
+above. That holds only as long as the directory is left alone — which is why
+this document is not in it.
 
 Every count below comes from that run's `run_manifest.json`: `stage_counts` for
 the funnel and `semantic_deduplication.report.actual_counts` for the realized
