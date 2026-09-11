@@ -141,6 +141,13 @@ scripted turn. Executable scoring adds five dimensions:
   or state failure may leave a declared suffix unrun; the failed infrastructure
   gate remains the stop and assertions are not fabricated. The scorer never
   runs an assertion.
+- Before executable assertions run, the driver adds a runner-owned
+  `task.candidate_evidence` object. Version `1.0` records whether the task
+  expects a final answer and, when the terminal text turn advances, the
+  candidate content, turn index, and response hash. A pack assertion categorized as
+  `final_answer` must read this live evidence rather than a rendered gold
+  answer. Missing terminal content is candidate evidence, not permission to
+  fall back to the benchmark's expected assistant text.
 - `executable_completion`: records whether live driving reached its terminal
   boundary and classifies candidate and infrastructure stops separately.
 

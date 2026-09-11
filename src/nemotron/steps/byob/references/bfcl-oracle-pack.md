@@ -120,6 +120,11 @@ HTTP v1. `endpoint_config.yaml` declares:
 The fixed routes are `GET /v1/metadata`, `GET /v1/tools`, `GET /v1/conformance`,
 `POST /v1/sessions`, `POST /v1/sessions/{id}/calls`,
 `GET /v1/sessions/{id}/state`, and `DELETE /v1/sessions/{id}`.
+Gold endpoint packs also pin the reviewed `GET /v1/conformance` response in
+`endpoint_config.yaml` with attestation kind `bfcl-endpoint-conformance-v1` and
+its SHA-256 digest. The conformance digest is distinct from the oracle content
+digest.
+
 Creating a session is the reset operation: the request carries the frozen
 `RunContext` fields and fixtures, and the response returns a unique session id
 plus the endpoint identity. Every replay gets a new session.
@@ -169,6 +174,11 @@ fingerprints, reports, logs, or manifests.
 `(*, state, trace, task, ctx)`. Return `None` on success, raise `AssertionError`
 on failure, or return `{"status": "not_applicable", "detail": "..."}` when the
 declared predicate does not apply. Any other return is an infrastructure error.
+A `not_applicable` predicate does not drop the task: `executable_replay` refuses
+a replay for a failed or broken assertion, and for a task no assertion judged at
+all, but it publishes a task another predicate did state success about. That is
+what makes a `final_answer` predicate declarable, because generation has no
+candidate answer for one to read.
 Export assertions through an `ASSERTIONS` dict or name them `assert_*`.
 Optional literal `ASSERTION_CAPABILITIES` entries declare boolean `trace` and
 `executable` support plus category `state`, `path`, `result`, `final_answer`, or
