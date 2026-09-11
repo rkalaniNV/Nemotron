@@ -3671,7 +3671,7 @@ wheels = [
 [[package]]
 name = "nemo-run"
 version = "0.10.0+a8425c9"
-source = { git = "https://github.com/NVIDIA-NeMo/Run.git?rev=main#a8425c9f11a45412e6d5338cecb1c014b0ecc0c4" }
+source = { git = "https://github.com/NVIDIA-NeMo/Run.git?rev=a8425c9f11a45412e6d5338cecb1c014b0ecc0c4#a8425c9f11a45412e6d5338cecb1c014b0ecc0c4" }
 dependencies = [
     { name = "catalogue" },
     { name = "fabric" },
@@ -3921,7 +3921,7 @@ requires-dist = [
     { name = "nemo-curator", extras = ["translation-all"], marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'translate'", git = "https://github.com/NVIDIA-NeMo/Curator.git?rev=main" },
     { name = "nemo-evaluator-launcher", marker = "extra == 'all'", specifier = ">=0.1.0" },
     { name = "nemo-evaluator-launcher", marker = "extra == 'evaluator'", specifier = ">=0.1.0" },
-    { name = "nemo-run", git = "https://github.com/NVIDIA-NeMo/Run.git?rev=main" },
+    { name = "nemo-run", git = "https://github.com/NVIDIA-NeMo/Run.git?rev=a8425c9f11a45412e6d5338cecb1c014b0ecc0c4" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "numpy", marker = "python_full_version >= '3.11' and extra == 'byob'", specifier = ">=2.2,<3" },
     { name = "obstore", marker = "python_full_version >= '3.11' and extra == 'byob'", specifier = ">=0.8,<0.9" },
@@ -4005,7 +4005,7 @@ docs = [
     { name = "sphinx-reredirects" },
     { name = "sphinxcontrib-mermaid" },
 ]
-run = [{ name = "nemo-run", git = "https://github.com/NVIDIA-NeMo/Run.git?rev=main" }]
+run = [{ name = "nemo-run", git = "https://github.com/NVIDIA-NeMo/Run.git?rev=a8425c9f11a45412e6d5338cecb1c014b0ecc0c4" }]
 
 [[package]]
 name = "networkx"
