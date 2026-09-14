@@ -1343,6 +1343,57 @@ def test_runtime_metadata_reports_the_revision_of_a_tracked_source_checkout(
     assert module.runtime_metadata()["pipeline_git_sha"] == head
 
 
+def test_runtime_metadata_calls_a_checkout_dirty_only_for_its_own_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A virtualenv beside the code is not an edit to the code.
+
+    The 0.2.0 release published ``pipeline_git_dirty: true`` from a tree whose
+    tracked source matched HEAD exactly. What git had seen was
+    ``$REPO/.venv-linux``, the environment the run itself needs, sitting
+    untracked inside the checkout. The harness gates on the step package before
+    it starts, so the manifest was contradicting the check that admitted the
+    run, and a reader had no way to tell that from a genuine edit.
+    """
+    from nemotron.steps.byob.runtime.benchmark_families.bfcl import runtime_metadata as module
+
+    package_root = tmp_path / "src" / "nemotron" / "steps" / "byob"
+    package_root.mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    for arguments in (
+        ("init",),
+        ("config", "user.email", "pipeline@example.invalid"),
+        ("config", "user.name", "pipeline"),
+        ("add", "."),
+        ("commit", "-m", "pipeline source"),
+    ):
+        subprocess.run(["git", *arguments], cwd=tmp_path, check=True, capture_output=True)
+
+    def probe(*arguments: str) -> str | None:
+        result = subprocess.run(
+            ["git", *arguments], cwd=package_root, capture_output=True, text=True
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    monkeypatch.setattr(module, "_step_package_root", lambda: package_root)
+    monkeypatch.setattr(module, "_git", probe)
+
+    assert module.runtime_metadata()["pipeline_git_dirty"] is False
+
+    # What the GPU host actually had: the run's own environment, and the litter
+    # CUDA leaves, both outside the package and neither one pipeline source.
+    (tmp_path / ".venv-linux" / "bin").mkdir(parents=True)
+    (tmp_path / ".venv-linux" / "bin" / "python").write_text("", encoding="utf-8")
+    (tmp_path / "cufile.log").write_text("", encoding="utf-8")
+    assert module.runtime_metadata()["pipeline_git_dirty"] is False
+
+    # An untracked module under the package is imported like any other source,
+    # so it is an edit even though nothing tracked moved.
+    (package_root / "shadow.py").write_text("", encoding="utf-8")
+    assert module.runtime_metadata()["pipeline_git_dirty"] is True
+
+
 def test_manifest_and_checkpoint_read_one_pipeline_identity() -> None:
     """Two answers to "which pipeline ran" cannot stay equal by coincidence.
 

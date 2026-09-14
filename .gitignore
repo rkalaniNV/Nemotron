@@ -29,6 +29,9 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
+# A GPU host keeps a second environment beside the first, because the RAPIDS
+# wheels it needs only exist for Linux. UV_PROJECT_ENVIRONMENT names this path.
+.venv-linux/
 
 # This is a source package, not a virtual environment.
 !src/nemotron/steps/env/

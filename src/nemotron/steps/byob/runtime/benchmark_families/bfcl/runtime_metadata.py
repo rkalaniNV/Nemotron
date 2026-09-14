@@ -62,6 +62,17 @@ def _git(*arguments: str) -> str | None:
     return result.stdout.strip()
 
 
+def _relative_package_root() -> Path | None:
+    """Locate this pipeline's source inside the surrounding checkout."""
+    toplevel = _git("rev-parse", "--show-toplevel")
+    if not toplevel:
+        return None
+    try:
+        return _step_package_root().relative_to(Path(toplevel).resolve())
+    except ValueError:
+        return None
+
+
 def _in_pipeline_worktree() -> bool:
     """Refuse to report a SHA from a repository that does not hold this code.
 
@@ -70,13 +81,8 @@ def _in_pipeline_worktree() -> bool:
     """
     if _git("rev-parse", "--is-inside-work-tree") != "true":
         return False
-    toplevel = _git("rev-parse", "--show-toplevel")
-    if not toplevel:
-        return False
-    try:
-        package_root = _step_package_root()
-        relative_root = package_root.relative_to(Path(toplevel).resolve())
-    except ValueError:
+    relative_root = _relative_package_root()
+    if relative_root is None:
         return False
     marker = (relative_root / "__init__.py").as_posix()
     # A wheel installed in <unrelated-repo>/.venv is physically below that repo,
@@ -91,6 +97,28 @@ def _in_pipeline_worktree() -> bool:
         _git("ls-files", "--error-unmatch", "--full-name", "--", f":(top){marker}")
         == marker
     )
+
+
+def _pipeline_dirty() -> str | None:
+    """Report modifications to this pipeline's source, and to nothing else.
+
+    Every other field here is scoped to the step package, and this one was not:
+    it asked git about the whole repository. A run on a GPU host puts its
+    virtualenv at ``$REPO/.venv-linux`` and leaves CUDA droppings like
+    ``cufile.log`` behind, none of which is pipeline source, and all of which
+    made a published release claim its own code had been edited. The harness
+    already draws the line here too — it gates on the step package alone — so a
+    manifest that disagreed contradicted the check that let the run start.
+
+    Untracked files under the package still count. They are imported like any
+    other source, and ``_pipeline_source_hash`` already hashes them.
+    """
+    relative_root = _relative_package_root()
+    if relative_root is None:
+        return None
+    # Pathspecs resolve against the process cwd, which is this file's directory
+    # rather than the toplevel, so the root has to be named from the top.
+    return _git("status", "--porcelain", "--", f":(top){relative_root.as_posix()}")
 
 
 def _dependency_lock_hash() -> str | None:
@@ -131,7 +159,7 @@ def runtime_metadata() -> dict[str, Any]:
         None,
     )
     git_sha = environment_sha or (_git("rev-parse", "HEAD") if in_worktree else None)
-    dirty = _git("status", "--porcelain") if in_worktree else None
+    dirty = _pipeline_dirty() if in_worktree else None
     return {
         "python": platform.python_version(),
         "platform": sys.platform,
