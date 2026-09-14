@@ -93,10 +93,7 @@ def _in_pipeline_worktree() -> bool:
     # the process cwd, which is this file's directory. Without ``:(top)`` the probe
     # asks about a path that exists nowhere and answers "untracked" for every real
     # checkout, which silently drops the revision from every run manifest.
-    return (
-        _git("ls-files", "--error-unmatch", "--full-name", "--", f":(top){marker}")
-        == marker
-    )
+    return _git("ls-files", "--error-unmatch", "--full-name", "--", f":(top){marker}") == marker
 
 
 def _pipeline_dirty() -> str | None:
