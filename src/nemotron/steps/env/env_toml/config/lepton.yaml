@@ -401,14 +401,10 @@ sections:
   # averaging); a single GPU is enough unless you use gemma_weighted.
   lepton_tokenizer_init_embeddings:
     extends: lepton_base
-    resource_shape: ${oc.env:LEPTON_INIT_SHAPE,gpu.1xa100-80gb}
+    resource_shape: ${oc.env:LEPTON_INIT_SHAPE,gpu.a100-80gb}
     nodes: 1
     gpus_per_node: 1
     nprocs_per_node: 1
-    # A single-GPU shape cannot satisfy the base profile's 64 GB /dev/shm either;
-    # Lepton rejects the submission with HTTP 400. 8192 matches every other
-    # one-GPU profile here.
-    shared_memory_size: 8192
     pip_extras: [typer, rich, pydantic-settings, fasttext-wheel, indic-nlp-library]
     env_vars:
       TOKEXT_OUTPUT_DIR: ${oc.env:TOKEXT_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/tokenizer_extension}
@@ -433,14 +429,10 @@ sections:
   # eval_init: BPB/perplexity. Runs the model, so it needs GPUs.
   lepton_tokenizer_eval_init:
     extends: lepton_base
-    resource_shape: ${oc.env:LEPTON_BPB_SHAPE,gpu.1xa100-80gb}
+    resource_shape: ${oc.env:LEPTON_BPB_SHAPE,gpu.a100-80gb}
     nodes: 1
     gpus_per_node: 1
     nprocs_per_node: 1
-    # A single-GPU shape cannot satisfy the base profile's 64 GB /dev/shm either;
-    # Lepton rejects the submission with HTTP 400. 8192 matches every other
-    # one-GPU profile here.
-    shared_memory_size: 8192
     # accelerate: bpb.py loads each model with device_map="auto" whenever CUDA is
     # visible, which transformers refuses without it. One GPU is enough; give the
     # profile more only to shard a large auxiliary model.
