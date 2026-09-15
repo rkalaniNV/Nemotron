@@ -29,7 +29,7 @@ description = "Resized HF checkpoint (weights + tokenizer) for pretrain/megatron
 name = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-Base-BF16"
 description = "Nemotron 3 Nano 30B-A3B base. Loads with device_map='auto'."
 default = true
-min_gpus = 8
+min_gpus = 1
 
 [[parameters]]
 name = "arm"

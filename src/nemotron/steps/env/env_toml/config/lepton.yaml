@@ -402,11 +402,23 @@ sections:
     nodes: 1
     gpus_per_node: 0
     nprocs_per_node: 1
+    # pip_extras REPLACES the parent's list rather than extending it, so every
+    # profile restates the base packages it still needs.
+    pip_extras: [typer, rich, pydantic-settings]
 
   # eval_init: BPB/perplexity. Runs the model, so it needs GPUs.
   lepton_tokenizer_eval_init:
     extends: lepton_base
+    resource_shape: ${oc.env:LEPTON_BPB_SHAPE,gpu.1xa100-80gb}
     nodes: 1
+    gpus_per_node: 1
+    nprocs_per_node: 1
+    # accelerate: bpb.py loads each model with device_map="auto" whenever CUDA is
+    # visible, which transformers refuses without it. One GPU is enough; give the
+    # profile more only to shard a large auxiliary model.
+    pip_extras: [typer, rich, pydantic-settings, accelerate]
+    env_vars:
+      TOKEXT_OUTPUT_DIR: ${oc.env:TOKEXT_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/tokenizer_extension}
   # rl/nemo_rl/dpo: NeMo-RL image plus output override. Runtime RL knobs stay in step YAML.
   lepton_rl_nemo_rl_dpo:
     extends: lepton_base
