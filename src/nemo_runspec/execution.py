@@ -158,17 +158,21 @@ def _job_uses_wandb(job_config: Any) -> bool:
 
 
 def _detect_wandb_api_key(env_vars: dict[str, str]) -> str | None:
-    """Find and validate the ambient W&B key, writing it into ``env_vars``."""
-    api_key = None
+    """Find and validate the ambient W&B key, writing it into ``env_vars``.
+
+    The key is never bound to a local of its own. A frame local holding a
+    credential is rendered into the traceback of anything that escapes this
+    function, and the auth check below exists precisely to raise. It lives in
+    ``env_vars`` instead, which is the payload it was always destined for.
+    """
     try:
         import wandb
 
-        api_key = wandb.api.api_key
-        if api_key:
-            # Quick auth check — this is what the container will do later
-            test_api = wandb.Api(timeout=10)
-            _ = test_api.viewer  # triggers the actual auth request
-            env_vars["WANDB_API_KEY"] = api_key
+        if not wandb.api.api_key:
+            return None
+        env_vars["WANDB_API_KEY"] = wandb.api.api_key
+        # Quick auth check — this is what the container will do later.
+        _ = wandb.Api(timeout=10).viewer
     except Exception as e:
         err_str = str(e)
         err_type = type(e).__name__
@@ -178,10 +182,9 @@ def _detect_wandb_api_key(env_vars: dict[str, str]) -> str | None:
                 "Artifact resolution will fail inside the container. "
                 "Fix: run 'wandb login --relogin' to refresh your credentials."
             ) from e
-        # For non-auth errors (network timeout, etc.), still pass the key through
-        if api_key:
-            env_vars["WANDB_API_KEY"] = api_key
-    return api_key
+        # For non-auth errors (network timeout, etc.), still pass the key through:
+        # it is already in env_vars above.
+    return env_vars.get("WANDB_API_KEY")
 
 
 def build_env_vars(job_config: Any, env_config: dict | None = None) -> dict[str, str]:
