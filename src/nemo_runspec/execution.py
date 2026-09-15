@@ -1082,7 +1082,18 @@ def _create_lepton_executor(
     # whose values are stored verbatim in the submitted spec.
     secret_vars = _get_env(env, "secret_vars")
     if secret_vars:
-        executor_kwargs["secret_vars"] = {str(k): str(v) for k, v in _to_plain(secret_vars).items()}
+        secret_map = {str(k): str(v) for k, v in _to_plain(secret_vars).items()}
+        executor_kwargs["secret_vars"] = secret_map
+        # A name carried by secret_vars must not also be an env_var. build_env_vars
+        # resolves HF_TOKEN and WANDB_API_KEY from the ambient environment, so
+        # without this the spec would carry both the secret reference and the
+        # value it was meant to replace -- which Lepton rejects as a duplicate
+        # environment entry, and which would defeat the point if it did not.
+        env_vars = executor_kwargs.get("env_vars")
+        if isinstance(env_vars, dict):
+            executor_kwargs["env_vars"] = {
+                k: v for k, v in env_vars.items() if k not in secret_map
+            }
 
     # LeptonRayCluster needs a plain version ("2.48.0"), not the default
     # image-tag string 'ray:2.48.0-py312-gpu' that nemo-run supplies.
