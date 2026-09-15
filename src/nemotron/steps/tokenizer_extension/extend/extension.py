@@ -46,6 +46,7 @@ from continued_bpe import (
     find_rank_dead_tokens,
 )
 from languages import get_normalizer
+from languages import describe as describe_language
 from languages import resolve as resolve_language
 from replace_bpe import (
     identify_script_tokens,
@@ -270,6 +271,7 @@ def run_extension(cfg: dict) -> dict:
     # `language:` resolves the normalizer and the prune script together;
     # `script_normalizer:` / `remove_script:` still override either one.
     script_norm, remove_script = resolve_language(cfg)
+    language_resolution = describe_language(cfg)
     normalizer = get_normalizer(script_norm)
     log.info(
         "language=%s -> script_normalizer=%s remove_script=%s",
@@ -304,6 +306,12 @@ def run_extension(cfg: dict) -> dict:
     summary: dict[str, Any] = {
         "model_id": cfg.get("model_id"),
         "method": method,
+        "language": language_resolution["language"],
+        "language_source": language_resolution["language_source"],
+        "script_normalizer": language_resolution["script_normalizer"],
+        "remove_script": language_resolution["remove_script"],
+        "language_overrides": language_resolution["overrides"],
+        "language_profile_defaults": language_resolution["profile_defaults"],
         "extension_size": ext_size,
         "corpus": corpus,
         "base_vocab_size": base_size,
