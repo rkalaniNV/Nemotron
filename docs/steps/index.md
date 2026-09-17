@@ -154,3 +154,5 @@ The Basics page covers profiles and the `env/env_toml` step in detail.
 | Fine-tune or align a model | [Model Training](../train-models/index.md) |
 | Evaluate a model | [Model Evaluation](../model-eval/index.md) |
 | Set up a Lepton or Slurm environment profile | [Nemotron Steps Basics](basics.md) |
+| Generate multiple-choice SFT data from personas | `sdg/persona_mcq` — no guide yet; see `nemotron steps show sdg/persona_mcq` and the step's README |
+| Extend a tokenizer for a new language | `tokenizer_extension/*` — no guide yet; see `src/nemotron/steps/tokenizer_extension/guide.md` |

@@ -98,12 +98,18 @@ In the `mounts` table, `path` is the NFS **source** path on the NFS server — n
 
 ### `NVIDIA_API_KEY` is not forwarded automatically
 
-Unlike `HF_TOKEN` and `WANDB_API_KEY`, `NVIDIA_API_KEY` is not automatically forwarded to the container. Declare it explicitly in the `env_vars` section:
+`NVIDIA_API_KEY` reaches the container as a platform secret reference, not as a
+plaintext `env_vars` value. The shipped profiles already declare it:
 
 ```toml
-[lepton_sdg_data_designer.env_vars]
-NVIDIA_API_KEY = "${oc.env:NVIDIA_API_KEY}"
+[lepton_sdg_data_designer.secret_vars]
+NVIDIA_API_KEY = "${oc.env:NEMOTRON_NVIDIA_API_KEY_SECRET,NVIDIA_API_KEY}"
 ```
+
+Create the secret once with `lep secret create -n NVIDIA_API_KEY -v <value>`, or
+point the profile at an existing one with `NEMOTRON_NVIDIA_API_KEY_SECRET`. Do not
+also add it to `env_vars`: a name in `secret_vars` must not appear there too, and
+the duplicate is stripped before submission.
 
 Set it in your local shell before submitting the job:
 
