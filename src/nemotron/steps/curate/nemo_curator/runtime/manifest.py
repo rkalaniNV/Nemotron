@@ -115,8 +115,7 @@ def _source_tree_revision(source: Path) -> str | None:
 def tool_revision() -> str:
     """Best available identifier for the code that produced a run.
 
-    Prefers an explicitly injected revision so a container build can stamp its
-    own commit; falls back to the installed package version.
+    Order: injected revision, Git, installed version, source digest, static version.
     """
     injected = os.environ.get("NEMOTRON_TOOL_REVISION")
     if injected:
@@ -146,15 +145,16 @@ def tool_revision() -> str:
 
         return f"nemotron {version('nemotron')}"
     except Exception:  # noqa: BLE001 - version lookup must never fail a run
-        # Staged source is importable without distribution metadata, so the
-        # tier above fails. This also covers direct run_flow invocations.
-        try:
-            from nemotron import __version__
+        pass
+    source_revision = _source_tree_revision(source)
+    if source_revision:
+        return source_revision
+    try:
+        from nemotron import __version__
 
-            return f"nemotron {__version__}"
-        except Exception:  # noqa: BLE001 - provenance must never fail a run
-            # Remote source staging may not include package metadata.
-            return _source_tree_revision(source) or "unknown"
+        return f"nemotron {__version__}"
+    except Exception:  # noqa: BLE001 - provenance must never fail a run
+        return "unknown"
 
 
 def runtime_dependencies() -> dict[str, dict[str, str]]:
