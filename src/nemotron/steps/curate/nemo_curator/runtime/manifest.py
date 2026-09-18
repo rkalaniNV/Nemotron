@@ -90,6 +90,28 @@ def config_hash(config: dict[str, Any]) -> str:
     return f"sha256:{digest}"
 
 
+def _source_tree_revision(source: Path) -> str | None:
+    """Fingerprint the staged Curate tree when no distribution metadata exists."""
+    try:
+        root = source.parents[1]
+        files = sorted(
+            path
+            for path in root.rglob("*")
+            if path.is_file() and path.suffix.casefold() in {".py", ".toml", ".yaml", ".yml"}
+        )
+        if not files:
+            return None
+        digest = hashlib.sha256()
+        for path in files:
+            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        return f"source:sha256:{digest.hexdigest()}"
+    except OSError:
+        return None
+
+
 def tool_revision() -> str:
     """Best available identifier for the code that produced a run.
 
@@ -131,7 +153,8 @@ def tool_revision() -> str:
 
             return f"nemotron {__version__}"
         except Exception:  # noqa: BLE001 - provenance must never fail a run
-            return "unknown"
+            # Remote source staging may not include package metadata.
+            return _source_tree_revision(source) or "unknown"
 
 
 def runtime_dependencies() -> dict[str, dict[str, str]]:
