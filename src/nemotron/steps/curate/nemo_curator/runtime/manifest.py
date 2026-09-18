@@ -124,7 +124,14 @@ def tool_revision() -> str:
 
         return f"nemotron {version('nemotron')}"
     except Exception:  # noqa: BLE001 - version lookup must never fail a run
-        return "unknown"
+        # Staged source is importable without distribution metadata, so the
+        # tier above fails. This also covers direct run_flow invocations.
+        try:
+            from nemotron import __version__
+
+            return f"nemotron {__version__}"
+        except Exception:  # noqa: BLE001 - provenance must never fail a run
+            return "unknown"
 
 
 def runtime_dependencies() -> dict[str, dict[str, str]]:

@@ -254,6 +254,17 @@ def test_an_injected_tool_revision_takes_precedence(monkeypatch) -> None:
     assert m.tool_revision() == "git:0123456789abcdef"
 
 
+def test_source_staging_falls_back_to_the_importable_package_version(monkeypatch) -> None:
+    """A staged source tree has no .git and no installed distribution metadata."""
+    from nemotron import __version__
+
+    monkeypatch.delenv("NEMOTRON_TOOL_REVISION", raising=False)
+    monkeypatch.setattr(m.Path, "resolve", lambda _self: m.Path("/staged/src/nemotron/runtime/manifest.py"))
+    monkeypatch.setattr("importlib.metadata.version", lambda _name: (_ for _ in ()).throw(LookupError()))
+
+    assert m.tool_revision() == f"nemotron {__version__}"
+
+
 def test_runtime_dependencies_include_an_exact_vcs_commit(monkeypatch) -> None:
     class FakeDistribution:
         version = "0.10.0+a8425c9"

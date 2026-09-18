@@ -324,6 +324,33 @@ def test_the_langid_fallback_matches_curator(monkeypatch) -> None:
     assert step.DEFAULT_LANGID_SCORE == 0.3, "a fallback below Curator's own default silently weakens the gate"
 
 
+def test_language_codes_are_validated_against_the_configured_model(tmp_path, monkeypatch) -> None:
+    import sys
+    import types
+
+    step = _stub_curator(monkeypatch)
+    model_path = tmp_path / "lid.176.bin"
+    model_path.write_bytes(b"model")
+
+    model = types.SimpleNamespace(get_labels=lambda: ["__label__en", "__label__hi", "__label__zh_Hans"])
+    fasttext = types.ModuleType("fasttext")
+    fasttext.load_model = lambda _path: model
+    monkeypatch.setitem(sys.modules, "fasttext", fasttext)
+
+    step.validate_language_codes({"language_codes": ["HI", "zh"], "models": {"fasttext_langid": str(model_path)}})
+    with pytest.raises(ValueError, match=r"HIN.*emits none"):
+        step.validate_language_codes({"language_codes": ["HIN"], "models": {"fasttext_langid": str(model_path)}})
+
+
+def test_a_total_language_drop_is_a_failure(tmp_path, monkeypatch) -> None:
+    step = _stub_curator(monkeypatch)
+    cfg = _corpus(tmp_path, 3, 0)
+    cfg["language_codes"] = ["HI"]
+
+    with pytest.raises(ValueError, match="kept 0 of 3"):
+        step.refuse_empty_language_output(cfg, [str(tmp_path / "in" / "a.jsonl")])
+
+
 def test_a_zero_input_glob_is_refused_before_ray_starts(tmp_path, monkeypatch) -> None:
     step = _stub_curator(monkeypatch)
     cfg = {
