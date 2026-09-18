@@ -31,6 +31,7 @@ import yaml
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 log = logging.getLogger(__name__)
+_VALID_BACKENDS = ("google", "aws", "nmt", "llm")
 _GENERATION_CONFIG_KEYS = {
     "extra_kwargs",
     "max_tokens",
@@ -42,6 +43,18 @@ _GENERATION_CONFIG_KEYS = {
     "top_k",
     "top_p",
 }
+
+
+class TranslationConfigError(ValueError):
+    """Raised when translation configuration is invalid before runtime setup."""
+
+
+def _validate_backend(config: dict[str, Any]) -> str:
+    backend = str(config.get("backend", "llm"))
+    if backend not in _VALID_BACKENDS:
+        valid = ", ".join(_VALID_BACKENDS)
+        raise TranslationConfigError(f"Unknown backend: {backend!r}. Valid: {valid}")
+    return backend
 
 
 def _required_path(config: dict[str, Any], key: str) -> str:
@@ -232,6 +245,8 @@ def _build_translation_stage(config: dict[str, Any]) -> Any:
 
 
 def run(config: dict[str, Any]) -> Path:
+    _validate_backend(config)
+
     from nemo_curator.pipeline import Pipeline
 
     input_path = _required_path(config, "input_path")
@@ -254,7 +269,10 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
     config = yaml.safe_load(args.config.read_text()) or {}
-    run(config)
+    try:
+        run(config)
+    except TranslationConfigError as exc:
+        raise SystemExit(str(exc)) from None
 
 
 if __name__ == "__main__":

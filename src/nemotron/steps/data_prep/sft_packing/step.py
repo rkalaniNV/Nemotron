@@ -47,6 +47,7 @@ from nemotron.data_prep import (
     TokenizerConfig,
     run_sft_pipeline,
 )
+from nemotron.data_prep.packing import PackingAlgorithm
 from nemotron.kit.train_script import (
     apply_hydra_overrides,
     load_omegaconf_yaml,
@@ -62,6 +63,16 @@ from nemotron.steps.data_prep._common import (
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
 STEP_DIR = Path(__file__).parent
+
+
+def _validate_algorithm(config: dict) -> str:
+    """Validate the packing algorithm before initializing pipeline services."""
+    algorithm = str(config.get("algorithm", "first_fit_shuffle"))
+    try:
+        return PackingAlgorithm(algorithm).value
+    except ValueError:
+        valid = ", ".join(member.value for member in PackingAlgorithm)
+        raise ValueError(f"Unknown algorithm: {algorithm!r}. Valid: {valid}") from None
 
 
 def _ratio_to_shards(ratio: float, total: int) -> int:
@@ -134,6 +145,10 @@ def main() -> None:
         apply_hydra_overrides(load_omegaconf_yaml(config_path), overrides),
         resolve=True,
     )
+    try:
+        algorithm = _validate_algorithm(cfg)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
 
     from nemotron.data_prep.stages.download import DownloadStageConfig
     from nemotron.data_prep.stages.packed_sft_parquet import PackedSftParquetStageConfig
@@ -154,7 +169,7 @@ def main() -> None:
         num_shards=cfg.get("num_shards", 128),
         dtype=cfg.get("dtype", "int32"),
         pack_size=cfg.get("pack_size", 4096),
-        algorithm=cfg.get("algorithm", "first_fit_shuffle"),
+        algorithm=algorithm,
         seed=cfg.get("seed"),
         chat_template=cfg.get("chat_template", "nano3"),
         messages_field_default=cfg.get("messages_field", "messages"),

@@ -24,9 +24,20 @@ from __future__ import annotations
 import logging
 import os
 from enum import Enum
+from numbers import Integral
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_MCQ_TRANSLATION_REQUIRED_COLUMNS = (
+    "question_id",
+    "question",
+    "options",
+    "answer_index",
+    "answer",
+    "src",
+    "category",
+)
 
 
 class McqGenerationStage(Enum):
@@ -62,6 +73,52 @@ def _should_run(skip_until: str | None, stage: Enum) -> bool:
 def _is_enabled(config_section: dict, *, default: bool = True) -> bool:
     """Return the optional stage switch while preserving legacy defaults."""
     return config_section.get("enabled", default)
+
+
+def validate_mcq_translation_input(dataset) -> None:
+    """Reject malformed MCQ rows before any translation request is made."""
+    missing = [column for column in _MCQ_TRANSLATION_REQUIRED_COLUMNS if column not in dataset.columns]
+    if missing:
+        required = ", ".join(_MCQ_TRANSLATION_REQUIRED_COLUMNS)
+        raise ValueError(f"Missing required columns: {', '.join(missing)}. Required schema: {required}")
+
+    for _, row in dataset.iterrows():
+        question_id = row["question_id"]
+        options = row["options"]
+        answer_index = row["answer_index"]
+
+        if isinstance(options, (str, bytes)):
+            raise ValueError(f"Row {question_id!r}: options must be a non-empty sequence")
+        try:
+            option_values = list(options)
+        except TypeError:
+            raise ValueError(f"Row {question_id!r}: options must be a non-empty sequence") from None
+        if not option_values:
+            raise ValueError(f"Row {question_id!r}: options must be a non-empty sequence")
+
+        if isinstance(answer_index, bool) or not isinstance(answer_index, Integral):
+            raise ValueError(f"Row {question_id!r}: answer_index={answer_index!r} is not an integer")
+        if answer_index < 0 or answer_index >= len(option_values):
+            raise ValueError(
+                f"Row {question_id!r}: answer_index={answer_index} "
+                f"is out of range for options of length {len(option_values)}"
+            )
+
+        duplicate_options = []
+        seen_options = []
+        for option in option_values:
+            if option in seen_options and option not in duplicate_options:
+                duplicate_options.append(option)
+            seen_options.append(option)
+        if duplicate_options:
+            duplicates = ", ".join(repr(option) for option in duplicate_options)
+            raise ValueError(f"Row {question_id!r}: duplicate option text: {duplicates}")
+
+    duplicate_ids = dataset.loc[dataset["question_id"].duplicated(keep=False), "question_id"].tolist()
+    if duplicate_ids:
+        unique_duplicate_ids = list(dict.fromkeys(duplicate_ids))
+        duplicates = ", ".join(repr(question_id) for question_id in unique_duplicate_ids)
+        raise ValueError(f"Duplicate question_id values: {duplicates}")
 
 
 def prepare_mcq_data(config_path: str | os.PathLike[str]):
@@ -248,7 +305,6 @@ def translate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None
     config = ByobTranslationConfig.from_yaml(str(config_path))
     output_base = Path(config.output_dir) / config.expt_name
     stage_cache = output_base / "stage_cache"
-    stage_cache.mkdir(parents=True, exist_ok=True)
 
     output_path_translation = stage_cache / "translated_questions.parquet"
     output_path_backtranslation = stage_cache / "backtranslated_questions.parquet"
@@ -256,8 +312,14 @@ def translate_mcq(config_path: str | os.PathLike[str], *, skip_until: str | None
     output_path_raw = output_base / "benchmark_raw.parquet"
     output_path_final = output_base / "benchmark.parquet"
 
-    if _should_run(skip_until, McqTranslationStage.TRANSLATION):
+    run_translation = _should_run(skip_until, McqTranslationStage.TRANSLATION)
+    if run_translation:
         dataset_in = pd.read_parquet(config.dataset_path)
+        validate_mcq_translation_input(dataset_in)
+
+    stage_cache.mkdir(parents=True, exist_ok=True)
+
+    if run_translation:
         seed_df = prepare_translation_seed_dataset(
             dataset_in,
             source_language=config.source_language,
