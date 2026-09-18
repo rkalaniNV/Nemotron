@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 
 import pytest
@@ -58,6 +59,16 @@ def test_f1_defaults_are_neutral() -> None:
     assert config["source_field"] is None
     assert config["heuristic_filters"] is None, "default must not filter on an unreviewed policy"
     assert config["mode"] == "filter", "default must keep the historical column set"
+
+
+def test_tiny_config_uses_a_local_and_container_portable_fixture() -> None:
+    """The documented local smoke must not depend on the container mount path."""
+    config = yaml.safe_load((STEP_DIR / "config" / "tiny.yaml").read_text(encoding="utf-8"))
+    repo_root = STEP_DIR.parents[4]
+
+    assert config["input_glob"] == "./src/nemotron/steps/curate/nemo_curator/data/tiny.jsonl"
+    assert (repo_root / config["input_glob"]).is_file()
+    assert config["emit_manifest"] is None
 
 
 def test_manifest_defaults_use_native_toml_types() -> None:
@@ -112,6 +123,15 @@ def _stub_curator(monkeypatch):
     module = importlib.import_module("nemotron.steps.curate.nemo_curator.step")
     monkeypatch.delitem(sys.modules, "nemotron.steps.curate.nemo_curator.step", raising=False)
     return module
+
+
+def test_uv_run_does_not_repackage_ray_workers(monkeypatch) -> None:
+    """Workers must reuse the installed env instead of creating an empty one."""
+    monkeypatch.delenv("RAY_ENABLE_UV_RUN_RUNTIME_ENV", raising=False)
+
+    _stub_curator(monkeypatch)
+
+    assert os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] == "0"
 
 
 def _corpus(tmp_path, n_in: int, n_out: int):

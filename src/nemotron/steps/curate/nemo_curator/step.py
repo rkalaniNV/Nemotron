@@ -39,6 +39,12 @@ from typing import Any, cast
 
 import yaml
 from huggingface_hub import snapshot_download
+
+# Ray otherwise replays the outer ``uv run`` command for every worker. Its
+# packaged working directory excludes ``.venv``, so ``uv --no-sync`` creates an
+# empty worker environment and then fails to import Ray itself.
+os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
+
 from nemo_curator.core.client import RayClient
 from nemo_curator.pipeline import Pipeline
 from nemo_curator.stages.text.io.reader import JsonlReader
