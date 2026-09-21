@@ -20,7 +20,7 @@ limitations under the License.
 
 Generate synthetic training data with [NeMo Data Designer](https://nvidia-nemo.github.io/DataDesigner/) using a declarative YAML pipeline. Seed a generation run with your domain-specific topics, scenarios, or personas; define the column structure and prompts in YAML; and produce training-ready JSONL without writing Python.
 
-Three output shapes ship out of the box: SFT chat data, tool-calling SFT data, and DPO preference pairs.
+Three output shapes ship out of the box: SFT chat data, tool-calling SFT data, and DPO preference pairs. The standalone [Long Context Chat SDG pipeline](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/use-case-examples/long-context-chat-sdg) produces retrieval-grounded, multi-turn tool-call conversations from a corpus or prepared queries.
 
 :::{tip}
 New to SDG or new to model training? Read {doc}`using-skills` for a short guide to productive agent sessions, then start the {doc}`getting-started` tutorial to run the bundled pipeline and produce your first dataset in 5 to 10 minutes.
@@ -33,6 +33,7 @@ Use SDG when you need training data that does not already exist in sufficient qu
 - **SFT chat data** — Generate user/assistant conversation pairs grounded in domain-specific topics, scenarios, or personas. Use `default.yaml` as a starting point and adapt it to your domain.
 - **Tool-calling SFT data** — Generate multi-turn conversations that include assistant tool calls and tool responses in OpenAI format. Use `customer_support_tools.yaml` as a starting point.
 - **DPO preference data** — Generate prompt / chosen / rejected triples for preference learning. Use `rl_pref.yaml`.
+- **Long-context retrieval-grounded SFT data** — Synthesize and prepare queries, simulate multi-turn assistant and user interactions, call an external HTTP retriever, and export objectively checked tool-call conversations. Use the standalone [Long Context Chat SDG pipeline](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/use-case-examples/long-context-chat-sdg).
 - **Custom domains** — Swap the seed file, category columns, and prompts to target any domain. The pipeline is fully declarative; customisation does not require editing Python.
 - **Cluster-scale generation** — Dispatch generation to Lepton or Slurm via env.toml profiles when local throughput is insufficient.
 
@@ -117,6 +118,7 @@ YAML config schema, CLI flags, output projection shapes, and troubleshooting.
 | {doc}`how-to/create-domain-dataset` | Adapt the pipeline to a custom domain with a seed file and multiple category dimensions |
 | {doc}`how-to/tool-call-data` | Generate multi-turn tool-calling SFT data |
 | {doc}`how-to/preference-data` | Generate DPO preference pairs from `rl_pref.yaml` |
+| [Long Context Chat SDG](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/use-case-examples/long-context-chat-sdg) | Generate retrieval-grounded, multi-turn tool-call SFT data from corpus-backed queries |
 | {doc}`how-to/dispatch-to-cluster` | Dispatch generation to Lepton or Slurm via env.toml |
 
 ```

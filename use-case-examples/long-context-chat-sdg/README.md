@@ -32,6 +32,9 @@ The query-synthesis stage supports JSONL chunks and optional LanceDB rows:
 - An embedding endpoint, unless query preparation uses a local embedding model.
 - For production generation, an HTTP retrieval endpoint over your corpus.
 - A chunked JSONL corpus or an existing `queries.jsonl` file.
+- For the default managed-persona configuration, the NGC CLI and `NGC_API_KEY`
+  are needed once to download the `en_IN` persona asset. Alternatively, configure
+  `persona.hf_dataset`, `persona.local_path`, or disable personas.
 
 No retriever server, index builder, or deployment manifests are included. Operate the
 retriever separately and configure only its HTTP contract here.
@@ -62,6 +65,18 @@ export RETRIEVAL_ENDPOINT=http://retriever-host:8080/search
 
 `ASSISTANT_API_KEY`, `USER_MODEL_API_KEY`, and `EMBEDDING_API_KEY` are the default
 credential variable names. Open endpoints may leave their values unset.
+
+The default configuration uses Data Designer's managed `en_IN` personas. Stage that
+asset before the first generation run:
+
+```bash
+export NGC_API_KEY=<your-ngc-api-key>
+uv run data-designer download personas --locale en_IN
+```
+
+After the asset is cached, generation does not need `NGC_API_KEY`. To use an external
+persona source instead, set `persona.hf_dataset` or `persona.local_path` in a copy of
+`config/pipeline.yaml`; to run without personas, set `persona.enabled: false`.
 
 ## 1. Prepare the input
 
