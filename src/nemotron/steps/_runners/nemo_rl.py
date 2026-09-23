@@ -42,7 +42,17 @@ def exec_or_run_nemo_rl_grpo(
     args, overrides = parse_nemo_rl_args(default_config=default_config, description=description)
     config_path = Path(args.config)
 
-    if should_use_nemo_gym_config(config_path, overrides):
+    config = load_nemo_rl_step_config(config_path, overrides)
+    runner = OmegaConf.select(config, "nemotron.runner", default=None)
+    if runner == "lightning35":
+        from nemotron.steps._runners.nemo_rl_lightning35 import run_lightning35_grpo
+
+        run_lightning35_grpo(config_path=config_path, overrides=overrides)
+        return
+    if runner is not None:
+        raise ValueError(f"Unsupported Nemotron GRPO runner: {runner!r}")
+
+    if bool(OmegaConf.select(config, "env.should_use_nemo_gym", default=False)):
         from nemotron.steps._runners.nemo_rl_grpo_nemo_gym import run_nemo_gym_grpo
 
         run_nemo_gym_grpo(config_path=config_path, overrides=overrides)

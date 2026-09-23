@@ -41,15 +41,19 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 from nemotron.data_prep import DataBlend, ObservabilityConfig
-from nemotron.data_prep.recipes.rl import run_rl_resolve_pipeline
 from nemotron.kit.train_script import (
     apply_hydra_overrides,
     load_omegaconf_yaml,
     parse_config_and_overrides,
 )
-from nemotron.steps.data_prep._common import init_prep_wandb
+from nemotron.steps.data_prep._common import (
+    init_prep_wandb,
+    resolve_blend_path,
+    resolve_output_dir,
+)
 
 DEFAULT_CONFIG = Path(__file__).parent / "config" / "default.yaml"
+STEP_DIR = Path(__file__).parent
 
 
 def main() -> None:
@@ -59,11 +63,31 @@ def main() -> None:
         resolve=True,
     )
 
+    blend_path = resolve_blend_path(cfg, step_dir=STEP_DIR)
+    output_dir = resolve_output_dir(cfg["output_dir"])
+
     init_prep_wandb(["data-prep", "rl"])
 
+    blend = DataBlend.load(blend_path)
+    prep_backend = str(cfg.get("prep_backend", "xenna")).strip().lower()
+    if prep_backend == "released_jsonl":
+        from nemotron.steps.data_prep.rl_prep.released_blend import run_released_jsonl_blend
+
+        run_released_jsonl_blend(
+            blend=blend,
+            output_dir=output_dir,
+            val_holdout=int(cfg.get("val_holdout", 1000) or 0),
+            sample=cfg.get("max_rows") if cfg.get("max_rows") is not None else cfg.get("sample"),
+            force=cfg.get("force", False),
+            allowed_agent_names=cfg.get("allowed_agent_names"),
+        )
+        return
+
+    from nemotron.data_prep.recipes.rl import run_rl_resolve_pipeline
+
     run_rl_resolve_pipeline(
-        blend=DataBlend.load(cfg["blend_path"]),
-        output_dir=cfg["output_dir"],
+        blend=blend,
+        output_dir=output_dir,
         sample=cfg.get("max_rows") if cfg.get("max_rows") is not None else cfg.get("sample"),
         force=cfg.get("force", False),
         compression=cfg.get("compression", "none"),
@@ -71,6 +95,7 @@ def main() -> None:
         resolve_hf_placeholders=cfg.get("resolve_hf_placeholders", True),
         observability=ObservabilityConfig(**cfg.get("observability", {})),
     )
+
 
 if __name__ == "__main__":
     main()

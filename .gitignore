@@ -129,3 +129,4 @@ skills/*/evals/tier3-reports/
 /spec/
 /tests/skills/
 /tools/fetch_sample_corpus.py
+results

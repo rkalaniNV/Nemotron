@@ -49,6 +49,7 @@ checks:
     - lepton_prep_sft_packing
     - lepton_prep_pretrain_prep
     - lepton_prep_rl_prep
+    - lepton_lightning35_rl_prep
     - lepton_pretrain_megatron_bridge
     - lepton_pretrain_automodel
     - lepton_sft_megatron_bridge
@@ -58,6 +59,7 @@ checks:
     - lepton_convert_model
     - lepton_rl_nemo_rl_dpo
     - lepton_rl_nemo_rl_rlvr
+    - lepton_lightning35_rlvr
     - lepton_rl_nemo_rl_rlhf
     - lepton_optimize_modelopt_quantize
     - lepton_optimize_modelopt_distill
@@ -154,6 +156,21 @@ sections:
     extends: lepton_prep_base
     env_vars:
       RL_OUTPUT_DIR: ${oc.env:RL_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/data_prep/rl_prep}
+
+  lepton_lightning35_rl_prep:
+    extends: lepton_prep_rl_prep
+    pip_extras:
+      - omegaconf
+      - cosmos-xenna
+      - typer
+      - rich
+      - pydantic-settings
+      - huggingface_hub
+      - datasets
+    env_vars:
+      RL_OUTPUT_DIR: ${oc.env:RL_PREP_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/data_prep/rl_prep/lightning35}
+      RL_PREP_OUTPUT_DIR: ${oc.env:RL_PREP_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/data_prep/rl_prep/lightning35}
+      WANDB_NAME: ${oc.env:WANDB_NAME,data-prep-rl-prep-lightning35}
 
   # Curator-backed steps: byob/mcq, translate/nemo_curator, and curate all use the Curator
   # container and install their Python runtime through the generic curator_runtime
@@ -321,6 +338,19 @@ sections:
     extends: lepton_rl_nemo_rl_dpo
     env_vars:
       RL_OUTPUT_DIR: ${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/rl/rlvr
+
+  lepton_lightning35_rlvr:
+    extends: lepton_rl_nemo_rl_rlvr
+    container_image: ${oc.env:LIGHTNING35_RL_IMAGE}
+    image_pull_secrets:
+      - ${oc.env:LEPTON_REGISTRY_AUTH}
+    ray_version: ${oc.env:LIGHTNING35_RAY_VERSION}
+    nodes: 31
+    env_vars:
+      RL_OUTPUT_DIR: ${oc.env:RL_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/rl/lightning35}
+      RL_PREP_OUTPUT_DIR: ${oc.env:RL_PREP_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/data_prep/rl_prep/lightning35}
+      RL_INITIAL_CHECKPOINT: ${oc.env:RL_INITIAL_CHECKPOINT,${oc.env:L35_OUTPUT_DIR,${oc.env:NEMOTRON_WORKSPACE,/mnt/lustre-shared}/output/sft/megatron_bridge}}
+      WANDB_NAME: ${oc.env:WANDB_NAME,nemotron-3.5-lightning-grpo}
 
   # rl/nemo_rl/rlhf: same RL profile, but more physical nodes for GenRM/NeMo-Gym placement.
   lepton_rl_nemo_rl_rlhf:
