@@ -105,7 +105,7 @@ The default config includes five standard benchmarks:
 | `hellaswag` | Log Probability | Commonsense sentence completion |
 | `openbookqa` | Log Probability | Open-domain science questions |
 
-To discover additional tasks: `nemo-evaluator-launcher ls tasks`
+To discover additional tasks: `nemo-evaluator-launcher ls tasks`.
 
 ---
 
