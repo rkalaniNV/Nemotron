@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Trusted half of the Review S3 preview flow. Runs from the default branch after
+# "Docs Review S3: Build" completes and delegates the AWS upload to the reusable
+# workflow in NVIDIA/docs-builder so GitHub OIDC can bind both workflow_ref and
+# job_workflow_ref. Requires the DOCS_REVIEW_S3_ROLE_ARN repository secret.
+
+name: "Docs Review S3: Upload"
+
+on:
+  workflow_run:
+    workflows: ["Docs Review S3: Build"]
+    types: [completed]
+
+jobs:
+  sphinx:
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      actions: read
+      id-token: write
+      pull-requests: write
+    uses: NVIDIA/docs-builder/.github/workflows/_docs-review-s3-upload.yml@main
+    with:
+      artifact-name: review-s3-sphinx
+      docset-subdir: sphinx
+      metadata-artifact-name: review-s3-metadata
+      s3-bucket: nvidia-docs-review-github
+      s3-project-prefix: github/rkalaninv/nemotron
+    secrets:
+      DOCS_REVIEW_S3_ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
