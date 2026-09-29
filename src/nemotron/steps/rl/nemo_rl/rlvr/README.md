@@ -34,9 +34,9 @@ Example shape:
 
 ```bash
 uv run nemotron steps run rl/nemo_rl/rlvr \
-  -c <project>/config/rlvr.yaml \
-  data.train.data_path=<rl-prep>/train.jsonl \
-  data.validation.data_path=<rl-prep>/validation.jsonl
+  -c "<project>/config/rlvr.yaml" \
+  "data.train.data_path=<rl-prep>/train.jsonl" \
+  "data.validation.data_path=<rl-prep>/validation.jsonl"
 ```
 
 ## Nemotron 3.5 Lightning On Lepton
@@ -47,7 +47,23 @@ conversion), GRPO, colocated vLLM generation, and the supported verifier agents
 from the released RL blend. It does not provision the external judge and
 sandbox pools required by the complete reference workload.
 
+The [step entrypoint](step.py) selects the
+[Lightning runner](../../../_runners/nemo_rl_lightning35.py) through
+`nemotron.runner: lightning35`. This adapter supports **synchronous GRPO only**;
+async GRPO and trajectory-collection mode fail early. It registers the prep
+manifest resolver, checks checkpoint/data paths and agent coverage, then calls
+the pinned NeMo-RL setup and training loop. It does not convert checkpoints
+to HF or import a recipe runner. Use the matching
+[Lightning data-prep preset](../../../data_prep/rl_prep/README.md#nemotron-35-lightning).
+
 ### 1. Build And Push The Pinned Image
+
+Users must currently build and push their own NeMo-RL Docker image using the
+dependency pins and patches documented below before running Lightning RL on
+Lepton. The Steps launcher uses this image; it does not build or publish it.
+
+We plan to update the configuration and instructions to use an official
+NeMo-RL image once a compatible release becomes available.
 
 Build on Linux x86_64. A GPU is not required for the build; the resulting
 CUDA image runs on Lepton H100 nodes. The image must contain the pinned
@@ -86,7 +102,7 @@ uv lock --check
 
 docker login nvcr.io --username '$oauthtoken'
 export LIGHTNING35_RAY_VERSION=2.55.1
-export LIGHTNING35_RL_IMAGE=nvcr.io/<ngc-org>/nemo-rl:lightning35-ray2551-7fa6e55-6bb55bc
+export LIGHTNING35_RL_IMAGE="nvcr.io/<ngc-org>/nemo-rl:lightning35-ray2551-7fa6e55-6bb55bc"
 
 docker buildx build \
   --platform linux/amd64 \
@@ -126,6 +142,10 @@ Create a private-registry credential in Lepton and use its auth object name in
 
 ### 2. Configure The Lepton Profiles
 
+Run the remaining `nemotron steps` commands from your **Nemotron checkout**,
+not from the separate NeMo-RL image-build directory. Replace angle-bracket
+placeholders with your own values before running any example.
+
 The repository's Lepton env generator includes these two focused profiles.
 They inherit site-specific mounts, node group, and resource shapes from the
 generic profiles:
@@ -153,36 +173,42 @@ RL_OUTPUT_DIR = "${oc.env:RL_OUTPUT_DIR}"
 ```
 
 Generate a new Lepton file once, or keep using an existing `env.toml` that has
-equivalent profiles:
+equivalent profiles. For a new file:
 
 ```bash
+# Run from the root of your Nemotron checkout.
 uv run nemotron steps run env/env_toml -c lepton
 export NEMOTRON_ENV_FILE="${PWD}/env.lepton.toml"
 ```
 
+Edit the generated node group, resource shapes, and storage mount to match
+your workspace before submission; the template contains site placeholders.
+The generic GPU shape defaults to `gpu.8xa100-80gb`; for H100 runs, set
+`LEPTON_GPU_SHAPE` to your workspace's eight-GPU H100 shape or edit the profile.
+For existing profiles, use `export NEMOTRON_ENV_FILE="${PWD}/env.toml"` instead.
 Do not store API tokens in the env file. Export them in the submitting shell
 so the inherited base profile resolves them.
 
 ### 3. Prepare And Verify The Released RL Data
 
 ```bash
-export RL_PREP_OUTPUT_DIR=/mnt/lustre-shared/<user>/data/processed/lightning35_rl
-export RL_INITIAL_CHECKPOINT=/mnt/lustre-shared/<user>/checkpoints/lightning35-sft/iter_0000100
-export RL_OUTPUT_DIR=/mnt/lustre-shared/<user>/checkpoints/lightning35-rl-grpo-run-01
-export LEPTON_REGISTRY_AUTH=<lepton-registry-auth-name>
+export RL_PREP_OUTPUT_DIR="/mnt/lustre-shared/<user>/data/processed/lightning35_rl"
+export RL_INITIAL_CHECKPOINT="/mnt/lustre-shared/<user>/checkpoints/lightning35-sft/iter_0000100"
+export RL_OUTPUT_DIR="/mnt/lustre-shared/<user>/checkpoints/lightning35-rl-grpo-$(date +%Y%m%d-%H%M%S)"
+export LEPTON_REGISTRY_AUTH="<lepton-registry-auth-name>"
 export LIGHTNING35_RAY_VERSION=2.55.1
-export LIGHTNING35_RL_IMAGE=nvcr.io/<ngc-org>/nemo-rl:lightning35-ray2551-7fa6e55-6bb55bc
+export LIGHTNING35_RL_IMAGE="nvcr.io/<ngc-org>/nemo-rl:lightning35-ray2551-7fa6e55-6bb55bc"
 
 uv run nemotron steps run data_prep/rl_prep \
   -c lightning35 --batch lepton_lightning35_rl_prep --dry-run \
-  run.env.env_vars.RL_PREP_OUTPUT_DIR="${RL_PREP_OUTPUT_DIR}" \
-  run.env.env_vars.RL_OUTPUT_DIR="${RL_PREP_OUTPUT_DIR}"
+  "run.env.env_vars.RL_PREP_OUTPUT_DIR=${RL_PREP_OUTPUT_DIR:?Set RL_PREP_OUTPUT_DIR}" \
+  "run.env.env_vars.RL_OUTPUT_DIR=${RL_PREP_OUTPUT_DIR:?Set RL_PREP_OUTPUT_DIR}"
 
 # Remove --dry-run after checking the rendered mount and output directory.
 uv run nemotron steps run data_prep/rl_prep \
   -c lightning35 --batch lepton_lightning35_rl_prep \
-  run.env.env_vars.RL_PREP_OUTPUT_DIR="${RL_PREP_OUTPUT_DIR}" \
-  run.env.env_vars.RL_OUTPUT_DIR="${RL_PREP_OUTPUT_DIR}"
+  "run.env.env_vars.RL_PREP_OUTPUT_DIR=${RL_PREP_OUTPUT_DIR:?Set RL_PREP_OUTPUT_DIR}" \
+  "run.env.env_vars.RL_OUTPUT_DIR=${RL_PREP_OUTPUT_DIR:?Set RL_PREP_OUTPUT_DIR}"
 ```
 
 The prep preset downloads the released `rlvr.jsonl`, restores its Hub-backed
@@ -194,27 +220,29 @@ asynchronous. After the prep job finishes, run these checks on a
 pod or host that mounts the shared filesystem (not on an unmounted submit Mac):
 
 ```bash
-test -s "${RL_PREP_OUTPUT_DIR}/manifest.json"
+test -s "${RL_PREP_OUTPUT_DIR:?Set RL_PREP_OUTPUT_DIR}/manifest.json"
 jq '{train, val, train_rows, val_rows, allowed_agent_names, filtered_rows}' \
   "${RL_PREP_OUTPUT_DIR}/manifest.json"
-test -d "${RL_INITIAL_CHECKPOINT}"
+test -d "${RL_INITIAL_CHECKPOINT:?Set RL_INITIAL_CHECKPOINT}"
 ```
 
 ### 4. Compile, Smoke, Then Submit
 
 For an eight-host diagnostic, use seven worker pods plus the Lepton Ray head.
-The batch sizes below are the tested smaller topology. First compile it:
+Each host must supply eight GPUs. The batch sizes below preserve
+`128 prompts * 16 generations = 2048` trajectories per update; they do not
+guarantee memory safety for every sequence length. First compile it:
 
 ```bash
 uv run nemotron steps run rl/nemo_rl/rlvr \
   -c lightning35 --batch lepton_lightning35_rlvr --dry-run \
-  run.env.container_image="${LIGHTNING35_RL_IMAGE}" \
-  "run.env.image_pull_secrets=[${LEPTON_REGISTRY_AUTH}]" \
-  run.env.ray_version="${LIGHTNING35_RAY_VERSION}" \
+  "run.env.container_image=${LIGHTNING35_RL_IMAGE:?Set LIGHTNING35_RL_IMAGE}" \
+  "run.env.image_pull_secrets=[${LEPTON_REGISTRY_AUTH:?Set LEPTON_REGISTRY_AUTH}]" \
+  "run.env.ray_version=${LIGHTNING35_RAY_VERSION:?Set LIGHTNING35_RAY_VERSION}" \
   run.env.nodes=7 \
-  run.env.env_vars.RL_PREP_OUTPUT_DIR="${RL_PREP_OUTPUT_DIR}" \
-  run.env.env_vars.RL_INITIAL_CHECKPOINT="${RL_INITIAL_CHECKPOINT}" \
-  run.env.env_vars.RL_OUTPUT_DIR="${RL_OUTPUT_DIR}" \
+  "run.env.env_vars.RL_PREP_OUTPUT_DIR=${RL_PREP_OUTPUT_DIR:?Set RL_PREP_OUTPUT_DIR}" \
+  "run.env.env_vars.RL_INITIAL_CHECKPOINT=${RL_INITIAL_CHECKPOINT:?Set RL_INITIAL_CHECKPOINT}" \
+  "run.env.env_vars.RL_OUTPUT_DIR=${RL_OUTPUT_DIR:?Set RL_OUTPUT_DIR}" \
   cluster.num_nodes=8 \
   policy.megatron_cfg.tensor_model_parallel_size=2 \
   policy.megatron_cfg.context_parallel_size=2 \
@@ -236,6 +264,13 @@ TP/CP and batch sizes. With the current Lepton backend, always keep
 `cluster.num_nodes = run.env.nodes + 1` because the former includes the GPU
 head and the latter counts worker pods.
 
+A one-step smoke does not exercise the normal validation/save cadence or
+prove long-run memory stability. With the preset, validation occurs every
+5 steps and checkpoint saves every 10 (also subject to a wall-clock save
+deadline). Exercise those phases before treating the run as validated.
+`--dry-run` only compiles the launch configuration; it does not check remote
+files, registry access, available GPUs, or runtime memory.
+
 From a shell in the Ray head pod, inspect the submitted job with:
 
 ```bash
@@ -247,6 +282,54 @@ SID="your-submission-id"
 ray job status "${SID}"
 ray job logs "${SID}" --follow
 ```
+
+### 5. Troubleshooting Without Changing Recipes
+
+**`None/manifest.json` or a missing data path.** An empty shell expansion such
+as `run.env.env_vars.RL_PREP_OUTPUT_DIR=` overrides a valid profile value with
+null, which the launcher exports as the string `None`. Keep the guarded
+`${VAR:?Set VAR}` arguments above, pass a literal path, or omit the override
+when the profile already supplies it. Check the manifest and both referenced
+JSONL files on the mounted cluster filesystem, then submit a new job from the
+current checkout. This error does not require rebuilding the image.
+
+**Unsupported agent or `_ng_*` metadata.** Rerun the Lightning prep step and
+check that training consumes its current manifest. Do not remove the agent
+allowlist unless the additional reward services are also provisioned.
+
+**OOM after initially successful steps.** Record the first traceback, failed
+worker/node, step, and phase (rollout, log-probs, training, validation, save).
+An `ActorDiedError` alone or a long delay before failure does not establish
+the cause or prove a memory leak. Collect logs in the Ray head pod:
+
+```bash
+export RAY_ADDRESS=http://127.0.0.1:8265
+ray job list
+SID="your-submission-id"
+ray job logs "${SID}" > "/tmp/lightning35-${SID}.log" 2>&1
+grep -n -B 60 -A 100 -Ei \
+  'out of memory|OutOfMemoryError|OOMKilled|memory pressure|memory usage|ActorDiedError' \
+  "/tmp/lightning35-${SID}.log"
+```
+
+If the driver log only reports a dead actor, inspect that worker pod's Ray
+logs and Lepton termination reason. GPU and host-memory failures need
+different mitigations; Ray's node-memory monitor concerns host RAM, not CUDA
+memory. See [Ray OOM prevention](https://docs.ray.io/en/master/ray-core/scheduling/ray-oom-prevention.html).
+
+| Failure evidence | Config-only diagnostic to consider | Tradeoff / caution |
+|---|---|---|
+| CUDA OOM on long rollout/training/log-prob batches | `policy.max_total_sequence_length=16384` | Default is 73728 even in the eight-host command. This also changes interpolated generation, vLLM, and packing limits; it changes the workload and can exclude long-input examples. |
+| OOM specifically during validation | `grpo.val_batch_size=16` | Smaller batches, more validation iterations. Keep `grpo.max_val_samples=null`; the runner includes the final partial batch. |
+| Host RAM pressure while code verification is active | `env.nemo_gym.code_gen.resources_servers.code_gen.num_processes=32` | Default is 1024; lower concurrency reduces verification throughput. Confirm the verifier is the memory consumer first. |
+| OOM during checkpoint saving | Inspect save/serialization logs and per-node RAM | Do not disable optimizer saves casually: doing so changes what can be restored on resume. |
+
+Apply one diagnostic override at a time after identifying the failing phase;
+these are not a confirmed fix for an uninspected OOM. Training and log-prob
+microbatch sizes are already `1`, and default packing token budgets are 73728.
+Reducing only the global batch is not equivalent to reducing these budgets.
+Do not assume `policy.generation_batch_size` caps NeMo-Gym's HTTP request
+concurrency, or disable Ray's memory monitor to hide host-memory pressure.
 
 ## Config Nuances
 
