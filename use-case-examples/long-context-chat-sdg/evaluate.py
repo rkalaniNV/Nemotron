@@ -36,9 +36,12 @@ gives it concurrency + per-row-group checkpointing (crash-safe, resumable). Scor
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -52,10 +55,59 @@ DISQUALIFIERS = ["unsupported_claims", "no_real_research", "incoherent",
                  "request_unresolved", "user_out_of_character"]
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Replace an artifact atomically so interrupted evaluation keeps the old result."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", suffix=".tmp",
+                                         delete=False) as f:
+            tmp_name = f.name
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
+
+
+def _atomic_write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
+    _atomic_write_text(path, "".join(
+        json.dumps(row, ensure_ascii=False, default=str) + "\n" for row in rows
+    ))
+
+
+def _input_digest(rows: List[Dict[str, Any]]) -> str:
+    h = hashlib.sha256()
+    for row in rows:
+        h.update(json.dumps(row, sort_keys=True, separators=(",", ":"),
+                            ensure_ascii=False, default=str).encode("utf-8"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def _eval_cache_key(rows: List[Dict[str, Any]], *, judge: bool, model: str = "",
+                    endpoint: str = "", api_key_env: str = "") -> str:
+    """Namespace DD checkpoints by input and judge identity, never by threshold.
+
+    The quality/overlap thresholds intentionally stay out of this key so an unchanged
+    judged dataset can be re-thresholded without making another model call.
+    """
+    identity = {"input_sha256": _input_digest(rows), "judge": bool(judge)}
+    if judge:
+        identity.update(model=model, endpoint=endpoint, api_key_env=api_key_env)
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:20]
+    return f"{'judge' if judge else 'objective'}-{digest}"
+
+
 def _load(input_file: Optional[Path], raw_dir: Optional[Path]) -> List[Dict[str, Any]]:
     files = [input_file] if input_file else (sorted(raw_dir.glob("*.jsonl")) if raw_dir else [])
     rows: List[Dict[str, Any]] = []
     for fp in files:
+        if not fp.is_file():
+            raise SystemExit(f"[eval] input not found: {fp}")
         rows += [json.loads(l) for l in fp.open(encoding="utf-8") if l.strip()]
     return rows
 
@@ -134,12 +186,16 @@ def _citation_integrity(row: Dict[str, Any]) -> Dict[str, Any]:
 def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any]:
     msgs = row.get("messages", [])
     tools = row.get("tools", [])
-    n_calls, invalid, retrievals = 0, 0, 0
+    n_calls, invalid, retrievals, empty_retrievals, retrieval_results = 0, 0, 0, 0, 0
+    retrieval_tool_names = set(row.get("retrieval_tools") or ["search"])
+    retrieval_call_ids = set()
     for m in msgs:
         if m.get("role") != "assistant":
             continue
         for tc in (m.get("tool_calls") or []):
             n_calls += 1
+            if tc.get("function", {}).get("name") in retrieval_tool_names:
+                retrieval_call_ids.add(str(tc.get("id", "")))
             try:
                 json.loads(tc.get("function", {}).get("arguments", "{}"))
                 ok, _ = verifier.verify_single(tc, tools)
@@ -147,13 +203,27 @@ def _objective(row: Dict[str, Any], verifier: ToolCallVerifier) -> Dict[str, Any
                 ok = False
             invalid += int(not ok)
     for m in msgs:
-        if m.get("role") == "tool" and '"results"' in (m.get("content") or ""):
+        if m.get("role") != "tool" or str(m.get("tool_call_id", "")) not in retrieval_call_ids:
+            continue
+        try:
+            payload = json.loads(m.get("content") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        results = payload.get("results") if isinstance(payload, dict) else None
+        usable = [item for item in results
+                  if isinstance(item, dict) and str(item.get("text", "")).strip()] \
+            if isinstance(results, list) else []
+        if usable:
             retrievals += 1
+            retrieval_results += len(usable)
+        else:
+            empty_retrievals += 1
     last = msgs[-1] if msgs else {}
     ends_on_answer = last.get("role") == "assistant" and not last.get("tool_calls") and bool(last.get("content"))
     cite = _citation_integrity(row)
     ok = (invalid == 0) and (n_calls > 0) and (retrievals > 0) and ends_on_answer and cite["citation_ok"]
     return {"tool_calls": n_calls, "invalid_calls": invalid, "retrievals": retrievals,
+            "empty_retrievals": empty_retrievals, "retrieval_results": retrieval_results,
             "ends_on_answer": ends_on_answer, **cite, "objective_ok": ok}
 
 
@@ -223,11 +293,12 @@ def _as_list(v: Any) -> List[Any]:
     return v if isinstance(v, list) else (json.loads(v) if isinstance(v, str) and v.strip() else [])
 
 
-@custom_column_generator(required_columns=["messages", "tools"])
+@custom_column_generator(required_columns=["messages", "tools", "retrieval_tools"])
 def _eval_column(row):
     """Per-trajectory eval detail (objective gate + grounding overlap + judge verdict),
     stored as a JSON string in the `eval` column."""
-    r = {"messages": _as_list(row["messages"]), "tools": _as_list(row.get("tools"))}
+    r = {"messages": _as_list(row["messages"]), "tools": _as_list(row.get("tools")),
+         "retrieval_tools": _as_list(row.get("retrieval_tools")) or ["search"]}
     obj = _objective(r, _VERIFIER)
     scores = _JUDGE(r) if (_JUDGE and obj["objective_ok"]) else None
     row["eval"] = json.dumps({**obj, "grounding_overlap": _evidence_overlap(r), "rubric": scores},
@@ -272,8 +343,10 @@ def main() -> None:
                     help="reuse DD's judge checkpoint (crash recovery; re-thresholding reuses cache)")
     args = ap.parse_args()
 
-    # resolve the judge (explicit flags win; else --config's judge_model; else NVIDIA hosted)
+    # resolve the judge (explicit flags win; else --config's judge_model)
     global _JUDGE
+    _JUDGE = None
+    judge_model = judge_endpoint = judge_key = ""
     if args.judge:
         model, endpoint, key = args.model, args.endpoint, args.api_key_env
         if args.config and not (model and endpoint and key):
@@ -282,7 +355,8 @@ def main() -> None:
         if not (model and endpoint):
             raise SystemExit("[eval] --judge needs a judge model + endpoint. Set a judge_model in "
                              "--config, or pass --model/--endpoint. (No silent hosted fallback.)")
-        _JUDGE = _make_judge(model, endpoint, key or "NVIDIA_API_KEY")
+        judge_model, judge_endpoint, judge_key = model, endpoint, key or "NVIDIA_API_KEY"
+        _JUDGE = _make_judge(judge_model, judge_endpoint, judge_key)
 
     # paths from --config's exp_name (raw.jsonl -> sft.jsonl + summary.json), or explicit --input/--out
     input_path, out_path, summary_path, artifacts = args.input, args.out, None, None
@@ -295,23 +369,20 @@ def main() -> None:
     if not (input_path and out_path):
         raise SystemExit("[eval] need --config (for exp paths) or explicit --input/--out")
     summary_path = summary_path or out_path.with_suffix(".summary.json")
+    details_path = (summary_path.parent / "eval_details.jsonl" if args.config
+                    else out_path.with_suffix(".eval.jsonl"))
     artifacts = artifacts or (out_path.parent / "eval_artifacts")
 
     raw = _load(input_path, None)
-    if args.limit:
+    if args.limit is not None:
         raw = raw[: args.limit]
     if not raw:
         raise SystemExit(f"[eval] no trajectories in {input_path}")
 
-    # seed: stringify messages/tools (DD-safe) + row_id to merge back onto the pristine rows.
-    # Written to a temp dir (rebuilt every run) so it never pollutes the output folder.
-    import tempfile
-    seed_path = Path(tempfile.gettempdir()) / f"{out_path.stem}.eval_seed.jsonl"
-    with seed_path.open("w", encoding="utf-8") as f:
-        for i, r in enumerate(raw):
-            f.write(json.dumps({"row_id": i, "messages": json.dumps(r.get("messages", []), ensure_ascii=False),
-                                "tools": json.dumps(r.get("tools", []), ensure_ascii=False)},
-                               ensure_ascii=False) + "\n")
+    input_sha256 = _input_digest(raw)
+    cache_key = _eval_cache_key(raw, judge=args.judge, model=judge_model,
+                                endpoint=judge_endpoint, api_key_env=judge_key)
+    artifacts = artifacts / cache_key
 
     # the eval column, run + checkpointed by DataDesigner
     import data_designer.config as dd
@@ -323,18 +394,31 @@ def main() -> None:
         # Data Designer 0.7.0 publishes ResumeMode from the storage API.
         from data_designer.engine.storage.artifact_storage import ResumeMode
     from data_designer.interface import DataDesigner
+    print(f"[eval] {len(raw)} trajectories, judge={'on' if args.judge else 'off'}, "
+          f"workers={args.workers}, cache={cache_key}")
+    # Keep the seed at a stable, input-keyed path so DD can resume across threshold
+    # changes. Atomic replacement also removes the old shared-/tmp collision hazard.
+    seed_path = artifacts.parent / "_seeds" / f"{cache_key}.jsonl"
+    _atomic_write_jsonl(seed_path, [
+        {"row_id": i,
+         "messages": json.dumps(r.get("messages", []), ensure_ascii=False),
+         "tools": json.dumps(r.get("tools", []), ensure_ascii=False),
+         "retrieval_tools": json.dumps(r.get("retrieval_tools", ["search"]), ensure_ascii=False)}
+        for i, r in enumerate(raw)
+    ])
     cb = dd.DataDesignerConfigBuilder(model_configs=[])
-    cb.with_seed_dataset(dd.LocalFileSeedSource(path=str(seed_path)), sampling_strategy=dd.SamplingStrategy.SHUFFLE)
+    cb.with_seed_dataset(dd.LocalFileSeedSource(path=str(seed_path)),
+                         sampling_strategy=dd.SamplingStrategy.SHUFFLE)
     cb.add_column(dd.CustomColumnConfig(name="eval", generator_function=_eval_column))
     client = DataDesigner(artifact_path=str(artifacts))
     client.set_run_config(RunConfig(non_inference_max_parallel_workers=max(1, args.workers)))
-    print(f"[eval] {len(raw)} trajectories, judge={'on' if args.judge else 'off'}, workers={args.workers}")
-    try:
-        result = client.create(cb, num_records=len(raw), dataset_name="long_context_chat_sdg_eval",
-                               resume=ResumeMode(args.resume))
-        by_id = {int(rec["row_id"]): rec for rec in _records(result)}
-    finally:
-        seed_path.unlink(missing_ok=True)
+    result = client.create(cb, num_records=len(raw), dataset_name="long_context_chat_sdg_eval",
+                           resume=ResumeMode(args.resume))
+    by_id = {int(rec["row_id"]): rec for rec in _records(result)}
+    missing_ids = sorted(set(range(len(raw))) - set(by_id))
+    if missing_ids:
+        raise SystemExit(f"[eval] checkpoint returned {len(by_id)}/{len(raw)} rows; "
+                         f"missing row ids: {missing_ids[:10]}")
 
     # apply thresholds in Python (re-tunable without re-judging), then filter + score
     kept, scored = [], []
@@ -348,12 +432,21 @@ def main() -> None:
         if keep:
             kept.append(_for_sft(r, keep_reasoning=not args.strip_reasoning))
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        for r in kept:
-            f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
+    objective_pass = sum(1 for row in scored if row["eval"].get("objective_ok"))
+    judged_rows = sum(1 for row in scored if row["eval"].get("rubric") is not None)
+    if args.judge and judged_rows != objective_pass:
+        raise SystemExit(f"[eval] judge produced {judged_rows}/{objective_pass} required verdicts; "
+                         "refusing to publish an incomplete judged dataset.")
+
+    args.input_sha256 = input_sha256
+    args.eval_cache_key = cache_key
+    args.judge_model = judge_model or None
+    _atomic_write_jsonl(out_path, kept)
+    _atomic_write_jsonl(details_path, [
+        {"row_id": i, "eval": row["eval"]} for i, row in enumerate(scored)
+    ])
     summary = _summary(scored, kept, args)
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+    _atomic_write_text(summary_path, json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     print(f"\n[eval] kept {len(kept)}/{len(raw)} -> {out_path}")
 
@@ -374,9 +467,15 @@ def _dist(vals: List[int]) -> Dict[str, Any]:
 
 def _summary(scored: List[Dict[str, Any]], kept: List[Dict[str, Any]], args) -> Dict[str, Any]:
     n = len(scored)
+    objective_pass = sum(1 for r in scored if r["eval"].get("objective_ok"))
+    rub = [r["eval"]["rubric"] for r in scored if r["eval"].get("rubric")]
+    judged_rows = len(rub)
+    judge_requested = bool(args.judge)
     out: Dict[str, Any] = {
         "total": n,
-        "objective_pass": sum(1 for r in scored if r["eval"].get("objective_ok")),
+        "objective_pass": objective_pass,
+        "empty_evidence_rows": sum(1 for r in scored if r["eval"].get("empty_retrievals", 0)),
+        "retrieval_results_total": sum(r["eval"].get("retrieval_results", 0) for r in scored),
         "citation_fabrication_rows": sum(1 for r in scored if not r["eval"].get("citation_ok", True)),
         "reasoning_fabrication_rows": sum(1 for r in scored if not r["eval"].get("reasoning_citation_ok", True)),
         "cited_ids_total": sum(r["eval"].get("cited_ids", 0) for r in scored),
@@ -387,7 +486,13 @@ def _summary(scored: List[Dict[str, Any]], kept: List[Dict[str, Any]], args) -> 
             str(r.get("retrieval_mode", "unknown")) for r in scored).items())),
         "kept_retrieval_mode_counts": dict(sorted(Counter(
             str(r.get("retrieval_mode", "unknown")) for r in kept).items())),
-        "judged": bool(args.judge),
+        "judge_requested": judge_requested,
+        "judged": bool(judge_requested and judged_rows > 0 and judged_rows == objective_pass),
+        "judged_rows": judged_rows,
+        "strip_reasoning": bool(getattr(args, "strip_reasoning", False)),
+        "reasoning_citation_gate_applied": not bool(getattr(args, "strip_reasoning", False)),
+        "input_sha256": getattr(args, "input_sha256", None),
+        "eval_cache_key": getattr(args, "eval_cache_key", None),
     }
     if kept:
         turns = [sum(1 for m in r["messages"] if m.get("role") == "user") for r in kept]
@@ -395,14 +500,14 @@ def _summary(scored: List[Dict[str, Any]], kept: List[Dict[str, Any]], args) -> 
         out["top_flow_patterns"] = [{"pattern": p, "count": c}
                                     for p, c in Counter(_role_seq(r["messages"]) for r in kept).most_common(5)]
         out["context_length_tokens"] = _dist([_ctx_tokens(r["messages"]) for r in kept])
+        out["context_length_estimator"] = "characters_divided_by_4"
     ov = sorted(r["eval"].get("grounding_overlap", 0.0) for r in scored)
     if ov:
         out["grounding_overlap"] = {"mean": round(sum(ov) / len(ov), 3),
                                     "median": ov[len(ov) // 2],
                                     "p10": ov[len(ov) // 10], "min": ov[0], "max": ov[-1]}
     if args.judge:
-        rub = [r["eval"]["rubric"] for r in scored if r["eval"].get("rubric")]
-        j = len(rub)
+        j = judged_rows
         # how often each defect fired among judged rows (lower = cleaner data)
         out["disqualifier_rate"] = ({k: round(sum(bool(s["disqualifiers"].get(k)) for s in rub) / j, 3)
                                      for k in DISQUALIFIERS} if j else {})

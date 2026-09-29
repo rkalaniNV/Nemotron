@@ -14,6 +14,8 @@
 
 import random
 
+import pytest
+
 from long_context_chat_sdg.retrieval.client import HttpRetrievalClient
 
 
@@ -79,3 +81,30 @@ def test_content_hash_id_when_service_gives_none():
     client = HttpRetrievalClient("http://x", oversample_factor=1, post_fn=post)
     got = client.retrieve("q", k=1, rng=random.Random(0))
     assert got[0].id.startswith("h") and got[0].text == "some passage"
+
+
+def test_persistent_transport_failure_is_not_silently_empty():
+    calls = []
+
+    def post(*_args, **_kwargs):
+        calls.append(1)
+        raise ConnectionError("closed port")
+
+    client = HttpRetrievalClient("http://127.0.0.1:9/search", max_retries=2,
+                                 backoff=0, post_fn=post)
+    with pytest.raises(RuntimeError, match=r"failed after 3 attempt\(s\).+closed port"):
+        client.retrieve("q", k=2, rng=random.Random(0))
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("payload, message", [
+    ({"wrong_key": []}, "results_path"),
+    ({"chunks": [{"id": "x", "text": ""}]}, "no non-empty"),
+])
+def test_invalid_response_mapping_fails_loudly(payload, message):
+    client = HttpRetrievalClient(
+        "http://x", max_retries=0,
+        post_fn=lambda *_args, **_kwargs: _FakeResp(payload),
+    )
+    with pytest.raises(ValueError, match=message):
+        client.retrieve("q", k=1, rng=random.Random(0))

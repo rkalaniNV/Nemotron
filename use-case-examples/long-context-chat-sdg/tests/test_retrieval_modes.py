@@ -139,3 +139,83 @@ def test_citation_integrity_uses_external_retriever_ids():
     assert result["cited_ids"] == 2
     assert result["fabricated"] == ["invented-9"]
     assert result["citation_ok"] is False
+
+
+def test_empty_retrieval_evidence_fails_objective_and_is_reported():
+    pytest.importorskip("data_designer")
+    from evaluate import _objective, _summary
+
+    call = {"id": "call-empty", "function": {"name": "search", "arguments": '{"query":"topic"}'}}
+    row = {
+        "retrieval_mode": "http",
+        "retrieval_tools": ["search"],
+        "tools": [SEARCH_TOOL],
+        "messages": [
+            {"role": "user", "content": "Explain."},
+            {"role": "assistant", "content": "", "tool_calls": [call]},
+            {"role": "tool", "tool_call_id": "call-empty", "content": '{"results":[]}'},
+            {"role": "assistant", "content": "An unsupported answer."},
+        ],
+    }
+    objective = _objective(row, ToolCallVerifier())
+    assert objective["objective_ok"] is False
+    assert objective["retrievals"] == 0
+    assert objective["empty_retrievals"] == 1
+    scored = [{**row, "eval": {**objective, "grounding_overlap": 0.0}}]
+    summary = _summary(scored, [], SimpleNamespace(judge=False, strip_reasoning=False))
+    assert summary["empty_evidence_rows"] == 1
+    assert summary["retrieval_results_total"] == 0
+
+
+def test_results_from_non_retrieval_tool_do_not_satisfy_grounding_gate():
+    pytest.importorskip("data_designer")
+    from evaluate import _objective
+
+    memory_tool = {
+        "function": {"name": "memory_read", "parameters": {"type": "object", "properties": {}}}
+    }
+    call = {"id": "memory-call", "function": {"name": "memory_read", "arguments": "{}"}}
+    row = {
+        "retrieval_tools": ["search"],
+        "tools": [SEARCH_TOOL, memory_tool],
+        "messages": [
+            {"role": "user", "content": "Explain."},
+            {"role": "assistant", "content": "", "tool_calls": [call]},
+            {"role": "tool", "tool_call_id": "memory-call",
+             "content": '{"results":[{"id":"not-evidence","text":"memory"}]}'},
+            {"role": "assistant", "content": "Answer."},
+        ],
+    }
+    objective = _objective(row, ToolCallVerifier())
+    assert objective["retrievals"] == 0
+    assert objective["objective_ok"] is False
+
+
+def test_eval_cache_separates_modes_models_and_inputs_but_not_thresholds():
+    pytest.importorskip("data_designer")
+    from evaluate import _eval_cache_key
+
+    rows = [{"messages": [], "tools": []}]
+    objective = _eval_cache_key(rows, judge=False)
+    judge_a = _eval_cache_key(rows, judge=True, model="a", endpoint="http://judge")
+    assert objective != judge_a
+    assert judge_a == _eval_cache_key(rows, judge=True, model="a", endpoint="http://judge")
+    assert judge_a != _eval_cache_key(rows, judge=True, model="b", endpoint="http://judge")
+    assert judge_a != _eval_cache_key(rows + [{"messages": [1]}], judge=True,
+                                      model="a", endpoint="http://judge")
+
+
+def test_summary_records_reasoning_policy_and_honest_judge_state():
+    pytest.importorskip("data_designer")
+    from evaluate import _summary
+
+    row = {"messages": [], "retrieval_mode": "http", "eval": {
+        "objective_ok": True, "citation_ok": True, "reasoning_citation_ok": False,
+        "grounding_overlap": 0.1, "rubric": None,
+    }}
+    summary = _summary([row], [], SimpleNamespace(judge=True, strip_reasoning=True))
+    assert summary["judge_requested"] is True
+    assert summary["judged"] is False
+    assert summary["judged_rows"] == 0
+    assert summary["strip_reasoning"] is True
+    assert summary["reasoning_citation_gate_applied"] is False

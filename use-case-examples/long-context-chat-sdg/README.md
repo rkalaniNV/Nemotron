@@ -84,7 +84,9 @@ uv run python pipeline.py --config config/pipeline.yaml --stage query_prep
 ```
 
 Use `--dry-run` with `--stage query_gen` to inspect corpus clustering and sizing without
-calling a generation model or writing query output.
+calling a generation model or writing query output. Dry-run is intentionally rejected
+for `query_prep` and `generate`; those stages do not have a no-spend simulation. Limits
+must be positive (`--limit 1` or greater); omit the flag to process every row.
 
 ## 2. Generate with an external retriever
 
@@ -114,6 +116,10 @@ and expects:
 fields, and static request body without code changes. The client requests
 `top_k * oversample_factor` results and deterministically samples back to `top_k` so
 successive searches can explore different evidence.
+
+Persistent HTTP, timeout, response-decoding, and service errors stop generation rather
+than becoming empty evidence. A valid empty search result can still be recorded, but it
+does not satisfy the objective retrieval gate and is counted in the evaluation summary.
 
 ## 3. Run an explicit simulated demo
 
@@ -146,6 +152,11 @@ Add the configured judge model for a defect gate and 1–5 quality score:
 uv run python evaluate.py --config config/pipeline.yaml --judge
 ```
 
+Objective-only and judged evaluations use separate checkpoints keyed by the exact
+`raw.jsonl` content. Judged checkpoints also include the judge model and endpoint
+identity. Changing only `--min-quality` or `--min-overlap` reuses the existing scored
+checkpoint, while changing the input or judge cannot reuse stale verdicts.
+
 Assistant `reasoning_content` is retained by default. Pass `--strip-reasoning` when the
 training recipe should learn only tool calls and final answers.
 
@@ -160,11 +171,19 @@ Each experiment writes under `experiments/<exp_name>/`:
 | `output/raw.jsonl` | Full generated trajectories before evaluation. |
 | `output/sft.jsonl` | Rows that passed the enabled evaluation gates. |
 | `output/summary.json` | Keep rate, context length, grounding, hop, score, and retrieval-mode metrics. |
+| `output/eval_details.jsonl` | Per-row objective, evidence, citation, judge, and keep/drop details. |
+| `output/generation_rejections.jsonl` | Durable diagnostics when DD returns fewer or invalid trajectories. |
 | `artifacts/` | Data Designer checkpoints used for resume and re-evaluation. |
 
 SFT rows contain `messages`, `tools`, `retrieval_mode`, and generation metadata. Tool
 responses use `{"results": [...]}` and final assistant answers cite the retrieved chunk
 IDs inline.
+
+Output replacement is atomic. A generation stage publishes `raw.jsonl` only when every
+requested record produced a valid trajectory; otherwise it exits non-zero and preserves
+the prior dataset. Successful regeneration removes the old `sft.jsonl`, `summary.json`,
+and `eval_details.jsonl` because they describe the previous raw input. Change
+`exp_name` whenever generation configuration changes so runs remain auditable.
 
 ## Tests
 

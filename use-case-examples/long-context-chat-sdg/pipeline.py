@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -61,7 +63,48 @@ def exp_paths(cfg: Dict[str, Any], base: Path) -> Dict[str, Path]:
     out = exp / "output"
     return {"exp": exp, "output": out, "artifacts": exp / "artifacts",
             "queries": out / "queries.jsonl", "seeds": out / "seeds.jsonl",
-            "raw": out / "raw.jsonl", "sft": out / "sft.jsonl", "summary": out / "summary.json"}
+            "raw": out / "raw.jsonl", "sft": out / "sft.jsonl", "summary": out / "summary.json",
+            "eval_details": out / "eval_details.jsonl",
+            "generation_rejections": out / "generation_rejections.jsonl"}
+
+
+def _atomic_write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
+    """Replace a JSONL artifact atomically so a crash cannot leave a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", suffix=".tmp",
+                                         delete=False) as f:
+            tmp_name = f.name
+            for row in rows:
+                f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
+
+
+def _positive_limit(value: str) -> int:
+    try:
+        limit = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer of at least 1") from exc
+    if limit < 1:
+        raise argparse.ArgumentTypeError("must be at least 1; omit --limit to process all rows")
+    return limit
+
+
+def _validate_dry_run_scope(stage: str, dry_run: bool, has_query_source: bool) -> None:
+    if not dry_run:
+        return
+    if stage not in {"query_gen", "all"}:
+        raise SystemExit("[pipeline] --dry-run is supported only for query_gen; no model calls were made.")
+    if stage == "all" and not has_query_source:
+        raise SystemExit("[pipeline] --stage all --dry-run needs a configured query_gen source; "
+                         "generation dry-runs are not supported.")
 
 
 def _build_model_clients(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -98,6 +141,9 @@ def run_query_gen(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path
     if source == "lancedb" and not qg.get("lancedb", {}).get("uri"):
         raise SystemExit("[query_gen] source: lancedb needs query_gen.lancedb.uri + table.")
     chunks_path = str(_resolve(base, qg["chunks_path"])) if qg.get("chunks_path") else ""
+    if source == "jsonl" and not Path(chunks_path).is_file():
+        raise SystemExit(f"[query_gen] corpus not found: {chunks_path}\n"
+                         "  set query_gen.chunks_path to a readable JSONL corpus.")
     out_path = exp_paths(cfg, base)["queries"]
     models = _build_model_clients(cfg)
 
@@ -145,10 +191,7 @@ def run_query_gen(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Path
         raise SystemExit(f"[query_gen] produced 0 queries; refusing to overwrite {out_path}. "
                          "Check the source, endpoint, and validation settings.")
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        for s in seeds:
-            f.write(json.dumps(s, ensure_ascii=False) + "\n")
+    _atomic_write_jsonl(out_path, seeds)
     print(f"[query_gen] wrote {len(seeds)} queries -> {out_path}")
     return out_path
 
@@ -191,9 +234,13 @@ def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Pat
     # DD Person sampler may fill it at generate time.
     tools_json = json.dumps(cfg["tools"], ensure_ascii=False)
     seeds: List[Dict[str, Any]] = [
-        {"query": str(r.get(field, "")), "cluster_id": r.get("cluster_id", ""),
-         "kind": r.get("kind", ""),   # -> planner opening kind (vague => clarify)
-         "tools": tools_json}
+        {
+            **r,
+            "query": str(r.get(field, "")),
+            "cluster_id": r.get("cluster_id", ""),
+            "kind": r.get("kind", ""),  # -> planner opening kind (vague => clarify)
+            "tools": tools_json,
+        }
         for r in picked
     ]
     pcfg = cfg.get("persona", {}) or {}
@@ -202,10 +249,7 @@ def run_query_prep(cfg: Dict[str, Any], base: Path, limit: Optional[int]) -> Pat
         if persona_source_is_external(pcfg):
             seeds = attach_personas_to_seeds(seeds, pcfg, base=base)
 
-    seeds_path.parent.mkdir(parents=True, exist_ok=True)
-    with seeds_path.open("w", encoding="utf-8") as f:
-        for row in seeds:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    _atomic_write_jsonl(seeds_path, seeds)
     print(f"[query_prep] wrote {len(seeds)} seeds -> {seeds_path}")
     return seeds_path
 
@@ -257,6 +301,37 @@ def build_config_builder(cfg: Dict[str, Any], seed_path: Path):
     return cb
 
 
+def _prepare_generated_rows(records: List[Dict[str, Any]], cfg: Dict[str, Any],
+                            retrieval_mode: str) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Convert DD records without silently discarding malformed/empty trajectories."""
+    tools = cfg["tools"]
+    eng = cfg.get("engine", {})
+    meta = eng.get("metadata_fields", cfg.get("metadata_fields",
+                   ["kind", "difficulty", "cluster_id", "hops_taken",
+                    "conversation_status", "trajectory_judgment", "retrieval_log"]))
+    rows, rejections = [], []
+    for index, rec in enumerate(records):
+        src = rec.get("conversation_messages")
+        try:
+            messages = json.loads(src) if isinstance(src, str) else src
+        except (json.JSONDecodeError, TypeError) as exc:
+            rejections.append({"record_index": index, "reason": "invalid_conversation_messages",
+                               "detail": str(exc)})
+            continue
+        if not isinstance(messages, list) or not messages:
+            rejections.append({"record_index": index, "reason": "empty_conversation_messages",
+                               "conversation_status": rec.get("conversation_status")})
+            continue
+        row = {"messages": messages, "tools": tools,
+               "retrieval_mode": rec.get("retrieval_mode", retrieval_mode),
+               "retrieval_tools": list((cfg.get("retrieval", {}) or {}).get("tools", ["search"]))}
+        for mf in meta:
+            if mf in rec:
+                row[mf] = rec[mf]
+        rows.append(row)
+    return rows, rejections
+
+
 def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Optional[int]) -> Path:
     import data_designer.config as dd
     try:
@@ -282,7 +357,11 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
         else DataDesigner(artifact_path=artifact_path)
 
     n_seeds = sum(1 for l in seed_path.open(encoding="utf-8") if l.strip())
-    n = min(limit, n_seeds) if limit else n_seeds
+    if limit == 0:
+        raise SystemExit("[generate] --limit 0 selects no rows; omit --limit to process all rows.")
+    n = min(limit, n_seeds) if limit is not None else n_seeds
+    if n == 0:
+        raise SystemExit(f"[generate] no non-empty seeds in {seed_path}.")
 
     # parallel trajectories + row-group size. buffer_size default = num_records/10
     # (incremental checkpoints), floored at workers so the pool doesn't starve.
@@ -297,30 +376,32 @@ def run_generate(cfg: Dict[str, Any], base: Path, seed_path: Path, limit: Option
     result = client.create(cb, num_records=n, dataset_name="long_context_chat_sdg", resume=resume)
     records = _records(result)
 
-    out = exp_paths(cfg, base)["raw"]
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tools = cfg["tools"]
-    meta = eng.get("metadata_fields", cfg.get("metadata_fields",
-                   ["kind", "difficulty", "cluster_id", "hops_taken",
-                    "conversation_status", "trajectory_judgment", "retrieval_log"]))
-    n_written = 0
-    with out.open("w", encoding="utf-8") as f:
-        for rec in records:
-            src = rec.get("conversation_messages")
-            try:
-                messages = json.loads(src) if isinstance(src, str) else src
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if not messages:
-                continue
-            row = {"messages": messages, "tools": tools,
-                   "retrieval_mode": rec.get("retrieval_mode", retrieval_mode)}
-            for mf in meta:
-                if mf in rec:
-                    row[mf] = rec[mf]
-            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
-            n_written += 1
-    print(f"[generate] {len(records)} generated, {n_written} trajectories -> {out}")
+    paths = exp_paths(cfg, base)
+    out = paths["raw"]
+    rows, rejections = _prepare_generated_rows(records, cfg, retrieval_mode)
+
+    if len(records) != n:
+        rejections.append({"reason": "generated_record_count_mismatch", "expected": n,
+                           "actual": len(records)})
+    if rejections or len(rows) != n:
+        _atomic_write_jsonl(paths["generation_rejections"], rejections)
+        raise SystemExit(
+            f"[generate] incomplete result: requested {n}, Data Designer returned {len(records)}, "
+            f"and {len(rows)} valid trajectories. Previous raw/SFT artifacts were not changed; "
+            f"details: {paths['generation_rejections']}"
+        )
+
+    _atomic_write_jsonl(out, rows)
+    paths["generation_rejections"].unlink(missing_ok=True)
+    # raw.jsonl has a new identity. Never leave derived artifacts that describe its
+    # predecessor; eval checkpoints remain safe because evaluate.py keys them by input.
+    invalidated = [p for p in (paths["sft"], paths["summary"], paths["eval_details"]) if p.exists()]
+    for path in invalidated:
+        path.unlink()
+    if invalidated:
+        print("[generate] invalidated stale derived artifacts: "
+              + ", ".join(str(p) for p in invalidated))
+    print(f"[generate] {len(records)} generated, {len(rows)} trajectories -> {out}")
     print("  next — judge & filter into the final SFT set:")
     print("    python evaluate.py --config config/pipeline.yaml --judge")
     return out
@@ -342,7 +423,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="long_context_chat_sdg pipeline (query_prep + conversation gen).")
     ap.add_argument("--config", required=True, type=Path)
     ap.add_argument("--stage", choices=["query_gen", "query_prep", "generate", "all"], default="all")
-    ap.add_argument("--limit", type=int, default=None, help="cap generated queries / sampled seeds / rows")
+    ap.add_argument("--limit", type=_positive_limit, default=None,
+                    help="cap generated queries / sampled seeds / rows (must be >= 1)")
     ap.add_argument("--dry-run", action="store_true",
                     help="query_gen only: embed+cluster+sample and print diagnostics, no LLM/tokens, no write")
     ap.add_argument("--resume", choices=["never", "if_possible", "always"], default=None,
@@ -355,6 +437,9 @@ def main() -> None:
     from omegaconf import OmegaConf
     cfg = OmegaConf.to_container(OmegaConf.load(args.config), resolve=True)
     base = args.config.resolve().parent
+    _qg = cfg.get("query_gen", {})
+    _has_source = _qg.get("lancedb", {}).get("uri") or _qg.get("chunks_path")
+    _validate_dry_run_scope(args.stage, args.dry_run, bool(_has_source))
     if args.resume is not None:                         # CLI flag overrides engine.resume
         cfg.setdefault("engine", {})["resume"] = args.resume
     if args.simulate_retrieval:
@@ -366,15 +451,15 @@ def main() -> None:
     # overwrites; change exp_name to keep both).
     P = exp_paths(cfg, base)
     if not args.dry_run:
-        if P["output"].exists() and any(P["output"].iterdir()):
+        has_output = P["output"].exists() and any(P["output"].iterdir())
+        has_artifacts = P["artifacts"].exists() and any(P["artifacts"].iterdir())
+        if has_output or has_artifacts:
             print(f"[pipeline] ⚠️  experiment '{cfg.get('exp_name') or 'default'}' exists at {P['exp']} "
                   "— outputs will be overwritten (change exp_name to keep both).")
         P["output"].mkdir(parents=True, exist_ok=True)
 
     # Stage 0 (query_gen) is opt-in: explicit --stage query_gen, or "all" when a corpus
     # source (lancedb uri or chunks_path) is configured.
-    _qg = cfg.get("query_gen", {})
-    _has_source = _qg.get("lancedb", {}).get("uri") or _qg.get("chunks_path")
     if args.stage == "query_gen" or (args.stage == "all" and _has_source):
         if args.dry_run:
             cfg.setdefault("query_gen", {})["_dry_run"] = True

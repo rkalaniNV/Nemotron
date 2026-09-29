@@ -97,14 +97,23 @@ class HttpRetrievalClient:
 
     def _parse(self, payload: Any) -> List[Chunk]:
         path = self.fm.get("results_path")
-        items = payload.get(path, []) if (path and isinstance(payload, dict)) else payload
+        if path:
+            if not isinstance(payload, dict) or path not in payload:
+                raise ValueError(f"retrieval response is missing configured results_path {path!r}")
+            items = payload[path]
+        else:
+            items = payload
         if not isinstance(items, list):
-            return []
+            raise ValueError("retrieval results must be a list")
         chunks: List[Chunk] = []
-        for it in items:
+        for index, it in enumerate(items):
             if not isinstance(it, dict):
-                continue
-            text = str(it.get(self.fm["text_field"], ""))
+                raise ValueError(f"retrieval result {index} must be an object")
+            text = str(it.get(self.fm["text_field"], "")).strip()
+            if not text:
+                raise ValueError(
+                    f"retrieval result {index} has no non-empty {self.fm['text_field']!r} field"
+                )
             # prefer a real id; else a stable content hash (so chunks remain citable
             # even when the service returns no id).
             cid = it.get(self.fm["id_field"]) or it.get("chunk_id")
@@ -122,11 +131,16 @@ class HttpRetrievalClient:
     # ── the one method the generator calls ────────────────────────────────────
     def retrieve(self, query: str, k: int, *, rng) -> List[Chunk]:
         """Oversample ``k * oversample_factor``, then randomly keep ``k`` (deterministic
-        given ``rng``). On persistent failure return [] (empty hop) rather than raise."""
+        given ``rng``). Persistent transport/service failures are fatal: converting
+        them to an empty result would allow a dead retriever to look like valid
+        evidence to the generation and evaluation stages."""
         try:
             payload = self._post(query, k * self.oversample_factor)
-        except Exception:
-            return []
+        except Exception as exc:
+            raise RuntimeError(
+                f"retrieval request failed after {self.max_retries + 1} attempt(s) "
+                f"to {self.endpoint}: {exc}"
+            ) from exc
         pool = self._parse(payload)
         if len(pool) > k:
             idx = sorted(rng.sample(range(len(pool)), k))  # random subset, original (score) order preserved
