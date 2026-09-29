@@ -1,0 +1,362 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nemotron 3.5 Lightning 30B-A3B GRPO (NeMo-Gym RLVR).
+# Mirrors src/nemotron/recipes/lightning35/stage2_rl/config/default.yaml on the
+# NeMo-RL v0.7-derived runner: Megatron TP=4 / EP=16 / CP=4, 5 MTP layers,
+# vLLM nano_v3 parser, and 32 total GPU hosts. On Lepton, 31 worker pods plus
+# the GPU head supply those 32 Ray nodes.
+#
+# Required env (env.toml profile or shell):
+#   RL_PREP_OUTPUT_DIR  — manifest.json from data_prep/rl_prep -c lightning35
+#   RL_INITIAL_CHECKPOINT — Megatron SFT checkpoint (e.g. L35_OUTPUT_DIR)
+#   RL_OUTPUT_DIR — GRPO checkpoints and logs
+#   LIGHTNING35_RL_IMAGE — patched custom NeMo-RL image for Lightning 3.5
+#   LIGHTNING35_RAY_VERSION — Ray version baked into that image
+#   LEPTON_REGISTRY_AUTH — Lepton registry credential name for the private image
+#
+#   nemotron steps run data_prep/rl_prep -c lightning35 --batch lepton_lightning35_rl_prep
+#   nemotron steps run rl/nemo_rl/rlvr -c lightning35 --batch lepton_lightning35_rlvr
+
+nemotron:
+  runner: lightning35
+
+run:
+  env:
+    # No stock-image fallback: the selected image must contain the pinned
+    # Lightning refit patch, and its Ray version must match the Lepton cluster.
+    container_image: ${oc.env:LIGHTNING35_RL_IMAGE}
+    nodes: 31
+    gpus_per_node: 8
+    env_vars:
+      NRL_WG_USE_RAY_REF: "1"
+      NRL_VLLM_USE_V1: "1"
+      NRL_FORCE_REBUILD_VENVS: "false"
+      VLLM_ATTENTION_BACKEND: FLASH_ATTN
+      VLLM_USE_PRECOMPILED: "1"
+      VLLM_DEEP_GEMM_WARMUP: skip
+      RAY_DEDUP_LOGS: "1"
+      RAY_ENABLE_UV_RUN_RUNTIME_ENV: "0"
+      UV_HTTP_TIMEOUT: "10"
+      OMP_NUM_THREADS: "16"
+      NEMO_GYM_VENV_DIR: /opt/gym_venvs
+      WANDB_NAME: ${oc.env:WANDB_NAME,nemotron-3.5-lightning-grpo}
+
+nemo_rl_workdir: /opt/nemo-rl
+
+grpo:
+  num_prompts_per_step: 512
+  num_generations_per_prompt: 16
+  val_num_generations_per_prompt: 4
+  max_rollout_turns: 1
+  max_num_epochs: 1
+  max_num_steps: 1000000
+  normalize_rewards: true
+  use_leave_one_out_baseline: true
+  val_period: 5
+  val_at_start: false
+  val_at_end: false
+  overlong_filtering: false
+  advantage_clip_low: null
+  advantage_clip_high: null
+  max_val_samples: null
+  val_batch_size: 256
+  seed: 42
+  async_grpo:
+    enabled: false
+    max_trajectory_age_steps: 1
+  batch_multiplier: 1
+  use_dynamic_sampling: false
+  dynamic_sampling_max_gen_batches: 10
+  seq_logprob_error_threshold: null
+  reward_shaping:
+    enabled: false
+  reward_scaling:
+    enabled: false
+
+loss_fn:
+  reference_policy_kl_penalty: 0
+  reference_policy_kl_type: k3
+  kl_input_clamp_value: null
+  kl_output_clamp_value: null
+  ratio_clip_min: 0.2
+  ratio_clip_max: 0.28
+  ratio_clip_c: null
+  use_on_policy_kl_approximation: true
+  use_importance_sampling_correction: true
+  sequence_level_importance_ratios: false
+  token_level_loss: true
+  truncated_importance_sampling_ratio: 5
+  truncated_importance_sampling_ratio_min: 0.2
+  truncated_importance_sampling_type: tis
+
+checkpointing:
+  enabled: true
+  checkpoint_dir: ${oc.env:RL_OUTPUT_DIR,./output/rl}/lightning35-grpo-checkpoints
+  # NeMo-Gym validation publishes `accuracy`; an absent metric would fail the
+  # first checkpoint save following validation.
+  metric_name: val:accuracy
+  higher_is_better: true
+  keep_top_k: 1000000
+  save_period: 10
+  checkpoint_must_save_by: "00:03:40:00"
+  save_optimizer: true
+  # Load the SFT weights natively. This replaces the NeMo-RL v0.5 fake
+  # step_0 resume workaround and allows the checkpoint to be resharded.
+  pretrained_checkpoint:
+    path: ${oc.env:RL_INITIAL_CHECKPOINT,${oc.env:L35_OUTPUT_DIR,''}}
+    format: megatron_bridge
+  artifact_name: lightning35-rl-model
+
+policy:
+  model_name: nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16
+  tokenizer:
+    name: ${policy.model_name}
+    chat_template_kwargs: null
+  hf_config_overrides: {}
+  train_global_batch_size: 8192
+  train_micro_batch_size: 1
+  generation_batch_size: 64
+  logprob_batch_size: 1
+  max_total_sequence_length: 73728
+  precision: bfloat16
+  logprob_chunk_size: 2048
+  dtensor_cfg:
+    _v2: true
+    enabled: false
+    cpu_offload: false
+    sequence_parallel: false
+    activation_checkpointing: false
+    tensor_parallel_size: 1
+    context_parallel_size: 1
+    custom_parallel_plan: null
+    clear_cache_every_n_steps: null
+  megatron_cfg:
+    enabled: true
+    # Megatron-Bridge checkpoints persist runtime-bound callbacks in
+    # run_config.yaml. They belong to the discarded SFT model/optimizer and
+    # must be cleared so the RL worker can bind callbacks to its own objects.
+    model_overrides:
+      timers: null
+      finalize_model_grads_func: null
+      grad_scale_func: null
+      moe_grad_scale_func: null
+      mtp_grad_scale_func: null
+      no_sync_func: null
+      grad_sync_func: null
+      param_sync_func: null
+    empty_unused_memory_level: 1
+    activation_checkpointing: true
+    bias_activation_fusion: false
+    tensor_model_parallel_size: 4
+    expert_tensor_parallel_size: 1
+    expert_model_parallel_size: 16
+    pipeline_model_parallel_size: 1
+    num_layers_in_first_pipeline_stage: null
+    num_layers_in_last_pipeline_stage: null
+    context_parallel_size: 4
+    pipeline_dtype: ${policy.precision}
+    sequence_parallel: true
+    freeze_moe_router: true
+    moe_router_dtype: fp32
+    moe_router_load_balancing_type: none
+    moe_router_bias_update_rate: 1e-3
+    moe_permute_fusion: true
+    moe_enable_deepep: false
+    moe_token_dispatcher_type: alltoall
+    moe_aux_loss_coeff: 0.0
+    moe_router_enable_expert_bias: true
+    mtp_loss_scaling_factor: 0.3
+    mtp_use_repeated_layer: true
+    mtp_num_layers: 5
+    mtp_detach_heads: true
+    apply_rope_fusion: true
+    defer_fp32_logits: true
+    track_moe_metrics: true
+    moe_per_layer_logging: true
+    moe_shared_expert_overlap: false
+    gradient_accumulation_fusion: false
+    use_fused_weighted_squared_relu: false
+    do_not_average_loss: true
+    cp_normalize: true
+    calculate_per_token_loss: true
+    scale_loss_by_dp_cp_size: false
+    optimizer:
+      optimizer: adam
+      lr: 4.0e-6
+      min_lr: 4.0e-6
+      weight_decay: 0.0
+      bf16: true
+      fp16: false
+      params_dtype: float32
+      adam_beta1: 0.9
+      adam_beta2: 0.999
+      adam_eps: 1e-8
+      sgd_momentum: 0.9
+      clip_grad: ${policy.max_grad_norm}
+      use_distributed_optimizer: true
+      use_precision_aware_optimizer: true
+      optimizer_cpu_offload: false
+      optimizer_offload_fraction: 0
+    scheduler:
+      start_weight_decay: ${policy.megatron_cfg.optimizer.weight_decay}
+      end_weight_decay: ${policy.megatron_cfg.optimizer.weight_decay}
+      weight_decay_incr_style: constant
+      lr_decay_style: constant
+      lr_decay_iters: null
+      lr_warmup_iters: 10
+      lr_warmup_init: 4e-7
+      override_opt_param_scheduler: true
+    distributed_data_parallel_config:
+      grad_reduce_in_fp32: false
+      # Match the pinned NeMo-RL Lightning GRPO recipe. The runtime callbacks
+      # loaded from the SFT checkpoint are cleared in model_overrides above.
+      overlap_grad_reduce: false
+      overlap_param_gather: true
+      average_in_collective: false
+      use_custom_fsdp: false
+      data_parallel_sharding_strategy: optim_grads_params
+    env_vars: null
+  draft:
+    enabled: false
+    model_name: null
+    loss_weight: 0.1
+    num_layers: null
+    aux_layer_indices: null
+  dynamic_batching:
+    enabled: false
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
+    logprob_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}}
+    sequence_length_round: 64
+  sequence_packing:
+    enabled: true
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
+    logprob_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}}
+    algorithm: modified_first_fit_decreasing
+    sequence_length_round: 64
+  make_sequence_length_divisible_by: ${mul:${mul:${policy.megatron_cfg.tensor_model_parallel_size}, ${policy.megatron_cfg.context_parallel_size}}, 2}
+  max_grad_norm: 1.0
+  optimizer: null
+  scheduler: null
+  offload_optimizer_for_logprob: false
+  generation:
+    backend: vllm
+    max_new_tokens: ${policy.max_total_sequence_length}
+    temperature: 1.0
+    top_p: 1.0
+    top_k: null
+    val_temperature: ${.temperature}
+    val_top_p: ${.top_p}
+    val_top_k: ${.top_k}
+    stop_token_ids: null
+    stop_strings: null
+    port_range_low: 11001
+    port_range_high: 15000
+    vllm_cfg:
+      async_engine: false
+      kv_cache_dtype: auto
+      precision: ${policy.precision}
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      expert_parallel_size: 1
+      gpu_memory_utilization: 0.5
+      max_model_len: ${policy.max_total_sequence_length}
+      skip_tokenizer_init: false
+      enforce_eager: false
+      use_deep_gemm: false
+      num_last_layers_in_bf16: 0
+      num_first_layers_in_bf16: 0
+      expose_http_server: true
+      http_server_serving_chat_kwargs:
+        enable_auto_tools: true
+        tool_parser: qwen3_coder
+        reasoning_parser: nano_v3
+      reasoning_parser_plugin: nemo_rl/models/generation/vllm/reasoning_parsers/nano_v3_reasoning_parser.py
+    vllm_kwargs:
+      mamba_ssm_cache_dtype: float32
+      compilation_config:
+        backend: eager
+    colocated:
+      enabled: true
+      resources:
+        gpus_per_node: null
+        num_nodes: null
+
+data:
+  max_input_seq_length: null
+  shuffle: false
+  num_workers: 1
+  use_multiple_dataloader: false
+  train:
+    data_path: ${manifest:${oc.env:RL_PREP_OUTPUT_DIR,./output/data_prep/rl_prep/lightning35},train}
+  validation:
+    data_path: ${manifest:${oc.env:RL_PREP_OUTPUT_DIR,./output/data_prep/rl_prep/lightning35},val}
+  default:
+    dataset_name: NemoGymDataset
+    env_name: nemo_gym
+    prompt_file: null
+    system_prompt_file: null
+    processor: nemo_gym_data_processor
+
+env:
+  should_use_nemo_gym: true
+  should_log_nemo_gym_responses: true
+  nemo_gym:
+    port_range_low: 15001
+    port_range_high: 20000
+    is_trajectory_collection: false
+    config_paths:
+      - responses_api_models/vllm_model/configs/vllm_model_for_training.yaml
+      - resources_servers/math_with_judge/configs/math_with_judge.yaml
+      - resources_servers/code_gen/configs/code_gen.yaml
+      - resources_servers/single_step_tool_use_with_argument_comparison/configs/single_step_tool_use_with_argument_comparison.yaml
+      - resources_servers/workplace_assistant/configs/workplace_assistant.yaml
+      - resources_servers/mcqa/configs/mcqa.yaml
+      - resources_servers/instruction_following/configs/instruction_following.yaml
+      - resources_servers/structured_outputs/configs/structured_outputs_json.yaml
+    math_with_judge:
+      resources_servers:
+        math_with_judge:
+          judge_model_server:
+            name: policy_model
+          should_use_judge: false
+    code_gen:
+      resources_servers:
+        code_gen:
+          num_processes: 1024
+          unit_test_timeout_secs: 10
+          debug: false
+
+logger:
+  log_dir: ${oc.env:RL_OUTPUT_DIR,./output/rl}/lightning35-grpo-logs
+  num_val_samples_to_print: 0
+  wandb_enabled: ${oc.decode:${oc.env:WANDB_ENABLED,true}}
+  tensorboard_enabled: false
+  mlflow_enabled: false
+  monitor_gpus: true
+  swanlab_enabled: false
+  wandb:
+    project: ${oc.select:run.wandb.project,${oc.env:WANDB_PROJECT,nemotron}}
+    name: ${oc.env:WANDB_NAME,nemotron-3.5-lightning-grpo}
+  tensorboard: {}
+  mlflow:
+    experiment_name: lightning35-grpo
+    run_name: lightning35-grpo
+  gpu_monitoring:
+    collection_interval: 10
+    flush_interval: 10
+
+cluster:
+  gpus_per_node: 8
+  num_nodes: 32

@@ -54,6 +54,10 @@ description = "Optional row cap for smoke runs. Alias for sample in the RL resol
 default = "null"
 
 [[strategies]]
+when = "Preparing Nemotron 3.5 Lightning RL data"
+then = "Use config/lightning35.yaml (blend nvidia/Nemotron-RL-Lightning-Training-Blend, prep_backend=released_jsonl) before rl/nemo_rl/rlvr -c lightning35 so the released NeMo-Gym response schema is preserved."
+
+[[strategies]]
 when = "Cluster has no HF Hub access"
 then = "Keep resolve_hf_placeholders=true so all data is materialised locally before training."
 
