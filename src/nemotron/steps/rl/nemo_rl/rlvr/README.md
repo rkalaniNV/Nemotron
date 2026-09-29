@@ -47,9 +47,12 @@ conversion), GRPO, colocated vLLM generation, and the supported verifier agents
 from the released RL blend. It does not provision the external judge and
 sandbox pools required by the complete reference workload.
 
-The [step entrypoint](step.py) selects the
-[Lightning runner](../../../_runners/nemo_rl_lightning35.py) through
-`nemotron.runner: lightning35`. This adapter supports **synchronous GRPO only**;
+The [step entrypoint](step.py) uses the shared
+[NeMo-Gym runner](../../../_runners/nemo_rl_grpo_nemo_gym.py). The existing
+`nemotron.runner: lightning35` selector chooses its pinned typed-config API
+path; other Gym presets retain the legacy API path. No launch command or image
+change is required for this consolidation. The Lightning path supports
+**synchronous GRPO only**;
 async GRPO and trajectory-collection mode fail early. It registers the prep
 manifest resolver, checks checkpoint/data paths and agent coverage, then calls
 the pinned NeMo-RL setup and training loop. It does not convert checkpoints
@@ -247,16 +250,21 @@ uv run nemotron steps run rl/nemo_rl/rlvr \
   policy.megatron_cfg.tensor_model_parallel_size=2 \
   policy.megatron_cfg.context_parallel_size=2 \
   policy.megatron_cfg.expert_model_parallel_size=16 \
+  policy.max_total_sequence_length=16384 \
   grpo.num_prompts_per_step=128 \
   policy.train_global_batch_size=2048 \
   grpo.val_batch_size=64 \
+  checkpointing.save_period=1 \
   grpo.max_num_steps=1
 ```
 
 Inspect the dry-run for the private image, registry auth name, Ray 2.55.1,
 shared mount, checkpoint, manifest, and 7/8 node counts. Remove `--dry-run` to
-submit the one-step smoke. Keep the eight-host topology for the first real run:
-remove both `--dry-run` and `grpo.max_num_steps=1`. Set `RL_OUTPUT_DIR` to a
+submit the one-step smoke, including a checkpoint save. The 16K sequence cap
+matches the successful eight-host diagnostic; the preset's 73,728-token cap
+previously exhausted memory in MTP training on this topology. Keep 16K for the
+first longer test, set `grpo.max_num_steps=20`, and restore
+`checkpointing.save_period=10`. Set `RL_OUTPUT_DIR` to a
 fresh directory; do not reuse an older run containing a synthetic `step_0`
 checkpoint. The 32-host preset is optional after the eight-host run is stable;
 it uses `run.env.nodes=31`, `cluster.num_nodes=32`, and the preset's default
@@ -264,8 +272,8 @@ TP/CP and batch sizes. With the current Lepton backend, always keep
 `cluster.num_nodes = run.env.nodes + 1` because the former includes the GPU
 head and the latter counts worker pods.
 
-A one-step smoke does not exercise the normal validation/save cadence or
-prove long-run memory stability. With the preset, validation occurs every
+A one-step smoke checks training and saving, but does not exercise validation
+or prove long-run memory stability. With the preset, validation occurs every
 5 steps and checkpoint saves every 10 (also subject to a wall-clock save
 deadline). Exercise those phases before treating the run as validated.
 `--dry-run` only compiles the launch configuration; it does not check remote

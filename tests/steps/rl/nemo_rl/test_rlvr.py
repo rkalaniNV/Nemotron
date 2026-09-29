@@ -15,11 +15,11 @@ from omegaconf import OmegaConf
 
 from nemotron.steps._runners import nemo_rl as nemo_rl_runner
 from nemotron.steps._runners.nemo_rl import load_nemo_rl_step_config
-from nemotron.steps._runners.nemo_rl_lightning35 import (
-    _reject_unsupported_modes,
-    set_lightning35_nemo_gym_validation_size,
-    validate_lightning35_nemo_gym_data,
-    validate_lightning35_pretrained_checkpoint,
+from nemotron.steps._runners.nemo_rl_grpo_nemo_gym import (
+    _reject_unsupported_native_modes,
+    set_native_nemo_gym_validation_size,
+    validate_native_pretrained_checkpoint,
+    validate_nemo_gym_response_data,
 )
 from tests.steps._step_helpers import assert_step_static, step_dir
 
@@ -87,12 +87,23 @@ def test_lightning35_disables_incompatible_gradient_overlap() -> None:
         assert OmegaConf.select(cfg, f"{overrides}.{callback}") is None
 
 
-def test_lightning35_dispatches_to_step_runner(
+@pytest.mark.parametrize(
+    ("config_text", "overrides"),
+    [
+        ("nemotron:\n  runner: lightning35\n", ["grpo.max_num_steps=1"]),
+        ("env:\n  should_use_nemo_gym: false\n", ["nemotron.runner=lightning35"]),
+        ("env:\n  should_use_nemo_gym: true\n", ["grpo.max_num_steps=1"]),
+    ],
+    ids=["native-config", "native-override", "legacy-gym"],
+)
+def test_nemo_gym_dispatches_to_shared_runner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    config_text: str,
+    overrides: list[str],
 ) -> None:
-    config_path = tmp_path / "lightning35.yaml"
-    config_path.write_text("nemotron:\n  runner: lightning35\n", encoding="utf-8")
+    config_path = tmp_path / "grpo.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
     captured: dict = {}
 
     monkeypatch.setattr(
@@ -100,11 +111,11 @@ def test_lightning35_dispatches_to_step_runner(
         "parse_nemo_rl_args",
         lambda **_kwargs: (
             argparse.Namespace(config=str(config_path)),
-            ["grpo.max_num_steps=1"],
+            overrides,
         ),
     )
     monkeypatch.setattr(
-        "nemotron.steps._runners.nemo_rl_lightning35.run_lightning35_grpo",
+        "nemotron.steps._runners.nemo_rl_grpo_nemo_gym.run_nemo_gym_grpo",
         lambda **kwargs: captured.update(kwargs),
     )
 
@@ -116,12 +127,12 @@ def test_lightning35_dispatches_to_step_runner(
 
     assert captured == {
         "config_path": config_path,
-        "overrides": ["grpo.max_num_steps=1"],
+        "overrides": overrides,
     }
 
 
-def test_lightning35_runner_has_no_recipe_dependency() -> None:
-    runner_path = RLVR_STEP_DIR.parents[2] / "_runners" / "nemo_rl_lightning35.py"
+def test_shared_nemo_gym_runner_has_no_recipe_dependency() -> None:
+    runner_path = RLVR_STEP_DIR.parents[2] / "_runners" / "nemo_rl_grpo_nemo_gym.py"
     source = runner_path.read_text(encoding="utf-8")
 
     assert "nemotron.recipes" not in source
@@ -130,7 +141,7 @@ def test_lightning35_runner_has_no_recipe_dependency() -> None:
 def test_lightning35_validation_keeps_bounded_batches() -> None:
     config = SimpleNamespace(max_val_samples=None, val_batch_size=64)
 
-    set_lightning35_nemo_gym_validation_size(config, [None] * 1000)
+    set_native_nemo_gym_validation_size(config, [None] * 1000)
 
     assert config.max_val_samples == 1024
     assert config.val_batch_size == 64
@@ -140,7 +151,7 @@ def test_lightning35_validation_rejects_nonpositive_batch() -> None:
     config = SimpleNamespace(max_val_samples=None, val_batch_size=0)
 
     with pytest.raises(ValueError, match="must be positive"):
-        set_lightning35_nemo_gym_validation_size(config, [None])
+        set_native_nemo_gym_validation_size(config, [None])
 
 
 @pytest.mark.parametrize(
@@ -155,7 +166,7 @@ def test_lightning35_validation_rejects_nonpositive_batch() -> None:
 )
 def test_lightning35_rejects_unsupported_modes(config: dict) -> None:
     with pytest.raises(NotImplementedError):
-        _reject_unsupported_modes(config)
+        _reject_unsupported_native_modes(config)
 
 
 def test_lightning35_removes_disabled_trajectory_flag() -> None:
@@ -164,7 +175,7 @@ def test_lightning35_removes_disabled_trajectory_flag() -> None:
         "env": {"nemo_gym": {"is_trajectory_collection": False}},
     }
 
-    _reject_unsupported_modes(config)
+    _reject_unsupported_native_modes(config)
 
     assert "is_trajectory_collection" not in config["env"]["nemo_gym"]
 
@@ -173,7 +184,7 @@ def test_lightning35_validates_checkpoint_mount(tmp_path: Path) -> None:
     checkpoint = tmp_path / "iter_0000100"
     checkpoint.mkdir()
 
-    validate_lightning35_pretrained_checkpoint(
+    validate_native_pretrained_checkpoint(
         {
             "checkpointing": {
                 "pretrained_checkpoint": {
@@ -185,7 +196,7 @@ def test_lightning35_validates_checkpoint_mount(tmp_path: Path) -> None:
     )
 
     with pytest.raises(FileNotFoundError, match="was not found"):
-        validate_lightning35_pretrained_checkpoint(
+        validate_native_pretrained_checkpoint(
             {
                 "checkpointing": {
                     "pretrained_checkpoint": {
@@ -236,18 +247,18 @@ def _lightning35_preflight_config(
 
 
 def test_lightning35_data_preflight_accepts_matching_agents(tmp_path: Path) -> None:
-    validate_lightning35_nemo_gym_data(_lightning35_preflight_config(tmp_path))
+    validate_nemo_gym_response_data(_lightning35_preflight_config(tmp_path))
 
 
 def test_lightning35_data_preflight_rejects_runtime_metadata(tmp_path: Path) -> None:
     config = _lightning35_preflight_config(tmp_path, runtime_metadata=True)
 
     with pytest.raises(ValueError, match="_ng_task_index"):
-        validate_lightning35_nemo_gym_data(config)
+        validate_nemo_gym_response_data(config)
 
 
 def test_lightning35_data_preflight_rejects_missing_agent(tmp_path: Path) -> None:
     config = _lightning35_preflight_config(tmp_path, train_agent="missing_agent")
 
     with pytest.raises(ValueError, match="missing_agent"):
-        validate_lightning35_nemo_gym_data(config)
+        validate_nemo_gym_response_data(config)

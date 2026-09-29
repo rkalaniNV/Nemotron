@@ -6,11 +6,15 @@
 """Focused checks for the NeMo-Gym GRPO runner and configs."""
 
 import json
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, sentinel
 
 import pytest
 from omegaconf import OmegaConf
 
+from nemotron.steps._runners import nemo_rl_grpo_nemo_gym as gym_runner
 from nemotron.steps._runners.nemo_rl import (
     load_nemo_rl_step_config,
     should_use_nemo_gym_config,
@@ -27,6 +31,263 @@ from nemotron.steps._runners.nemo_rl_grpo_nemo_gym import (
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RLVR_CONFIG = REPO_ROOT / "src/nemotron/steps/rl/nemo_rl/rlvr/config"
 RLHF_CONFIG = REPO_ROOT / "src/nemotron/steps/rl/nemo_rl/rlhf/config"
+
+
+@pytest.fixture
+def nemo_rl_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Model both upstream contracts without importing GPU or Ray dependencies."""
+
+    class NativeMasterConfig(SimpleNamespace):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.grpo = SimpleNamespace(**kwargs["grpo"])
+
+        def model_dump(self):
+            return vars(self) | {"grpo": vars(self.grpo)}
+
+    generation = SimpleNamespace(
+        cfg={"model_name": "policy"},
+        dp_openai_server_base_urls=["http://policy/v1"],
+    )
+    legacy_env = SimpleNamespace(health_check=SimpleNamespace(remote=Mock(return_value=sentinel.health)))
+    runtime = SimpleNamespace(
+        master_config_type=NativeMasterConfig,
+        master_config=Mock(side_effect=NativeMasterConfig),
+        tokenizer=Mock(return_value=sentinel.tokenizer),
+        generation=Mock(return_value=sentinel.generation_config),
+        response_data=Mock(return_value=([sentinel.train], [1, 2, 3])),
+        setup_gym=Mock(),
+        setup=Mock(),
+        train=Mock(),
+        async_train=Mock(),
+        init_ray=Mock(),
+        create_env=Mock(return_value=legacy_env),
+        env_config=Mock(return_value=sentinel.env_config),
+        ray_get=Mock(),
+        legacy_env=legacy_env,
+        register_resolvers=Mock(),
+        register_manifest=Mock(),
+        register_artifacts=Mock(),
+        clear_artifacts=Mock(),
+        next_log_dir=Mock(return_value="logs/experiment_1"),
+        setup_values=(
+            sentinel.policy,
+            generation,
+            sentinel.cluster,
+            sentinel.dataloader,
+            sentinel.val_dataloader,
+            sentinel.loss_fn,
+            sentinel.logger,
+            sentinel.checkpointer,
+            sentinel.grpo_state,
+            sentinel.master_config,
+        ),
+    )
+    module_attrs = {
+        "ray": {"get": runtime.ray_get},
+        "nemo_rl.algorithms.grpo": {
+            "MasterConfig": runtime.master_config,
+            "_should_use_nemo_gym": lambda _config: True,
+            "setup": runtime.setup,
+            "grpo_train": runtime.train,
+            "async_grpo_train": runtime.async_train,
+        },
+        "nemo_rl.algorithms.utils": {"get_tokenizer": runtime.tokenizer},
+        "nemo_rl.data.utils": {"setup_response_data": runtime.response_data},
+        "nemo_rl.distributed.virtual_cluster": {"init_ray": runtime.init_ray},
+        "nemo_rl.environments.nemo_gym": {
+            "NemoGymConfig": runtime.env_config,
+            "setup_nemo_gym_config": runtime.setup_gym,
+        },
+        "nemo_rl.environments.utils": {"create_env": runtime.create_env},
+        "nemo_rl.models.generation": {"configure_generation_config": runtime.generation},
+        "nemo_rl.utils.config": {"register_omegaconf_resolvers": runtime.register_resolvers},
+        "nemo_rl.utils.logger": {"get_next_experiment_dir": runtime.next_log_dir},
+        "nemo_runspec.config.resolvers": {
+            "register_manifest_resolver": runtime.register_manifest,
+            "register_resolvers_from_config": runtime.register_artifacts,
+            "clear_artifact_cache": runtime.clear_artifacts,
+        },
+    }
+    modules = {}
+    for name, attrs in module_attrs.items():
+        parts = name.split(".")
+        for index in range(1, len(parts) + 1):
+            module_name = ".".join(parts[:index])
+            if module_name not in modules:
+                module = ModuleType(module_name)
+                module.__path__ = []
+                modules[module_name] = module
+                monkeypatch.setitem(sys.modules, module_name, module)
+        vars(modules[name]).update(attrs)
+
+    runtime.legacy_hooks = {}
+    for name in (
+        "_maybe_chdir_to_nemo_rl_workdir",
+        "materialize_nemo_gym_data_manifest",
+        "materialize_nemo_gym_response_data",
+        "_patch_wandb",
+        "_setup_initial_policy",
+    ):
+        hook = Mock(name=name)
+        monkeypatch.setattr(gym_runner, name, hook)
+        runtime.legacy_hooks[name] = hook
+    return runtime
+
+
+@pytest.fixture
+def nemo_gym_runner_config(tmp_path: Path) -> Path:
+    data_path = tmp_path / "responses.jsonl"
+    data_path.write_text(
+        json.dumps({"agent_ref": {"type": "responses_api_agents", "name": "test_agent"}}) + "\n",
+        encoding="utf-8",
+    )
+    checkpoint = tmp_path / "pretrained"
+    checkpoint.mkdir()
+    config = {
+        "run": {"workdir": "/unused"},
+        "nemo_rl_workdir": "/unused",
+        "env": {
+            "should_use_nemo_gym": True,
+            "nemo_gym": {
+                "is_trajectory_collection": False,
+                "test_agent": {"responses_api_agents": {"simple_agent": {"entrypoint": "app.py"}}},
+            },
+        },
+        "data": {"train": {"data_path": str(data_path)}, "validation": {"data_path": str(data_path)}},
+        "grpo": {"max_val_samples": None, "val_batch_size": 2, "async_grpo": {"enabled": False}},
+        "policy": {
+            "tokenizer": {"name": "tokenizer"},
+            "generation": {"backend": "vllm"},
+            "draft": {"enabled": True},
+            "megatron_cfg": {"enabled": True, "mtp_num_layers": 5},
+        },
+        "checkpointing": {
+            "enabled": False,
+            "pretrained_checkpoint": {"path": str(checkpoint), "format": "megatron_bridge"},
+        },
+        "logger": {"log_dir": "logs"},
+    }
+    config_path = tmp_path / "grpo.yaml"
+    config_path.write_text(OmegaConf.to_yaml(config), encoding="utf-8")
+    return config_path
+
+
+@pytest.mark.parametrize(
+    ("selector_override", "draft_enabled", "megatron_enabled", "mtp_layers"),
+    [(False, True, True, 5), (True, False, True, 0), (True, True, False, 5)],
+)
+def test_shared_entrypoint_preserves_native_upstream_contract(
+    nemo_rl_runtime: SimpleNamespace,
+    nemo_gym_runner_config: Path,
+    selector_override: bool,
+    draft_enabled: bool,
+    megatron_enabled: bool,
+    mtp_layers: int,
+) -> None:
+    runtime = nemo_rl_runtime
+    if not selector_override:
+        config = OmegaConf.load(nemo_gym_runner_config)
+        config.nemotron = {"runner": "lightning35"}
+        nemo_gym_runner_config.write_text(OmegaConf.to_yaml(config), encoding="utf-8")
+    overrides = [
+        f"policy.draft.enabled={str(draft_enabled).lower()}",
+        f"policy.megatron_cfg.enabled={str(megatron_enabled).lower()}",
+        f"policy.megatron_cfg.mtp_num_layers={mtp_layers}",
+    ]
+    if selector_override:
+        overrides.append("nemotron.runner=lightning35")
+    runtime.setup.return_value = (
+        *runtime.setup_values[:2],
+        sentinel.upstream_gym,
+        *runtime.setup_values[2:],
+        sentinel.teacher_worker_groups,
+        sentinel.alias_to_group_alias,
+    )
+
+    gym_runner.run_nemo_gym_grpo(config_path=nemo_gym_runner_config, overrides=overrides)
+
+    runtime.master_config.assert_called_once()
+    config = runtime.setup.call_args.args[0]
+    assert isinstance(config, runtime.master_config_type)
+    assert not {"run", "nemotron", "nemo_rl_workdir"}.intersection(runtime.master_config.call_args.kwargs)
+    assert "is_trajectory_collection" not in config.env["nemo_gym"]
+    assert config.grpo.max_val_samples == 4
+    assert config.grpo.val_batch_size == 2
+    runtime.generation.assert_called_once_with(
+        {"backend": "vllm"},
+        sentinel.tokenizer,
+        has_refit_draft_weights=draft_enabled,
+        trains_mtp=bool(megatron_enabled and mtp_layers),
+    )
+    runtime.setup_gym.assert_called_once_with(config, sentinel.tokenizer)
+    runtime.response_data.assert_called_once_with(sentinel.tokenizer, config.data, env_configs=None)
+    runtime.setup.assert_called_once_with(config, sentinel.tokenizer, [sentinel.train], [1, 2, 3])
+    runtime.train.assert_called_once_with(
+        *runtime.setup_values[:2],
+        sentinel.dataloader,
+        sentinel.val_dataloader,
+        sentinel.tokenizer,
+        sentinel.loss_fn,
+        {"nemo_gym": sentinel.upstream_gym},
+        {"nemo_gym": sentinel.upstream_gym},
+        *runtime.setup_values[6:],
+    )
+    runtime.init_ray.assert_called_once_with()
+    runtime.create_env.assert_not_called()
+    runtime.env_config.assert_not_called()
+    runtime.ray_get.assert_not_called()
+    runtime.async_train.assert_not_called()
+    runtime.register_artifacts.assert_not_called()
+    for hook in runtime.legacy_hooks.values():
+        hook.assert_not_called()
+
+
+def test_shared_entrypoint_preserves_legacy_upstream_contract(
+    nemo_rl_runtime: SimpleNamespace,
+    nemo_gym_runner_config: Path,
+) -> None:
+    runtime = nemo_rl_runtime
+    runtime.setup.return_value = runtime.setup_values
+
+    gym_runner.run_nemo_gym_grpo(config_path=nemo_gym_runner_config)
+
+    config = runtime.setup.call_args.args[0]
+    assert isinstance(config, dict)
+    assert config["grpo"]["max_val_samples"] == 3
+    assert config["grpo"]["val_batch_size"] == 2
+    runtime.master_config.assert_not_called()
+    runtime.generation.assert_called_once_with({"backend": "vllm"}, sentinel.tokenizer)
+    runtime.setup_gym.assert_called_once_with(config, sentinel.tokenizer)
+    runtime.response_data.assert_called_once_with(
+        tokenizer=sentinel.tokenizer, data_config=config["data"], env_configs=None
+    )
+    runtime.setup.assert_called_once_with(config, sentinel.tokenizer, [sentinel.train], [1, 2, 3])
+    runtime.create_env.assert_called_once_with(env_name="nemo_gym", env_config=sentinel.env_config)
+    runtime.env_config.assert_called_once_with(
+        model_name="policy",
+        base_urls=["http://policy/v1"],
+        initial_global_config_dict={
+            "test_agent": {"responses_api_agents": {"simple_agent": {"entrypoint": "app.py"}}}
+        },
+    )
+    runtime.legacy_env.health_check.remote.assert_called_once_with()
+    runtime.ray_get.assert_called_once_with(sentinel.health)
+    runtime.train.assert_called_once_with(
+        *runtime.setup_values[:2],
+        sentinel.dataloader,
+        sentinel.val_dataloader,
+        sentinel.tokenizer,
+        sentinel.loss_fn,
+        {"nemo_gym": runtime.legacy_env},
+        {"nemo_gym": runtime.legacy_env},
+        *runtime.setup_values[6:],
+    )
+    runtime.init_ray.assert_called_once_with()
+    runtime.async_train.assert_not_called()
+    runtime.register_artifacts.assert_called_once()
+    for hook in runtime.legacy_hooks.values():
+        hook.assert_called_once_with(config)
 
 
 def test_nemo_gym_dispatch_configs() -> None:

@@ -27,15 +27,18 @@ The shared runner has two helpers:
   Hydra-style overrides to a NeMo-RL example via `os.execvp`.
 - `exec_or_run_nemo_rl_grpo(...)` — RLVR/RLHF use this. Inspects the loaded
   config in this order:
-  - `nemotron.runner = lightning35` → call the pinned, synchronous
-    [`nemo_rl_lightning35.run_lightning35_grpo(...)`](../../_runners/nemo_rl_lightning35.py).
+  - `nemotron.runner = lightning35` → call the shared
+    [`nemo_rl_grpo_nemo_gym.run_nemo_gym_grpo(...)`](../../_runners/nemo_rl_grpo_nemo_gym.py)
+    using its pinned, synchronous typed-config API path.
     Other explicit `nemotron.runner` values are rejected.
   - With no explicit runner, `env.should_use_nemo_gym = true` → call in-repo
-    `nemo_rl_grpo_nemo_gym.run_nemo_gym_grpo(...)` directly (no exec).
+    `nemo_rl_grpo_nemo_gym.run_nemo_gym_grpo(...)` using its legacy dictionary
+    API path (no exec).
   - Otherwise → exec the upstream NeMo-RL example.
 
-These paths have different runtime contracts. Don't mix configs or substitute
-the generic runner for the pinned Lightning adapter.
+Both Gym paths live in the same module but have different upstream runtime
+contracts. Keep each preset paired with its matching image; retain
+`nemotron.runner: lightning35` when using the pinned Lightning image.
 
 Use the single-string `defaults: base.yaml` form for local YAML layering;
 this loader is **not** a full Hydra composition engine.
