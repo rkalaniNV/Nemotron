@@ -14,6 +14,7 @@ overclaim would live if it lived anywhere.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tomllib
 from pathlib import Path
@@ -334,6 +335,9 @@ def test_gpu_workflow_runs_inside_one_explicit_ray_lifecycle(tmp_path, monkeypat
             assert kwargs == {"num_gpus": 1, "include_dashboard": False}
 
         def start(self) -> None:
+            # RayClient shells out to the `ray` CLI; it must resolve from this
+            # interpreter's venv even when the venv is not activated.
+            assert str(Path(sys.executable).parent) in os.environ["PATH"].split(os.pathsep)
             events.append("ray-start")
 
         def stop(self) -> None:
@@ -358,6 +362,7 @@ def test_gpu_workflow_runs_inside_one_explicit_ray_lifecycle(tmp_path, monkeypat
     monkeypatch.setitem(sys.modules, "nemo_curator.core.client", client_module)
     monkeypatch.setitem(sys.modules, "nemo_curator.stages.deduplication.fuzzy.workflow", workflow_module)
     monkeypatch.setattr(step, "read_cross_split_pairs", lambda *args: [])
+    monkeypatch.setenv("PATH", "/usr/bin")
 
     assert (
         step.candidate_pairs(

@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 from itertools import product
@@ -205,6 +206,11 @@ def candidate_pairs(
     # pipeline.  Starting Ray explicitly keeps that actor on one persistent
     # cluster for all workflow stages.  RayClient reuses RAY_ADDRESS when the
     # operator supplied an external cluster and stops only a cluster it started.
+    # RayClient launches the `ray` CLI from PATH, which an unactivated venv
+    # does not provide; put this interpreter's bin directory first.
+    bin_dir = str(Path(sys.executable).parent)
+    if bin_dir not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = os.pathsep.join(filter(None, [bin_dir, os.environ.get("PATH")]))
     ray_client = RayClient(num_gpus=1, include_dashboard=False)
     ray_started = False
     try:
