@@ -14,6 +14,11 @@ inherit.
 | [`rlvr`](rlvr/README.md) | GRPO with verifiable rewards (math, tests, env success) | `examples/run_grpo.py` or in-repo NeMo-Gym runner |
 | [`rlhf`](rlhf/README.md) | GRPO with a learned judge / GenRM via NeMo-Gym | in-repo NeMo-Gym GRPO runner |
 
+For Nemotron 3.5 Lightning, use `rl/nemo_rl/rlvr -c lightning35`. Follow the
+[Lightning Lepton runbook](rlvr/README.md#nemotron-35-lightning-on-lepton)
+for the pinned image, matching data prep, checkpoint, and launch commands.
+GRPO is the algorithm used by this RLVR step, not a separate step directory.
+
 ## Runner Gating
 
 The shared runner has two helpers:
@@ -21,15 +26,22 @@ The shared runner has two helpers:
 - `exec_nemo_rl_example(...)` — DPO uses this. Forwards `--config` and
   Hydra-style overrides to a NeMo-RL example via `os.execvp`.
 - `exec_or_run_nemo_rl_grpo(...)` — RLVR/RLHF use this. Inspects the loaded
-  config:
-  - `env.should_use_nemo_gym = false` → exec upstream NeMo-RL example.
-  - `env.should_use_nemo_gym = true` → call in-repo
-    `nemo_rl_grpo_nemo_gym.run_nemo_gym_grpo(...)` directly (no exec).
+  config in this order:
+  - `nemotron.runner = lightning35` → call the shared
+    [`nemo_rl_grpo_nemo_gym.run_nemo_gym_grpo(...)`](../../_runners/nemo_rl_grpo_nemo_gym.py)
+    using its pinned, synchronous typed-config API path.
+    Other explicit `nemotron.runner` values are rejected.
+  - With no explicit runner, `env.should_use_nemo_gym = true` → call in-repo
+    `nemo_rl_grpo_nemo_gym.run_nemo_gym_grpo(...)` using its legacy dictionary
+    API path (no exec).
+  - Otherwise → exec the upstream NeMo-RL example.
 
-The two paths have different Ray actor topologies. Don't mix configs.
+Both Gym paths live in the same module but have different upstream runtime
+contracts. Keep each preset paired with its matching image; retain
+`nemotron.runner: lightning35` when using the pinned Lightning image.
 
-The local `defaults: <yaml>` form in YAML is a small layering convenience
-(single string or list); it is **not** a full Hydra composition engine.
+Use the single-string `defaults: base.yaml` form for local YAML layering;
+this loader is **not** a full Hydra composition engine.
 
 ## Common Config Nuances
 
@@ -49,7 +61,7 @@ The local `defaults: <yaml>` form in YAML is a small layering convenience
 ## Repository Layout
 
 - `dpo/`: `step.toml`, `step.py`, `config/{default,tiny}.yaml`
-- `rlvr/`: `step.toml`, `step.py`, `config/{default,tiny,nemo_gym}.yaml`
+- `rlvr/`: `step.toml`, `step.py`, `config/{default,tiny,nemo_gym,lightning35}.yaml`
 - `rlhf/`: `step.toml`, `step.py`, `config/{default,tiny}.yaml`
 
 ## Guardrails
