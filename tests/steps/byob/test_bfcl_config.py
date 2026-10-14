@@ -53,7 +53,7 @@ def _edit_pack_yaml(path: Path, mutate) -> None:
 
 
 def test_list_families_includes_bfcl_and_mcq() -> None:
-    assert list_families() == ["bfcl", "mcq"]
+    assert list_families() == ["bfcl", "mcq", "safety"]
 
 
 def test_all_bfcl_configs_pin_family() -> None:

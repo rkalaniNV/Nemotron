@@ -101,6 +101,8 @@ byob = [
     "iso639-lang>=2.6.0,<3.0.0; python_version>='3.11'",
     "bcp47>=0.1.0; python_version>='3.11' and python_version<'3.14'",
     "httpx",
+    "python-docx>=1.1,<2; python_version>='3.11'",
+    "pypdf>=5.0,<7; python_version>='3.11'",
 ]
 bfcl-mcp = [
     # The 2026 protocol requires MCP Python SDK v2. Data Designer currently pins

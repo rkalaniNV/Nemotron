@@ -1,0 +1,11 @@
+# Safety does not localize a benchmark in this increment.
+# The translation hook is registered so the shared dispatcher does not report it
+# with exit code 2, which safety reserves for a finished Silver or Preview publication.
+
+family: safety
+expt_name: safety_translate_unsupported
+stage: translate
+config_status: resolved
+mode: assisted
+output_dir: /tmp/byob-safety
+input_dir: safety/examples/policies

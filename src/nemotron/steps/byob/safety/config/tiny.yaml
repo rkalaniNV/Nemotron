@@ -1,0 +1,15 @@
+# Safety plumbing config. stage=prepare only initializes the run directory.
+# It does not publish a benchmark and does not write run_manifest.json.
+
+family: safety
+expt_name: safety_tiny
+stage: prepare
+config_status: resolved
+mode: assisted
+
+# Paths resolve from src/nemotron/steps/byob when they are not absolute.
+output_dir: /tmp/byob-safety
+input_dir: safety/examples/policies
+
+assurance:
+  profile: standard

@@ -21,6 +21,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import yaml  # type: ignore[import-untyped]
+
 from nemotron.steps.byob.runtime.benchmark_families.base import BenchmarkRunResult
 from nemotron.steps.byob.scripts.runtime import (
     STAGE_CHOICES,
@@ -64,7 +66,11 @@ def main() -> None:
     if args.config is None:
         parser.error("--config is required unless --list-families is set")
 
-    yaml_dict = load_dispatch_config(args.config)
+    try:
+        yaml_dict = load_dispatch_config(args.config)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        print(f"byob_config_unreadable: cannot read {args.config}: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
     stage = resolve_dispatch_value(args.stage, yaml_dict, "stage")
     family = resolve_dispatch_value(args.family, yaml_dict, "family", default="mcq")
     skip_until = resolve_dispatch_value(args.skip_until, yaml_dict, "skip_until")

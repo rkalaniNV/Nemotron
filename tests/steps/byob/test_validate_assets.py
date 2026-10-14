@@ -34,4 +34,4 @@ def test_validator_discovers_additional_family(tmp_path: Path) -> None:
     )
 
     assert validate_skill_dir(skill_dir) == []
-    assert _discover_families(skill_dir) == ["bfcl", "gsm8k", "mcq"]
+    assert _discover_families(skill_dir) == ["bfcl", "gsm8k", "mcq", "safety"]

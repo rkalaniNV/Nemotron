@@ -1,0 +1,26 @@
+# Starting point for a customer safety run.
+# Copy this file, point input_dir at the customer policy directory, and keep family: safety.
+# Relative paths resolve from src/nemotron/steps/byob, not from the current directory, so use
+# absolute paths for customer folders.
+# stage=prepare is the runnable command. Use stage: all only after publication generation
+# is connected; today that stage stops once prepare has initialized the run.
+
+family: safety
+expt_name: customer-safety-v1
+stage: prepare
+config_status: resolved
+mode: assisted
+
+output_dir: /tmp/byob-safety
+input_dir: safety/examples/policies
+
+assurance:
+  profile: standard
+
+budget:
+  assisted_max_cases: 500
+  max_review_items: 40
+
+generation:
+  modules:
+    adversarial: false

@@ -1,0 +1,57 @@
+[step]
+id = "byob/safety"
+name = "Bring Your Own Benchmark — Safety"
+category = "byob"
+description = "Compile a customer policy into a private guardrail benchmark. This family is separate from bfcl function-calling generation."
+tags = ["benchmark", "byob", "safety", "guardrails", "policy"]
+
+[[consumes]]
+type = "customer_policy"
+description = "Policy documents or a structured Policy Pack. This is not a BFCL oracle pack."
+
+[[produces]]
+type = "safety_run_record"
+description = "run_record.json for an initialized run. It is not a publication commit."
+
+[[produces]]
+type = "safety_benchmark_parquet"
+description = "Published safety benchmark parquet. Written only when generation publishes."
+required = false
+
+[[produces]]
+type = "safety_run_manifest"
+description = "run_manifest.json written last, only when a safety benchmark is published."
+required = false
+
+[[parameters]]
+name = "family"
+description = "Benchmark family implementation to run."
+default = "safety"
+choices = ["safety"]
+
+[[parameters]]
+name = "stage"
+description = "Shared BYOB stage. prepare initializes the run. generate publishes. all runs prepare then generate. eval scores a published benchmark."
+default = "prepare"
+choices = ["prepare", "generate", "translate", "eval", "all"]
+
+[[parameters]]
+name = "config"
+description = "Path to a safety YAML config. Relative paths inside it resolve from the BYOB root."
+
+[[parameters]]
+name = "skip_until"
+description = "Reserved for safety checkpoint resume. Not available until publication checkpoints exist."
+
+[[strategies]]
+when = "You need a guardrail benchmark from a customer policy"
+then = "Use family=safety. stage=prepare initializes output_dir/expt_name. stage=generate publishes the benchmark. Do not point this family at an oracle pack and do not use it to score function calling."
+skill = "src/nemotron/steps/byob/references/safety-family.md"
+
+[[errors]]
+name = "review_required"
+recovery = "Exit code 3 is not a failure. Review the packet, then run python -m nemotron.steps.byob.scripts.approve_safety_review --config <config>. It signs the packet and publishes."
+
+[[errors]]
+name = "missing_family_pin"
+recovery = "Every safety config must set family: safety. Without it the shared dispatcher defaults to mcq."
