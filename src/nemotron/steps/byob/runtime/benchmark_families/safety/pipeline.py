@@ -36,6 +36,15 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.config import (
     ResolvedConfig,
     load_resolved,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import (
+    COVERAGE_OUTPUTS,
+    build_coverage_plan,
+    case_cap_for,
+    load_eligible_rules,
+    load_routed_statuses,
+    span_text,
+    write_coverage_plan,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.extract import PROMPT_VERSION
 from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
     INGEST_VERSION,
@@ -163,7 +172,7 @@ def _ingest_detail(ingested: IngestResult) -> str:
 
 
 def generate_safety(config_path: ConfigPath, /, *, skip_until: str | None = None) -> Path:
-    """Publication entry point. Generation itself arrives in a later task."""
+    """Publication entry point. Coverage is planned here; case text arrives in a later task."""
     resolved = _load(config_path)
     run_dir = resolved.run_dir
     digest = _digest(resolved)
@@ -227,9 +236,17 @@ def _publication_blocker(
     run_dir = config.run_dir
     _check_rule_inputs(record, run_dir)
     counts = _rule_stages(config, digest, fingerprint)
+    coverage = _coverage_stage(config, digest, fingerprint)
+    record["coverage"] = coverage
+    coverage_note = (
+        f"Coverage plan: {coverage['certification']} for eligible rules, "
+        f"{coverage['scheduled_cases']} scheduled, {coverage['required_cases']} required, "
+        f"{len(coverage['missing_required'])} required omitted, "
+        f"{len(coverage['excluded_rules'])} rules excluded."
+    )
     if counts["eligible_for_generation"] + counts["needs_decision"] == 0:
-        return RunStatus.NO_USABLE_RULES, _rule_summary(counts), counts
-    rules_note = f"{_rule_summary(counts)} Rule file: {run_dir / 'stage_cache' / POLICY_RULES_FILE}."
+        return RunStatus.NO_USABLE_RULES, f"{_rule_summary(counts)} {coverage_note}", counts
+    rules_note = f"{_rule_summary(counts)} {coverage_note} Rule file: {run_dir / 'stage_cache' / POLICY_RULES_FILE}."
     packet_path = run_dir / PACKET_NAME
     packet = _read_packet(packet_path, run_dir)
     if packet is None:
@@ -264,6 +281,11 @@ def _rule_stages(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[
             "stage_cache/cache_index.json is missing or damaged; run stage=prepare.",
         )
     bound = {"config_sha256": digest, "source_fingerprint": fingerprint}
+    stage_cache = run_dir / "stage_cache"
+    # The plan names rules from the previous result. Drop it with those rules, before the index changes.
+    for name in COVERAGE_OUTPUTS:
+        (stage_cache / name).unlink(missing_ok=True)
+    index["stages"].pop("coverage_plan", None)
     # Rule outputs are replaced from here on. Until they are written, the index must not say completed.
     for stage in RULE_STAGES:
         index["stages"][stage] = {"status": "running", **bound, "started_at": _now()}
@@ -288,6 +310,55 @@ def _rule_stages(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[
     index["stages"]["conflicts"] = {**common, "unresolved_conflicts": result.counts["unresolved_conflicts"]}
     _write_json(index_path, index)
     return result.counts
+
+
+def _coverage_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[str, Any]:
+    """Write the coverage plan from the eligible rules. This stage does not call a model."""
+    run_dir = config.run_dir
+    stage_cache = run_dir / "stage_cache"
+    index_path = stage_cache / "cache_index.json"
+    index = _read_json(index_path, run_dir)
+    if index is None or not _valid_cache_index(index):
+        raise abort(
+            RunStatus.INVALID_RUN_ARTIFACT,
+            run_dir,
+            "stage_cache/cache_index.json is missing or damaged; run stage=prepare.",
+        )
+    bound = {"config_sha256": digest, "source_fingerprint": fingerprint}
+    index["stages"]["coverage_plan"] = {"status": "running", **bound, "started_at": _now()}
+    _write_json(index_path, index)
+    try:
+        rules = load_eligible_rules(yaml.safe_load((stage_cache / "policy_rules_eligible.yaml").read_text("utf-8")))
+        routed = load_routed_statuses((stage_cache / POLICY_RULES_FILE).read_text(encoding="utf-8"))
+        spans = span_text(json.loads((stage_cache / "source_index.json").read_text(encoding="utf-8")))
+        plan = build_coverage_plan(
+            rules,
+            spans,
+            case_cap=case_cap_for(config.mode, config.budget),
+            budget=config.budget,
+            modules=config.generation["modules"],
+            routed=routed,
+        )
+        summary = write_coverage_plan(stage_cache, plan)
+    except Exception as exc:
+        for name in COVERAGE_OUTPUTS:
+            (stage_cache / name).unlink(missing_ok=True)
+        outcome = exc.status.value if isinstance(exc, SafetyStatus) else type(exc).__name__
+        index["stages"]["coverage_plan"] = {"status": "failed", "outcome": outcome, **bound, "failed_at": _now()}
+        _write_json(index_path, index)
+        if isinstance(exc, SafetyStatus):
+            raise
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"coverage plan cannot be built: {exc}") from exc
+    index["stages"]["coverage_plan"] = {
+        "status": "completed",
+        **bound,
+        "completed_at": _now(),
+        "certification": summary["certification"],
+        "scheduled_cases": summary["scheduled_cases"],
+        "required_cases": summary["required_cases"],
+    }
+    _write_json(index_path, index)
+    return summary
 
 
 def _check_rule_inputs(record: dict[str, Any], run_dir: Path) -> None:

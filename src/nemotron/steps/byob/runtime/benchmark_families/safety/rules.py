@@ -47,6 +47,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import ResolvedConfig
 from nemotron.steps.byob.runtime.benchmark_families.safety.conflicts import detect_conflicts
+from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import COVERAGE_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.extract import (
     ExtractedCandidate,
     ExtractionError,
@@ -185,7 +186,7 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
         )
     _check_glossary_conflicts(glossary_conflicts, run_dir)
     # Drop the previous routing result first, so a failed run cannot leave rules from older code.
-    for name in RULE_OUTPUTS:
+    for name in (*RULE_OUTPUTS, *COVERAGE_OUTPUTS):
         (stage_cache / name).unlink(missing_ok=True)
     try:
         windows = build_windows(documents, spans, terms)

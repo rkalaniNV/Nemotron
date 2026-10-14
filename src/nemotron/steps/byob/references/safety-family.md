@@ -18,7 +18,7 @@ Relative paths in a safety config resolve from `src/nemotron/steps/byob`. Artifa
 | `stage` | What the run does |
 | --- | --- |
 | `prepare` | Validate the config, initialize the run directory, and ingest the policy files locally (see [Ingest](#ingest)). A completed prepare exits 0. It exits 4 when only quarantined files are left, and 1 when every file was rejected. It does not publish a benchmark. |
-| `generate` | Extract and route policy rules (see [Rule extraction and routing](#rule-extraction-and-routing)), then publish the safety benchmark. Gold exits 0. Silver or Preview exits 2. A ready review exits 3. A privacy block exits 4. |
+| `generate` | Extract and route policy rules (see [Rule extraction and routing](#rule-extraction-and-routing)), then write a coverage plan (see [Coverage planning](#coverage-planning)). Case text and publication are not connected yet, so the command still stops before a benchmark exists. Gold exits 0. Silver or Preview exits 2. A ready review exits 3. A privacy block exits 4. |
 | `all` | Run `prepare`, then `generate`. It does not evaluate. |
 | `eval` | Score a published safety benchmark. Until scoring is connected, the safety hook exits 1 and says this is not a Silver publication. |
 | `translate` | Not part of this increment. The safety hook exits 1. Exit code 2 remains reserved for a finished Silver or Preview publication. |
@@ -301,7 +301,7 @@ A pre-authored rule keeps its severity with `severity_basis: source:pre_authored
 
 A conflict the action order must not settle is unresolved and goes to `conflict_report.json`: `contradictory_rules` (one rule allows exactly the trigger another acts on, including one rule that both allows and acts on that trigger), `exception_contradicts_condition`, and `definition_conflict` (the clause uses a term defined differently in two places). Each rule involved goes to `needs_decision`; a critical one is `quarantined`. Other rules are not affected. A damaged source index, glossary, or pre-authored rule file stops with `invalid_run_artifact` before a model is called. `generate` removes the previous rule files at the start of this stage, so a failed run does not leave rules from an older result.
 
-When no rule is `eligible_for_generation` or `needs_decision`, `generate` stops with `no_usable_rules` and generates nothing.
+When no rule is `eligible_for_generation` or `needs_decision`, `generate` stops with `no_usable_rules` and generates nothing. Routing still writes the coverage plan first; with no eligible rule that plan is Silver and schedules nothing.
 
 | File in `stage_cache/` | Contents |
 | --- | --- |
@@ -315,3 +315,35 @@ When no rule is `eligible_for_generation` or `needs_decision`, `generate` stops 
 | `policy_routing_log.json` | Prompt version, model identity, passes with cached and requested counts, thresholds, weights, and counts. |
 
 `cache_index.json` records `stages.extract`, `stages.normalize`, and `stages.conflicts`, and `run_record.json` repeats the counts under `rules`. The three entries say `running` while the stage works, `completed` once every rule file is written, and `failed` with the stop code under `outcome` when the stage stops. The index never says `completed` for rule files that a failed run removed.
+
+### Coverage planning
+
+After routing, and before any case text is generated, `generate` writes a coverage plan. The planner reads eligible rules only. A `needs_decision`, quarantined, or rejected rule adds no cell. Those rules are listed in `excluded_rules`, and `coverage_of` is `eligible_rules`. `certification: gold` means every required cell of the eligible rules fits in the budget. It does not mean the whole policy is ready to publish. The planner does not call a model.
+
+The cap is `budget.preview_max_cases` in preview mode. Assisted and expert both use `budget.assisted_max_cases`; raise that number for a larger expert run. A critical rule also stops at `budget.cases_per_critical_rule`. Every other severity stops at `budget.cases_per_normal_rule`.
+
+Required cells are scheduled before optional cells. Across rules, every cell of an earlier kind is scheduled before any cell of a later kind, and within one kind the order is `policy_id`. The kinds are:
+
+1. One clear violation, when the rule has a block, escalation, or confirmation condition. The expected action is the strongest of those actions.
+2. One clear allow. The expected action is `allow`. `paired_policy_id` names the paired rule. The cell is flagged `paired_rule_not_eligible` when that rule is not eligible, and `paired_rule_not_allow` when it is eligible but has no `allow_if`. With no partner, the flag is `allow_unpaired`.
+3. One boundary case. Its expected action is `decision.ambiguous_action`. When the rule states none, the cell is kept and flagged `boundary_action_unspecified`.
+4. One exception case when the rule lists exceptions. The expected action is `allow`.
+5. One missing-leg allow case for each leg of an `all_of` group on `block_if`, `escalate_if`, or `require_confirmation_if` that has two or more legs. Exactly one leg is absent and the others stay. A two-condition `all_of` block therefore receives two such cases. An `any_of` group receives none, including a `block_if` stored as `default_any_of`: one leg is already a violation. An `allow_if` group receives none: a missing allow leg is not an allow case.
+6. One case for each source language after the first. Languages come only from `scope.languages`, ignoring `unspecified`. The planner does not guess a language from the quote. The first language is `source_language` on the rule's other cells, not a second case.
+7. One code-switch case when `scope.languages` lists at least two languages and the quote or the cited span affirms a code-switch, with wording such as `code-switch`, `chuyển mã`, `trộn ngôn ngữ`, or `mixed language`. The cell lists those declared languages. A negated clause (`không`, `not`, `never`) does not count, and foreign words in the quote do not by themselves.
+8. One multi-turn case when the quote or the cited span has two or more numbered steps (`1.`, `bước 1`, `step 1`), or affirms `multi-turn`, `nhiều lượt`, `nhiều bước`, `trong hội thoại`, `in a dialogue`, or `hidden instruction`. The same negation rule applies to those phrases. `turns` is the step count, and `budget.max_turns` caps it. A cap below 2 cannot hold the cell, so the cell is a gap with reason `max_turns` and the plan is Silver.
+
+Optional cells come after the required cells, and only while the caps still have room: one adversarial case when `generation.modules.adversarial` is true, one actor-swap case when `political_symmetry` is true, and one persona case per eligible rule. `confirm_if_detected` does not add actor-swap cases. Production replay adds none in this increment, reported as `not_configured`, because the safety config has no evidence paths yet. An optional cell left out does not block Gold.
+
+A required cell that does not fit is not dropped. `coverage_gaps.json` lists it with its slot id and a reason, `budget_cap` or `rule_cap` or `max_turns`, and `blocks_gold: true`. The plan's `certification` is then `silver`, and `gold_cases_needed` is the full required count. When every required cell of the eligible rules is scheduled, `certification` is `gold` even if optional cells remain or other rules were excluded. `run_record.json` repeats the certification, the counts, `missing_required`, and `excluded_rules` under `coverage`.
+
+A slot id joins the policy id, the kind, and any extra part with `/`. A contrast family id uses the same escaping after `contrast/`. A `/` or `\` inside a part is escaped. Read `policy_id`, `kind`, `language`, and `absent_leg` from the row. Do not split the slot id on `:`.
+
+Contrast families point at those slot ids. An acting `all_of` rule has one family per leg: the clear violation keeps every leg, and the allow member is that leg's missing-leg cell. A rule with no missing-leg cell has one family whose allow member is the clear allow cell. Families do not add cases. `changed_dimension` is the absent leg, `paired_allow` when the partner is an eligible allow rule, `paired_rule` when the partner is not an allow rule, or `benign_neighbor` when the rule names no partner.
+
+| File in `stage_cache/` | Contents |
+| --- | --- |
+| `coverage_plan.jsonl` | Scheduled cells, required rows first. Each row names the rule, the kind, and the expected action. It is not case text. |
+| `coverage_gaps.json` | Certification, counts, every unscheduled cell, and the contrast families. |
+
+`cache_index.json` records `stages.coverage_plan` as `running`, then `completed`, or `failed`. Any failure while planning, including a damaged span, a repeated span id, or an error inside the planner, marks the stage `failed` and deletes `coverage_plan.jsonl` and `coverage_gaps.json`. The next generate removes the plan at the start of rule extraction, so a failed run does not keep a plan for rule files it deleted.

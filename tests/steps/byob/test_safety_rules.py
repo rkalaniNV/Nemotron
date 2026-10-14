@@ -571,11 +571,15 @@ def test_a_failed_generate_marks_the_rule_stages_failed(tmp_path: Path, use: Any
         assert stages[stage]["status"] == "failed"
         assert stages[stage]["outcome"] == "model_unavailable"
     assert not (run_dir / "stage_cache" / "policy_rules_eligible.yaml").exists()
+    assert "coverage_plan" not in stages
+    assert not (run_dir / "stage_cache" / "coverage_plan.jsonl").exists()
+    assert not (run_dir / "stage_cache" / "coverage_gaps.json").exists()
     use(ScriptedExtractor(FIVE_TOPIC_REPLIES))
     _expect(config, RunStatus.PIPELINE_INCOMPLETE)
     assert {_cache_index(run_dir)["stages"][stage]["status"] for stage in ("extract", "normalize", "conflicts")} == {
         "completed"
     }
+    assert _cache_index(run_dir)["stages"]["coverage_plan"]["status"] == "completed"
 
 
 def test_a_reply_with_a_malformed_candidate_is_used_but_asked_again(tmp_path: Path, use: Any) -> None:
