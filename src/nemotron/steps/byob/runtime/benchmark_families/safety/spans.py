@@ -33,7 +33,10 @@ PREAMBLE = "preamble"
 MAX_SPAN_CHARS = 1200
 MAX_CROSS_REFERENCE_TARGETS = 50
 
-_SECTION_WORDS = r"section|mục|điều|chương|phần|article|chapter"
+_SECTION_WORDS = (
+    r"section|article|chapter|clause|mục|điều|chương|phần|"
+    r"sección|artículo|capítulo|cláusula|abschnitt|artikel|kapitel|klausel|chapitre"
+)
 # A roman numeral, non-empty. "IIII" does not match; "IV" and "III" do.
 _ROMAN = r"(?=[IVXLCDM])M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})"
 _NUMBER = rf"(?:\d+(?:\.\d+)*|(?:{_ROMAN})(?:\.\d+)*)"
@@ -51,16 +54,68 @@ _TABLE_DIVIDER = re.compile(r"^\|?[\s:|-]*-[\s:|-]*\|?$")
 _LIST_MARKER = re.compile(r"(?:[-*+•▪◦]|\d{1,3}[.)]|[a-z][.)]|\((?:\d{1,3}|[A-Za-z])\))[ \t]+")
 _QUOTE_MARKER = re.compile(r"(?:>[ \t]?)+")
 _SENTENCE_END = re.compile(r"(?:[.!?…]+[\"'”’)\]]*(?=\s|$)|[。！？]+[\"'”’）)\]]*)")
-_ABBREVIATIONS = frozenset({"e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "no", "tp", "v.v", "ths", "ts"})
-_CHAPTER_WORDS = frozenset({"chương", "chapter", "phần"})
-_DEFINITION_HEADINGS = ("definition", "glossary", "định nghĩa", "giải thích từ ngữ", "thuật ngữ")
-_DEFINE_VERBS = r"được hiểu là|có nghĩa là|nghĩa là|means|is defined as|refers to"
+_ABBREVIATIONS = frozenset(
+    {
+        "e.g",
+        "i.e",
+        "etc",
+        "vs",
+        "mr",
+        "mrs",
+        "ms",
+        "dr",
+        "st",
+        "no",
+        "tp",
+        "v.v",
+        "ths",
+        "ts",
+        "cf",
+        "art",
+        "vol",
+        "resp",
+        "bzw",
+        "n.b",
+        "prof",
+        "jr",
+        "sr",
+    }
+)
+_CHAPTER_WORDS = frozenset({"chương", "chapter", "phần", "chapitre", "capítulo", "kapitel"})
+_DEFINITION_HEADINGS = (
+    "definition",
+    "glossary",
+    "định nghĩa",
+    "giải thích từ ngữ",
+    "thuật ngữ",
+    "definiciones",
+    "glosario",
+    "définitions",
+    "glossaire",
+    "definitionen",
+    "glossar",
+    "정의",
+    "용어",
+    "定義",
+    "用語",
+    "释义",
+    "术语",
+    "定义",
+)
+_DEFINE_VERBS = (
+    r"được hiểu là|có nghĩa là|nghĩa là|means|is defined as|refers to|"
+    r"significa|se define como|bedeutet|ist definiert als|"
+    r"désigne|est défini comme|指的是|是指|定义为|とは|を意味する|의미한다|정의된다"
+)
+# Unsegmented scripts do not put spaces around the verb.
+_UNSEGMENTED_VERBS = r"指的是|是指|定义为|とは|を意味する|의미한다|정의된다"
 _QUOTED_TERM = re.compile(
     rf"^[“\"'‘]([^”\"'’]{{1,80}})[”\"'’]\s*(?:\([^)]*\)\s*)?(?:là|{_DEFINE_VERBS})\s+(.+)$", re.I
 )
 _QUOTED_COLON = re.compile(r"^[“\"'‘「『]([^”\"'’」』]{1,80})[”\"'’」』]\s*[:：]\s*(\S.*)$")
 _BOLD_TERM = re.compile(rf"^\*\*([^*]{{1,80}})\*\*\s*(?:(?:là|{_DEFINE_VERBS})\s+|[:\-–]\s*)(.+)$", re.I)
 _PLAIN_TERM = re.compile(rf"^([^\W\d_][^:.;]{{0,60}}?)\s+({_DEFINE_VERBS})\s+(.+)$", re.I)
+_UNSEGMENTED_TERM = re.compile(rf"^(\S{{1,40}}?)(?:{_UNSEGMENTED_VERBS})(\S.+)$")
 _SECTION_TERM = re.compile(r"^([^\W\d_][^:.;]{0,60}?)\s+là\s+(.+)$", re.I)
 _BOLD_DEFINITION = re.compile(r"^\*\*([^*]{1,80})\*\*\s*[:\-–—]\s+(\S.*)$")
 _MAX_TERM_WORDS = 8
@@ -377,7 +432,7 @@ def structural_definition(span: Mapping[str, Any]) -> tuple[str, str] | None:
 
 
 def _definition(text: str, in_definitions: bool) -> tuple[str, str] | None:
-    candidates = [_QUOTED_COLON, _QUOTED_TERM, _BOLD_TERM, _PLAIN_TERM]
+    candidates = [_QUOTED_COLON, _QUOTED_TERM, _BOLD_TERM, _PLAIN_TERM, _UNSEGMENTED_TERM]
     if in_definitions:
         candidates.append(_SECTION_TERM)
     for pattern in candidates:
@@ -385,7 +440,7 @@ def _definition(text: str, in_definitions: bool) -> tuple[str, str] | None:
         if match is None:
             continue
         term = match.group(1).strip().strip("*").strip()
-        definition = match.group(match.lastindex or 2).strip().rstrip(".;").strip()
+        definition = match.group(match.lastindex or 2).strip().rstrip(".;。．").strip()
         if term and definition and len(term.split()) <= _MAX_TERM_WORDS:
             return term, definition
     return None
@@ -396,18 +451,58 @@ def _link_glossary_terms(document: StructuredDocument) -> None:
 
 
 def link_glossary_terms(spans: Sequence[dict[str, Any]], keys: Sequence[str]) -> None:
-    """Set ``glossary_terms`` on each span to the defined terms it uses, as whole words."""
-    patterns = {key: re.compile(rf"(?<!\w){re.escape(key)}(?!\w)") for key in dict.fromkeys(keys)}
+    """Set ``glossary_terms`` on each span to the defined terms it uses.
+
+    Spaced or Latin terms match as whole tokens. Unsegmented terms match as substrings.
+    """
+    ordered = list(dict.fromkeys(keys))
     for span in spans:
         folded = term_key(span["text"])
-        span["glossary_terms"] = sorted(key for key, pattern in patterns.items() if pattern.search(folded))
+        matched = [key for key in ordered if _term_in_text(key, folded)]
+        # Prefer a defined compound over a shorter unsegmented term contained in it.
+        span["glossary_terms"] = sorted(
+            key
+            for key in matched
+            if not any(
+                key != other
+                and _unsegmented_term(key)
+                and _unsegmented_term(other)
+                and key in other
+                for other in matched
+            )
+        )
 
 
 def term_key(text: str) -> str:
     return " ".join(unicodedata.normalize("NFC", text).casefold().split())
 
 
+def _term_in_text(key: str, folded: str) -> bool:
+    if not key:
+        return False
+    if re.search(r"\s", key) or re.fullmatch(r"[a-z0-9_'-]+", key):
+        return re.search(rf"(?<!\w){re.escape(key)}(?!\w)", folded) is not None
+    if sum(char.isalnum() for char in key) < 2:
+        return False
+    return key in folded
+
+
+def _unsegmented_term(key: str) -> bool:
+    return not re.search(r"\s", key) and re.fullmatch(r"[a-z0-9_'-]+", key) is None
+
+
 def _slug(text: str) -> str:
+    """ASCII-fold Latin letters. Keep letters that have no ASCII form, such as CJK."""
     folded = unicodedata.normalize("NFKD", text.replace("đ", "d").replace("Đ", "D"))
-    ascii_text = "".join(char for char in folded if not unicodedata.combining(char)).encode("ascii", "ignore")
-    return re.sub(r"[^a-z0-9]+", "-", ascii_text.decode().casefold()).strip("-")[:48].strip("-")
+    chars = []
+    for char in folded:
+        if unicodedata.combining(char):
+            continue
+        lowered = char.casefold()
+        if lowered.isascii() and lowered.isalnum():
+            chars.append(lowered)
+        elif not char.isascii() and char.isalnum():
+            chars.append(lowered)
+        else:
+            chars.append("-")
+    return re.sub(r"-+", "-", "".join(chars)).strip("-")[:48].strip("-")

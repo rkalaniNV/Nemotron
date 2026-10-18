@@ -21,6 +21,7 @@ _MODULES = {
     "adversarial": False,
     "political_symmetry": "confirm_if_detected",
     "production_replay": "auto_if_evidence_exists",
+    "persona": False,
 }
 
 
@@ -46,7 +47,7 @@ def _rule(
     quote: str = "Block it.",
     severity: str = "critical",
     paired: str | None = None,
-    span: str = "doc#1#span-01",
+    span: str | None = "doc#1#span-01",
     status: str = "eligible_for_generation",
     signals: dict[str, Any] | None = None,
 ) -> Any:
@@ -60,11 +61,13 @@ def _rule(
     data: dict[str, Any] = {
         "policy_id": policy_id,
         "severity": severity,
-        "provenance": {"document_id": "doc", "source_quote": quote, "source_span_id": span},
+        "provenance": {"document_id": "doc", "source_quote": quote},
         "rule": body,
         "decision": {"violation_action": "block"},
         "status": status,
     }
+    if span is not None:
+        data["provenance"]["source_span_id"] = span
     if status == "eligible_for_generation":
         data["testability"] = "testable"
         data["confidence"] = 0.95
@@ -273,7 +276,7 @@ def test_max_turns_below_two_records_the_multi_turn_case_instead_of_dropping_it(
 
 def test_a_per_rule_cap_does_not_fill_the_rest_with_optional_cases() -> None:
     rule = _rule("ALL-2", block={"all_of": ["verb", "target"], "operator_source": "explicit"})
-    plan = _plan([rule], cap=50, budget=_budget(cases_per_critical_rule=1))
+    plan = _plan([rule], cap=50, budget=_budget(cases_per_critical_rule=1), modules={"persona": True})
 
     assert [row["priority"] for row in plan.rows] == ["required"]
     assert plan.certification == "silver"
@@ -282,6 +285,27 @@ def test_a_per_rule_cap_does_not_fill_the_rest_with_optional_cases() -> None:
     assert len(persona) == 1
     assert persona[0]["blocks_gold"] is False
     assert persona[0]["reason"] == "rule_cap"
+
+
+def test_persona_is_optional_only_when_the_module_is_enabled() -> None:
+    rule = _rule("ALL-2", block={"all_of": ["verb", "target"], "operator_source": "explicit"})
+    off = _plan([rule])
+    on = _plan([rule], modules={"persona": True})
+
+    assert [row for row in (*off.rows, *off.gaps) if row["kind"] == "persona"] == []
+    assert off.modules["persona"] == "disabled"
+    assert any(row["kind"] == "persona" for row in (*on.rows, *on.gaps))
+    assert on.modules["persona"] == "enabled"
+
+
+def test_a_rule_without_a_source_span_holds_required_cells() -> None:
+    plan = _plan([_rule("SELF", span=None)], modules={"persona": True})
+
+    assert plan.rows == ()
+    assert plan.certification == "silver"
+    assert plan.reason == "span_missing"
+    assert {gap["reason"] for gap in plan.gaps if gap["blocks_gold"]} == {"span_missing"}
+    assert all(row["kind"] != "persona" for row in (*plan.rows, *plan.gaps))
 
 
 def test_incidental_foreign_words_do_not_add_a_language_or_code_switch_case() -> None:
@@ -432,6 +456,7 @@ def test_preview_and_expert_use_the_documented_case_caps() -> None:
 def test_generate_writes_the_plan_and_a_short_budget_is_silver(tmp_path: Path) -> None:
     policies = tmp_path / "policies"
     policies.mkdir()
+    (policies / "policy.md").write_text("Block it.\n", encoding="utf-8")
     (policies / "rules.yaml").write_text(
         yaml.safe_dump(
             {
@@ -441,7 +466,7 @@ def test_generate_writes_the_plan_and_a_short_budget_is_silver(tmp_path: Path) -
                         "severity": "high",
                         "testability": "testable",
                         "scope": {"languages": ["vi-VN", "en-US"]},
-                        "provenance": {"source_quote": "Block it."},
+                        "provenance": {"document_id": "policy", "source_quote": "Block it."},
                         "rule": {
                             "actor": "assistant",
                             "action": "respond",
@@ -453,7 +478,7 @@ def test_generate_writes_the_plan_and_a_short_budget_is_silver(tmp_path: Path) -
                         "policy_id": "ANY-001",
                         "severity": "high",
                         "testability": "testable",
-                        "provenance": {"source_quote": "Block it."},
+                        "provenance": {"document_id": "policy", "source_quote": "Block it."},
                         "rule": {
                             "actor": "assistant",
                             "action": "respond",
@@ -467,7 +492,13 @@ def test_generate_writes_the_plan_and_a_short_budget_is_silver(tmp_path: Path) -
         ),
         encoding="utf-8",
     )
-    gold = _generate(tmp_path, policies, "gold", {"cases_per_normal_rule": 12, "assisted_max_cases": 50})
+    gold = _generate(
+        tmp_path,
+        policies,
+        "gold",
+        {"cases_per_normal_rule": 12, "assisted_max_cases": 50},
+        generation={"modules": {"adversarial": True}},
+    )
     rows = _jsonl(gold / "stage_cache" / "coverage_plan.jsonl")
     report = json.loads((gold / "stage_cache" / "coverage_gaps.json").read_text(encoding="utf-8"))
 
@@ -489,6 +520,7 @@ def test_generate_writes_the_plan_and_a_short_budget_is_silver(tmp_path: Path) -
     assert record["coverage"]["coverage_of"] == "eligible_rules"
     assert record["coverage"]["excluded_rules"] == []
     assert report["modules"]["production_replay"] == "not_configured"
+    assert report["modules"]["persona"] == "disabled"
     index = json.loads((gold / "stage_cache" / "cache_index.json").read_text(encoding="utf-8"))
     assert index["stages"]["coverage_plan"]["status"] == "completed"
 
@@ -556,23 +588,27 @@ def test_a_planner_error_marks_the_stage_failed_and_removes_a_partial_plan(
     assert index["stages"]["coverage_plan"]["outcome"] == "RuntimeError"
 
 
-def _generate(tmp_path: Path, policies: Path, name: str, budget: dict[str, int]) -> Path:
+def _generate(
+    tmp_path: Path,
+    policies: Path,
+    name: str,
+    budget: dict[str, int],
+    generation: dict[str, Any] | None = None,
+) -> Path:
     output = tmp_path / name
     config = tmp_path / f"{name}.yaml"
-    config.write_text(
-        yaml.safe_dump(
-            {
-                "family": "safety",
-                "expt_name": "plan",
-                "config_status": "resolved",
-                "mode": "assisted",
-                "input_dir": str(policies),
-                "output_dir": str(output),
-                "budget": budget,
-            }
-        ),
-        encoding="utf-8",
-    )
+    payload: dict[str, Any] = {
+        "family": "safety",
+        "expt_name": "plan",
+        "config_status": "resolved",
+        "mode": "assisted",
+        "input_dir": str(policies),
+        "output_dir": str(output),
+        "budget": budget,
+    }
+    if generation is not None:
+        payload["generation"] = generation
+    config.write_text(yaml.safe_dump(payload), encoding="utf-8")
     prepare_safety(config)
     with pytest.raises(SafetyStatus) as caught:
         generate_safety(config)

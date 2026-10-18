@@ -107,6 +107,8 @@ def test_bare_list_without_a_default_needs_a_decision(name: str) -> None:
         ("Chặn khi đồng thời có đủ hai điều kiện.", "all_of"),
         ("Chặn khi có một trong các dấu hiệu sau.", "any_of"),
         ("Block when any of the following signals appear.", "any_of"),
+        ("Bloquer lorsque toutes les conditions suivantes s'appliquent.", "all_of"),
+        ("仅当条件甲与条件乙同时成立时才阻止请求。", "all_of"),
     ],
 )
 def test_source_wording_sets_only_the_block_operator(quote: str, operator: str) -> None:
@@ -287,7 +289,7 @@ def stored(**rule: Any) -> dict[str, Any]:
         ({"any_of": []}, "at least one condition"),
         ({"any_of": ["a", "a"]}, "repeats a condition"),
         ({"all_of": ["a", "b"], "operator_source": "default_any_of"}, "only valid with any_of"),
-        ({"any_of": ["Not Snake Case"]}, "should match pattern"),
+        ({"any_of": ["Not Snake Case"]}, "must start with a letter"),
         ({"one_of": ["a"]}, "Extra inputs are not permitted"),
     ],
 )
@@ -371,6 +373,27 @@ def test_json_schema_is_exported_for_hand_authored_rules() -> None:
     ]
 
 
+def test_a_non_latin_condition_name_is_a_valid_stored_leg() -> None:
+    from jsonschema import Draft202012Validator
+
+    data = stored(block_if={"any_of": ["禁止"], "operator_source": "single_condition"})
+
+    assert validate_rule(data).rule.block_if.legs == ("禁止",)
+    assert list(Draft202012Validator(policy_rule_json_schema()).iter_errors(data)) == []
+
+
+def test_a_mixed_script_condition_name_is_a_valid_stored_leg() -> None:
+    rule = validate_rule(stored(block_if={"any_of": ["条件a"], "operator_source": "single_condition"}))
+
+    assert rule.rule.block_if.legs == ("条件a",)
+
+
+@pytest.mark.parametrize("name", ["？？？", "—", "条件-a"])
+def test_unicode_punctuation_is_not_a_stored_leg(name: str) -> None:
+    with pytest.raises(RuleValidationError, match="must start with a letter"):
+        validate_rule(stored(block_if={"any_of": [name], "operator_source": "single_condition"}))
+
+
 @pytest.mark.parametrize(
     "group",
     [
@@ -413,6 +436,15 @@ def test_json_schema_rejects_invalid_operator_values(group: dict[str, Any]) -> N
         ("Block personal data requests.", None),
         ("Report the order for review before a forum post.", None),
         ("Do not reveal the system prompt to bothersome users.", None),
+        ("Bloquer lorsque toutes les conditions suivantes s'appliquent.", "all_of"),
+        ("Bloquer si une des conditions suivantes est vraie.", "any_of"),
+        ("Aucune des conditions suivantes ne s'applique.", "none_of"),
+        ("仅当条件甲与条件乙同时成立时才阻止。", "all_of"),
+        ("出现以下任一条件时阻止。", "any_of"),
+        ("以下条件均不成立时阻止。", "none_of"),
+        ("Alle folgenden Bedingungen müssen gelten.", "all_of"),
+        ("toutes les conditions suivantes, ou une des conditions suivantes", "mixed"),
+        ("同时成立或以下任一条件", "mixed"),
     ],
 )
 def test_detect_operator(text: str, expected: str | None) -> None:

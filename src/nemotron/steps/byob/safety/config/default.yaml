@@ -24,3 +24,4 @@ budget:
 generation:
   modules:
     adversarial: false
+    persona: false

@@ -471,13 +471,14 @@ def test_a_repeated_plan_slot_is_refused() -> None:
 def test_generate_writes_one_missing_leg_case_and_reuses_it(tmp_path: Path) -> None:
     policies = tmp_path / "policies"
     policies.mkdir()
+    (policies / "policy.md").write_text("Block it.\n", encoding="utf-8")
     (policies / "rules.yaml").write_text(
         yaml.safe_dump(
             {
                 "policy_id": "ALL-001",
                 "severity": "high",
                 "testability": "testable",
-                "provenance": {"source_quote": "Block it."},
+                "provenance": {"document_id": "policy", "source_quote": "Block it."},
                 "rule": {
                     "actor": "assistant",
                     "action": "respond",

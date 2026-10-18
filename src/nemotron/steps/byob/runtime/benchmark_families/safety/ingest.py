@@ -33,7 +33,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -120,7 +120,13 @@ class IngestResult:
         }
 
 
-def ingest_sources(input_dir: Path, sources: Mapping[str, str], cache_dir: Path) -> IngestResult:
+def ingest_sources(
+    input_dir: Path,
+    sources: Mapping[str, str],
+    cache_dir: Path,
+    *,
+    privacy_labels: Mapping[str, Sequence[str]] | None = None,
+) -> IngestResult:
     """Process every source. ``sources`` is the scan result ``{relative path: sha256}``."""
     ids = document_ids(list(sources), _read_document_ids(cache_dir / DOCUMENT_IDS_FILE))
     cache = cache_dir / CACHE_DIR
@@ -128,13 +134,19 @@ def ingest_sources(input_dir: Path, sources: Mapping[str, str], cache_dir: Path)
     used: set[str] = set()
     reused = 0
     for relative in sorted(sources):
-        key = _cache_key(relative, ids[relative], sources[relative])
+        key = _cache_key(relative, ids[relative], sources[relative], privacy_labels)
         used.add(f"{key}.json")
         outcome = _read_cache(cache / f"{key}.json", relative, sources[relative])
         if outcome is not None:
             reused += 1
         else:
-            outcome = _process_source(input_dir, relative, sources[relative], ids[relative])
+            outcome = _process_source(
+                input_dir,
+                relative,
+                sources[relative],
+                ids[relative],
+                privacy_labels=privacy_labels,
+            )
             write_json(cache / f"{key}.json", _cache_entry(relative, sources[relative], outcome))
         outcomes[relative] = outcome
     if cache.is_dir():
@@ -144,7 +156,14 @@ def ingest_sources(input_dir: Path, sources: Mapping[str, str], cache_dir: Path)
     return _assemble(outcomes, reused)
 
 
-def _process_source(input_dir: Path, relative: str, sha256: str, document_id: str) -> dict[str, Any]:
+def _process_source(
+    input_dir: Path,
+    relative: str,
+    sha256: str,
+    document_id: str,
+    *,
+    privacy_labels: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Any]:
     """Read and ingest one source. Oversized files are refused before their bytes are loaded."""
     limit = documents.MAX_SOURCE_BYTES
     try:
@@ -157,7 +176,7 @@ def _process_source(input_dir: Path, relative: str, sha256: str, document_id: st
         return _rejected(row, "file_too_large", f"files larger than {limit} bytes are not read")
     data = _read_source(input_dir, relative, sha256)
     try:
-        return process_file(relative, data, document_id)
+        return process_file(relative, data, document_id, privacy_labels=privacy_labels)
     except Exception as exc:
         # One damaged or unexpected file must not discard the rest of the directory.
         return _rejected(
@@ -165,7 +184,13 @@ def _process_source(input_dir: Path, relative: str, sha256: str, document_id: st
         )
 
 
-def process_file(relative: str, data: bytes, document_id: str) -> dict[str, Any]:
+def process_file(
+    relative: str,
+    data: bytes,
+    document_id: str,
+    *,
+    privacy_labels: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Any]:
     """Ingest one file's bytes. The returned outcome holds only redacted text."""
     row = _row(relative, hashlib.sha256(data).hexdigest(), document_id)
     fmt = detect_format(relative)
@@ -176,7 +201,7 @@ def process_file(relative: str, data: bytes, document_id: str) -> dict[str, Any]
         extracted = extract(data, fmt)
     except DocumentError as exc:
         return _rejected(row, exc.reason, exc.detail)
-    scan = privacy.assess([line.text for line in extracted.lines])
+    scan = privacy.assess([line.text for line in extracted.lines], additional_labels=privacy_labels)
     row["findings"] = [finding.to_dict() for finding in scan.findings]
     row["redactions"] = scan.redactions
     if not scan.safe:
@@ -541,8 +566,14 @@ def _read_source(input_dir: Path, relative: str, expected: str) -> bytes:
     return data
 
 
-def _cache_key(relative: str, document_id: str, sha256: str) -> str:
-    payload = f"safety-ingest-v{INGEST_VERSION}\0{relative}\0{document_id}\0{sha256}"
+def _cache_key(
+    relative: str,
+    document_id: str,
+    sha256: str,
+    privacy_labels: Mapping[str, Sequence[str]] | None = None,
+) -> str:
+    labels = json.dumps(privacy_labels or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload = f"safety-ingest-v{INGEST_VERSION}\0{relative}\0{document_id}\0{sha256}\0{labels}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

@@ -225,7 +225,9 @@ def test_a_rule_without_a_span_cannot_enter_the_dataset() -> None:
     )
     build = _build([rule])
 
-    result = select_dataset(build.cases, build.families, [rule], {})
+    assert build.cases == ()
+    injected = _one(_build([_rule("BARE", block=_ALL_OF)]), "clear_violation")
+    result = select_dataset([injected], [], [rule], {})
 
     assert result.summary()["validated"] == 0
     assert result.manifest["reason"] == "no_cases"
@@ -403,7 +405,7 @@ def test_a_dataset_error_marks_the_stage_failed_and_keeps_scenarios(
 
 def _ready() -> tuple[list[Any], Any]:
     rules = [_rule("ALL-2", block=_ALL_OF, quote="Follow the multi-turn policy.", signals={"multi_turn_turns": 2})]
-    return rules, _build(rules)
+    return rules, _cases(rules, modules={"persona": True})[1]
 
 
 def _build(rules: list[Any]) -> Any:

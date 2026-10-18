@@ -28,7 +28,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, get_args
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    WithJsonSchema,
+    model_validator,
+)
 
 Operator = Literal["all_of", "any_of", "none_of"]
 # single_condition: a list with one leg has no operator to state; all_of and any_of mean the same.
@@ -64,12 +74,28 @@ def _lowercase_hex(value: Any) -> Any:
 
 
 PolicyId = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
-Leg = Annotated[str, StringConstraints(strict=True, pattern=r"^[a-z0-9][a-z0-9_]{0,127}$")]
+
+
+def _condition_leg(value: str) -> str:
+    """Require one Unicode identifier token, without imposing a source script."""
+    if not value[0].isalpha() or any(not (char.isalnum() or char == "_") for char in value):
+        raise ValueError("must start with a letter and contain only Unicode letters, numbers, or underscores")
+    return value
+
+
+# Runtime validation is Unicode-aware. JSON Schema regex has no portable Unicode-property
+# syntax, so its pattern is deliberately broader; PolicyRule validation remains authoritative.
+Leg = Annotated[
+    str,
+    StringConstraints(strict=True, min_length=1, max_length=128),
+    AfterValidator(_condition_leg),
+    WithJsonSchema({"type": "string", "minLength": 1, "maxLength": 128, "pattern": r"^(?![0-9_])\S+$"}),
+]
 Text = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 Sha256 = Annotated[str, BeforeValidator(_lowercase_hex), StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 
-# Clear operator frames only. A bare "or", "hoặc", "both", or "either" is too common in a
-# list of objects to choose the operator by itself.
+# Clear operator frames only. A bare "or", "hoặc", "ou", "oder", "both", or "either" is too
+# common in a list of objects to choose the operator by itself.
 _ALL_OF_PHRASES = (
     "đồng thời",
     "đủ các thành phần",
@@ -78,13 +104,49 @@ _ALL_OF_PHRASES = (
     "tất cả các điều kiện",
     "all of the following",
     "both of the following",
+    "toutes les conditions suivantes",
+    "les deux conditions suivantes",
+    "todas las condiciones siguientes",
+    "ambas las condiciones siguientes",
+    "alle folgenden bedingungen",
+    "beide folgenden bedingungen",
+    "同时成立",
+    "同时满足",
+    "以下全部条件",
+    "下列全部条件",
+    "次の条件をすべて",
+    "以下の条件をすべて",
+    "다음 조건을 모두",
+    "아래 조건을 모두",
 )
-_ANY_OF_PHRASES = ("một trong các", "any of the following")
+_ANY_OF_PHRASES = (
+    "một trong các",
+    "any of the following",
+    "l'une des conditions suivantes",
+    "une des conditions suivantes",
+    "cualquiera de las condiciones siguientes",
+    "una de las siguientes condiciones",
+    "eine der folgenden bedingungen",
+    "以下任一条件",
+    "下列任一",
+    "以下条件之一",
+    "次のいずれかの条件",
+    "以下のいずれ",
+    "다음 조건 중 하나",
+    "아래 조건 중 하나",
+)
 _NONE_OF_PHRASES = (
     "không có điều kiện nào",
     "không có thành phần nào",
     "none of the following",
     "neither of the following",
+    "aucune des conditions suivantes",
+    "ninguna de las condiciones siguientes",
+    "keine der folgenden bedingungen",
+    "以下条件均不",
+    "下列条件均不",
+    "次の条件のいずれも",
+    "다음 조건이 모두 아님",
 )
 _MISSING = object()
 
@@ -320,13 +382,16 @@ def detect_operator(text: str) -> Literal["all_of", "any_of", "none_of", "mixed"
     """Return the operator a source passage states with a clear frame.
 
     A clear AND frame is wording such as "đồng thời", "tất cả các điều kiện",
-    or "all of the following". A clear OR frame is "một trong các" or
-    "any of the following". Clear NONE frames include "không có điều kiện nào"
-    and "none of the following". A bare "or", "hoặc", "both", "either", "cả hai",
-    or "at the same time" does not count: those words usually list objects.
+    "all of the following", "toutes les conditions suivantes", or "同时成立".
+    A clear OR frame is "một trong các", "any of the following", or
+    "以下任一条件". Clear NONE frames include "không có điều kiện nào" and
+    "none of the following". A bare "or", "hoặc", "ou", "oder", "both",
+    "either", "cả hai", or "at the same time" does not count: those words
+    usually list objects.
 
     ``mixed`` means the passage uses both kinds of frame. None means it uses neither.
-    Matching is case-insensitive, on whole words, after Unicode NFC normalization.
+    Matching is case-insensitive after Unicode NFC normalization. Spaced phrases use
+    whole-token boundaries; unsegmented phrases match as substrings.
     """
     if not isinstance(text, str):
         raise TypeError("operator text must be a string")
@@ -611,7 +676,11 @@ def _mark_unsupported(data: dict[str, Any], field_name: str, flags: list[Flag]) 
 
 def _has_phrase(text: str, phrase: str) -> bool:
     folded = unicodedata.normalize("NFC", phrase).casefold()
-    return re.search(rf"(?<!\w){re.escape(folded)}(?!\w)", text) is not None
+    if not folded:
+        return False
+    if re.search(r"\s", folded) or re.fullmatch(r"[a-z0-9_']+", folded):
+        return re.search(rf"(?<!\w){re.escape(folded)}(?!\w)", text) is not None
+    return folded in text
 
 
 def _messages(exc: ValidationError) -> list[str]:

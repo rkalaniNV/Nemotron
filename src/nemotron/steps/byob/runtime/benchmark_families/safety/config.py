@@ -17,6 +17,7 @@
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -32,10 +33,12 @@ MODES = frozenset({"preview", "assisted", "expert"})
 PROFILES = frozenset({"standard", "regulated", "high_assurance"})
 MODULE_STRING_FLAGS = frozenset({"confirm_if_detected", "auto_if_evidence_exists"})
 SECOND_JUDGE_TRIGGERS = frozenset({"disagreement", "critical_boundary", "low_confidence"})
+PRIVACY_LABEL_KINDS = frozenset({"credential", "national_id", "bank_account", "date_of_birth"})
+BUILTIN_PRIVACY_LANGUAGES = frozenset({"de", "en", "es", "fr", "ja", "ko", "vi", "zh"})
 # The same vocabularies Policy Rule IR stores, so a config can name every target and action a rule can.
 MODERATION_TARGETS = frozenset(TARGETS)
 DECISION_ACTIONS = frozenset(ACTIONS)
-DEFAULT_DECISION_ACTIONS = ("allow", "block", "caution", "escalate")
+DEFAULT_DECISION_ACTIONS = ACTIONS
 
 DEFAULT_BUDGET = {
     "preview_max_cases": 100,
@@ -53,6 +56,7 @@ DEFAULT_GENERATION = {
         "adversarial": False,
         "political_symmetry": "confirm_if_detected",
         "production_replay": "auto_if_evidence_exists",
+        "persona": False,
     },
 }
 DEFAULT_PROPOSALS = {
@@ -101,6 +105,7 @@ TOP_LEVEL_KEYS = DISPATCH_KEYS | {
     "generation",
     "proposals",
     "languages",
+    "privacy",
     "generation_model_config",
     "judge_model_configs",
     "evaluation",
@@ -238,8 +243,10 @@ def resolve_config(raw: dict[str, Any]) -> ResolvedConfig:
     budget = _budget(raw.get("budget", {}), messages)
     generation = _generation(raw.get("generation", {}), messages)
     proposals = _proposals(raw.get("proposals", {}), messages)
+    _apply_languages(raw.get("languages"), proposals, messages)
     _check_decision_mix(generation["decision_mix"], proposals["decision_actions"], messages)
     extras = _passthrough(raw, messages)
+    _check_privacy_language(proposals, extras, messages)
 
     if messages or input_dir is None or output_dir is None:
         raise ConfigError(messages)
@@ -332,6 +339,39 @@ def _mapping(value: Any, name: str, messages: list[str]) -> dict[str, Any] | Non
 
 def _number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _apply_languages(value: Any, proposals: dict[str, Any], messages: list[str]) -> None:
+    """Apply the documented language block without changing source into target work."""
+    if value is None:
+        return
+    supplied = _mapping(value, "languages", messages)
+    if supplied is None:
+        return
+    allowed = {"source_language", "target_languages"}
+    _unknown_keys("languages", supplied, allowed, messages)
+    if "source_language" in supplied:
+        source = supplied["source_language"]
+        if not isinstance(source, str) or not source.strip():
+            messages.append("languages.source_language must be a non-empty string.")
+        else:
+            configured = proposals.get("source_language")
+            if isinstance(configured, str) and configured.casefold() not in ("", "unspecified", source.casefold()):
+                messages.append("languages.source_language and proposals.source_language must match.")
+            else:
+                proposals["source_language"] = source.strip()
+    if "target_languages" in supplied:
+        targets = supplied["target_languages"]
+        _string_list(targets, "languages.target_languages", messages)
+        if isinstance(targets, list) and all(isinstance(item, str) and item.strip() for item in targets):
+            codes = [item.strip() for item in targets]
+            configured = proposals.get("target_languages")
+            if configured and [str(item).casefold() for item in configured] != [
+                item.casefold() for item in codes
+            ]:
+                messages.append("languages.target_languages and proposals.target_languages must match.")
+            else:
+                proposals["target_languages"] = codes
 
 
 def _string_list(value: Any, name: str, messages: list[str], allowed: frozenset[str] | None = None) -> None:
@@ -496,7 +536,13 @@ def _model_config(value: Any, path: str, messages: list[str]) -> None:
 
 def _passthrough(raw: dict[str, Any], messages: list[str]) -> dict[str, Any]:
     extras: dict[str, Any] = {}
-    for key in ("languages", "evaluation", "generation_model_config"):
+    if "languages" in raw:
+        extras["languages"] = raw["languages"]
+    if "privacy" in raw:
+        privacy = _privacy(raw["privacy"], messages)
+        if privacy is not None:
+            extras["privacy"] = privacy
+    for key in ("evaluation", "generation_model_config"):
         if key in raw and _mapping(raw[key], key, messages) is not None:
             extras[key] = raw[key]
     if "judge_model_configs" in raw:
@@ -517,3 +563,46 @@ def _passthrough(raw: dict[str, Any], messages: list[str]) -> dict[str, Any]:
     for key, value in extras.items():
         _reject_model_secrets(value, key, messages)
     return extras
+
+
+def _privacy(value: Any, messages: list[str]) -> dict[str, Any] | None:
+    supplied = _mapping(value, "privacy", messages)
+    if supplied is None:
+        return None
+    _unknown_keys("privacy", supplied, {"additional_labels"}, messages)
+    labels = _mapping(supplied.get("additional_labels", {}), "privacy.additional_labels", messages)
+    if labels is None:
+        return None
+    _unknown_keys("privacy.additional_labels", labels, PRIVACY_LABEL_KINDS, messages)
+    normalized: dict[str, list[str]] = {}
+    for kind, values in labels.items():
+        _string_list(values, f"privacy.additional_labels.{kind}", messages)
+        if isinstance(values, list) and all(isinstance(item, str) and item.strip() for item in values):
+            normalized[kind] = [item.strip() for item in values]
+    return {"additional_labels": normalized}
+
+
+def _check_privacy_language(
+    proposals: Mapping[str, Any],
+    extras: Mapping[str, Any],
+    messages: list[str],
+) -> None:
+    source = proposals.get("source_language")
+    if not isinstance(source, str) or source.strip().casefold() == "unspecified":
+        return
+    primary = re.split(r"[-_]", source.strip().casefold(), maxsplit=1)[0]
+    if primary in BUILTIN_PRIVACY_LANGUAGES:
+        return
+    privacy = extras.get("privacy")
+    labels = privacy.get("additional_labels") if isinstance(privacy, dict) else None
+    supplied = {
+        kind
+        for kind, values in labels.items()
+        if isinstance(labels, dict) and isinstance(values, list) and values
+    } if isinstance(labels, dict) else set()
+    missing = sorted(PRIVACY_LABEL_KINDS - supplied)
+    if missing:
+        messages.append(
+            f"source language {source!r} has no built-in contextual privacy labels; "
+            "configure privacy.additional_labels for " + ", ".join(missing) + " before ingest."
+        )

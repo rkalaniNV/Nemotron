@@ -141,7 +141,16 @@ def prepare_safety(config_path: ConfigPath) -> Path:
         index = _recover_json(index_path, run_dir, _valid_cache_index, recovered)
         index = _refresh_cache_index(index, digest, fingerprint)
         try:
-            ingested = ingest_sources(resolved.input_dir, sources, run_dir / "stage_cache")
+            privacy_config = resolved.extras.get("privacy", {})
+            privacy_labels = (
+                privacy_config.get("additional_labels", {}) if isinstance(privacy_config, dict) else {}
+            )
+            ingested = ingest_sources(
+                resolved.input_dir,
+                sources,
+                run_dir / "stage_cache",
+                privacy_labels=privacy_labels,
+            )
         except SourceChangedError as exc:
             raise abort(RunStatus.PREPARE_REQUIRED, run_dir, str(exc)) from exc
         except SourceError as exc:

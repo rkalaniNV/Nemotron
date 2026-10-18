@@ -30,7 +30,7 @@ A finding records its kind and line number, never the matched value.
 """
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 CREDENTIAL = "credential"
@@ -40,8 +40,10 @@ REDACTION_INCOMPLETE = "redaction_incomplete"
 
 _WORD = r"A-Za-z0-9"
 _SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b(?:api[_ -]?key|secret[_ -]?key|client[_ -]?secret|access[_ -]?token|auth[_ -]?token"
-    r"|password|passwd|pwd|mật khẩu)\b[ \t]*[:=][ \t]*[\"']?([^\s\"'<>]{8,})"
+    r"(?i)(?:\b(?:api[_ -]?key|secret[_ -]?key|client[_ -]?secret|access[_ -]?token|auth[_ -]?token"
+    r"|password|passwd|pwd|mật khẩu|mot de passe|contraseña|passwort|senha)\b|"
+    r"(?:パスワード|비밀번호|密码))"
+    r"[ \t]*[:=：][ \t]*[\"']?([^\s\"'<>]{8,})"
 )
 
 
@@ -126,15 +128,20 @@ _PERSONAL_PATTERNS: tuple[_PersonalPattern, ...] = (
     _PersonalPattern(
         "national_id",
         re.compile(
-            r"(?i)\b(?:CCCD|CMND|CMT|căn cước(?: công dân)?|chứng minh nhân dân|hộ chiếu|passport(?: number| no\.?)?"
-            r"|national id(?: number)?|SSN)\b[^\w\n]{0,5}(?:số[^\w\n]{0,3})?(\d(?:[ \-]?\d){6,14})"
+            r"(?i)(?:\b(?:CCCD|CMND|CMT|căn cước(?: công dân)?|chứng minh nhân dân|hộ chiếu|"
+            r"passport(?: number| no\.?)?|national id(?: number)?|SSN|"
+            r"numéro (?:d['’])?identité|dni|cédula|cedula|personalausweis|ausweis)\b|"
+            r"(?:주민등록번호|マイナンバー|身份证|身分證))[^\w\n]{0,5}"
+            r"(?:số[^\w\n]{0,3})?(\d(?:[ \-]?\d){6,14})"
         ),
         group=1,
     ),
     _PersonalPattern(
         "bank_account",
         re.compile(
-            r"(?i)\b(?:số tài khoản|STK|tài khoản số|account (?:number|no\.?))[^\w\n]{0,5}(\d(?:[ -]?\d){4,22})"
+            r"(?i)(?:\b(?:số tài khoản|STK|tài khoản số|account (?:number|no\.?)|"
+            r"n[o°º] de compte|numéro de compte|número de cuenta|kontonummer)\b|"
+            r"(?:계좌번호|口座番号|账号|帳號))[^\w\n]{0,5}(\d(?:[ -]?\d){4,22})"
         ),
         group=1,
     ),
@@ -178,12 +185,16 @@ class PrivacyResult:
     redactions: dict[str, int] = field(default_factory=dict)
 
 
-def assess(lines: Sequence[str]) -> PrivacyResult:
+def assess(
+    lines: Sequence[str],
+    *,
+    additional_labels: Mapping[str, Sequence[str]] | None = None,
+) -> PrivacyResult:
     """Scan one document, given as lines, and redact personal data line by line.
 
     Redaction never adds or removes a line, so structure and section numbers survive it.
     """
-    credentials = credential_findings(lines)
+    credentials = credential_findings(lines, additional_labels=additional_labels)
     if credentials:
         return PrivacyResult(False, SECRET_PATTERN, (), tuple(credentials))
     placeholders: dict[tuple[str, str], str] = {}
@@ -191,17 +202,18 @@ def assess(lines: Sequence[str]) -> PrivacyResult:
     redactions: dict[str, int] = {}
     findings: list[Finding] = []
     redacted: list[str] = []
+    personal_patterns = (*_PERSONAL_PATTERNS, *_additional_personal_patterns(additional_labels))
     for number, line in enumerate(lines, start=1):
-        for spec in _PERSONAL_PATTERNS:
+        for spec in personal_patterns:
             line, hits = _redact(line, spec, placeholders, counters)
             if hits:
                 redactions[spec.kind] = redactions.get(spec.kind, 0) + hits
                 findings.append(Finding(spec.kind, PERSONAL_DATA, number))
         redacted.append(line)
-    remaining = credential_findings(redacted) + [
+    remaining = credential_findings(redacted, additional_labels=additional_labels) + [
         Finding(spec.kind, PERSONAL_DATA, number)
         for number, line in enumerate(redacted, start=1)
-        for spec in _PERSONAL_PATTERNS
+        for spec in personal_patterns
         if any(_accepted(spec, match) for match in spec.pattern.finditer(line))
     ]
     if remaining:
@@ -209,12 +221,24 @@ def assess(lines: Sequence[str]) -> PrivacyResult:
     return PrivacyResult(True, None, tuple(redacted), tuple(findings), dict(sorted(redactions.items())))
 
 
-def credential_findings(lines: Sequence[str]) -> list[Finding]:
+def credential_findings(
+    lines: Sequence[str],
+    *,
+    additional_labels: Mapping[str, Sequence[str]] | None = None,
+) -> list[Finding]:
     """Credentials anywhere in the document, including ones that span lines."""
     text = "\n".join(lines)
+    patterns = list(_CREDENTIAL_PATTERNS)
+    labels = _labels(additional_labels, "credential")
+    if labels:
+        pattern = re.compile(
+            rf"(?i)(?:{'|'.join(_label_pattern(label) for label in labels)})"
+            r"[ \t]*[:=：][ \t]*[\"']?([^\s\"'<>]{8,})"
+        )
+        patterns.append(("secret_assignment", pattern, _assigned_secret))
     findings = {
         (kind, text.count("\n", 0, match.start()) + 1)
-        for kind, pattern, accept in _CREDENTIAL_PATTERNS
+        for kind, pattern, accept in patterns
         for match in pattern.finditer(text)
         if accept is None or accept(match)
     }
@@ -223,6 +247,48 @@ def credential_findings(lines: Sequence[str]) -> list[Finding]:
 
 def _accepted(spec: _PersonalPattern, match: re.Match[str]) -> bool:
     return spec.accept is None or spec.accept(match.group(spec.group))
+
+
+def _labels(additional: Mapping[str, Sequence[str]] | None, kind: str) -> tuple[str, ...]:
+    if not isinstance(additional, Mapping):
+        return ()
+    values = additional.get(kind, ())
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        return ()
+    return tuple(dict.fromkeys(value.strip() for value in values if isinstance(value, str) and value.strip()))
+
+
+def _label_pattern(label: str) -> str:
+    escaped = re.escape(label)
+    if any(char.isascii() and char.isalnum() for char in label):
+        return rf"(?<!\w){escaped}(?!\w)"
+    return escaped
+
+
+def _additional_personal_patterns(
+    additional: Mapping[str, Sequence[str]] | None,
+) -> tuple[_PersonalPattern, ...]:
+    specs: list[_PersonalPattern] = []
+    definitions = {
+        "national_id": r"(\d(?:[ \-]?\d){6,14})",
+        "bank_account": r"(\d(?:[ \-]?\d){4,22})",
+        "date_of_birth": (
+            r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
+        ),
+    }
+    for kind, value_pattern in definitions.items():
+        labels = _labels(additional, kind)
+        if not labels:
+            continue
+        label_pattern = "|".join(_label_pattern(label) for label in labels)
+        specs.append(
+            _PersonalPattern(
+                kind,
+                re.compile(rf"(?i)(?:{label_pattern})[^\w\n]{{0,5}}{value_pattern}"),
+                group=1,
+            )
+        )
+    return tuple(specs)
 
 
 def _redact(

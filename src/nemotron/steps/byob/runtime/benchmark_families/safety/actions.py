@@ -187,9 +187,9 @@ def _scalar_overlap(first: str, second: str) -> bool:
 
 
 def _scope_overlap(first: Iterable[str], second: Iterable[str]) -> bool:
-    left = {value.casefold() for value in first}
-    right = {value.casefold() for value in second}
-    if not left or not right or "unspecified" in left or "unspecified" in right:
+    left = {value.casefold() for value in first if value.casefold() != "unspecified"}
+    right = {value.casefold() for value in second if value.casefold() != "unspecified"}
+    if not left or not right:
         return True
     return bool(left & right)
 

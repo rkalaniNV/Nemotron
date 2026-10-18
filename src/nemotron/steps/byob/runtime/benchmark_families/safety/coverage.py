@@ -223,7 +223,15 @@ def build_coverage_plan(
         primary = languages[0] if languages else None
         translation = _translation_languages(languages, target_languages)
         rule_required = _required_cells(rule, by_id, translation, primary, max_turns)
-        rule_optional = _optional_cells(rule, by_id, primary, modules)
+        missing_span = (
+            not isinstance(rule.provenance.source_span_id, str) or not rule.provenance.source_span_id.strip()
+        )
+        if missing_span:
+            for cell in rule_required:
+                cell["hold"] = "span_missing"
+            rule_optional = []
+        else:
+            rule_optional = _optional_cells(rule, by_id, primary, modules)
         required.extend(rule_required)
         optional.extend(rule_optional)
         for cell in (*rule_required, *rule_optional):
@@ -429,7 +437,8 @@ def _optional_cells(
         cells.append(_planned(rule, rules, "adversarial", primary=primary, priority="optional", flags=preserved))
     if modules.get("political_symmetry") is True:
         cells.append(_planned(rule, rules, "actor_swap", primary=primary, priority="optional", flags=preserved))
-    cells.append(_planned(rule, rules, "persona", primary=primary, priority="optional", flags=preserved))
+    if modules.get("persona") is True:
+        cells.append(_planned(rule, rules, "persona", primary=primary, priority="optional", flags=preserved))
     return cells
 
 
@@ -703,6 +712,7 @@ def _module_status(modules: Mapping[str, Any]) -> dict[str, str]:
     return {
         "adversarial": "enabled" if modules.get("adversarial") is True else "disabled",
         "political_symmetry": symmetry_status,
+        "persona": "enabled" if modules.get("persona") is True else "disabled",
         "production_replay": "not_configured",
     }
 

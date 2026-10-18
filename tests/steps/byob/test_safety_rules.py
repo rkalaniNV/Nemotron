@@ -124,8 +124,9 @@ def test_rule_ids_depend_on_document_section_quote_and_action() -> None:
         "five-topic", "4", "Block card data.", "block", ("b",)
     )
     assert first.startswith("FIVE-TOPIC-4-")
+    assert stable_policy_id("政策", "4", "Block card data.", "block").startswith("U")
     assert condition_name("Bỏ qua mọi quy định!") == "bo_qua_moi_quy_dinh"
-    assert condition_name("禁止").startswith("c_")
+    assert condition_name("禁止") == "禁止"
     assert condition_name("禁止") == condition_name(" 禁止 ")
     assert condition_name("???").startswith("c_")
     assert condition_name("   ") is None
@@ -167,6 +168,24 @@ def test_grounded_operator_supports_a_language_without_keyword_rules(tmp_path: P
     }
     flags = {flag["code"] for flag in row["flags"]}
     assert "operator_from_model_evidence" in flags
+    assert "operator_keyword_confirmed" in flags
+
+
+def test_grounded_operator_is_kept_when_wording_has_no_listed_frame(tmp_path: Path, use: Any) -> None:
+    quote = "เมื่อมีเงื่อนไขเอและเงื่อนไขบี ให้บล็อกคำขอ"
+    candidate = _candidate(
+        quote,
+        operators={"block_if": {"operator": "all_of", "evidence": "เงื่อนไขเอและเงื่อนไขบี"}},
+        block_if=[_leg("condition_a", "เงื่อนไขเอ"), _leg("condition_b", "เงื่อนไขบี")],
+    )
+    use(ScriptedExtractor({quote: [candidate]}))
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{quote}\n"}))
+
+    [row] = _rows(run_dir).values()
+    assert row["status"] == "eligible_for_generation"
+    assert row["rule"]["rule"]["block_if"]["operator_source"] == "model_evidence"
+    flags = {flag["code"] for flag in row["flags"]}
+    assert "operator_from_model_evidence" in flags
     assert "operator_keyword_confirmed" not in flags
 
 
@@ -182,6 +201,7 @@ def test_extracted_rules_keep_configured_source_and_target_languages(tmp_path: P
 
     [row] = _rows(run_dir).values()
     assert row["rule"]["scope"]["languages"] == ["vi-VN"]
+    assert row["rule"]["scope"]["domains"] == ["unspecified"]
     coverage = json.loads((run_dir / "stage_cache" / "coverage_gaps.json").read_text(encoding="utf-8"))
     [translated] = [case for case in coverage["gaps"] if case["kind"] == "language"]
     assert translated["source_language"] == "vi-VN"
@@ -200,13 +220,14 @@ def test_rule_specific_grounded_scope_overrides_run_scope(tmp_path: Path, use: A
     config = _config(
         tmp_path,
         {"policy.md": f"## Cards\n\n{quote}\n"},
-        proposals={"jurisdiction": "US", "moderation_targets": ["user_input"]},
+        proposals={"domain": "payments", "jurisdiction": "US", "moderation_targets": ["user_input"]},
     )
     run_dir = _generate(config)
 
     [row] = _rows(run_dir).values()
     assert row["rule"]["scope"]["jurisdictions"] == ["EU"]
     assert row["rule"]["scope"]["targets"] == ["tool_call"]
+    assert row["rule"]["scope"]["domains"] == ["payments"]
 
 
 def test_operator_evidence_outside_the_quote_is_unresolved(tmp_path: Path, use: Any) -> None:
@@ -364,6 +385,7 @@ TRANSFER_REPLIES = {
             ),
             "object": "transfer",
             "risk_category": "irreversible_tool_action",
+            "critical_risk_basis": "irreversible_tool_action",
         }
     ],
 }
@@ -426,13 +448,33 @@ def test_binding_and_conditional_words_count_only_with_grounded_evidence() -> No
         "high",
         "rubric:explicit_prohibition",
     )
-    assert assign_severity(french, french.provenance.source_quote, "block", "legal_prohibition") == (
+    assert assign_severity(
+        french,
+        french.provenance.source_quote,
+        "block",
+        "interdiction légale",
+        "legal_prohibition",
+    ) == (
         "critical",
         "rubric:binding_evidence+legal_prohibition",
     )
+    assert assign_severity(french, french.provenance.source_quote, "block", "misc") == (
+        "high",
+        "rubric:explicit_prohibition",
+    )
 
 
-def test_mixed_operator_frames_do_not_veto_grounded_model_evidence(tmp_path: Path, use: Any) -> None:
+@pytest.mark.parametrize("category", ["gian lận", "欺诈", "fraude liée au paiement"])
+def test_risk_category_keeps_its_source_language(category: str) -> None:
+    candidate = extract.ExtractedCandidate.model_validate(
+        {"expected_action": "block", "source_quote": "q", "risk_category": category}
+    )
+
+    assert candidate.risk_category == category
+    assert candidate.critical_risk_basis is None
+
+
+def test_mixed_operator_frames_leave_the_condition_unresolved(tmp_path: Path, use: Any) -> None:
     quote = "Block when all of the following apply, or any of the following exceptions."
     evidence = "all of the following apply, or any of the following"
     candidate = _candidate(
@@ -444,8 +486,9 @@ def test_mixed_operator_frames_do_not_veto_grounded_model_evidence(tmp_path: Pat
     run_dir = _generate(_config(tmp_path, {"policy.md": f"## Mixed\n\n{quote}\n"}))
 
     [row] = _rows(run_dir).values()
-    assert row["status"] == "eligible_for_generation"
-    assert row["rule"]["rule"]["block_if"]["all_of"] == ["condition_a", "condition_b"]
+    assert row["status"] == "needs_decision"
+    assert row["rule"]["rule"].get("block_if") is None
+    assert row["rule"]["unresolved_conditions"]["block_if"] == ["condition_a", "condition_b"]
     assert "operator_keyword_ambiguous" in {flag["code"] for flag in row["flags"]}
     assert "operator_evidence_conflict" not in {flag["code"] for flag in row["flags"]}
 
@@ -505,6 +548,7 @@ def test_unresolved_conflict_is_reported_and_quarantines_only_the_critical_rule(
                     block_if=[_leg("card_data_request", "card data")],
                 ),
                 "risk_category": "fraud",
+                "critical_risk_basis": "fraud",
             }
         ],
         allow: [_candidate(allow, "allow", allow_if=[_leg("card_data_request", "Card data requests")])],
@@ -835,14 +879,55 @@ def test_an_allow_rule_with_multiple_possible_partners_waits_for_review(tmp_path
     assert any("possible acting partners" in reason for reason in row["reasons"])
 
 
-def test_a_condition_without_ascii_is_kept_for_review(tmp_path: Path, use: Any) -> None:
+def test_a_non_latin_condition_name_is_kept(tmp_path: Path, use: Any) -> None:
     quote = "Block requests for card data."
     use(ScriptedExtractor({quote: [_candidate(quote, block_if=[_leg("禁止", "card data")])]}))
     run_dir = _generate(_config(tmp_path, {"policy.md": f"## Cards\n\n{quote}\n"}))
 
     [row] = _rows(run_dir).values()
+    assert row["status"] == "eligible_for_generation"
+    assert row["rule"]["rule"]["block_if"]["any_of"] == ["禁止"]
+    assert "condition_name_hashed" not in {flag["code"] for flag in row["flags"]}
+
+
+def test_mixed_script_condition_names_do_not_collapse(tmp_path: Path, use: Any) -> None:
+    quote = "条件Aと情况Aの両方が必要です。"
+    candidate = _candidate(
+        quote,
+        operators={"block_if": {"operator": "all_of", "evidence": "条件Aと情况Aの両方"}},
+        block_if=[_leg("条件A", "条件A"), _leg("情况A", "情况A")],
+    )
+    use(ScriptedExtractor({quote: [candidate]}))
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Rule\n\n{quote}\n"}))
+
+    [row] = _rows(run_dir).values()
+    assert row["rule"]["rule"]["block_if"]["all_of"] == ["条件a", "情况a"]
+    assert "condition_name_collision" not in {flag["code"] for flag in row["flags"]}
+
+
+def test_condition_name_collision_is_sent_for_review(tmp_path: Path, use: Any) -> None:
+    quote = "Block when both forms apply."
+    candidate = _candidate(
+        quote,
+        operators={"block_if": {"operator": "all_of", "evidence": "both forms"}},
+        block_if=[_leg("Café", "forms"), _leg("Cafe", "forms")],
+    )
+    use(ScriptedExtractor({quote: [candidate]}))
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Rule\n\n{quote}\n"}))
+
+    [row] = _rows(run_dir).values()
     assert row["status"] == "needs_decision"
-    assert row["rule"]["rule"]["block_if"]["any_of"] == [condition_name("禁止")]
+    assert "condition_name_collision" in {flag["code"] for flag in row["flags"]}
+
+
+def test_a_punctuation_only_condition_name_is_kept_for_review(tmp_path: Path, use: Any) -> None:
+    quote = "Block requests for card data."
+    use(ScriptedExtractor({quote: [_candidate(quote, block_if=[_leg("???", "card data")])]}))
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Cards\n\n{quote}\n"}))
+
+    [row] = _rows(run_dir).values()
+    assert row["status"] == "needs_decision"
+    assert row["rule"]["rule"]["block_if"]["any_of"] == [condition_name("???")]
     assert "condition_name_hashed" in {flag["code"] for flag in row["flags"]}
 
 

@@ -62,6 +62,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import GLOSSAR
 from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import RULES_FILE as PREAUTHORED_FILE
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
     CONDITION_CLASSES,
+    DEFAULT_TARGETS,
     PolicyRule,
     RuleValidationError,
     detect_operator,
@@ -94,8 +95,8 @@ RULE_OUTPUTS = (
 )
 SECOND_PASS_PROFILES = frozenset({"regulated", "high_assurance"})
 ALLOW_SUFFIX = "-ALLOW"
-CRITICAL_CATEGORIES = frozenset({"fraud", "personal_harm", "legal_prohibition", "irreversible_tool_action"})
 _VIOLATION_ACTIONS = frozenset({"block", "caution", "rewrite", "redact"})
+_HASHED_CONDITION = re.compile(r"^c_[0-9a-f]{8}$")
 
 
 @dataclass
@@ -452,13 +453,7 @@ def _candidate_draft(
             )
         )
     }
-    scope = {
-        "domains": [config.proposals["domain"]],
-        "jurisdictions": [config.proposals["jurisdiction"]],
-        "languages": _proposal_languages(config.proposals),
-        "targets": list(config.proposals["moderation_targets"]),
-        **scoped,
-    }
+    scope = {**_proposal_scope(config.proposals), **scoped}
     raw = {
         "policy_id": "PENDING",
         "title": candidate.title.strip() or None,
@@ -495,7 +490,13 @@ def _candidate_draft(
                 "operator_hint is not an authority; use condition_operators with exact evidence",
             )
         )
-    severity, basis = assign_severity(rule, quote, expected, candidate.risk_category)
+    severity, basis = assign_severity(
+        rule,
+        quote,
+        expected,
+        candidate.risk_category,
+        candidate.critical_risk_basis,
+    )
     rule = _replace(rule, severity=severity, severity_basis=basis)
     signals = ConfidenceSignals(
         quote_match=1.0 if found else 0.0,
@@ -551,11 +552,12 @@ def _extracted_operator(
         flags.append(
             _flag(
                 "operator_keyword_ambiguous",
-                f"{name} evidence contains more than one operator frame; the grounded model operator is kept",
+                f"{name} evidence contains more than one operator frame",
                 f"rule.{name}",
             )
         )
-    elif detected is not None and detected != proposed.operator:
+        return None
+    if detected is not None and detected != proposed.operator:
         flags.append(
             _flag(
                 "operator_evidence_conflict",
@@ -589,21 +591,30 @@ def _legs(
     names: list[str] = []
     grounded = 0
     for item in items:
-        readable = _ascii_snake(item.name)
-        name = readable or condition_name(item.name)
+        name = condition_name(item.name)
         if name is None:
             flags.append(_flag("condition_name_unusable", f"{item.name!r} cannot be a condition name", where))
             if f"{where}.unusable_name" not in unsupported:
                 unsupported.append(f"{where}.unusable_name")
             continue
         if name in names:
+            flags.append(
+                _flag(
+                    "condition_name_collision",
+                    f"{item.name!r} normalizes to the already used condition name {name!r}",
+                    where,
+                )
+            )
+            collision = f"{where}.{name}"
+            if collision not in unsupported:
+                unsupported.append(collision)
             continue
         names.append(name)
         found = bool(item.evidence.strip()) and any(_evidence_in_source(item.evidence, source) for source in sources)
         problems = []
-        if readable is None:
+        if _hashed_condition_name(name):
             problems.append(
-                _flag("condition_name_hashed", f"{item.name!r} has no ASCII form and was stored as {name}", where)
+                _flag("condition_name_hashed", f"{item.name!r} has no identifier form and was stored as {name}", where)
             )
         if not found:
             problems.append(
@@ -828,7 +839,13 @@ def _is_allow_only(draft: Draft) -> bool:
     return draft.expected_action == "allow" and names == {"allow_if"}
 
 
-def assign_severity(rule: PolicyRule, quote: str, expected_action: str, risk_category: str) -> tuple[str, str]:
+def assign_severity(
+    rule: PolicyRule,
+    quote: str,
+    expected_action: str,
+    risk_category: str,
+    critical_risk_basis: str | None = None,
+) -> tuple[str, str]:
     """The rubric; the first matching level wins. A model severity is never an input.
 
     Binding and conditional wording count only when extraction stored exact evidence from
@@ -837,8 +854,8 @@ def assign_severity(rule: PolicyRule, quote: str, expected_action: str, risk_cat
     del quote
     if expected_action == "allow":
         return "low", "rubric:explicit_allow"
-    if risk_category in CRITICAL_CATEGORIES and rule.signals.binding_evidence:
-        return "critical", f"rubric:binding_evidence+{risk_category}"
+    if critical_risk_basis is not None and risk_category not in ("", "none") and rule.signals.binding_evidence:
+        return "critical", f"rubric:binding_evidence+{critical_risk_basis}"
     if expected_action == "escalate":
         return "high", "rubric:escalation"
     acting = [group for name, group in rule.rule.conditions().items() if name != "allow_if"]
@@ -853,19 +870,30 @@ def assign_severity(rule: PolicyRule, quote: str, expected_action: str, risk_cat
 
 
 def condition_name(text: str) -> str | None:
-    """A snake_case condition name.
+    """A stored condition name.
 
-    Latin text is folded to ASCII (``Bỏ qua`` becomes ``bo_qua``). A name with no ASCII
-    letters, such as a Chinese term, is kept as ``c_`` plus a stable hash so the condition
-    is not dropped. None only when the text is empty.
+    All-Latin text is folded to ASCII snake_case (``Bỏ qua`` becomes ``bo_qua``).
+    A name containing another script keeps all of its letters and numbers, including
+    mixed-script suffixes. Punctuation-only or digit-leading text becomes ``c_`` plus
+    a stable hash and is sent to review. None is returned only for empty text.
     """
-    readable = _ascii_snake(text)
-    if readable:
-        return readable
     folded = unicodedata.normalize("NFC", text).strip()
     if not folded:
         return None
+    letters = [char for char in folded if char.isalpha()]
+    if letters and all("LATIN" in unicodedata.name(char, "") for char in letters):
+        readable = _ascii_snake(folded)
+        if readable and readable[0].isalpha():
+            return readable
+    if any(char.isalpha() and "LATIN" not in unicodedata.name(char, "") for char in folded):
+        script = re.sub(r"[^\w]+", "_", folded.casefold(), flags=re.UNICODE).strip("_")[:128].strip("_")
+        if script and script[0].isalpha() and all(char.isalnum() or char == "_" for char in script):
+            return script
     return "c_" + hashlib.sha256(folded.casefold().encode("utf-8")).hexdigest()[:8]
+
+
+def _hashed_condition_name(name: str) -> bool:
+    return bool(_HASHED_CONDITION.fullmatch(name))
 
 
 def _ascii_snake(text: str) -> str | None:
@@ -907,6 +935,27 @@ def _proposal_languages(proposals: Mapping[str, Any]) -> list[str]:
     if isinstance(value, str) and value.strip() and value.strip().casefold() != "unspecified":
         return [value.strip()]
     return []
+
+
+def _proposal_scope(proposals: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Run-level fallbacks; empty domain and jurisdiction become IR's wildcard ``unspecified``."""
+
+    def stated(value: Any) -> list[str]:
+        if isinstance(value, str) and value.strip() and value.strip().casefold() != "unspecified":
+            return [value.strip()]
+        return []
+
+    targets = [
+        item.strip()
+        for item in proposals.get("moderation_targets", [])
+        if isinstance(item, str) and item.strip() and item.strip().casefold() != "unspecified"
+    ]
+    return {
+        "domains": stated(proposals.get("domain")),
+        "jurisdictions": stated(proposals.get("jurisdiction")),
+        "languages": _proposal_languages(proposals),
+        "targets": targets or list(DEFAULT_TARGETS),
+    }
 
 
 def _grounded_signals(
@@ -952,7 +1001,11 @@ def _turn_count(count: int | None, flags: list[dict[str, Any]]) -> int:
 def _id_part(text: str) -> str:
     folded = unicodedata.normalize("NFKD", text.replace("đ", "d").replace("Đ", "D"))
     ascii_text = "".join(char for char in folded if not unicodedata.combining(char)).encode("ascii", "ignore").decode()
-    return re.sub(r"[^A-Z0-9]+", "-", ascii_text.upper()).strip("-")[:40].strip("-") or "X"
+    slug = re.sub(r"[^A-Z0-9]+", "-", ascii_text.upper()).strip("-")[:40].strip("-")
+    if slug:
+        return slug
+    digest = hashlib.sha256(unicodedata.normalize("NFC", text).encode("utf-8")).hexdigest()[:4].upper()
+    return f"U{digest}"
 
 
 def _text(value: str) -> str:

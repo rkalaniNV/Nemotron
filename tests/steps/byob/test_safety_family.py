@@ -109,6 +109,8 @@ def test_prepare_initializes_run_dir_without_publishing(tmp_path: Path) -> None:
     assert resolved["budget"]["assisted_max_cases"] == 500
     assert resolved["config_status"] == "resolved"
     assert "stage" not in resolved
+    assert resolved["generation"]["modules"]["persona"] is False
+    assert "rewrite" in resolved["proposals"]["decision_actions"]
 
 
 def test_prepare_rerun_keeps_cache_entries_and_creation_time(tmp_path: Path) -> None:
@@ -795,11 +797,25 @@ def test_config_status_may_be_omitted(tmp_path: Path) -> None:
         ),
         (
             {
+                "proposals": {"decision_actions": ["allow", "block", "caution", "escalate"]},
                 "generation": {
                     "decision_mix": {"allow": 0.4, "block": 0.4, "caution": 0, "escalate": 0, "rewrite": 0.2}
-                }
+                },
             },
             "decision_mix gives a share to rewrite",
+        ),
+        ({"languages": {"source": "vi"}}, "Unknown languages keys: source"),
+        (
+            {
+                "languages": {"source_language": "en-US", "target_languages": ["en-US"]},
+                "proposals": {"source_language": "vi-VN"},
+            },
+            "languages.source_language and proposals.source_language must match",
+        ),
+        ({"languages": ["en-US"]}, "languages must be a mapping"),
+        (
+            {"languages": {"source_language": "ar"}},
+            "has no built-in contextual privacy labels",
         ),
         ({"generation": {"decision_mix": {"ban": 0.1}}}, "Unknown generation.decision_mix keys: ban"),
     ],
@@ -809,6 +825,59 @@ def test_invalid_config_is_reported_without_writing(tmp_path: Path, overrides: d
 
     assert message in str(caught)
     assert not (tmp_path / "out").exists()
+
+
+def test_languages_mapping_sets_source_and_target_languages(tmp_path: Path) -> None:
+    languages = {"source_language": "fr-FR", "target_languages": ["fr-FR", "de-DE"]}
+    run_dir = _run(_config(tmp_path, overrides={"languages": languages}), "prepare")
+
+    resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
+    assert resolved["proposals"]["source_language"] == "fr-FR"
+    assert resolved["proposals"]["target_languages"] == ["fr-FR", "de-DE"]
+    assert resolved["languages"] == languages
+
+
+def test_an_unlisted_source_language_accepts_custom_privacy_labels(tmp_path: Path) -> None:
+    labels = {
+        "credential": ["كلمة المرور"],
+        "national_id": ["رقم الهوية"],
+        "bank_account": ["رقم الحساب"],
+        "date_of_birth": ["تاريخ الميلاد"],
+    }
+    run_dir = _run(
+        _config(
+            tmp_path,
+            files={"policy.md": "رقم الهوية: 1234567890\nلا تكشف بيانات العميل.\n"},
+            overrides={
+                "languages": {"source_language": "ar", "target_languages": []},
+                "privacy": {"additional_labels": labels},
+            },
+        ),
+        "prepare",
+    )
+
+    resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
+    assert resolved["privacy"]["additional_labels"]["national_id"] == ["رقم الهوية"]
+    redacted = (run_dir / "stage_cache" / "redacted" / "policy.txt").read_text(encoding="utf-8")
+    assert "1234567890" not in redacted
+    assert "REDACTED_NATIONAL_ID_1" in redacted
+
+
+def test_default_decision_actions_include_rewrite(tmp_path: Path) -> None:
+    run_dir = _run(
+        _config(
+            tmp_path,
+            overrides={
+                "generation": {
+                    "decision_mix": {"allow": 0.4, "block": 0.4, "caution": 0, "escalate": 0, "rewrite": 0.2}
+                }
+            },
+        ),
+        "prepare",
+    )
+
+    resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
+    assert resolved["generation"]["decision_mix"]["rewrite"] == 0.2
 
 
 def test_config_accepts_every_target_and_action_policy_rule_ir_accepts(tmp_path: Path) -> None:

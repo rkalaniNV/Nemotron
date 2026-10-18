@@ -179,12 +179,59 @@ def test_international_iban_and_labeled_birth_date_are_redacted_locally() -> Non
         [
             "IBAN: GB82 WEST 1234 5698 7654 32",
             "出生日期：1990-12-31",
+            "身份证：001099012345",
+            "账号：123456789012",
+            "Call +33 612345678.",
         ]
     )
 
     assert result.safe is True
-    assert result.redactions == {"date_of_birth": 1, "iban": 1}
-    assert result.lines == ("IBAN: REDACTED_IBAN_1", "出生日期：REDACTED_DATE_OF_BIRTH_1")
+    assert result.redactions == {
+        "bank_account": 1,
+        "date_of_birth": 1,
+        "iban": 1,
+        "national_id": 1,
+        "phone_number": 1,
+    }
+    assert result.lines == (
+        "IBAN: REDACTED_IBAN_1",
+        "出生日期：REDACTED_DATE_OF_BIRTH_1",
+        "身份证：REDACTED_NATIONAL_ID_1",
+        "账号：REDACTED_BANK_ACCOUNT_1",
+        "Call REDACTED_PHONE_NUMBER_1.",
+    )
+
+
+def test_customer_privacy_labels_cover_an_unlisted_language() -> None:
+    result = privacy.assess(
+        [
+            "رقم الهوية: 1234567890",
+            "رقم الحساب: 123456789012",
+            "تاريخ الميلاد: 1990-12-31",
+            "كلمة المرور: Abcd1234!",
+        ],
+        additional_labels={
+            "credential": ["كلمة المرور"],
+            "national_id": ["رقم الهوية"],
+            "bank_account": ["رقم الحساب"],
+            "date_of_birth": ["تاريخ الميلاد"],
+        },
+    )
+
+    assert result.safe is False
+    assert result.reason == privacy.SECRET_PATTERN
+    assert [finding.kind for finding in result.findings] == ["secret_assignment"]
+
+    redacted = privacy.assess(
+        ["رقم الهوية: 1234567890", "رقم الحساب: 123456789012", "تاريخ الميلاد: 1990-12-31"],
+        additional_labels={
+            "national_id": ["رقم الهوية"],
+            "bank_account": ["رقم الحساب"],
+            "date_of_birth": ["تاريخ الميلاد"],
+        },
+    )
+    assert redacted.safe is True
+    assert redacted.redactions == {"bank_account": 1, "date_of_birth": 1, "national_id": 1}
 
 
 @pytest.mark.parametrize(
@@ -194,6 +241,8 @@ def test_international_iban_and_labeled_birth_date_are_redacted_locally() -> Non
         ("AKIAABCDEFGHIJKLMNOP", "cloud_access_key"),
         ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz", "access_token"),
         ("mật khẩu: Matkhau2024!", "secret_assignment"),
+        ("mot de passe: Matkhau2024!", "secret_assignment"),
+        ("密码：Secret12!", "secret_assignment"),
         ("api_key: AbCdEfGhIj1234567890", "secret_assignment"),
         ("nvapi-" + "x" * 30, "api_key"),
     ],
@@ -214,6 +263,7 @@ def test_credential_patterns_quarantine(text: str, kind: str) -> None:
         "The password: MustBe8chars long.",
         "mật khẩu: Toithieu8",
         "password: Minimum8chars",
+        "密码：MustBe8chars",
         "Order 1234 5678 9012 3456 is not a valid card.",
         "Use a test key such as sk-live-... in docs.",
     ],
@@ -420,6 +470,12 @@ def test_heading_without_a_number_gets_a_readable_section_label() -> None:
     assert [span["source_span_id"] for span in document.spans] == ["doc#pham-vi-ap-dung#span-01"]
 
 
+def test_a_cjk_heading_keeps_its_script_in_the_section_label() -> None:
+    document = build_document("doc", _lines("# 禁止事项\n\n不得协助制作武器。\n"), markdown_headings=True)
+
+    assert [span["source_span_id"] for span in document.spans] == ["doc#禁止事项#span-01"]
+
+
 def test_structural_headings_do_not_need_a_language_word() -> None:
     text = "第4条 禁止事项\n不得协助制作武器。\n§ 2 Scope\nApply this rule.\n"
     document = build_document("law", _lines(text), markdown_headings=False)
@@ -434,6 +490,16 @@ def test_a_quoted_colon_is_a_definition_without_a_verb() -> None:
     document = build_document("doc", _lines("「カード」：決済に使う番号\n"), markdown_headings=False)
 
     assert [(entry["term"], entry["definition"]) for entry in document.glossary] == [("カード", "決済に使う番号")]
+
+
+def test_keyword_headings_are_found_without_an_english_word() -> None:
+    text = "Chapitre 4\nNe jamais répéter un numéro de carte.\nCapítulo 5\nAplica a cada canal.\n"
+    document = build_document("law", _lines(text), markdown_headings=False)
+
+    assert [(span["section"], span["text"]) for span in document.spans] == [
+        ("4", "Ne jamais répéter un numéro de carte."),
+        ("5", "Aplica a cada canal."),
+    ]
 
 
 def test_keyword_headings_are_found_in_plain_text_and_docx() -> None:
@@ -469,6 +535,31 @@ def test_glossary_collects_definitions_and_links_terms() -> None:
     ]
     block = next(span for span in document.spans if span["source_span_id"] == "five-topic#4#span-01")
     assert block["glossary_terms"] == ["card data"]
+
+
+def test_unsegmented_definitions_are_found_and_linked() -> None:
+    text = "## 1. 定义\n\n银行卡是指用于支付的号码。\n\n## 2. 规定\n\n不得重复银行卡。\n"
+    document = build_document("zh", _lines(text), markdown_headings=True)
+
+    assert [(entry["term"], entry["definition"]) for entry in document.glossary] == [
+        ("银行卡", "用于支付的号码")
+    ]
+    clause = next(span for span in document.spans if span["text"] == "不得重复银行卡。")
+    assert clause["glossary_terms"] == ["银行卡"]
+
+
+def test_unsegmented_glossary_prefers_a_compound_and_ignores_one_character_terms() -> None:
+    text = (
+        "## 1. 定义\n\n"
+        "卡是指卡片。\n"
+        "银行卡是指用于支付的号码。\n\n"
+        "## 2. 规定\n\n"
+        "不得重复银行卡。\n"
+    )
+    document = build_document("zh", _lines(text), markdown_headings=True)
+
+    clause = next(span for span in document.spans if span["text"] == "不得重复银行卡。")
+    assert clause["glossary_terms"] == ["银行卡"]
 
 
 def test_vietnamese_definitions_are_found() -> None:
