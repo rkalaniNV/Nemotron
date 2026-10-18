@@ -509,9 +509,7 @@ def test_rejecting_a_rule_drops_its_cases_and_publishes_silver(tmp_path: Path) -
     assert report["reason"] == "review_removed_cases"
     assert report["withheld_policies"]
     rows = [
-        json.loads(line)
-        for line in (run_dir / "benchmark.jsonl").read_text(encoding="utf-8").splitlines()
-        if line
+        json.loads(line) for line in (run_dir / "benchmark.jsonl").read_text(encoding="utf-8").splitlines() if line
     ]
     assert all(row["policy_id"] not in report["withheld_policies"] for row in rows)
 

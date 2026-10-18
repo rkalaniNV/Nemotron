@@ -30,7 +30,13 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.eval_adapters import 
     NemoGuardrailsAdapter,
     OpenAICompatibleAdapter,
 )
-from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import EvalInputError, GuardAdapter
+from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import (
+    PATH1_ADAPTERS,
+    PATH2_ADAPTERS,
+    SMOKE_MESSAGE,
+    EvalInputError,
+    GuardAdapter,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS
 from nemotron.steps.byob.runtime.benchmark_families.safety.publish import BENCHMARK_FILE, PRIVATE_FILE
 
@@ -38,8 +44,6 @@ PATH1_FILE = "evaluator/path1_metrics.json"
 PATH2_FILE = "evaluator/path2_metrics.json"
 SMOKE_FILE = "evaluator/adapter_smoke.json"
 EVAL_FILES = (PATH1_FILE, PATH2_FILE, SMOKE_FILE)
-PATH1_ADAPTERS = frozenset({"openai_compatible", "test"})
-PATH2_ADAPTERS = frozenset({"mocked_guardrails", "nemo_guardrails"})
 PARSE_OK = "ok"
 PARSE_STATUSES = frozenset(
     {
@@ -124,7 +128,7 @@ def evaluate_published(
         if isinstance(path1_cfg, Mapping) and path1_cfg:
             path1_adapter = make_path1_adapter(path1_cfg, config_path=config_path, run_dir=run_dir)
             if path1_adapter.name != "test":
-                _smoke_adapter(path1_adapter, "path1", run_dir, smoke)
+                _smoke_adapter(path1_adapter, "path1", run_dir, smoke, path1_cfg)
         elif path1_cfg is not None:
             raise EvalInputError("evaluation.path1 must be a non-empty object.")
 
@@ -134,7 +138,7 @@ def evaluate_published(
                 path2_rows = load_rails_log(path2_cfg, config_path=config_path, run_dir=run_dir)
             elif adapter_name == "nemo_guardrails":
                 path2_adapter = NemoGuardrailsAdapter(path2_cfg)
-                _smoke_adapter(path2_adapter, "path2", run_dir, smoke)
+                _smoke_adapter(path2_adapter, "path2", run_dir, smoke, path2_cfg)
             else:
                 raise EvalInputError(f"evaluation.path2.adapter must be one of {', '.join(sorted(PATH2_ADAPTERS))}.")
         elif path2_cfg is not None:
@@ -192,17 +196,23 @@ def _smoke_adapter(
     path: str,
     run_dir: Path,
     report: dict[str, Any],
+    config: Mapping[str, Any] | None = None,
 ) -> None:
     """Verify a live adapter contract without reading or sending private benchmark rows."""
     identity = dict(adapter.public_identity)
     capabilities = identity.get("capabilities")
-    target = capabilities[0] if isinstance(capabilities, list) and capabilities else "user_input"
+    if isinstance(capabilities, list) and capabilities:
+        target = "user_input" if "user_input" in capabilities else str(capabilities[0])
+    else:
+        target = "user_input"
+    supplied = config.get("smoke_message") if isinstance(config, Mapping) else None
+    message = supplied if isinstance(supplied, str) and supplied.strip() else SMOKE_MESSAGE
     reply = adapter.decide(
         {
             "case_id": "adapter-smoke",
             "event_id": "adapter-smoke#1",
             "policy_id": None,
-            "messages": [{"role": "user", "content": "Adapter contract smoke test."}],
+            "messages": [{"role": "user", "content": message}],
             "targets": [target],
         }
     )
@@ -590,10 +600,7 @@ def _event(
     if not isinstance(language, str) or not language:
         languages = case.get("languages")
         language = ",".join(str(item) for item in languages) if isinstance(languages, list) else None
-    targets = case.get("targets")
-    if not isinstance(targets, list) or not targets:
-        target = case.get("target")
-        targets = [target] if isinstance(target, str) and target else ["user_input"]
+    targets = _event_targets(case, messages)
     return {
         "case_id": case_id,
         "event_id": f"{case_id}#{number}",
@@ -615,13 +622,30 @@ def _message(turn: Mapping[str, Any]) -> dict[str, str]:
     return {"role": role if isinstance(role, str) and role else "user", "content": text}
 
 
+def _event_targets(case: Mapping[str, Any], messages: Sequence[Mapping[str, str]]) -> list[str]:
+    targets = case.get("targets")
+    if isinstance(targets, list) and targets and all(isinstance(item, str) and item for item in targets):
+        return [str(item) for item in targets]
+    target = case.get("target")
+    if isinstance(target, str) and target:
+        return [target]
+    role = messages[-1]["role"] if messages else "user"
+    if role == "assistant":
+        return ["assistant_output"]
+    if role == "tool":
+        return ["tool_output"]
+    return ["user_input"]
+
+
 def _request(event: Mapping[str, Any]) -> dict[str, Any]:
+    messages = list(event.get("messages") or [])
+    targets = event.get("targets")
     return {
         "case_id": event.get("case_id"),
         "event_id": event.get("event_id"),
         "policy_id": event.get("policy_id"),
-        "messages": list(event.get("messages") or []),
-        "targets": list(event.get("targets") or ["user_input"]),
+        "messages": messages,
+        "targets": list(targets) if isinstance(targets, list) and targets else _event_targets({}, messages),
     }
 
 

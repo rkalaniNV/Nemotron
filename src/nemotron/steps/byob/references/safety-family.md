@@ -477,7 +477,7 @@ evaluation:
       unsafe: block
 ```
 
-The adapter adds a system message requiring a canonical JSON decision. Override `system_prompt` when the endpoint has a different prompt contract, `content_path` when its OpenAI envelope stores content elsewhere, and `request_options` for non-identity generation parameters. The response may be a canonical action, a JSON object such as `{"decision":"block"}`, or an exact label declared in `decision_map`. Set `decision_format: first_line` for guards such as Llama Guard that return a decision followed by category lines. Parsing uses exact configured labels, never substring keyword matching.
+By default the adapter prepends a system message that asks for a canonical JSON `decision`. Set `system_prompt: null` or an empty string to send the conversation unchanged, which is required for guards that already have a native chat template. Override `content_path` when the OpenAI envelope stores content elsewhere, and `request_options` for non-identity generation parameters. The response may be a canonical action, a JSON object such as `{"decision":"block"}`, or an exact label declared in `decision_map`. Labels such as `safe`/`unsafe` or locale-specific verbs are never assumed; they must be listed in `decision_map`. Set `decision_format: first_line` when the model returns a decision token followed by extra lines. Parsing uses Unicode-normalized exact labels, never substring keyword matching. Optional `smoke_message` replaces the language-neutral contract probe.
 
 For a live NeMo Guardrails service:
 
@@ -496,7 +496,7 @@ evaluation:
       pass: allow
 ```
 
-The default `chat_completions` API format sends `messages`, optional `model`, and a nested `guardrails` object containing `config_id` and `options`. Set `api_format: legacy_chat_completions` for older servers that expect top-level `config_id`, `messages`, and `options`. By default, `options` requests activated-rail logs. `decision_path`, `content_path`, and `rails_path` are dotted paths into the response. The Guardrails configuration must expose a policy decision, because a natural-language refusal is not treated as a reliable classification signal.
+The default `chat_completions` API format sends `messages`, optional `model`, and a nested `guardrails` object containing `config_id` and `options`. Set `api_format: legacy_chat_completions` for older servers that expect top-level `config_id`, `messages`, and `options`. By default, `options` requests activated-rail logs. `decision_path` and `rails_path` are dotted paths into the response. Only the value at `decision_path` is classified; a natural-language refusal is recorded as malformed rather than inferred as block or allow.
 
 Credentials are read only from environment-variable names in `api_key_env` or `headers_env`; secret values are not written to metrics or error messages. A missing path is written as `not_run` with the reason. An unknown adapter, invalid configuration, damaged log, or mismatched event list stops evaluation.
 

@@ -25,6 +25,7 @@ from typing import Any
 import yaml
 from yaml.constructor import ConstructorError
 
+from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import PATH1_ADAPTERS, PATH2_ADAPTERS
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS, DEFAULT_TARGETS, TARGETS
 
 BYOB_ROOT = Path(__file__).resolve().parents[3]
@@ -72,8 +73,6 @@ DEFAULT_ASSURANCE = {"profile": "standard"}
 ASSURANCE_KEYS = frozenset({"profile", "review_sample_rate", "second_judge_on"})
 GENERATION_KEYS = frozenset({"decision_mix", "case_family_mix", "turn_mix", "modules"})
 EVALUATION_KEYS = frozenset({"path1", "path2"})
-PATH1_ADAPTERS = frozenset({"test", "openai_compatible"})
-PATH2_ADAPTERS = frozenset({"mocked_guardrails", "nemo_guardrails"})
 ENDPOINT_EVAL_KEYS = frozenset(
     {
         "adapter",
@@ -88,6 +87,7 @@ ENDPOINT_EVAL_KEYS = frozenset(
         "capabilities",
         "decision_map",
         "decision_format",
+        "smoke_message",
     }
 )
 PATH1_TEST_KEYS = frozenset({"adapter", "responses", "file"})
@@ -100,7 +100,6 @@ PATH2_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset(
         "api_format",
         "options",
         "decision_path",
-        "content_path",
         "rails_path",
     }
 )
@@ -668,9 +667,15 @@ def _live_eval_path(config: Mapping[str, Any], path: str, adapter: str, messages
         model = config.get("model")
         if not isinstance(model, str) or not model.strip():
             messages.append(f"{path}.model must be a non-empty string.")
-    for key in ("api_key_env", "system_prompt", "content_path", "decision_path", "rails_path", "config_id"):
+    for key in ("api_key_env", "content_path", "decision_path", "rails_path", "config_id", "smoke_message"):
         if key in config and (not isinstance(config[key], str) or not config[key].strip()):
             messages.append(f"{path}.{key} must be a non-empty string.")
+    if (
+        "system_prompt" in config
+        and config["system_prompt"] is not None
+        and not isinstance(config["system_prompt"], str)
+    ):
+        messages.append(f"{path}.system_prompt must be a string or null.")
     for key in ("headers_env", "decision_map", "request_options", "options"):
         if key in config and not isinstance(config[key], dict):
             messages.append(f"{path}.{key} must be a mapping.")

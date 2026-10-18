@@ -6,6 +6,10 @@
 from collections.abc import Mapping
 from typing import Any, Protocol
 
+PATH1_ADAPTERS = frozenset({"openai_compatible", "test"})
+PATH2_ADAPTERS = frozenset({"mocked_guardrails", "nemo_guardrails"})
+SMOKE_MESSAGE = "ADAPTER_SMOKE"
+
 
 class EvalInputError(ValueError):
     """An evaluation configuration or input cannot be scored."""

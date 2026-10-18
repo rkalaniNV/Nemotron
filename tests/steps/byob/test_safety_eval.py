@@ -290,12 +290,12 @@ def test_adapter_smoke_uses_only_synthetic_input_and_writes_no_prompt(tmp_path: 
             "case_id": "adapter-smoke",
             "event_id": "adapter-smoke#1",
             "policy_id": None,
-            "messages": [{"role": "user", "content": "Adapter contract smoke test."}],
+            "messages": [{"role": "user", "content": "ADAPTER_SMOKE"}],
             "targets": ["user_input"],
         }
     ]
     written = (tmp_path / SMOKE_FILE).read_text(encoding="utf-8")
-    assert "Adapter contract smoke test" not in written
+    assert "ADAPTER_SMOKE" not in written
     assert json.loads(written)["paths"]["path1"]["status"] == "passed"
 
 
@@ -358,6 +358,7 @@ def test_openai_compatible_adapter_calls_endpoint_without_answer_key(
             "model": "customer-guard",
             "api_key_env": "GUARD_API_KEY",
             "decision_format": "first_line",
+            "decision_map": {"safe": "allow", "unsafe": "block"},
             "retry_backoff_seconds": 0,
         },
         transport=httpx.MockTransport(handle),
@@ -474,6 +475,112 @@ def test_nemo_guardrails_adapter_calls_live_configuration() -> None:
 
     assert reply["decision"] == "block"
     assert reply["rails"] == [{"name": "input safety", "activated": True, "duration_ms": 7.5}]
+
+
+def test_unmapped_vendor_labels_are_malformed_not_guessed() -> None:
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions",
+            "model": "customer-guard",
+            "decision_format": "first_line",
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={"choices": [{"message": {"content": "unsafe\nS1"}}]})
+        ),
+    )
+    try:
+        reply = adapter.decide({"messages": [{"role": "user", "content": "hello"}], "targets": ["user_input"]})
+    finally:
+        adapter.close()
+
+    assert reply["parse_status"] == "malformed"
+    assert "decision" not in reply
+
+
+def test_system_prompt_can_be_omitted_for_native_templates() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["messages"] == [{"role": "user", "content": "hello"}]
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"decision":"allow"}'}}]})
+
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions",
+            "model": "customer-guard",
+            "system_prompt": None,
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(handle),
+    )
+    try:
+        reply = adapter.decide({"messages": [{"role": "user", "content": "hello"}], "targets": ["user_input"]})
+    finally:
+        adapter.close()
+
+    assert reply["decision"] == "allow"
+
+
+def test_guardrails_does_not_infer_a_decision_from_refusal_text() -> None:
+    adapter = NemoGuardrailsAdapter(
+        {
+            "endpoint": "http://localhost:8000/v1/chat/completions",
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={"response": [{"role": "assistant", "content": "I'm sorry, I must block that request."}]},
+            )
+        ),
+    )
+    try:
+        reply = adapter.decide({"messages": [{"role": "user", "content": "hello"}], "targets": ["user_input"]})
+    finally:
+        adapter.close()
+
+    assert reply["parse_status"] == "malformed"
+    assert "decision" not in reply
+
+
+def test_json_fence_and_unicode_labels_parse_exactly() -> None:
+    import unicodedata
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '```json\n{"decision":"CẤM"}\n```'}}]},
+        )
+
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions",
+            "model": "customer-guard",
+            "decision_map": {unicodedata.normalize("NFD", "CẤM"): "block"},
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(handle),
+    )
+    try:
+        reply = adapter.decide({"messages": [{"role": "user", "content": "hello"}], "targets": ["user_input"]})
+    finally:
+        adapter.close()
+
+    assert reply == {"decision": "block", "parse_status": "ok", "latency_ms": reply["latency_ms"]}
+
+
+def test_scored_assistant_turn_targets_assistant_output() -> None:
+    events = events_from_case(
+        {
+            "case_id": "out-1",
+            "turns": [
+                {"turn": 1, "role": "user", "text": "ask"},
+                {"turn": 2, "role": "assistant", "text": "answer", "expected_action": "block"},
+            ],
+        }
+    )
+
+    assert events[0]["targets"] == ["assistant_output"]
 
 
 def _eval_config(tmp_path: Path, responses: dict[str, dict[str, object]], log_path: Path) -> Path:
