@@ -71,6 +71,39 @@ DEFAULT_PROPOSALS = {
 DEFAULT_ASSURANCE = {"profile": "standard"}
 ASSURANCE_KEYS = frozenset({"profile", "review_sample_rate", "second_judge_on"})
 GENERATION_KEYS = frozenset({"decision_mix", "case_family_mix", "turn_mix", "modules"})
+EVALUATION_KEYS = frozenset({"path1", "path2"})
+PATH1_ADAPTERS = frozenset({"test", "openai_compatible"})
+PATH2_ADAPTERS = frozenset({"mocked_guardrails", "nemo_guardrails"})
+ENDPOINT_EVAL_KEYS = frozenset(
+    {
+        "adapter",
+        "endpoint",
+        "base_url",
+        "api_key_env",
+        "headers_env",
+        "timeout_seconds",
+        "max_retries",
+        "retry_backoff_seconds",
+        "max_concurrency",
+        "capabilities",
+        "decision_map",
+        "decision_format",
+    }
+)
+PATH1_TEST_KEYS = frozenset({"adapter", "responses", "file"})
+PATH1_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset({"model", "system_prompt", "request_options", "content_path"})
+PATH2_MOCK_KEYS = frozenset({"adapter", "log", "file"})
+PATH2_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset(
+    {
+        "config_id",
+        "model",
+        "api_format",
+        "options",
+        "decision_path",
+        "content_path",
+        "rails_path",
+    }
+)
 MODEL_IDENTITY_KEYS = ("alias", "provider", "model", "canonical_id")
 # Same credential names BFCL refuses, so neither family writes a secret into a run directory.
 MODEL_SECRET_KEYS = frozenset(
@@ -366,9 +399,7 @@ def _apply_languages(value: Any, proposals: dict[str, Any], messages: list[str])
         if isinstance(targets, list) and all(isinstance(item, str) and item.strip() for item in targets):
             codes = [item.strip() for item in targets]
             configured = proposals.get("target_languages")
-            if configured and [str(item).casefold() for item in configured] != [
-                item.casefold() for item in codes
-            ]:
+            if configured and [str(item).casefold() for item in configured] != [item.casefold() for item in codes]:
                 messages.append("languages.target_languages and proposals.target_languages must match.")
             else:
                 proposals["target_languages"] = codes
@@ -542,9 +573,15 @@ def _passthrough(raw: dict[str, Any], messages: list[str]) -> dict[str, Any]:
         privacy = _privacy(raw["privacy"], messages)
         if privacy is not None:
             extras["privacy"] = privacy
-    for key in ("evaluation", "generation_model_config"):
-        if key in raw and _mapping(raw[key], key, messages) is not None:
-            extras[key] = raw[key]
+    if "evaluation" in raw:
+        evaluation = _evaluation(raw["evaluation"], messages)
+        if evaluation is not None:
+            extras["evaluation"] = evaluation
+    if (
+        "generation_model_config" in raw
+        and _mapping(raw["generation_model_config"], "generation_model_config", messages) is not None
+    ):
+        extras["generation_model_config"] = raw["generation_model_config"]
     if "judge_model_configs" in raw:
         judges = raw["judge_model_configs"]
         if not isinstance(judges, list):
@@ -563,6 +600,103 @@ def _passthrough(raw: dict[str, Any], messages: list[str]) -> dict[str, Any]:
     for key, value in extras.items():
         _reject_model_secrets(value, key, messages)
     return extras
+
+
+def _evaluation(value: Any, messages: list[str]) -> dict[str, Any] | None:
+    evaluation = _mapping(value, "evaluation", messages)
+    if evaluation is None:
+        return None
+    _unknown_keys("evaluation", evaluation, EVALUATION_KEYS, messages)
+    path1 = evaluation.get("path1")
+    if path1 is not None:
+        _evaluation_path(path1, "evaluation.path1", PATH1_ADAPTERS, "test", messages)
+    path2 = evaluation.get("path2")
+    if path2 is not None:
+        _evaluation_path(path2, "evaluation.path2", PATH2_ADAPTERS, "mocked_guardrails", messages)
+    return dict(evaluation)
+
+
+def _evaluation_path(
+    value: Any,
+    path: str,
+    adapters: frozenset[str],
+    default_adapter: str,
+    messages: list[str],
+) -> None:
+    config = _mapping(value, path, messages)
+    if config is None:
+        return
+    if not config:
+        messages.append(f"{path} must not be empty; omit it when this path should not run.")
+        return
+    adapter = config.get("adapter", default_adapter)
+    if not isinstance(adapter, str) or adapter not in adapters:
+        messages.append(f"{path}.adapter must be one of {', '.join(sorted(adapters))}; received {adapter!r}.")
+        return
+    if path.endswith("path1"):
+        allowed = PATH1_TEST_KEYS if adapter == "test" else PATH1_LIVE_KEYS
+    else:
+        allowed = PATH2_MOCK_KEYS if adapter == "mocked_guardrails" else PATH2_LIVE_KEYS
+    _unknown_keys(path, config, allowed, messages)
+    if adapter in {"test", "mocked_guardrails"}:
+        _offline_eval_path(config, path, adapter, messages)
+    else:
+        _live_eval_path(config, path, adapter, messages)
+
+
+def _offline_eval_path(config: Mapping[str, Any], path: str, adapter: str, messages: list[str]) -> None:
+    if adapter == "test":
+        inline = config.get("responses")
+        file_name = config.get("file")
+        if (inline is None) == (file_name is None):
+            messages.append(f"{path} must name exactly one of responses or file.")
+        if inline is not None and not isinstance(inline, dict):
+            messages.append(f"{path}.responses must be a mapping.")
+    else:
+        file_name = config.get("log") or config.get("file")
+        if file_name is None:
+            messages.append(f"{path} must name log or file.")
+    if file_name is not None and (not isinstance(file_name, str) or not file_name.strip()):
+        messages.append(f"{path}.file/log must be a non-empty path string.")
+
+
+def _live_eval_path(config: Mapping[str, Any], path: str, adapter: str, messages: list[str]) -> None:
+    endpoint = config.get("endpoint") or config.get("base_url")
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        messages.append(f"{path} requires endpoint or base_url.")
+    if adapter == "openai_compatible":
+        model = config.get("model")
+        if not isinstance(model, str) or not model.strip():
+            messages.append(f"{path}.model must be a non-empty string.")
+    for key in ("api_key_env", "system_prompt", "content_path", "decision_path", "rails_path", "config_id"):
+        if key in config and (not isinstance(config[key], str) or not config[key].strip()):
+            messages.append(f"{path}.{key} must be a non-empty string.")
+    for key in ("headers_env", "decision_map", "request_options", "options"):
+        if key in config and not isinstance(config[key], dict):
+            messages.append(f"{path}.{key} must be a mapping.")
+    if "capabilities" in config:
+        _string_list(config["capabilities"], f"{path}.capabilities", messages, MODERATION_TARGETS)
+    decision_map = config.get("decision_map")
+    if isinstance(decision_map, dict):
+        for label, action in decision_map.items():
+            if not isinstance(label, str) or not label.strip() or action not in DECISION_ACTIONS:
+                messages.append(f"{path}.decision_map must map non-empty labels to canonical safety actions.")
+                break
+    for key, minimum, maximum in (
+        ("timeout_seconds", 0, None),
+        ("retry_backoff_seconds", 0, None),
+        ("max_retries", 0, 10),
+        ("max_concurrency", 1, 64),
+    ):
+        if key not in config:
+            continue
+        number = config[key]
+        valid = _number(number) and number >= minimum and (maximum is None or number <= maximum)
+        if key in {"max_retries", "max_concurrency"}:
+            valid = valid and isinstance(number, int)
+        if not valid or (key == "timeout_seconds" and number == 0):
+            upper = f" through {maximum}" if maximum is not None else " or greater"
+            messages.append(f"{path}.{key} must be a number from {minimum}{upper}.")
 
 
 def _privacy(value: Any, messages: list[str]) -> dict[str, Any] | None:
@@ -595,11 +729,11 @@ def _check_privacy_language(
         return
     privacy = extras.get("privacy")
     labels = privacy.get("additional_labels") if isinstance(privacy, dict) else None
-    supplied = {
-        kind
-        for kind, values in labels.items()
-        if isinstance(labels, dict) and isinstance(values, list) and values
-    } if isinstance(labels, dict) else set()
+    supplied = (
+        {kind for kind, values in labels.items() if isinstance(labels, dict) and isinstance(values, list) and values}
+        if isinstance(labels, dict)
+        else set()
+    )
     missing = sorted(PRIVACY_LABEL_KINDS - supplied)
     if missing:
         messages.append(

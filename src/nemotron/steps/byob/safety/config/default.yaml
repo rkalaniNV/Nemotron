@@ -2,8 +2,8 @@
 # Copy this file, point input_dir at the customer policy directory, and keep family: safety.
 # Relative paths resolve from src/nemotron/steps/byob, not from the current directory, so use
 # absolute paths for customer folders.
-# stage=prepare is the runnable command. Use stage: all only after publication generation
-# is connected; today that stage stops once prepare has initialized the run.
+# Run prepare, generate/review/approve, then eval. stage=all runs prepare + generate;
+# evaluation remains explicit because it requires an already published benchmark.
 
 family: safety
 expt_name: customer-safety-v1
@@ -25,3 +25,18 @@ generation:
   modules:
     adversarial: false
     persona: false
+
+# Add after choosing the systems to evaluate. Credentials are environment-variable
+# names only; never put a key value in this file.
+# evaluation:
+#   path1:
+#     adapter: openai_compatible
+#     endpoint: https://guard.example.com/v1/chat/completions
+#     model: customer-guard
+#     api_key_env: CUSTOMER_GUARD_API_KEY
+#     decision_map: {safe: allow, unsafe: block}
+#   path2:
+#     adapter: nemo_guardrails
+#     endpoint: http://localhost:8000/v1/chat/completions
+#     config_id: customer-safety
+#     decision_path: output_data.decision

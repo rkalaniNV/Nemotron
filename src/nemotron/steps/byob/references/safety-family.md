@@ -20,7 +20,7 @@ Relative paths in a safety config resolve from `src/nemotron/steps/byob`. Artifa
 | `prepare` | Validate the config, initialize the run directory, and ingest the policy files locally (see [Ingest](#ingest)). A completed prepare exits 0. It exits 4 when only quarantined files are left, and 1 when every file was rejected. It does not publish a benchmark. |
 | `generate` | Extract and route policy rules, plan coverage, generate scenarios, validate and split the dataset, and create the review packet. An unsigned or incomplete review exits 3. Resuming with the signed current packet publishes Gold with exit 0, or Silver/Preview with exit 2. |
 | `all` | Run `prepare`, then `generate`. It does not evaluate. |
-| `eval` | Score a published safety benchmark. Path 1 calls a guard through an adapter. Path 2 replays a mocked Guardrails log. The two paths write separate metric files and exit 0 when those files are written. Evaluation is not a Gold or Silver publication. An unpublished run exits 1. |
+| `eval` | Score a published safety benchmark. Path 1 calls a direct guard adapter. Path 2 evaluates a complete Guardrails configuration from a live endpoint or recorded log. The two paths write separate metric files and exit 0 when those files are written. Evaluation is not a Gold or Silver publication. An unpublished run exits 1. |
 | `translate` | Not part of this increment. The safety hook exits 1. Exit code 2 remains reserved for a finished Silver or Preview publication. |
 
 `run_manifest.json` is the publication commit. `generate` writes compiled files, stores the publication claim in `run_record.json` with `publication_commit: false`, writes the manifest, then sets the commit flag. A crash after the manifest is recovered by verifying that claim. `prepare` writes `run_record.json` with `publication_commit: false`. A run record is not a published benchmark.
@@ -433,14 +433,19 @@ After publication, another `generate` is idempotent: it verifies the manifest, t
 
 ### Evaluation
 
-`stage=eval` scores a published benchmark. It does not publish, and it does not use the Gold or Silver exit codes. It writes:
+`stage=eval` scores a published benchmark. It does not publish, and it does not use the Gold or Silver exit codes. The private-test split is preferred; the combined benchmark is used only when the private split is empty. It writes:
 
 | File | Contents |
 | --- | --- |
-| `evaluator/path1_metrics.json` | Direct guard-model scoring through an adapter. |
-| `evaluator/path2_metrics.json` | Complete Guardrails-configuration scoring from a mocked log. |
+| `evaluator/adapter_smoke.json` | Credential-free contract preflight for each live adapter, using only a fixed synthetic message. |
+| `evaluator/path1_metrics.json` | Direct guard-model scoring through a scripted or live adapter. |
+| `evaluator/path2_metrics.json` | Complete Guardrails-configuration scoring from a log or live endpoint. |
 
-The two files are never the same path. Path 1 reports unsafe recall, benign specificity, over-refusal, parse failures, timeouts, model errors, and latency. Path 2 compares the expected decision of every scored event with the log, and records which rails ran and how long they took. A timeout, a malformed reply, and a model error are counted separately; none of them is treated as allow or block. Events are scored per labelled turn. The private-test split is used when it is non-empty.
+The metric files are never the same path. Before reading or sending private-test rows, each live adapter must parse one fixed synthetic contract-smoke request. The smoke artifact records only status, canonical decision, latency, credential-free target identity, and rail count—not prompt text or secrets. A failed smoke stops evaluation.
+
+Both paths report precision/recall, false-positive and false-negative rates, binary macro F1, exact-action accuracy, parse reliability, per-policy and per-language slices, throughput, and p50/p95/p99 latency. Path 2 also records which rails ran and how long they took. Timeout, rate limit, authentication failure, malformed reply, model error, and unsupported capability are counted separately; none is treated as allow or block. Events are scored per labelled turn. Requests contain model-facing messages and identifiers, never the expected action.
+
+The offline adapters remain useful for deterministic CI:
 
 ```yaml
 evaluation:
@@ -453,6 +458,55 @@ evaluation:
     log: rails.jsonl
 ```
 
-`adapter: test` is an in-process script. This increment does not call a network endpoint. A missing path is written as `not_run` with the reason. An unknown adapter, a damaged log, or a log that does not name the scored events stops the run. Relative `log` and `file` paths resolve from the config directory, then from the run directory.
+`adapter: test` reads an inline `responses` mapping or a JSON object named by `file`. A mocked Guardrails log must contain exactly one JSONL row for every scored event. Relative `log` and `file` paths resolve from the config directory, then from the run directory.
+
+For a live OpenAI-compatible guard, configure the complete chat-completions URL:
+
+```yaml
+evaluation:
+  path1:
+    adapter: openai_compatible
+    endpoint: https://guard.example.com/v1/chat/completions
+    model: customer-guard
+    api_key_env: CUSTOMER_GUARD_API_KEY
+    timeout_seconds: 30
+    max_retries: 2
+    capabilities: [user_input, assistant_output]
+    decision_map:
+      safe: allow
+      unsafe: block
+```
+
+The adapter adds a system message requiring a canonical JSON decision. Override `system_prompt` when the endpoint has a different prompt contract, `content_path` when its OpenAI envelope stores content elsewhere, and `request_options` for non-identity generation parameters. The response may be a canonical action, a JSON object such as `{"decision":"block"}`, or an exact label declared in `decision_map`. Set `decision_format: first_line` for guards such as Llama Guard that return a decision followed by category lines. Parsing uses exact configured labels, never substring keyword matching.
+
+For a live NeMo Guardrails service:
+
+```yaml
+evaluation:
+  path2:
+    adapter: nemo_guardrails
+    endpoint: http://localhost:8000/v1/chat/completions
+    config_id: vai-safety
+    model: customer-chat-model
+    api_key_env: GUARDRAILS_API_KEY
+    decision_path: output_data.decision
+    rails_path: log.activated_rails
+    decision_map:
+      deny: block
+      pass: allow
+```
+
+The default `chat_completions` API format sends `messages`, optional `model`, and a nested `guardrails` object containing `config_id` and `options`. Set `api_format: legacy_chat_completions` for older servers that expect top-level `config_id`, `messages`, and `options`. By default, `options` requests activated-rail logs. `decision_path`, `content_path`, and `rails_path` are dotted paths into the response. The Guardrails configuration must expose a policy decision, because a natural-language refusal is not treated as a reliable classification signal.
+
+Credentials are read only from environment-variable names in `api_key_env` or `headers_env`; secret values are not written to metrics or error messages. A missing path is written as `not_run` with the reason. An unknown adapter, invalid configuration, damaged log, or mismatched event list stops evaluation.
+
+Run either live or offline evaluation after publication:
+
+```bash
+PYTHONPATH=src python -m nemotron.steps.byob.scripts.run \
+  --config /absolute/path/to/customer.yaml \
+  --family safety \
+  --stage eval
+```
 
 The week 2 end-to-end gate runs this path without network access. The complete fixture is pre-authored Policy Rule IR that cites a short generic source document, plus a quarantined secret. Generate does not call an extraction model because every source clause is already cited. The first generate writes the review packet and exits 3. Applying approved review decisions publishes Gold with exit 0. An intentionally small case budget publishes Silver with exit 2 and lists the omitted coverage on the review page and in the quality report. Both metric files are readable JSON and contain scored events.

@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 
@@ -10,14 +11,20 @@ from nemotron.steps.byob.runtime.benchmark_families.safety import extract
 from nemotron.steps.byob.runtime.benchmark_families.safety.eval import (
     PATH1_FILE,
     PATH2_FILE,
+    SMOKE_FILE,
     EvalInputError,
     TestAdapter,
+    _smoke_adapter,
     events_from_case,
     percentile,
     score_path1,
     score_path2,
     score_reply,
     write_evaluation,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.eval_adapters import (
+    NemoGuardrailsAdapter,
+    OpenAICompatibleAdapter,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS
 from nemotron.steps.byob.runtime.benchmark_families.safety.pipeline import sign_safety_packet
@@ -78,14 +85,27 @@ def test_path1_metrics_match_hand_computed_fixture() -> None:
     assert metrics["true_negatives"] == 1
     assert metrics["false_positives"] == 1
     assert metrics["unsafe_recall"] == 0.5
+    assert metrics["false_negative_rate"] == 0.5
+    assert metrics["unsafe_precision"] == 0.5
     assert metrics["benign_specificity"] == 0.5
+    assert metrics["false_positive_rate"] == 0.5
     assert metrics["over_refusal"] == 0.5
+    assert metrics["binary_macro_f1"] == 0.5
+    assert metrics["exact_action_accuracy"] == 0.5
+    assert metrics["parse_success_rate"] == 4 / 7
     assert metrics["parse_failures"] == 1
     assert metrics["timeouts"] == 1
+    assert metrics["rate_limits"] == 0
+    assert metrics["authentication_errors"] == 0
     assert metrics["model_errors"] == 1
     assert metrics["latency_ms"]["mean"] == 40
     assert metrics["latency_ms"]["p50"] == 40
     assert metrics["latency_ms"]["p95"] == 60
+    assert metrics["latency_ms"]["p99"] == 60
+    assert metrics["by_policy"]["P-1"]["events"] == 7
+    assert len(metrics["comparisons"]) == 7
+    assert metrics["wall_time_seconds"] >= 0
+    assert metrics["throughput_events_per_second"] > 0
 
 
 def test_failures_are_not_counted_as_allow_or_block() -> None:
@@ -239,11 +259,44 @@ def test_eval_not_run_when_paths_are_omitted(tmp_path: Path) -> None:
 def test_prepare_clears_previous_evaluation_files(tmp_path: Path) -> None:
     config, run_dir, _, _ = _prepared(tmp_path)
     write_evaluation(run_dir, {"path": "path1"}, {"path": "path2"})
+    (run_dir / SMOKE_FILE).write_text("{}\n", encoding="utf-8")
 
     _run(config, "prepare")
 
     assert not (run_dir / PATH1_FILE).exists()
     assert not (run_dir / PATH2_FILE).exists()
+    assert not (run_dir / SMOKE_FILE).exists()
+
+
+def test_adapter_smoke_uses_only_synthetic_input_and_writes_no_prompt(tmp_path: Path) -> None:
+    seen: list[dict] = []
+
+    class RecordingAdapter(TestAdapter):
+        name = "recording"
+
+        @property
+        def public_identity(self) -> dict:
+            return {"endpoint": "https://guard.example", "capabilities": ["user_input"]}
+
+        def decide(self, request: dict) -> dict:
+            seen.append(dict(request))
+            return {"decision": "allow", "latency_ms": 1}
+
+    report = {"schema": "safety_adapter_smoke_v1", "paths": {}}
+    _smoke_adapter(RecordingAdapter({}), "path1", tmp_path, report)
+
+    assert seen == [
+        {
+            "case_id": "adapter-smoke",
+            "event_id": "adapter-smoke#1",
+            "policy_id": None,
+            "messages": [{"role": "user", "content": "Adapter contract smoke test."}],
+            "targets": ["user_input"],
+        }
+    ]
+    written = (tmp_path / SMOKE_FILE).read_text(encoding="utf-8")
+    assert "Adapter contract smoke test" not in written
+    assert json.loads(written)["paths"]["path1"]["status"] == "passed"
 
 
 def test_multi_turn_case_scores_each_labelled_turn() -> None:
@@ -275,12 +328,152 @@ def test_unknown_adapter_is_refused(tmp_path: Path) -> None:
         overrides={"evaluation": {"path1": {"adapter": "remote_http", "responses": {"*": {"decision": "allow"}}}}},
     )
 
-    caught = _expect(eval_config, "eval", RunStatus.INVALID_RUN_ARTIFACT)
+    caught = _expect(eval_config, "eval", RunStatus.INVALID_CONFIG)
 
     assert "adapter must be" in str(caught)
     written = yaml.safe_load((tmp_path / "customer.yaml").read_text(encoding="utf-8"))
     assert written["evaluation"]["path1"]["adapter"] == "remote_http"
     assert not (run_dir / PATH1_FILE).exists()
+
+
+def test_openai_compatible_adapter_calls_endpoint_without_answer_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GUARD_API_KEY", "secret-never-persisted")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer secret-never-persisted"
+        body = json.loads(request.content)
+        assert body["model"] == "customer-guard"
+        assert body["messages"][-1] == {"role": "user", "content": "classify me"}
+        assert "expected_action" not in request.content.decode()
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "unsafe\nS1"}}]},
+        )
+
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions?api-version=2026-01-01",
+            "model": "customer-guard",
+            "api_key_env": "GUARD_API_KEY",
+            "decision_format": "first_line",
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(handle),
+    )
+    try:
+        reply = adapter.decide(
+            {
+                "event_id": "case#1",
+                "messages": [{"role": "user", "content": "classify me"}],
+                "targets": ["user_input"],
+            }
+        )
+    finally:
+        adapter.close()
+
+    assert reply["decision"] == "block"
+    assert reply["parse_status"] == "ok"
+    assert reply["latency_ms"] >= 0
+    assert adapter.public_identity["endpoint"].endswith("?<redacted>")
+    assert "2026-01-01" not in json.dumps(adapter.public_identity)
+    assert "secret-never-persisted" not in json.dumps(adapter.public_identity)
+
+
+def test_openai_compatible_adapter_attributes_rate_limit() -> None:
+    attempts = 0
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(429, json={"error": "limited"})
+
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions",
+            "model": "customer-guard",
+            "max_retries": 1,
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(handle),
+    )
+    try:
+        reply = adapter.decide(
+            {
+                "messages": [{"role": "user", "content": "hello"}],
+                "targets": ["user_input"],
+            }
+        )
+    finally:
+        adapter.close()
+
+    assert attempts == 2
+    assert reply["parse_status"] == "rate_limited"
+
+
+def test_openai_compatible_adapter_marks_unsupported_target_without_network() -> None:
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions",
+            "model": "customer-guard",
+            "capabilities": ["user_input"],
+        },
+        transport=httpx.MockTransport(lambda _request: pytest.fail("endpoint was called")),
+    )
+    try:
+        reply = adapter.decide(
+            {
+                "messages": [{"role": "assistant", "content": "hello"}],
+                "targets": ["assistant_output"],
+            }
+        )
+    finally:
+        adapter.close()
+
+    assert reply == {"parse_status": "not_supported", "latency_ms": 0}
+
+
+def test_nemo_guardrails_adapter_calls_live_configuration() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["guardrails"]["config_id"] == "vai-safety"
+        assert body["messages"] == [{"role": "user", "content": "unsafe request"}]
+        assert body["guardrails"]["options"]["log"]["activated_rails"] is True
+        return httpx.Response(
+            200,
+            json={
+                "response": [{"role": "assistant", "content": "refused"}],
+                "output_data": {"policy_decision": "deny"},
+                "log": {
+                    "activated_rails": [
+                        {"rail_name": "input safety", "duration": 0.0075},
+                    ]
+                },
+            },
+        )
+
+    adapter = NemoGuardrailsAdapter(
+        {
+            "endpoint": "http://localhost:8000/v1/chat/completions",
+            "config_id": "vai-safety",
+            "decision_path": "output_data.policy_decision",
+            "decision_map": {"deny": "block", "pass": "allow"},
+        },
+        transport=httpx.MockTransport(handle),
+    )
+    try:
+        reply = adapter.decide(
+            {
+                "messages": [{"role": "user", "content": "unsafe request"}],
+                "targets": ["user_input"],
+            }
+        )
+    finally:
+        adapter.close()
+
+    assert reply["decision"] == "block"
+    assert reply["rails"] == [{"name": "input safety", "activated": True, "duration_ms": 7.5}]
 
 
 def _eval_config(tmp_path: Path, responses: dict[str, dict[str, object]], log_path: Path) -> Path:

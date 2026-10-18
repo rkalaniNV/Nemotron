@@ -789,6 +789,40 @@ def test_config_status_may_be_omitted(tmp_path: Path) -> None:
         ({"generation_model_config": {"api_key": "sk-test"}}, "generation_model_config.api_key looks like a secret"),
         ({"judge_model_configs": [{"provider_api_key": "x"}]}, "judge_model_configs[0].provider_api_key looks like"),
         ({"evaluation": {"endpoint": {"Authorization": "Bearer x"}}}, "evaluation.endpoint.Authorization looks like"),
+        ({"evaluation": {"path1": {}}}, "evaluation.path1 must not be empty"),
+        (
+            {"evaluation": {"path1": {"adapter": "openai_compatible", "endpoint": "https://guard.example"}}},
+            "evaluation.path1.model must be a non-empty string",
+        ),
+        (
+            {"evaluation": {"path1": {"adapter": "test", "responses": {}, "file": "responses.json"}}},
+            "exactly one of responses or file",
+        ),
+        (
+            {
+                "evaluation": {
+                    "path2": {
+                        "adapter": "nemo_guardrails",
+                        "endpoint": "http://localhost:8000/v1/chat/completions",
+                        "decision_map": {"deny": "ban"},
+                    }
+                }
+            },
+            "canonical safety actions",
+        ),
+        (
+            {
+                "evaluation": {
+                    "path1": {
+                        "adapter": "openai_compatible",
+                        "endpoint": "https://guard.example",
+                        "model": "guard",
+                        "max_concurrency": 0,
+                    }
+                }
+            },
+            "max_concurrency must be a number from 1 through 64",
+        ),
         ({"proposals": {"domain": "REPLACE_ME_DOMAIN"}}, "REPLACE_ME placeholder"),
         ({"proposals": {"moderation_targets": ["user_input", "tool_log"]}}, "unsupported entries tool_log"),
         (
