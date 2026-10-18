@@ -20,7 +20,7 @@ allow. A lower action never overrides a higher one. When no rule applies, the ca
 label is ``not_applicable``.
 """
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ConditionGroup, PolicyRule
@@ -133,6 +133,7 @@ def expected_action(
     *,
     ambiguous: bool = False,
     include_review: bool = False,
+    ambiguous_rules: Collection[str] | None = None,
 ) -> AggregatedDecision:
     """Evaluate publishable rules against one event and aggregate the result.
 
@@ -140,13 +141,57 @@ def expected_action(
     ``include_review`` for review previews that must also show ``needs_decision`` rules.
     Rejected and quarantined rules never affect the label. Scope, jurisdiction, date,
     and actor are not applied here; pass only the rules that already apply.
+    ``ambiguous=True`` treats every matching rule that names an ambiguous action as
+    ambiguous. ``ambiguous_rules`` does that for the named policy ids only.
     """
     if not isinstance(include_review, bool):
         raise ValueError("include_review must be true or false")
+    if isinstance(ambiguous_rules, (str, bytes)) or (
+        ambiguous_rules is not None and not isinstance(ambiguous_rules, Collection)
+    ):
+        raise TypeError("ambiguous_rules must be a collection of policy ids")
+    targeted = set(ambiguous_rules or ())
     allowed = {"eligible_for_generation", "needs_decision"} if include_review else {"eligible_for_generation"}
     return aggregate(
-        match for rule in rules if rule.status in allowed for match in rule_matches(rule, facts, ambiguous=ambiguous)
+        match
+        for rule in rules
+        if rule.status in allowed
+        for match in rule_matches(rule, facts, ambiguous=ambiguous or rule.policy_id in targeted)
     )
+
+
+def rules_overlap(first: PolicyRule, second: PolicyRule) -> bool:
+    """Whether two rules can apply to the same event, treating unspecified scope as a wildcard."""
+    for left, right in (
+        (first.rule.actor, second.rule.actor),
+        (first.rule.action, second.rule.action),
+        (first.rule.object, second.rule.object),
+    ):
+        if not _scalar_overlap(left, right):
+            return False
+    return all(
+        _scope_overlap(left, right)
+        for left, right in (
+            (first.scope.domains, second.scope.domains),
+            (first.scope.jurisdictions, second.scope.jurisdictions),
+            (first.scope.languages, second.scope.languages),
+            (first.scope.audiences, second.scope.audiences),
+            (first.scope.targets, second.scope.targets),
+        )
+    )
+
+
+def _scalar_overlap(first: str, second: str) -> bool:
+    left, right = first.casefold(), second.casefold()
+    return "unspecified" in (left, right) or left == right
+
+
+def _scope_overlap(first: Iterable[str], second: Iterable[str]) -> bool:
+    left = {value.casefold() for value in first}
+    right = {value.casefold() for value in second}
+    if not left or not right or "unspecified" in left or "unspecified" in right:
+        return True
+    return bool(left & right)
 
 
 def _as_facts(facts: Iterable[str]) -> set[str]:

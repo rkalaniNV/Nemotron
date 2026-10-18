@@ -18,6 +18,10 @@
 Python computes the one published ``confidence`` from checks it can observe. A model
 self-score is never an input. ``confidence`` estimates whether a rule was read correctly
 from its source passage; it is not a measure of legal correctness or model accuracy.
+
+``operator_explicitness`` reads ``operator_source`` already stored on the rule. Whether a
+condition quote appears in the source is a separate pass-or-fail check, not a weighted
+signal. Section labels are not scored.
 """
 
 import math
@@ -25,16 +29,17 @@ import re
 import unicodedata
 from dataclasses import dataclass, replace
 
-from nemotron.steps.byob.runtime.benchmark_families.safety.ir import PolicyRule
+from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ConditionGroup, PolicyRule
 
 CONFIDENCE_WEIGHTS = {
-    "quote_match": 0.25,
-    "schema_completeness": 0.20,
-    "pass_agreement": 0.20,
-    "definition_resolution": 0.15,
-    "cross_reference_resolution": 0.10,
-    "low_ambiguity": 0.10,
+    "quote_match": 0.36,
+    "schema_completeness": 0.28,
+    "pass_agreement": 0.28,
+    "operator_explicitness": 0.08,
 }
+# A multi-leg ``default_any_of`` scores 0 on ``operator_explicitness``. Weight 0.08 keeps
+# that rule at 0.92 when every other signal is 1, so the guessed operator is still not,
+# by itself, a reason for review.
 ELIGIBLE_THRESHOLD = 0.90
 DECISION_THRESHOLD = 0.70
 _WHITESPACE = re.compile(r"\s+")
@@ -44,22 +49,18 @@ _WHITESPACE = re.compile(r"\s+")
 class ConfidenceSignals:
     """Observable checks, each a score from 0 to 1.
 
-    ``pass_agreement`` is None when only one extraction pass ran, and
-    ``cross_reference_resolution`` is None when the passage has no cross-reference.
-    Both then count as 1.0, because there is nothing to disagree with or resolve.
+    ``pass_agreement`` is None when only one extraction pass ran, and then counts as 1.
     """
 
     quote_match: float
     schema_completeness: float
-    definition_resolution: float
-    low_ambiguity: float
+    operator_explicitness: float
     pass_agreement: float | None = None
-    cross_reference_resolution: float | None = None
 
     def __post_init__(self) -> None:
         for name in CONFIDENCE_WEIGHTS:
             value = getattr(self, name)
-            if value is None and name in {"pass_agreement", "cross_reference_resolution"}:
+            if value is None and name == "pass_agreement":
                 continue
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{name} must be a number from 0 to 1")
@@ -84,7 +85,10 @@ class RoutingResult:
 
 
 def compute_confidence(signals: ConfidenceSignals) -> float:
-    """Weighted sum with the locked weights, rounded to four decimals."""
+    """Weighted sum with the locked weights, rounded to four decimals.
+
+    A missing ``pass_agreement`` counts as 1.
+    """
     total = 0.0
     for name, weight in CONFIDENCE_WEIGHTS.items():
         value = getattr(signals, name)
@@ -92,19 +96,52 @@ def compute_confidence(signals: ConfidenceSignals) -> float:
     return round(total, 4)
 
 
+_EXPLICIT_OPERATORS = frozenset({"explicit", "model_evidence", "single_condition"})
+
+
+def operator_explicitness(rule: PolicyRule) -> float:
+    """Share of condition groups whose operator was stated or did not need one.
+
+    ``explicit``, grounded ``model_evidence``, and ``single_condition`` score 1. A one-leg
+    ``default_any_of`` also scores 1: a single positive condition has the same meaning under
+    either positive operator. A multi-leg ``default_any_of`` scores 0 because the operator
+    was guessed. An unresolved group scores 0. The scorer reads the stored operator and does
+    not look for words such as "đồng thời" or "may".
+    """
+    groups = tuple(rule.rule.conditions().values())
+    total = len(groups) + len(rule.unresolved_conditions)
+    if total == 0:
+        return 1.0
+    stated = sum(_operator_is_explicit(group) for group in groups)
+    return round(stated / total, 4)
+
+
+def _operator_is_explicit(group: ConditionGroup) -> bool:
+    if group.operator_source in _EXPLICIT_OPERATORS:
+        return True
+    return group.operator_source == "default_any_of" and len(group.legs) == 1
+
+
 def quote_in_span(quote: str, span_text: str) -> bool:
     """True when the quote appears verbatim in the span.
 
     Unicode NFC, curly quotes, zero-width characters, and runs of whitespace are
-    normalized. The quote must fall on word boundaries, so a short quote does not match
-    inside a longer word. One changed word, letter, or diacritic is still a mismatch.
+    normalized. In a spaced script the quote must fall on word boundaries, so a short
+    quote does not match inside a longer word. A quote of at least two letters in a
+    script that does not separate words may match as a substring. One changed word,
+    letter, or diacritic is still a mismatch.
     """
     if not isinstance(quote, str) or not isinstance(span_text, str):
         raise TypeError("quote and span must be strings")
     needle = canonical_text(quote)
     if not needle:
         return False
-    return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", canonical_text(span_text)) is not None
+    haystack = canonical_text(span_text)
+    if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None:
+        return True
+    # Scripts that do not separate words with spaces have no boundary to test.
+    unsegmented = len(needle) >= 2 and any(not char.isascii() and char.isalpha() for char in needle)
+    return unsegmented and needle in haystack
 
 
 def route_rule(

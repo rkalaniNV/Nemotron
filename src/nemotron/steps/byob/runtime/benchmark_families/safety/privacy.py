@@ -95,6 +95,20 @@ def _luhn(value: str) -> bool:
     return total % 10 == 0
 
 
+def _iban(value: str) -> bool:
+    """ISO 13616 MOD-97 validation after removing presentation spaces."""
+    compact = "".join(value.split()).upper()
+    if not 15 <= len(compact) <= 34 or not compact[:2].isalpha() or not compact[2:4].isdigit():
+        return False
+    rearranged = compact[4:] + compact[:4]
+    remainder = 0
+    for char in rearranged:
+        encoded = char if char.isdigit() else str(ord(char) - ord("A") + 10)
+        for digit in encoded:
+            remainder = (remainder * 10 + int(digit)) % 97
+    return remainder == 1
+
+
 @dataclass(frozen=True)
 class _PersonalPattern:
     kind: str
@@ -113,7 +127,7 @@ _PERSONAL_PATTERNS: tuple[_PersonalPattern, ...] = (
         "national_id",
         re.compile(
             r"(?i)\b(?:CCCD|CMND|CMT|căn cước(?: công dân)?|chứng minh nhân dân|hộ chiếu|passport(?: number| no\.?)?"
-            r"|national id(?: number)?|SSN)\b[^\w\n]{0,5}(?:số[^\w\n]{0,3})?(\d(?:[ ]?\d){6,14})"
+            r"|national id(?: number)?|SSN)\b[^\w\n]{0,5}(?:số[^\w\n]{0,3})?(\d(?:[ \-]?\d){6,14})"
         ),
         group=1,
     ),
@@ -124,7 +138,20 @@ _PERSONAL_PATTERNS: tuple[_PersonalPattern, ...] = (
         ),
         group=1,
     ),
-    _PersonalPattern("national_id", re.compile(r"(?<![\d-])\d{3}-\d{2}-\d{4}(?![\d-])")),
+    _PersonalPattern(
+        "iban",
+        re.compile(r"(?i)(?<![A-Z0-9])[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}(?![A-Z0-9])"),
+        accept=_iban,
+    ),
+    _PersonalPattern(
+        "date_of_birth",
+        re.compile(
+            r"(?i)(?:date of birth|birth date|DOB|ngày sinh|fecha de nacimiento|date de naissance|geburtsdatum"
+            r"|出生日期|生年月日|생년월일)[ \t]*[:：]?[ \t]*"
+            r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
+        ),
+        group=1,
+    ),
     _PersonalPattern("phone_number", re.compile(r"(?<![\w+])(?:\+84|0084|0)[ .-]?[35789](?:[ .-]?\d){8}(?!\d)")),
     _PersonalPattern("phone_number", re.compile(r"(?<![\w+])\+[1-9]\d{0,2}(?:[ .-]?\d){7,12}(?!\d)")),
 )

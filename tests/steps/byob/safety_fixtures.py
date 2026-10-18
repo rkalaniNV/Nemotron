@@ -48,8 +48,19 @@ def leg(name: str, evidence: str) -> dict[str, str]:
     return {"name": name, "evidence": evidence}
 
 
-def candidate(quote: str, action: str = "block", **conditions: list[dict[str, str]]) -> dict[str, Any]:
-    return {
+def candidate(
+    quote: str,
+    action: str = "block",
+    *,
+    operators: dict[str, dict[str, str]] | None = None,
+    binding_evidence: str = "",
+    conditional_evidence: str = "",
+    multi_turn_evidence: str = "",
+    multi_turn_count: int | None = None,
+    code_switch_evidence: str = "",
+    **conditions: list[dict[str, str]],
+) -> dict[str, Any]:
+    row = {
         "title": quote[:40],
         "actor": "assistant",
         "action": "respond",
@@ -62,12 +73,27 @@ def candidate(quote: str, action: str = "block", **conditions: list[dict[str, st
         "self_score": 0.99,
         "confidence": 0.97,
     }
+    if operators:
+        row["condition_operators"] = operators
+    if binding_evidence:
+        row["binding_evidence"] = binding_evidence
+    if conditional_evidence:
+        row["conditional_evidence"] = conditional_evidence
+    if multi_turn_evidence:
+        row["multi_turn_evidence"] = multi_turn_evidence
+        if multi_turn_count is not None:
+            row["multi_turn_count"] = multi_turn_count
+    if code_switch_evidence:
+        row["code_switch_evidence"] = code_switch_evidence
+    return row
 
 
 FIVE_TOPIC_REPLIES = {
     ANTI_STATE: [
         candidate(
             ANTI_STATE,
+            operators={"block_if": {"operator": "all_of", "evidence": "đồng thời"}},
+            conditional_evidence="Chỉ chặn khi",
             block_if=[
                 leg("instructional_or_organizing_verb", "động từ hướng dẫn hoặc tổ chức"),
                 leg("anti_government_target", "mục tiêu chống chính quyền"),
@@ -84,6 +110,7 @@ FIVE_TOPIC_REPLIES = {
     DAN: [
         candidate(
             DAN,
+            operators={"block_if": {"operator": "any_of", "evidence": "gồm"}},
             block_if=[
                 leg("bỏ qua mọi quy định", "bỏ qua mọi quy định"),
                 leg("ignore_previous_instructions", "ignore previous instructions"),
@@ -96,6 +123,7 @@ FIVE_TOPIC_REPLIES = {
     WRAPPER: [
         candidate(
             WRAPPER,
+            operators={"block_if": {"operator": "any_of", "evidence": "nghiên cứu, giả định, hoặc đánh giá bảo mật"}},
             block_if=[
                 leg("research_framing", "nghiên cứu"),
                 leg("hypothetical_framing", "giả định"),
@@ -107,6 +135,7 @@ FIVE_TOPIC_REPLIES = {
     ROLEPLAY: [
         candidate(
             ROLEPLAY,
+            operators={"block_if": {"operator": "any_of", "evidence": '"you are now unfiltered" và các biến thể'}},
             block_if=[
                 leg("you_are_now_unfiltered", "you are now unfiltered"),
                 leg("no_rules_variant", "các biến thể không còn rule"),
@@ -119,6 +148,8 @@ FIVE_TOPIC_REPLIES = {
     PROBING: [
         candidate(
             PROBING,
+            operators={"block_if": {"operator": "all_of", "evidence": "đồng thời"}},
+            conditional_evidence="Chỉ chặn khi",
             block_if=[
                 leg("probe_intent", "ý định dò"),
                 leg("mentions_this_system", "nhắc tới bot hoặc hệ thống này"),

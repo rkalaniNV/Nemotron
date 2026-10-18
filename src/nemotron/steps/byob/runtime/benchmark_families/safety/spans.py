@@ -23,7 +23,7 @@ offsets index the redacted document text that ingest stores beside the spans.
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,13 +41,16 @@ _ATX = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 _KEYWORD_HEADING = re.compile(
     rf"^(?P<word>{_SECTION_WORDS})[ \t]+(?P<number>{_NUMBER})(?:[.):](?=\s|$)|[ \t]+[-–—](?=\s)|$)", re.I
 )
+_STRUCTURAL_HEADING = re.compile(
+    r"^(?:第\s*(?P<cjk>\d{1,6})\s*(?P<unit>[条章节編编])|§\s*(?P<section>\d+(?:\.\d+)*))\s*(?P<title>\S.*)?$"
+)
 _NUMBER_PREFIX = re.compile(rf"^(?:(?:{_SECTION_WORDS})[ \t]+)?({_NUMBER})(?=[.):\s]|$)", re.I)
 _CROSS_REFERENCE = re.compile(rf"(?<!\w)(?:{_SECTION_WORDS})[ \t]+({_NUMBER})\b", re.I)
 _TABLE_DIVIDER = re.compile(r"^\|?[\s:|-]*-[\s:|-]*\|?$")
 # A single letter marks a list only in lowercase, so "A. Nguyen" and "I. Chương" stay sentences.
 _LIST_MARKER = re.compile(r"(?:[-*+•▪◦]|\d{1,3}[.)]|[a-z][.)]|\((?:\d{1,3}|[A-Za-z])\))[ \t]+")
 _QUOTE_MARKER = re.compile(r"(?:>[ \t]?)+")
-_SENTENCE_END = re.compile(r"[.!?…]+[\"'”’)\]]*(?=\s)")
+_SENTENCE_END = re.compile(r"(?:[.!?…]+[\"'”’)\]]*(?=\s|$)|[。！？]+[\"'”’）)\]]*)")
 _ABBREVIATIONS = frozenset({"e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "st", "no", "tp", "v.v", "ths", "ts"})
 _CHAPTER_WORDS = frozenset({"chương", "chapter", "phần"})
 _DEFINITION_HEADINGS = ("definition", "glossary", "định nghĩa", "giải thích từ ngữ", "thuật ngữ")
@@ -55,9 +58,11 @@ _DEFINE_VERBS = r"được hiểu là|có nghĩa là|nghĩa là|means|is defined
 _QUOTED_TERM = re.compile(
     rf"^[“\"'‘]([^”\"'’]{{1,80}})[”\"'’]\s*(?:\([^)]*\)\s*)?(?:là|{_DEFINE_VERBS})\s+(.+)$", re.I
 )
+_QUOTED_COLON = re.compile(r"^[“\"'‘「『]([^”\"'’」』]{1,80})[”\"'’」』]\s*[:：]\s*(\S.*)$")
 _BOLD_TERM = re.compile(rf"^\*\*([^*]{{1,80}})\*\*\s*(?:(?:là|{_DEFINE_VERBS})\s+|[:\-–]\s*)(.+)$", re.I)
 _PLAIN_TERM = re.compile(rf"^([^\W\d_][^:.;]{{0,60}}?)\s+({_DEFINE_VERBS})\s+(.+)$", re.I)
 _SECTION_TERM = re.compile(r"^([^\W\d_][^:.;]{0,60}?)\s+là\s+(.+)$", re.I)
+_BOLD_DEFINITION = re.compile(r"^\*\*([^*]{1,80})\*\*\s*[:\-–—]\s+(\S.*)$")
 _MAX_TERM_WORDS = 8
 
 
@@ -155,6 +160,16 @@ def _heading(line: Line, stripped: str, markdown_headings: bool) -> tuple[int, s
         level = 1 if word in _CHAPTER_WORDS else 2 + match.group("number").count(".")
         lead = len(line.text) - len(line.text.lstrip())
         return level, stripped, lead + match.end()
+    structural = _STRUCTURAL_HEADING.match(stripped)
+    if structural:
+        if structural.group("cjk"):
+            number = structural.group("cjk")
+            level = 1 if structural.group("unit") in "章編编" else 2
+        else:
+            number = structural.group("section") or ""
+            level = 1 + number.count(".")
+        title = f"{number} {(structural.group('title') or '').strip()}".strip()
+        return level, title, None
     return None
 
 
@@ -250,9 +265,6 @@ def _sentences(text: str, begin: int, end: int) -> list[tuple[int, int]]:
             following += 1
         if following >= end:
             break
-        upcoming = text[following]
-        if not (upcoming.isupper() or upcoming.isdigit() or upcoming in "\"'“‘([*"):
-            continue
         word = re.search(r"([\w.]+)$", text[cursor : match.start()])
         token = word.group(1).casefold().rstrip(".") if word else ""
         if token in _ABBREVIATIONS or (len(token) == 1 and token.isalpha()):
@@ -341,8 +353,31 @@ def _glossary(document: StructuredDocument) -> list[dict[str, Any]]:
     return entries
 
 
+def structural_definition(span: Mapping[str, Any]) -> tuple[str, str] | None:
+    """A definition recognized by structure, not by a verb such as "means" or "là".
+
+    A table row with two or more cells, or a bold term followed by a colon or dash,
+    returns ``(term, span text)``. The span text is what evidence grounding searches.
+    """
+    text = span.get("text")
+    if not isinstance(text, str):
+        return None
+    stripped = text.strip()
+    if span.get("kind") == "table_row":
+        cells = [cell.strip() for cell in stripped.split("|") if cell.strip()]
+        if len(cells) >= 2 and 0 < len(cells[0].split()) <= _MAX_TERM_WORDS:
+            return cells[0], stripped
+    match = _BOLD_DEFINITION.match(stripped)
+    if match is None:
+        return None
+    term = match.group(1).strip()
+    if term and len(term.split()) <= _MAX_TERM_WORDS and match.group(2).strip():
+        return term, stripped
+    return None
+
+
 def _definition(text: str, in_definitions: bool) -> tuple[str, str] | None:
-    candidates = [_QUOTED_TERM, _BOLD_TERM, _PLAIN_TERM]
+    candidates = [_QUOTED_COLON, _QUOTED_TERM, _BOLD_TERM, _PLAIN_TERM]
     if in_definitions:
         candidates.append(_SECTION_TERM)
     for pattern in candidates:

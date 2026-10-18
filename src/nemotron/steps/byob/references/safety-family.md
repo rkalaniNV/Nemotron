@@ -18,12 +18,12 @@ Relative paths in a safety config resolve from `src/nemotron/steps/byob`. Artifa
 | `stage` | What the run does |
 | --- | --- |
 | `prepare` | Validate the config, initialize the run directory, and ingest the policy files locally (see [Ingest](#ingest)). A completed prepare exits 0. It exits 4 when only quarantined files are left, and 1 when every file was rejected. It does not publish a benchmark. |
-| `generate` | Extract and route policy rules (see [Rule extraction and routing](#rule-extraction-and-routing)), then write a coverage plan (see [Coverage planning](#coverage-planning)). Case text and publication are not connected yet, so the command still stops before a benchmark exists. Gold exits 0. Silver or Preview exits 2. A ready review exits 3. A privacy block exits 4. |
+| `generate` | Extract and route policy rules, plan coverage, generate scenarios, validate and split the dataset, and create the review packet. An unsigned or incomplete review exits 3. Resuming with the signed current packet publishes Gold with exit 0, or Silver/Preview with exit 2. |
 | `all` | Run `prepare`, then `generate`. It does not evaluate. |
-| `eval` | Score a published safety benchmark. Until scoring is connected, the safety hook exits 1 and says this is not a Silver publication. |
+| `eval` | Score a published safety benchmark. Path 1 calls a guard through an adapter. Path 2 replays a mocked Guardrails log. The two paths write separate metric files and exit 0 when those files are written. Evaluation is not a Gold or Silver publication. An unpublished run exits 1. |
 | `translate` | Not part of this increment. The safety hook exits 1. Exit code 2 remains reserved for a finished Silver or Preview publication. |
 
-`run_manifest.json` is the publication commit, written last by `generate`, matching BFCL. `prepare` writes `run_record.json` with `publication_commit: false`. A run record is not a published benchmark.
+`run_manifest.json` is the publication commit. `generate` writes compiled files, stores the publication claim in `run_record.json` with `publication_commit: false`, writes the manifest, then sets the commit flag. A crash after the manifest is recovered by verifying that claim. `prepare` writes `run_record.json` with `publication_commit: false`. A run record is not a published benchmark.
 
 The safety publication statuses are:
 
@@ -33,7 +33,7 @@ The safety publication statuses are:
 | Silver or Preview completed | 2 | Publication finished, and Gold remains blocked. |
 | Review required | 3 | The review packet is ready, or still waits for a required signature. Run `approve_safety_review`, which signs and publishes. This is not a failure. |
 | Privacy blocked | 4 | No safe policy document remains, so no external model was called. |
-| Invalid config, incomplete publication, or unavailable stage | 1 | The config cannot start, publication is not connected yet, or the requested stage is not available. This is not a Silver result. |
+| Invalid config, incomplete publication, or unavailable stage | 1 | The config cannot start, a required artifact is missing or changed, or the requested stage is unavailable. This is not a Silver result. |
 | No usable sources | 1 | Every policy file was rejected as unsupported, unreadable, or invalid, and none was held back for privacy. No external model was called. |
 | No usable rules | 1 | Every extracted or pre-authored rule was quarantined or rejected, so no case is generated. `stage_cache/policy_flags.jsonl` gives each rule's reasons. |
 | Model unavailable | 1 | The extraction model could not be reached, or every reply in a pass was malformed. Rerunning continues from the cached windows. |
@@ -74,21 +74,22 @@ Formats:
 Privacy:
 
 - Credentials quarantine the whole file. These are private keys, API keys such as `sk-live-...`, `nvapi-...`, `hf_...`, or `AIza...`, cloud access keys, GitHub, Slack, JWT, and Bearer tokens. An assignment such as `password: ...`, `api_key: ...`, or `mật khẩu: ...` quarantines the file when the value looks like a token: it contains a symbol, or it is at least 20 characters and uses both letter cases. `The password: MustBe8chars long` is policy text and stays.
-- Personal data is replaced line by line with a typed placeholder: `REDACTED_EMAIL_1`, `REDACTED_CARD_NUMBER_1`, `REDACTED_PHONE_NUMBER_1`, `REDACTED_NATIONAL_ID_1`, or `REDACTED_BANK_ACCOUNT_1`. Card numbers must pass the Luhn check. National ID and bank account numbers are only redacted after a label such as `CCCD`, `hộ chiếu`, `passport`, `STK`, or `account number`. The same value keeps the same placeholder within a document, and redaction never adds or removes a line.
+- Personal data is replaced line by line with a typed placeholder: email, payment card, phone, national ID, bank account, IBAN, or a labeled date of birth. Card numbers pass Luhn and IBANs pass ISO 13616 MOD-97 before redaction. National ID, bank account, and birth dates require a contextual label, so an unlabeled number such as `123-45-6789` stays in the text. Birth-date labels cover common English, Vietnamese, French, Spanish, German, Chinese, Japanese, and Korean forms. The same value keeps the same placeholder within a document, and redaction never adds or removes a line. Free-form names and postal addresses still require customer-side redaction because deterministic regex cannot distinguish them from policy prose safely.
 - The redacted text is scanned again. Anything still found quarantines the file with `redaction_incomplete`.
 
 Spans:
 
 - A heading is a Markdown `#` heading, a DOCX heading (style name or outline level), or a line that starts with `Section`, `Mục`, `Điều`, `Chương`, `Phần`, `Article`, or `Chapter` and a number followed by `.`, `:`, `)`, a dash, or the end of the line. The number may be Arabic (`4`, `4.3`) or Roman (`Chương I`, `Mục II`). There is no length limit. "Section 4 applies to..." is a sentence, not a heading.
 - A section label is that number when the document uses it once (`4`, `I`). The same number again is a different section: the label becomes `<parent>/<number>`, for example `2/1` for Điều 1 inside Chương 2, and `heading_path` comes from the headings above that occurrence. An unnumbered heading uses a slug of its title, prefixed by the nearest numbered parent (`4.payments`). Text before the first heading is in section `preamble`.
-- A span is one sentence or one table row, at most 1200 characters. Its ID is `<document_id>#<section>#span-NN`, where NN counts spans within the section, for example `five-topic#4#span-01`. Quote markers and list markers (`-`, `1.`, `a.`, `(a)`, `(1)`) are not part of the span text. `A. Nguyen` and `(see) below` stay sentences. `char_start` and `char_end` index the redacted text in `stage_cache/redacted/`.
+- A span is one sentence or one table row, at most 1200 characters. Sentence boundaries support Latin punctuation and `。！？`; a following lowercase sentence is not merged into the previous one. Its ID is `<document_id>#<section>#span-NN`, where NN counts spans within the section, for example `five-topic#4#span-01`. Quote markers and list markers (`-`, `1.`, `a.`, `(a)`, `(1)`) are not part of the span text. `A. Nguyen` and `(see) below` stay sentences. `char_start` and `char_end` index the redacted text in `stage_cache/redacted/`.
 - Lines inside a `` ``` `` or `~~~` fence are still scanned for secrets, and they are not spans. A fence that never closes rejects that file with `unclosed_code_fence`.
 - `document_id` is the path without its extension, folded to lowercase ASCII (`Chính sách/Điều 4.md` becomes `chinh-sach/dieu-4`). `stage_cache/document_ids.json` remembers an id, so adding `policy.txt` beside `policy.md` does not rename `policy.md`. The new file gets `policy.txt`. On a first run that already contains both, the first path in sorted order keeps the stem.
 - References such as "see section 4.3", "Điều 5", or "Chương I" resolve to spans of that exact section and its dotted subsections (`4.3` under `4`) in the same document. Section `4.3` does not satisfy a reference to section `4` when section `4` itself is absent, and a span is never one of its own targets. An unknown section is kept with `resolved: false`.
-- The glossary collects a quoted or bold term followed by `là`, `được hiểu là`, `có nghĩa là`, `means`, `refers to`, or `is defined as`, and an unquoted term with one of the longer verbs. A plain `X là Y` counts only under a heading such as "Definitions", "Định nghĩa", "Giải thích từ ngữ", or "Thuật ngữ". A colon does not define a term. Each span lists the glossary terms it uses, including terms defined in another file. When two files define the same term differently, the conflict is recorded.
+- Headings are markdown headings, an outline level, a numbered keyword such as "section" or "điều", or a language-neutral form such as `第4条` and `§ 2`. The keyword list is not required for those structural forms.
+- The glossary collects a quoted term followed by a colon, a quoted or bold term followed by `là`, `được hiểu là`, `có nghĩa là`, `means`, `refers to`, or `is defined as`, and an unquoted term with one of the longer verbs. A plain `X là Y` counts only under a heading such as "Definitions", "Định nghĩa", "Giải thích từ ngữ", or "Thuật ngữ". A bare colon after an unquoted word does not define a term. Each span lists the glossary terms it uses, including terms defined in another file. When two files define the same term differently, the conflict is recorded.
 - Byte-identical files are kept once. The later path is `safe` with `duplicate_of`, and its `span_count` and `rule_count` are 0. It contributes no spans and no rules.
 
-Pre-authored Policy Rule IR. A YAML or JSON file is IR when it has a `policy_rules` key, or it is one rule, or it is a list in which every item is a rule. A rule has `policy_id` or `policy_id_candidate` and a `rule` mapping. A file that only uses those words (`rule: follow the written policy`) or that mixes rules with notes is read as text. Each IR rule goes through the same normalization as extracted candidates, so a bare `block_if` list becomes `any_of` with `operator_source: default_any_of`, and the status is reset to `needs_decision` for routing. A supplied `confidence` is dropped with the flag `confidence_dropped`, because routing computes it. `provenance.document_id` defaults to the IR file's own, and `provenance.document_sha256` defaults to the IR file's hash only when the rule cites the IR file itself.
+Pre-authored Policy Rule IR. A YAML or JSON file is IR when it has a `policy_rules` key, or it is one rule, or it is a list in which every item is a rule. A rule has `policy_id` or `policy_id_candidate` and a `rule` mapping. A file that only uses those words (`rule: follow the written policy`) or that mixes rules with notes is read as text. Each IR rule goes through the same normalization as extracted candidates. A one-condition bare `block_if` list becomes `any_of` with `operator_source: default_any_of`. A longer bare list stays unresolved unless the source states one clear operator frame. The status is reset to `needs_decision` for routing. A pre-authored id stays the id its author supplied. Its expected action is the strongest action its conditions produce, so rewrite, redact, caution, and confirmation are not collapsed to block. A supplied `confidence` is dropped with the flag `confidence_dropped`, because routing computes it. `provenance.document_id` defaults to the IR file's own, and `provenance.document_sha256` defaults to the IR file's hash only when the rule cites the IR file itself.
 
 Each pre-authored rule row carries `evidence`, checked against the redacted documents of the same run. The rule itself is not changed; routing reads `evidence`.
 
@@ -122,7 +123,7 @@ Artifacts written by `prepare`:
 
 ### What generate reads
 
-`stage=generate` first checks that `run_record.json` carries both current digests, and otherwise exits with `prepare_required` and names what changed. It then reads the files below before it reports that publication is not connected, and records the outcome as `last_outcome` in `run_record.json`.
+`stage=generate` first checks that `run_record.json` carries both current digests, and otherwise exits with `prepare_required` and names what changed. It then runs the deterministic pipeline, creates or resumes the review packet, and records the outcome as `last_outcome` in `run_record.json`.
 
 `quarantine/files.jsonl` must list every current source exactly once:
 
@@ -135,9 +136,9 @@ Artifacts written by `prepare`:
 - A missing report, or one that misses a source, names an unknown file, repeats a path, or carries an older sha256, stops the run with `invalid_run_artifact`. A gap is never treated as safe.
 - With no `safe` source left, the run exits 4 if any source is `quarantined`, and exits 1 with `no_usable_sources` if every source is `rejected`. It also exits 4 when a row `{"run_blocked": true, "config_sha256": ..., "source_fingerprint": ...}` carries both current digests. A `run_blocked` row for older inputs is ignored. `prepare` never writes this row; it lets another tool hold a run back.
 
-Only after this privacy check does `generate` extract and route rules, the first step that may call a model. Before that, it compares the three ingest files listed under `ingest_artifacts` with the hashes prepare recorded. A file edited, added, or removed after prepare stops the run with `invalid_run_artifact`, and a run record without `ingest_artifacts` asks for `prepare_required`; no model is called in either case. It then reads the review packet.
+Only after this privacy check does `generate` extract and route rules, the first step that may call a model. Before that, it compares the three ingest files listed under `ingest_artifacts` with the hashes prepare recorded. A file edited, added, or removed after prepare stops the run with `invalid_run_artifact`, and a run record without `ingest_artifacts` asks for `prepare_required`; no model is called in either case. It then writes the coverage plan, the scenario seeds, and the checked dataset split, and reads the review packet.
 
-`publication_review_packet.yaml` must set `packet_version: 1`, `config_sha256`, and `source_fingerprint`. A packet for older inputs is ignored. A current packet exits 3 until every required role has signed it.
+`publication_review_packet.yaml` sets `packet_version: 1`, `config_sha256`, and `source_fingerprint`. It binds the routed and eligible rules, conflict report, coverage gaps, contrast families, validation report, deduplicated cases, split manifest, and decision sheet by sha256. A packet for older inputs is rebuilt. A current packet exits 3 until every review card is resolved and every required role has signed it.
 
 ### Signing the review packet
 
@@ -160,7 +161,7 @@ It signs the current packet and, once every required role has signed, publishes 
 | `regulated` | `benchmark_owner`, `compliance_owner` |
 | `high_assurance` | `policy_author`, `adjudicator`, `release_owner`, each a different person |
 
-A packet may list `required_roles` to narrow this, for example when no regulated rule needs a compliance owner. Each role holds one signature, and signing it again replaces it. The command refuses to sign when the policy files or config changed since prepare (`prepare_required`), when there is no packet yet, or when the packet describes older inputs. The signoff stores `signoff_version: 1`, both current digests, `packet_sha256` (the sha256 of the packet bytes at signing time), and per role `approved_by`, `approved_at`, and an optional `note`. Editing the packet after signing invalidates every signature on it. A signature is a recorded attestation, not a cryptographic signature.
+A packet may list `required_roles` to narrow this, for example when no regulated rule needs a compliance owner. Each role holds one signature, and signing it again replaces it. The command refuses to sign when the policy files or config changed since prepare (`prepare_required`), when there is no packet yet, when the packet describes older inputs, or after publication. The signoff stores `signoff_version: 1`, both current digests, `packet_sha256` (the sha256 of the packet bytes at signing time), and per role `approved_by`, `approved_at`, and an optional `note`. Editing the packet or any bound content after signing refuses publication. A signature is a recorded attestation, not a cryptographic signature.
 
 ### Config rules
 
@@ -172,7 +173,7 @@ A packet may list `required_roles` to narrow this, for example when no regulated
 - `generation_model_config`, `judge_model_configs`, `evaluation`, and `languages` must not contain credentials. The same key names BFCL refuses, such as `api_key`, `token`, `authorization`, or anything ending in `_api_key`, stop the run before anything is written. Provide credentials through the provider environment.
 - `input_dir` and `output_dir` must not be the same directory or inside each other.
 
-The checked-in `safety/config/default.yaml` uses `stage: prepare` so that copying it runs the stage that currently finishes.
+The checked-in `safety/config/default.yaml` uses `stage: prepare`, so copying it first performs local ingestion and privacy checks before any model-backed generation.
 
 ### Policy Rule IR
 
@@ -194,26 +195,27 @@ status: eligible_for_generation
 ```
 
 - A stored condition list (`allow_if`, `block_if`, `escalate_if`, `require_confirmation_if`) sets exactly one of `all_of`, `any_of`, or `none_of`, with at least one unique snake_case condition. A bare list, two operators, or an unknown key is refused.
-- `operator_source: default_any_of` is valid only on `block_if` with `any_of`. `operator_source: single_condition` is valid only on a group with exactly one condition, where the operator does not matter.
+- `operator_source: model_evidence` means extraction grounded the model's per-condition operator in an exact source quote. `default_any_of` is valid only on `block_if` with `any_of`. `single_condition` is valid only on a group with exactly one positive condition, where `all_of` and `any_of` have the same meaning.
 - `severity_basis` records why the severity was chosen, for example `rubric:explicit_prohibition` or `source:pre_authored`. `paired_with` names the rule a paired allow rule relaxes.
 - Missing `version`, `owner`, `effective_date`, domain, or jurisdiction is `unspecified`. An empty domain or jurisdiction list is the same as missing. Jurisdiction `global` is refused on a stored rule. Normalization clears it, including a padded value, a single string, or the singular key `jurisdiction`, and sends the rule to review.
 - An `eligible_for_generation` rule has a confidence and no `unresolved_conditions`, no `unsupported_fields`, and no testability other than `testable`.
 - Customer-specific fields go under `extensions`; any other unknown key is refused.
 
-`normalize_candidate(raw)` turns extractor output into a stored rule and never raises; it returns the rule, the flags it raised, and validation errors. A bare list is resolved from the source wording (`provenance.source_quote`, or `operator_text`):
+`normalize_candidate(raw)` normalizes pre-authored or programmatic input and never raises; it returns the rule, the flags it raised, and validation errors. Its legacy bare-list interface can resolve source wording from `provenance.source_quote` or `operator_text`:
 
 | Wording | Result |
 | --- | --- |
-| "đồng thời", "đủ các thành phần", "cùng lúc", "cả hai", "tất cả các thành phần", "tất cả các điều kiện", "all of the following", "both of the following", "at the same time" | `all_of`, `operator_source: explicit` |
-| "một trong", "any of the following", or "either" together with "or" | `any_of`, `operator_source: explicit` |
+| "đồng thời", "đủ các thành phần", "cùng lúc", "tất cả các thành phần", "tất cả các điều kiện", "all of the following", "both of the following" | `all_of`, `operator_source: explicit` |
+| "một trong các", "any of the following" | `any_of`, `operator_source: explicit` |
 | "không có điều kiện nào", "không có thành phần nào", "none of the following", "neither of the following" | `none_of`, `operator_source: explicit` |
 | More than one kind of operator wording | Moved to `unresolved_conditions`, so `needs_decision` |
-| A bare "or", "hoặc", "both", or "either" | Not an operator. `block_if` uses the default below |
-| No wording, `block_if` | `any_of`, `operator_source: default_any_of` |
+| A bare "or", "hoặc", "both", "either", "cả hai", or "at the same time" | Not an operator |
+| No wording, `block_if` with one condition | `any_of`, `operator_source: default_any_of` |
+| No wording, `block_if` with several conditions | Moved to `unresolved_conditions`, so `needs_decision` |
 | Any other condition with exactly one entry | `any_of`, `operator_source: single_condition` |
 | No wording, any other condition with several entries | Moved to `unresolved_conditions`, so `needs_decision` |
 
-A shared source quote supplies an operator only when the rule has one condition. For a rule with several conditions, the caller passes field-specific evidence such as `operator_text={"block_if": "..."}`. A shared quote with clear wording is otherwise ambiguous and leaves each bare list unresolved; it is never guessed onto `block_if`. A model self-score is dropped at the top level and inside `rule`, `provenance`, `decision`, and `scope`. A reviewer `rejected` status is kept. Every other status waits for routing. A candidate that is not a mapping, whose `unresolved_conditions` is not a mapping, or whose evidence mapping has an unknown condition returns errors and does not raise. Stored lists and mappings cannot be changed in place.
+A shared source quote supplies an operator only when the rule has one condition. For a rule with several conditions, a programmatic caller passes field-specific evidence such as `operator_text={"block_if": "..."}`. Model extraction uses the stricter per-condition protocol described below and never applies this legacy `default_any_of` fallback. A model self-score is dropped at the top level and inside `rule`, `provenance`, `decision`, and `scope`. A reviewer `rejected` status is kept. Every other status waits for routing. A candidate that is not a mapping, whose `unresolved_conditions` is not a mapping, or whose evidence mapping has an unknown condition returns errors and does not raise. Stored lists and mappings cannot be changed in place.
 
 ### Action order
 
@@ -223,18 +225,18 @@ When several rules match one case, `aggregate` (`safety/actions.py`) returns the
 escalate > block > require_confirmation > rewrite > redact > caution > allow
 ```
 
-The primary policy is the rule that demanded the winning action and has the highest severity, then the lowest `policy_id`. `contributing_policy_ids` lists every matching policy, winning action first. `overridden_policy_ids` lists policies whose action lost. No matching rule gives `not_applicable`. By default, `expected_action` evaluates only `eligible_for_generation` rules. `include_review=True` also evaluates `needs_decision` rules for a review preview; rejected and quarantined rules never apply. It does not apply scope, jurisdiction, date, or actor. A rule whose exception is present does not match. `escalate_if` maps to `decision.critical_action` (default `escalate`), `block_if` to `decision.violation_action` (default `block`), `require_confirmation_if` to `require_confirmation`, and `allow_if` to `allow`. `ambiguous=True` uses `decision.ambiguous_action` only after at least one rule condition matches. Unresolved conditions are never evaluated.
+The primary policy is the rule that demanded the winning action and has the highest severity, then the lowest `policy_id`. `contributing_policy_ids` lists every matching policy, winning action first. `overridden_policy_ids` lists policies whose action lost. No matching rule gives `not_applicable`. By default, `expected_action` evaluates only `eligible_for_generation` rules. `include_review=True` also evaluates `needs_decision` rules for a review preview; rejected and quarantined rules never apply. The low-level function expects callers to pass applicable rules. Coverage and scenario labeling filter participants by actor, action, object, domain, jurisdiction, language, audience, and moderation target, treating `unspecified` or an empty scope as a wildcard. A rule whose exception is present does not match. `escalate_if` maps to `decision.critical_action` (default `escalate`), `block_if` to `decision.violation_action` (default `block`), `require_confirmation_if` to `require_confirmation`, and `allow_if` to `allow`. `ambiguous=True` uses `decision.ambiguous_action` only after at least one rule condition matches. `ambiguous_rules` does that for the named policy ids and leaves every other rule on its normal action. Unresolved conditions are never evaluated.
 
 ### Confidence and routing
 
 `route_rule` (`safety/confidence.py`) stores the confidence that Python computes. A model self-score is never an input.
 
 ```text
-confidence = 0.25 quote_match + 0.20 schema_completeness + 0.20 pass_agreement
-           + 0.15 definition_resolution + 0.10 cross_reference_resolution + 0.10 low_ambiguity
+confidence = 0.36 quote_match + 0.28 schema_completeness + 0.28 pass_agreement
+           + 0.08 operator_explicitness
 ```
 
-Each signal is a score from 0 to 1. `pass_agreement` counts as 1 when only one extraction pass ran, and `cross_reference_resolution` counts as 1 when the passage has no cross-reference. With every signal at 1 except `low_ambiguity: 0.5`, confidence is 0.95.
+Each signal is a score from 0 to 1. `pass_agreement` counts as 1 when only one extraction pass ran. With every signal at 1 except `operator_explicitness: 0.5`, confidence is 0.96. `explicit`, grounded `model_evidence`, and `single_condition` score 1. A multi-leg `default_any_of` block scores 0. Evidence that a condition appears in the source is a pass-or-fail check, not a weighted signal. Section labels are not scored.
 
 | Condition | Status |
 | --- | --- |
@@ -242,7 +244,7 @@ Each signal is a score from 0 to 1. `pass_agreement` counts as 1 when only one e
 | Confidence from 0.70 up to but excluding 0.90, an unresolved operator, an unsupported field, a conflict, unassessed testability, or `partially_testable` | `needs_decision` |
 | Everything else | `eligible_for_generation` |
 
-`quote_in_span` normalizes NFC, curly quotes, zero-width characters, and whitespace, and the quote must fall on word boundaries. One changed word still fails. `route_rule` treats its deterministic `quote_found` boolean as the only authority for the exact-match score, replacing any stale score in `ConfidenceSignals`. Prefer `route_rule_from_span`, which verifies `provenance.source_quote` and routes in one operation. A `rejected` rule stays rejected. A `block_if` stored as `default_any_of` is not a routing reason. The thresholds are defaults and can be passed as `Thresholds(eligible=..., decision=...)`.
+`quote_in_span` normalizes NFC, curly quotes, zero-width characters, and whitespace. A quote in a spaced script must fall on word boundaries. A quote of at least two letters in a script that does not separate words may match as a substring. One changed word still fails. `route_rule` treats its deterministic `quote_found` boolean as the only authority for the exact-match score, replacing any stale score in `ConfidenceSignals`. Prefer `route_rule_from_span`, which verifies `provenance.source_quote` and routes in one operation. A `rejected` rule stays rejected. A `block_if` stored as `default_any_of` is not a routing reason. The thresholds are defaults and can be passed as `Thresholds(eligible=..., decision=...)`.
 
 ### Rule extraction and routing
 
@@ -261,32 +263,38 @@ Each signal is a score from 0 to 1. `pass_agreement` counts as 1 when only one e
 | The candidate does not match the reply schema | Listed as `malformed_candidate`, not a rule |
 | The quote is not in the clause but is in a neighboring clause | Listed as `quote_in_neighbor`; the neighbor's own window extracts it |
 | The quote is in neither | Kept with `quote_found: false`, so `quarantined` |
-| A condition or exception has evidence in neither the clause nor a glossary definition | `unsupported_fields` gets `rule.<class>.<name>` or `exceptions.<name>`, flag `condition_not_grounded`, so `needs_decision` |
+| A condition or exception has evidence in neither the clause, a neighboring clause, nor a structural definition | `unsupported_fields` gets `rule.<class>.<name>` or `exceptions.<name>`, flag `condition_not_grounded`, so `needs_decision` |
 | No condition remains | Listed as `no_conditions`, not a rule |
 | `expected_action` is not produced by any condition, or an action is not in `proposals.decision_actions` | `needs_decision` with that reason |
-| The model's `operator_hint` disagrees with the stored operator | Flag `operator_hint_ignored`; the quote decides |
+| A multi-condition class omits `condition_operators`, or its evidence is not an exact part of `source_quote` | Moved to `unresolved_conditions`, so `needs_decision` |
+| Grounded model evidence names an operator and deterministic wording recognizes the same operator | Stored with `operator_source: model_evidence`; flag `operator_keyword_confirmed` |
+| Deterministic wording recognizes one different operator | Moved to `unresolved_conditions`; flag `operator_evidence_conflict` |
+| Deterministic wording sees more than one operator frame | The grounded model operator is kept; flag `operator_keyword_ambiguous` |
+| `binding_evidence`, `conditional_evidence`, `multi_turn_evidence`, or `code_switch_evidence` is not an exact part of `source_quote` | The hint is ignored; flag `signal_not_grounded`. It does not add `unsupported_fields` |
+| Deterministic wording does not recognize the language | The grounded model operator is kept; absence of a keyword match does not overrule it |
+| Legacy `operator_hint` is present | Flag `legacy_operator_hint_ignored`; only per-condition grounded evidence is authoritative |
 
-Condition names are folded to snake_case ASCII (`Bỏ qua mọi quy định` becomes `bo_qua_moi_quy_dinh`). A name with no ASCII letters, such as a Chinese term, is stored as `c_` plus a hash and the rule goes to review, so the condition is not dropped. A second candidate with the same quote but different conditions also sends the kept rule to review. Scope comes from `proposals`, never from the model. A model self-score, `confidence`, or severity hint is removed before anything is cached.
+The structured model output uses `condition_operators.<class>.operator` plus `evidence`, copied exactly from `source_quote`. One positive condition is canonicalized to `any_of` with `single_condition`; a proposed single-condition `none_of` still needs grounded evidence because it reverses the meaning. Condition names are folded to snake_case ASCII (`Bỏ qua mọi quy định` becomes `bo_qua_moi_quy_dinh`). A name with no ASCII letters, such as a Chinese term, is stored as `c_` plus a hash and the rule goes to review, so the condition is not dropped. Exact evidence in an unsegmented non-ASCII script can ground without whitespace word boundaries. Multiple atomic rules from one quote remain separate when their conditions or operators differ. A clause may also return rule-specific domain, jurisdiction, language, audience, and moderation target values with exact quote evidence; grounded values override run scope for that rule, while `proposals` remains the fallback. Ungrounded scope is unsupported and goes to review. A model self-score, `confidence`, or severity hint is removed before anything is cached.
 
-**IDs.** `policy_id` is `<DOCUMENT>-<SECTION>-<HASH8>`, where the hash covers document id, section, the normalized quote, and the expected action. The same input gives the same IDs on every run. A candidate that repeats an ID is listed as `duplicate_candidate`. An allow-only rule is paired with the nearest earlier acting rule in its section, or the first one: its ID is `<partner>-ALLOW` (`-ALLOW-2` for a second) and `paired_with` names the partner. Pairing applies to extracted rules only. A pre-authored rule keeps the `policy_id` its author gave it, so an author who wants a pair sets `paired_with` in the IR.
+**IDs.** `policy_id` is `<DOCUMENT>-<SECTION>-<HASH8>`, where the hash covers document id, section, normalized quote, expected action, condition classes, operators, and condition names. Two atomic rules extracted from the same quote therefore keep distinct stable IDs, while an identical candidate is still a duplicate. An allow-only rule is paired automatically only when its section has exactly one acting rule: its ID is `<partner>-ALLOW` (`-ALLOW-2` for a second) and `paired_with` names the partner. With several possible acting partners, the allow rule remains unpaired and goes to review instead of being attached by document order. Pairing applies to extracted rules only. A pre-authored rule keeps the `policy_id` its author gave it.
 
 **Severity rubric.** The first matching line wins, and `severity_basis` records it:
 
 | Rule | Severity | `severity_basis` |
 | --- | --- | --- |
 | Allow rule | low | `rubric:explicit_allow` |
-| Fraud, personal harm, legal prohibition, or irreversible tool action, with binding words (must, shall, required, prohibited, never, phải, bắt buộc, nghiêm cấm, tuyệt đối không, không được phép) | critical | `rubric:binding_language+<category>` |
+| Fraud, personal harm, legal prohibition, or irreversible tool action, with grounded `signals.binding_evidence` | critical | `rubric:binding_evidence+<category>` |
 | Escalation | high | `rubric:escalation` |
-| Block with no exception, no multi-condition `all_of`, no `none_of`, and no "only when", "unless", "chỉ khi", "trừ khi" | high | `rubric:explicit_prohibition` |
+| Block with no exception, no `none_of`, and no grounded `signals.conditional_evidence` | high | `rubric:explicit_prohibition` |
 | Anything else | medium | `rubric:conditional_restriction` |
 
 A pre-authored rule keeps its severity with `severity_basis: source:pre_authored`. One without `testability` is read as `testable`, with flag `testability_from_author`.
 
-**Signals.** `schema_completeness` is the share of: actor, action, and object stated; a stored condition; testability set; expected action produced. `definition_resolution` is the share of conditions that are grounded. `low_ambiguity` is 0 for mixed operator wording, 0.5 for hedges (may, might, should, nên, reasonable, as appropriate, có thể, khi cần thiết, nếu phù hợp), and 1 otherwise. `cross_reference_resolution` is the share of resolved cross-references in the clause.
+**Signals.** `schema_completeness` is the share of: actor, action, and object stated; a stored condition; testability set; expected action produced. `operator_explicitness` is the share of condition groups stored as `explicit`, grounded `model_evidence`, or `single_condition`. A one-leg `default_any_of` also scores 1 for the legacy normalization path. A multi-leg `default_any_of` and an unresolved group score 0. The scorer does not match hedge words. A condition whose evidence is missing from the clause, a neighboring clause, and any structural definition is `needs_decision` through `unsupported_fields`, not through the confidence weights. A structural definition is a table row with two or more cells, or a bold term followed by a colon or dash. The verb glossary is sent to the model as context and is not a grounding source. Section labels are not part of confidence.
 
-**Second pass.** A window runs a second, independent pass when the profile is `regulated` or `high_assurance`, or when one of its rules with a found quote scores below 0.90. Rules are matched across passes by quote only. `pass_agreement` is the share of three checks that agree: expected action, condition classes, and the condition names in each class. A rule pass two does not find gets 0. A rule only pass two finds is listed as `second_pass_only` and is not stored. If the second pass fails, the first-pass rules stay and go to review; the run does not stop.
+**Second pass.** A window runs a second, independent pass when the profile is `regulated` or `high_assurance`, or when one of its rules with a found quote scores below 0.90. Rules are matched across passes by quote only. `pass_agreement` is the share of four checks that agree: expected action, condition classes, condition names, and the operator of each class. An operator disagreement explicitly sends the first-pass rule to review, even when the weighted confidence remains high. A rule pass two does not find gets 0. A rule only pass two finds is listed as `second_pass_only` and is not stored. If the second pass fails, the first-pass rules stay and go to review; the run does not stop.
 
-**Conflicts.** `safety/conflicts.py` evaluates each rule's triggers, and the combined triggers of related rules. Rules are related when they share a condition name, a source section, or an object that both quotes use. A guessed object such as `user_request`, and a missing section, do not relate rules. Rules whose moderation targets do not overlap are not combined. Where several actions fire, `policy_graph.json` records a node:
+**Conflicts.** `safety/conflicts.py` evaluates each rule's triggers, including the empty minimal witness for `none_of`, and the combined triggers of related rule pairs. Rules are related when they share a condition name, a source section, or an object that both quotes use. They are combined only when actor, action, object, domain, jurisdiction, language, audience, and moderation target can overlap; unspecified fields are wildcards. Where several actions fire, `policy_graph.json` records a node:
 
 ```json
 {
@@ -322,24 +330,24 @@ After routing, and before any case text is generated, `generate` writes a covera
 
 The cap is `budget.preview_max_cases` in preview mode. Assisted and expert both use `budget.assisted_max_cases`; raise that number for a larger expert run. A critical rule also stops at `budget.cases_per_critical_rule`. Every other severity stops at `budget.cases_per_normal_rule`.
 
-Required cells are scheduled before optional cells. Across rules, every cell of an earlier kind is scheduled before any cell of a later kind, and within one kind the order is `policy_id`. The kinds are:
+Required cells are scheduled before optional cells. Every policy receives its first anchor before additional cells. Remaining ties minimize the error against `generation.decision_mix`, `case_family_mix`, and `turn_mix`, while policy counts stay round-robin; stable hashes replace lexical policy-id ordering as the final tie-break. The required kinds are:
 
-1. One clear violation, when the rule has a block, escalation, or confirmation condition. The expected action is the strongest of those actions.
-2. One clear allow. The expected action is `allow`. `paired_policy_id` names the paired rule. The cell is flagged `paired_rule_not_eligible` when that rule is not eligible, and `paired_rule_not_allow` when it is eligible but has no `allow_if`. With no partner, the flag is `allow_unpaired`.
-3. One boundary case. Its expected action is `decision.ambiguous_action`. When the rule states none, the cell is kept and flagged `boundary_action_unspecified`.
-4. One exception case when the rule lists exceptions. The expected action is `allow`.
-5. One missing-leg allow case for each leg of an `all_of` group on `block_if`, `escalate_if`, or `require_confirmation_if` that has two or more legs. Exactly one leg is absent and the others stay. A two-condition `all_of` block therefore receives two such cases. An `any_of` group receives none, including a `block_if` stored as `default_any_of`: one leg is already a violation. An `allow_if` group receives none: a missing allow leg is not an allow case.
-6. One case for each source language after the first. Languages come only from `scope.languages`, ignoring `unspecified`. The planner does not guess a language from the quote. The first language is `source_language` on the rule's other cells, not a second case.
-7. One code-switch case when `scope.languages` lists at least two languages and the quote or the cited span affirms a code-switch, with wording such as `code-switch`, `chuyển mã`, `trộn ngôn ngữ`, or `mixed language`. The cell lists those declared languages. A negated clause (`không`, `not`, `never`) does not count, and foreign words in the quote do not by themselves.
-8. One multi-turn case when the quote or the cited span has two or more numbered steps (`1.`, `bước 1`, `step 1`), or affirms `multi-turn`, `nhiều lượt`, `nhiều bước`, `trong hội thoại`, `in a dialogue`, or `hidden instruction`. The same negation rule applies to those phrases. `turns` is the step count, and `budget.max_turns` caps it. A cap below 2 cannot hold the cell, so the cell is a gap with reason `max_turns` and the plan is Silver.
+1. One clear violation, when the rule has a block, escalation, or confirmation condition. Its facts are the legs of the strongest action. A `none_of` group contributes absent legs. The expected action is aggregated only across eligible rules that overlap the anchor rule's event dimensions.
+2. One clear allow. When the rule has `allow_if`, its facts are the legs that satisfy that group. Otherwise the facts are empty, plus any `none_of` leg that would otherwise fire. The expected action is `allow` when no rule matches, and the aggregated action when one does. `paired_policy_id` names the paired rule. The cell is flagged `paired_rule_not_eligible` when that rule is not eligible, and `paired_rule_not_allow` when it is eligible but has no `allow_if`. With no partner, the flag is `allow_unpaired`.
+3. One boundary case. When the rule names `decision.ambiguous_action`, the facts are the clear-violation facts and that rule is evaluated as ambiguous. When the rule names none, the cell is kept with a null action and flagged `boundary_action_unspecified`.
+4. One exception case when the rule lists exceptions. The facts are the clear-violation facts plus the exception names. The expected action is `allow` when those facts match no rule.
+5. One missing-leg case for each leg of a multi-leg `all_of` acting group. When that group is not already the clear violation, the plan also adds one `all_legs` case. Every `any_of` leg and every `none_of` acting condition class also gets a minimal `condition_path` case unless it is identical to the clear violation. Secondary block, escalation, and confirmation paths are therefore required even when another condition class owns the strongest action.
+6. One pending case for each additional declared language and each `proposals.target_languages` entry that is not already the rule's source language. Extracted rules store only `proposals.source_language` in `scope.languages` unless the clause itself grounds a language. Target languages are translation work, not languages the clause declared. A target-language cell is a blocking `translation_required` gap until real translated text exists.
+7. One pending code-switch case when the rule stores grounded `signals.code_switch` and `scope.languages` lists at least two languages. It is a `translation_required` gap. A phrase such as "code-switch" does not create the cell.
+8. One multi-turn case when the rule stores grounded `signals.multi_turn_turns`. `turns` is that count, and `budget.max_turns` caps it. A numbered list or a phrase such as "multi-turn" does not create the cell. A cap below 2 cannot hold the cell, so the cell is a gap with reason `max_turns` and the plan is Silver. A rule that cites a `source_span_id` missing from the source index stops the plan.
 
 Optional cells come after the required cells, and only while the caps still have room: one adversarial case when `generation.modules.adversarial` is true, one actor-swap case when `political_symmetry` is true, and one persona case per eligible rule. `confirm_if_detected` does not add actor-swap cases. Production replay adds none in this increment, reported as `not_configured`, because the safety config has no evidence paths yet. An optional cell left out does not block Gold.
 
-A required cell that does not fit is not dropped. `coverage_gaps.json` lists it with its slot id and a reason, `budget_cap` or `rule_cap` or `max_turns`, and `blocks_gold: true`. The plan's `certification` is then `silver`, and `gold_cases_needed` is the full required count. When every required cell of the eligible rules is scheduled, `certification` is `gold` even if optional cells remain or other rules were excluded. `run_record.json` repeats the certification, the counts, `missing_required`, and `excluded_rules` under `coverage`.
+A required cell that does not fit is not dropped. `coverage_gaps.json` lists it with its slot id and a reason: `budget_cap`, `rule_cap`, `max_turns`, or `translation_required`, with `blocks_gold: true`. The plan's `certification` is then `silver`, and `gold_cases_needed` is the full required count. When every required cell of the eligible rules is scheduled, `certification` is `gold` even if optional cells remain or other rules were excluded. `run_record.json` repeats the certification, the counts, `missing_required`, and `excluded_rules` under `coverage`.
 
 A slot id joins the policy id, the kind, and any extra part with `/`. A contrast family id uses the same escaping after `contrast/`. A `/` or `\` inside a part is escaped. Read `policy_id`, `kind`, `language`, and `absent_leg` from the row. Do not split the slot id on `:`.
 
-Contrast families point at those slot ids. An acting `all_of` rule has one family per leg: the clear violation keeps every leg, and the allow member is that leg's missing-leg cell. A rule with no missing-leg cell has one family whose allow member is the clear allow cell. Families do not add cases. `changed_dimension` is the absent leg, `paired_allow` when the partner is an eligible allow rule, `paired_rule` when the partner is not an allow rule, or `benign_neighbor` when the rule names no partner.
+Contrast families point at those slot ids. An acting `all_of` group has one family per leg. The block member is the case that contains every leg of that group: the clear violation when that case is exactly the group, and the group's `all_legs` case otherwise. The allow member is that leg's missing-leg cell. A rule with no missing-leg cell has one family whose allow member is the clear allow cell. Families do not add cases beyond those cells. `changed_dimension` is the absent leg, `paired_allow` when the partner is an eligible allow rule, `paired_rule` when the partner is not an allow rule, or `benign_neighbor` when the rule names no partner.
 
 | File in `stage_cache/` | Contents |
 | --- | --- |
@@ -347,3 +355,101 @@ Contrast families point at those slot ids. An acting `all_of` rule has one famil
 | `coverage_gaps.json` | Certification, counts, every unscheduled cell, and the contrast families. |
 
 `cache_index.json` records `stages.coverage_plan` as `running`, then `completed`, or `failed`. Any failure while planning, including a damaged span, a repeated span id, or an error inside the planner, marks the stage `failed` and deletes `coverage_plan.jsonl` and `coverage_gaps.json`. The next generate removes the plan at the start of rule extraction, so a failed run does not keep a plan for rule files it deleted.
+
+### Scenario generation
+
+After the coverage plan, `generate` writes one conversation for each scheduled cell. The planner's slot is the case id. The stage copies the rule, the expected action, and the source quote from the eligible rule. It does not call a model and it does not add a condition the rule does not already name.
+
+A missing-leg cell removes exactly one leg of the rule's `all_of` group and keeps the others, in the group's order, then adds any `none_of` leg the cell is not holding absent. The contrast family points at that same case id. The conversation is not written a second time. When both members of a family are present, the block case must contain every leg of that group and the allow case must remove only the family's named leg. The stored action must be the aggregated action of the case's facts. A family that does not have that shape stops the build. A member slot that is neither in the plan nor in the gap list stops the build. A case whose action is `allow` is listed in `overrefusal_cases.jsonl`. That file stores the case id only.
+
+A `none_of` violation records those legs in `absent_legs`. The allow case for a block rule keeps the same legs present, so the `none_of` group does not fire. An allow rule's clear-allow case uses the `allow_if` legs. An exception case copies the rule's exception names into the facts. Every scored turn's text is the source quote; legs and exceptions stay in the case fields. A multi-turn cell has one scored user turn for each planned turn, and each turn carries the same quote. Every scored turn carries the cell's expected action. A boundary whose action is unspecified stores null on its scored turn. The generator does not fill that action in. A boundary that names an ambiguous action uses the clear-violation facts. Every other plan row needs an expected action from the action order.
+
+`run_record.json` stores the counts under `scenarios`. This command writes the seeds. A plan row that names an unknown policy, an unknown action, or legs the rule does not have stops the build, and the scenario stage is `failed`. A proposal handed to the builder may replace a seed only when its rule, quote, action, and legs match that seed, in the same order, and every turn uses that seed's sentence. A proposal with an unknown policy id, a changed meaning, or a missing-leg set that drops another required leg or keeps the removed leg is written to `scenario_rejections.jsonl` and does not become a case. A slot with no proposal still receives its seed.
+
+| File in `stage_cache/` | Contents |
+| --- | --- |
+| `scenario_candidates.jsonl` | One accepted case per scheduled slot: policy id, source evidence, legs, and a decision on every scored turn. |
+| `scenario_rejections.jsonl` | Rejected proposals and plan cells that do not match an eligible rule. |
+| `contrast_families.jsonl` | The plan's contrast families, each member pointing at one case id. |
+| `overrefusal_cases.jsonl` | Pointers to accepted allow cases. The conversation stays in `scenario_candidates.jsonl`. |
+
+`cache_index.json` records `stages.scenarios` as `running`, then `completed`, or `failed`. Any failure deletes the four scenario files and leaves the coverage plan in place. The next generate removes those files at the start of rule extraction.
+
+### Dataset selection
+
+After the scenario seeds, `generate` checks every accepted case, drops exact duplicate rows, and writes the development and private-test splits. This stage does not call a model. The preliminary label is the aggregated action of the case's facts. A stored action that differs is rejected. The case keeps the action it arrived with.
+
+A case is accepted only when its policy id is an eligible rule and its evidence names that rule's source span. The span must be in `source_index.json`, and the quote must appear in that span. A rule that cites no span cannot place a case in the dataset. Every turn's text is the rule's source quote. Legs, absent legs, and exceptions stay in the case fields, so the turn is not wrapped in one language's scaffolding. A rewritten turn is rejected with `turn_text_mismatch`. Every scored turn carries the case action. A multi-turn case has a decision on each scored turn. A boundary whose action is unspecified stays unlabeled.
+
+When one member of a complete contrast family fails, the other members are rejected with `contrast_pair_broken`. A family counts only when its members change the facts. A missing-leg family must remove exactly the named leg. Two copies of the same facts are duplicates, so the family does not keep both rows. A family that still has an unscheduled member is not a pair, and the member that was accepted can stay. Two families that share a case stay together: if that shared case is rejected, both families are rejected. A persona, multi-turn case, exception, or labeled boundary that still carries the removed violation's conditions is rejected with `attack_removed`. An unlabeled boundary has empty facts, so it can stay.
+
+An exact duplicate has the same policy, the same action, the same language, the same kind, the same legs, and the same canonical turn text. The language is the case's own language, or the rule's first declared language when the case names none. The lowest case id is kept, and the dropped id is listed in `split_manifest.json`. Members of one real contrast family are not collapsed. A row with a different action, or a different kind such as a translation, code-switch, actor swap, adversarial case, persona, or missing leg, stays as its own row. Semantic deduplication is not configured.
+
+The split keeps a whole group on one side. A group is a real contrast family, the cases that repeat its violation, and any case whose conditions still contain that violation's conditions. An exception and a boundary that uses the violation's facts stay with the violation. An unlabeled boundary stays in its own group. A clear allow stays with the violation when the contrast family names it. Groups are processed largest first and greedily assigned to minimize imbalance in case count, policy, action, kind, and language; case IDs only break deterministic ties. Both lists are non-empty when two or more groups exist. `balance.by_split` records the achieved distribution. One group stays in development, `complete` is false, and `reason` is `one_group`. When no case is accepted, both lists are empty and `reason` is `no_cases`. A public test split is not assigned.
+
+`run_record.json` stores the counts under `dataset`. Case ids for both splits are in `stage_cache/split_manifest.json`.
+
+| File in `stage_cache/` | Contents |
+| --- | --- |
+| `label_checks.jsonl` | One row per candidate: the stored action, the aggregated action, and whether they agree. |
+| `validated_cases.jsonl` | Cases that passed the checks, including rows later removed as duplicates. |
+| `rejected_cases.jsonl` | Cases rejected by a check, a broken contrast pair, or exact deduplication. |
+| `validation_report.json` | Counts, rejection reasons, and the deterministic judge summary. The judge method is `deterministic` and `model` is null. |
+| `deduplicated_cases.jsonl` | The rows that enter the split. |
+| `split_manifest.json` | `development` and `private_test` case ids, the groups, and the dropped duplicate ids. |
+
+`cache_index.json` records `stages.dataset` as `running`, then `completed`, or `failed`. Any failure deletes the six dataset files and leaves the coverage plan and the scenario files in place. The next generate removes those files at the start of rule extraction.
+
+### Review packet and decisions
+
+After dataset selection, `generate` writes three files in the run directory:
+
+| File | Contents |
+| --- | --- |
+| `review.html` | A local, escaped HTML summary. Every unresolved rule, unresolved conflict, blocking gap, and excluded rule is listed. Only representative cases are capped globally by `budget.max_review_items`; cases are selected round-robin across policies with a stable hash tie-break. |
+| `review_decisions.csv` | One row per rule or conflict card. Decisions are `pre_accepted`, `pending`, `approve`, `reject`, or `edit`. |
+| `publication_review_packet.yaml` | The complete review claim, coverage result, cards, representative examples, and sha256 bindings for every publication input, including the decision sheet and `review.html`. |
+
+Eligible rules begin as `pre_accepted`; rules that need a decision and unresolved conflicts begin as `pending`. The reviewer records `approve`, `reject`, or `edit`. `pre_accepted` is only valid on an eligible rule; writing it on a pending card is refused. An `edit` requires a non-empty note in this increment and withholds the affected rule, as does `reject`. Withholding one member removes every member of its contrast family. Conflict and glossary cards use a content hash, not a list index, so a decision cannot attach to a different conflict when the set changes. Unknown or repeated card ids, unknown decisions, CSV metadata that does not match the current card, a malformed CSV, and stale decision rows stop the run instead of being ignored.
+
+The next `generate` rebuilds deterministic stages, imports the decision sheet, and writes a canonical packet. If this changes the packet, existing signatures no longer match and the current packet must be signed again. A signed packet with a pending card still exits 3. Approved unresolved rules or conflicts remain documented limitations because approval alone does not invent a condition operator or conflict resolution; such a publication is Silver.
+
+### Benchmark compilation
+
+When the decision sheet is complete and the required signatures match the current packet, `generate` compiles:
+
+| File | Contents |
+| --- | --- |
+| `benchmark.jsonl` | Every retained case with `split: development` or `split: private_test`. |
+| `benchmark_development.jsonl` | Retained development cases. |
+| `benchmark_private_test.jsonl` | Retained private-test cases. |
+| `quality_report.json` | Certification, coverage reason, case counts, gaps, withheld policies and cases, unresolved review items, split result, and provenance digests. |
+| `run_manifest.json` | Publication commit. It binds the packet, decision sheet, review page, signoff, benchmark files, and quality report. `files` must list every compiled output. |
+
+Compilation refuses duplicate case ids, unknown split ids, a case missing from both splits, overlap between splits, or any file whose digest differs from the signed packet. Gold requires assisted or expert mode, complete Gold coverage, a complete non-empty development/private split, no withheld cases, and no unresolved rule or conflict. A documented coverage gap, incomplete split, review limitation, or reviewer removal publishes Silver. Preview mode publishes Preview without requiring a signoff and remains non-comparable.
+
+After publication, another `generate` is idempotent: it verifies the manifest, the run-record claim, and the Gold/Silver result implied by the signed packet, then returns that status. Editing the certification in the manifest cannot turn Silver into Gold. Editing or deleting the packet, decisions, HTML page, signoff, benchmark, or quality report is detected and refused. Running `prepare` starts a new review cycle and removes the previous publication commit, compiled files, and evaluator metrics.
+
+### Evaluation
+
+`stage=eval` scores a published benchmark. It does not publish, and it does not use the Gold or Silver exit codes. It writes:
+
+| File | Contents |
+| --- | --- |
+| `evaluator/path1_metrics.json` | Direct guard-model scoring through an adapter. |
+| `evaluator/path2_metrics.json` | Complete Guardrails-configuration scoring from a mocked log. |
+
+The two files are never the same path. Path 1 reports unsafe recall, benign specificity, over-refusal, parse failures, timeouts, model errors, and latency. Path 2 compares the expected decision of every scored event with the log, and records which rails ran and how long they took. A timeout, a malformed reply, and a model error are counted separately; none of them is treated as allow or block. Events are scored per labelled turn. The private-test split is used when it is non-empty.
+
+```yaml
+evaluation:
+  path1:
+    adapter: test
+    responses:
+      "case-1#1": {decision: block, latency_ms: 12}
+  path2:
+    adapter: mocked_guardrails
+    log: rails.jsonl
+```
+
+`adapter: test` is an in-process script. This increment does not call a network endpoint. A missing path is written as `not_run` with the reason. An unknown adapter, a damaged log, or a log that does not name the scored events stops the run. Relative `log` and `file` paths resolve from the config directory, then from the run directory.

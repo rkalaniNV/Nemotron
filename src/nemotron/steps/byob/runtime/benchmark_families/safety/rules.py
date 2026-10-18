@@ -34,6 +34,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from nemotron.steps.byob.runtime.benchmark_families.safety import extract as extraction
+from nemotron.steps.byob.runtime.benchmark_families.safety.actions import ACTION_ORDER
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_json, write_jsonl, write_yaml
 from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     CONFIDENCE_WEIGHTS,
@@ -42,14 +43,18 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     ConfidenceSignals,
     canonical_text,
     compute_confidence,
+    operator_explicitness,
     quote_in_span,
     route_rule,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import ResolvedConfig
 from nemotron.steps.byob.runtime.benchmark_families.safety.conflicts import detect_conflicts
 from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import COVERAGE_OUTPUTS
+from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import DATASET_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.extract import (
     ExtractedCandidate,
+    ExtractedOperator,
+    ExtractedScopeItem,
     ExtractionError,
     PassOutcome,
 )
@@ -63,6 +68,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
     normalize_candidate,
     validate_rule,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.scenarios import SCENARIO_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStatus, abort
 from nemotron.steps.byob.runtime.benchmark_families.safety.windows import EvidenceWindow, build_windows
 
@@ -89,45 +95,6 @@ RULE_OUTPUTS = (
 SECOND_PASS_PROFILES = frozenset({"regulated", "high_assurance"})
 ALLOW_SUFFIX = "-ALLOW"
 CRITICAL_CATEGORIES = frozenset({"fraud", "personal_harm", "legal_prohibition", "irreversible_tool_action"})
-_BINDING = (
-    "must",
-    "shall",
-    "required",
-    "prohibited",
-    "never",
-    "phải",
-    "bắt buộc",
-    "nghiêm cấm",
-    "tuyệt đối không",
-    "không được phép",
-)
-_CONDITIONAL = (
-    "only when",
-    "only if",
-    "unless",
-    "except when",
-    "except if",
-    "chỉ khi",
-    "chỉ chặn khi",
-    "trừ khi",
-    "ngoại trừ",
-    "trừ trường hợp",
-)
-_HEDGES = (
-    "may",
-    "might",
-    "where appropriate",
-    "as appropriate",
-    "if possible",
-    "as needed",
-    "có thể",
-    "should",
-    "nên",
-    "reasonable",
-    "tùy trường hợp",
-    "khi cần thiết",
-    "nếu phù hợp",
-)
 _VIOLATION_ACTIONS = frozenset({"block", "caution", "rewrite", "redact"})
 
 
@@ -155,7 +122,8 @@ class Draft:
     @property
     def shape(self) -> tuple[Any, ...]:
         mapped = _condition_map(self)
-        return (self.expected_action, tuple(mapped), tuple(mapped.values()))
+        operators = _operator_map(self)
+        return (self.expected_action, tuple(mapped), tuple(mapped.values()), tuple(operators.values()))
 
     def _legs(self, name: str) -> tuple[str, ...]:
         group = self.rule.rule.conditions().get(name)
@@ -186,7 +154,7 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
         )
     _check_glossary_conflicts(glossary_conflicts, run_dir)
     # Drop the previous routing result first, so a failed run cannot leave rules from older code.
-    for name in (*RULE_OUTPUTS, *COVERAGE_OUTPUTS):
+    for name in (*RULE_OUTPUTS, *COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *DATASET_OUTPUTS):
         (stage_cache / name).unlink(missing_ok=True)
     try:
         windows = build_windows(documents, spans, terms)
@@ -337,6 +305,11 @@ def _compare_passes(
         agreement = 0.0 if match is None else _agreement(draft, match)
         draft.signals = dataclasses.replace(draft.signals, pass_agreement=agreement)
         draft.passes = 2
+        if match is not None and _operator_map(draft) != _operator_map(match):
+            draft.decision_reasons.append("the second extraction pass disagrees on condition operators")
+            uncertainties.append(
+                _uncertainty(window_id, "operator_disagreement", draft.rule.provenance.source_quote)
+            )
     for other in remaining:
         uncertainties.append(_uncertainty(window_id, "second_pass_only", other.rule.provenance.source_quote))
 
@@ -346,13 +319,22 @@ def _condition_map(draft: Draft) -> dict[str, frozenset[str]]:
     return {name: frozenset(draft._legs(name)) for name in sorted(names)}
 
 
+def _operator_map(draft: Draft) -> dict[str, str | None]:
+    names = set(draft.rule.rule.conditions()) | set(draft.rule.unresolved_conditions)
+    return {
+        name: (group.operator if (group := draft.rule.rule.conditions().get(name)) is not None else None)
+        for name in sorted(names)
+    }
+
+
 def _agreement(first: Draft, second: Draft) -> float:
-    """Share of action, condition classes, and condition names that the two passes share."""
+    """Share of action, condition classes, condition names, and operators across passes."""
     left, right = _condition_map(first), _condition_map(second)
     checks = (
         first.expected_action == second.expected_action,
         set(left) == set(right),
         left == right,
+        _operator_map(first) == _operator_map(second),
     )
     return round(sum(checks) / len(checks), 4)
 
@@ -393,21 +375,29 @@ def _candidate_draft(
         # The neighbor's own window extracts this rule.
         uncertainties.append(_uncertainty(window.window_id, "quote_in_neighbor", quote))
         return None
-    sources = [clause, *(entry["definition"] for entry in window.glossary)]
+    # The clause, its neighbors, and structural definitions. A verb glossary is context for
+    # the model, not evidence that can clear the grounding check.
+    sources = [clause, *window.grounding_texts]
     flags: list[dict[str, Any]] = []
     unsupported: list[str] = []
-    grounded = total = 0
     body: dict[str, Any] = {name: _text(getattr(candidate, name)) for name in ("actor", "action", "object")}
+    unresolved: dict[str, list[str]] = {}
+    condition_names: set[str] = set()
     for name in CONDITION_CLASSES:
-        legs, found_legs, all_legs = _legs(
-            getattr(candidate.conditions, name), sources, f"rule.{name}", unsupported, flags
-        )
-        grounded, total = grounded + found_legs, total + all_legs
-        if legs:
-            body[name] = legs
-    exceptions, found_legs, all_legs = _legs(candidate.exceptions, sources, "exceptions", unsupported, flags)
-    grounded, total = grounded + found_legs, total + all_legs
-    if not any(name in body for name in CONDITION_CLASSES):
+        legs, _, _ = _legs(getattr(candidate.conditions, name), sources, f"rule.{name}", unsupported, flags)
+        if not legs:
+            continue
+        condition_names.add(name)
+        group = _extracted_operator(name, legs, candidate.condition_operators.get(name), quote, flags)
+        if group is None:
+            unresolved[name] = legs
+        else:
+            body[name] = group
+    for name in sorted(set(candidate.condition_operators) - condition_names):
+        flags.append(_flag("operator_without_conditions", f"the model supplied an operator for empty {name}", name))
+        unsupported.append(f"rule.{name}.operator")
+    exceptions, _, _ = _legs(candidate.exceptions, sources, "exceptions", unsupported, flags)
+    if not condition_names:
         uncertainties.append(_uncertainty(window.window_id, "no_conditions", quote))
         return None
     expected = candidate.expected_action
@@ -417,21 +407,37 @@ def _candidate_draft(
         "require_confirmation_if": "require_confirmation",
         "allow_if": "allow",
     }
-    actions = {produced[name] for name in CONDITION_CLASSES if name in body}
+    actions = {produced[name] for name in condition_names}
     decision_reasons = []
     if expected not in actions:
         decision_reasons.append(f"expected_action {expected} is not produced by any of its conditions")
     disabled = sorted((actions | {expected}) - set(config.proposals["decision_actions"]))
     if disabled:
         decision_reasons.append(f"{', '.join(disabled)} is not enabled in proposals.decision_actions")
+    scoped = {
+        name: values
+        for name in ("domains", "jurisdictions", "languages", "audiences", "targets")
+        if (
+            values := _scope_values(
+                name,
+                getattr(candidate.scope, name),
+                quote,
+                unsupported,
+                flags,
+            )
+        )
+    }
+    scope = {
+        "domains": [config.proposals["domain"]],
+        "jurisdictions": [config.proposals["jurisdiction"]],
+        "languages": _proposal_languages(config.proposals),
+        "targets": list(config.proposals["moderation_targets"]),
+        **scoped,
+    }
     raw = {
         "policy_id": "PENDING",
         "title": candidate.title.strip() or None,
-        "scope": {
-            "domains": [config.proposals["domain"]],
-            "jurisdictions": [config.proposals["jurisdiction"]],
-            "targets": list(config.proposals["moderation_targets"]),
-        },
+        "scope": scope,
         "rule": body,
         "exceptions": exceptions,
         "decision": {"violation_action": produced["block_if"]},
@@ -446,17 +452,22 @@ def _candidate_draft(
         "testability": candidate.testability,
         "unsupported_fields": unsupported,
     }
+    if unresolved:
+        raw["unresolved_conditions"] = unresolved
+    stored_signals = _grounded_signals(candidate, quote, flags)
+    if stored_signals:
+        raw["signals"] = stored_signals
     normalized = normalize_candidate(raw)
     if normalized.rule is None:
         uncertainties.append(_uncertainty(window.window_id, "invalid_rule", "; ".join(normalized.errors)))
         return None
     rule = normalized.rule
     flags.extend(dataclasses.asdict(flag) for flag in normalized.flags)
-    stored = {group.operator for group in rule.rule.conditions().values()}
-    if candidate.operator_hint is not None and candidate.operator_hint not in stored:
+    if candidate.operator_hint is not None:
         flags.append(
             _flag(
-                "operator_hint_ignored", f"the model suggested {candidate.operator_hint}; the quote does not state it"
+                "legacy_operator_hint_ignored",
+                "operator_hint is not an authority; use condition_operators with exact evidence",
             )
         )
     severity, basis = assign_severity(rule, quote, expected, candidate.risk_category)
@@ -464,9 +475,7 @@ def _candidate_draft(
     signals = ConfidenceSignals(
         quote_match=1.0 if found else 0.0,
         schema_completeness=_completeness(rule, expected in actions),
-        definition_resolution=round(grounded / total, 4) if total else 1.0,
-        low_ambiguity=_low_ambiguity(quote),
-        cross_reference_resolution=_reference_score(window.target.get("cross_references")),
+        operator_explicitness=operator_explicitness(rule),
     )
     return Draft(
         rule=rule,
@@ -481,10 +490,77 @@ def _candidate_draft(
     )
 
 
+def _extracted_operator(
+    name: str,
+    legs: Sequence[str],
+    proposed: ExtractedOperator | None,
+    quote: str,
+    flags: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Store a model operator only with exact evidence; keywords may confirm or reject it."""
+    if len(legs) == 1 and (proposed is None or proposed.operator != "none_of"):
+        if proposed is not None:
+            flags.append(_flag("operator_not_needed", f"{name} has one positive condition", f"rule.{name}"))
+        return {"any_of": list(legs), "operator_source": "single_condition"}
+    if proposed is None:
+        flags.append(
+            _flag(
+                "operator_missing",
+                f"{name} needs a per-condition operator with exact source evidence",
+                f"rule.{name}",
+            )
+        )
+        return None
+    evidence = proposed.evidence.strip()
+    if not evidence or not quote_in_span(evidence, quote):
+        flags.append(
+            _flag(
+                "operator_evidence_not_grounded",
+                f"{name} operator evidence is not an exact part of source_quote",
+                f"rule.{name}",
+            )
+        )
+        return None
+    detected = detect_operator(evidence)
+    if detected == "mixed":
+        flags.append(
+            _flag(
+                "operator_keyword_ambiguous",
+                f"{name} evidence contains more than one operator frame; the grounded model operator is kept",
+                f"rule.{name}",
+            )
+        )
+    elif detected is not None and detected != proposed.operator:
+        flags.append(
+            _flag(
+                "operator_evidence_conflict",
+                f"{name} proposes {proposed.operator}, while deterministic wording says {detected}",
+                f"rule.{name}",
+            )
+        )
+        return None
+    flags.append(
+        _flag(
+            "operator_from_model_evidence",
+            f"{name} stores {proposed.operator} from grounded model evidence",
+            f"rule.{name}",
+        )
+    )
+    if detected == proposed.operator:
+        flags.append(
+            _flag(
+                "operator_keyword_confirmed",
+                f"{name} operator agrees with deterministic wording",
+                f"rule.{name}",
+            )
+        )
+    return {proposed.operator: list(legs), "operator_source": "model_evidence"}
+
+
 def _legs(
     items: Sequence[Any], sources: Sequence[str], where: str, unsupported: list[str], flags: list[dict[str, Any]]
 ) -> tuple[list[str], int, int]:
-    """Condition names, plus how many of them the clause or a definition states."""
+    """Condition names, plus how many are stated in the clause, a neighbor, or a structural definition."""
     names: list[str] = []
     grounded = 0
     for item in items:
@@ -498,7 +574,7 @@ def _legs(
         if name in names:
             continue
         names.append(name)
-        found = bool(item.evidence.strip()) and any(quote_in_span(item.evidence, source) for source in sources)
+        found = bool(item.evidence.strip()) and any(_evidence_in_source(item.evidence, source) for source in sources)
         problems = []
         if readable is None:
             problems.append(
@@ -506,7 +582,11 @@ def _legs(
             )
         if not found:
             problems.append(
-                _flag("condition_not_grounded", f"{name} is stated neither in the clause nor in a definition", where)
+                _flag(
+                    "condition_not_grounded",
+                    f"{name} is not in the clause, a neighboring clause, or a structural definition",
+                    where,
+                )
             )
         if problems:
             flags.extend(problems)
@@ -514,6 +594,32 @@ def _legs(
         else:
             grounded += 1
     return names, grounded, len(names)
+
+
+def _evidence_in_source(evidence: str, source: str) -> bool:
+    """Exact grounding, including a substring match for scripts that do not separate words."""
+    return quote_in_span(evidence, source)
+
+
+def _scope_values(
+    name: str,
+    items: Sequence[ExtractedScopeItem],
+    quote: str,
+    unsupported: list[str],
+    flags: list[dict[str, Any]],
+) -> list[str]:
+    values: list[str] = []
+    for item in items:
+        value = item.value.strip()
+        evidence = item.evidence.strip()
+        where = f"scope.{name}.{value or 'empty'}"
+        if not value or not evidence or not quote_in_span(evidence, quote):
+            flags.append(_flag("scope_evidence_not_grounded", f"{where} is not grounded in source_quote", where))
+            unsupported.append(where)
+            continue
+        if value not in values:
+            values.append(value)
+    return values
 
 
 # Pre-authored IR
@@ -558,9 +664,7 @@ def _preauthored_draft(
     signals = ConfidenceSignals(
         quote_match=1.0 if found else 0.0,
         schema_completeness=_completeness(rule, True),
-        definition_resolution=1.0,
-        low_ambiguity=_low_ambiguity(rule.provenance.source_quote),
-        cross_reference_resolution=_reference_score(_references(spans)),
+        operator_explicitness=operator_explicitness(rule),
     )
     if found:
         provenance_reasons: list[str] = []
@@ -573,7 +677,7 @@ def _preauthored_draft(
         origin=PRE_AUTHORED,
         quote_found=found,
         signals=signals,
-        expected_action=next((action for action in ("escalate", "block", "allow") if action in actions), "block"),
+        expected_action=_strongest_action(actions),
         flags=flags,
         decision_reasons=decision_reasons,
         quarantine_reasons=provenance_reasons,
@@ -584,11 +688,31 @@ def _preauthored_draft(
 # IDs, pairing, severity, and signals
 
 
-def stable_policy_id(document_id: str, section: str, quote: str, action: str) -> str:
-    """Same document, section, quote, and action give the same ID on every run."""
-    material = "\x1f".join((document_id, section, canonical_text(quote).casefold(), action))
+def stable_policy_id(
+    document_id: str,
+    section: str,
+    quote: str,
+    action: str,
+    shape: Sequence[Any] | None = None,
+) -> str:
+    """Same source and canonical rule shape give the same ID on every run."""
+    parts = [document_id, section, canonical_text(quote).casefold(), action]
+    if shape is not None:
+        parts.append(json.dumps(shape, ensure_ascii=False, separators=(",", ":")))
+    material = "\x1f".join(parts)
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:8].upper()
     return f"{_id_part(document_id)}-{_id_part(section)}-{digest}"
+
+
+def _id_shape(draft: Draft) -> tuple[Any, ...]:
+    return tuple(
+        (
+            name,
+            group.operator if (group := draft.rule.rule.conditions().get(name)) is not None else None,
+            tuple(sorted(draft._legs(name))),
+        )
+        for name in sorted(set(draft.rule.rule.conditions()) | set(draft.rule.unresolved_conditions))
+    )
 
 
 def _assign_ids(drafts: Sequence[Draft], uncertainties: list[dict[str, Any]]) -> list[Draft]:
@@ -598,7 +722,11 @@ def _assign_ids(drafts: Sequence[Draft], uncertainties: list[dict[str, Any]]) ->
     for draft in drafts:
         provenance = draft.rule.provenance
         policy_id = stable_policy_id(
-            provenance.document_id, provenance.section or "", provenance.source_quote, draft.expected_action
+            provenance.document_id,
+            provenance.section or "",
+            provenance.source_quote,
+            draft.expected_action,
+            _id_shape(draft),
         )
         previous = by_id.get(policy_id)
         if previous is not None:
@@ -619,8 +747,12 @@ def _assign_ids(drafts: Sequence[Draft], uncertainties: list[dict[str, Any]]) ->
         for draft in group:
             if not acting or not _is_allow_only(draft):
                 continue
-            earlier = [other for other in acting if other.order < draft.order]
-            partner = (earlier[-1] if earlier else acting[0]).rule.policy_id
+            if len(acting) != 1:
+                draft.decision_reasons.append(
+                    f"allow rule has {len(acting)} possible acting partners in its section"
+                )
+                continue
+            partner = acting[0].rule.policy_id
             suffixes[partner] = suffixes.get(partner, 0) + 1
             count = suffixes[partner]
             policy_id = f"{partner}{ALLOW_SUFFIX}" + (f"-{count}" if count > 1 else "")
@@ -634,18 +766,23 @@ def _is_allow_only(draft: Draft) -> bool:
 
 
 def assign_severity(rule: PolicyRule, quote: str, expected_action: str, risk_category: str) -> tuple[str, str]:
-    """The rubric; the first matching level wins. A model severity is never an input."""
+    """The rubric; the first matching level wins. A model severity is never an input.
+
+    Binding and conditional wording count only when extraction stored exact evidence from
+    ``quote``. The quote itself is not scanned for a language's keyword list.
+    """
+    del quote
     if expected_action == "allow":
         return "low", "rubric:explicit_allow"
-    if risk_category in CRITICAL_CATEGORIES and _says(quote, _BINDING):
-        return "critical", f"rubric:binding_language+{risk_category}"
+    if risk_category in CRITICAL_CATEGORIES and rule.signals.binding_evidence:
+        return "critical", f"rubric:binding_evidence+{risk_category}"
     if expected_action == "escalate":
         return "high", "rubric:escalation"
     acting = [group for name, group in rule.rule.conditions().items() if name != "allow_if"]
     conditional = (
         bool(rule.exceptions)
-        or any(group.operator == "none_of" or (group.operator == "all_of" and len(group.legs) > 1) for group in acting)
-        or _says(quote, _CONDITIONAL)
+        or any(group.operator == "none_of" for group in acting)
+        or bool(rule.signals.conditional_evidence)
     )
     if expected_action == "block" and not conditional:
         return "high", "rubric:explicit_prohibition"
@@ -687,12 +824,6 @@ def _completeness(rule: PolicyRule, action_produced: bool) -> float:
     return round(sum(checks) / len(checks), 4)
 
 
-def _low_ambiguity(quote: str) -> float:
-    if detect_operator(quote) == "mixed":
-        return 0.0
-    return 0.5 if _says(quote, _HEDGES) else 1.0
-
-
 def _rule_actions(rule: PolicyRule) -> set[str]:
     produced = {
         "block_if": rule.decision.violation_action,
@@ -703,11 +834,56 @@ def _rule_actions(rule: PolicyRule) -> set[str]:
     return {produced[name] for name in rule.rule.conditions()}
 
 
-def _says(text: str, phrases: Sequence[str]) -> bool:
-    folded = canonical_text(text).casefold()
-    return any(
-        re.search(rf"(?<!\w){re.escape(canonical_text(phrase).casefold())}(?!\w)", folded) for phrase in phrases
-    )
+def _strongest_action(actions: set[str]) -> str:
+    return next((action for action in ACTION_ORDER if action in actions), "block")
+
+
+def _proposal_languages(proposals: Mapping[str, Any]) -> list[str]:
+    """The clause's fallback language is the source language. Targets are translation work."""
+    value = proposals.get("source_language")
+    if isinstance(value, str) and value.strip() and value.strip().casefold() != "unspecified":
+        return [value.strip()]
+    return []
+
+
+def _grounded_signals(
+    candidate: extraction.ExtractedCandidate, quote: str, flags: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Keep modality and discourse hints only when their evidence is inside the quote."""
+    stored: dict[str, Any] = {}
+    binding = _optional_evidence(candidate.binding_evidence, quote, "binding_evidence", flags)
+    conditional = _optional_evidence(candidate.conditional_evidence, quote, "conditional_evidence", flags)
+    multi_turn = _optional_evidence(candidate.multi_turn_evidence, quote, "multi_turn_evidence", flags)
+    code_switch = _optional_evidence(candidate.code_switch_evidence, quote, "code_switch_evidence", flags)
+    if binding:
+        stored["binding_evidence"] = binding
+    if conditional:
+        stored["conditional_evidence"] = conditional
+    if multi_turn:
+        stored["multi_turn_turns"] = _turn_count(candidate.multi_turn_count, flags)
+    if code_switch:
+        stored["code_switch"] = True
+    return stored
+
+
+def _optional_evidence(evidence: str, quote: str, field_name: str, flags: list[dict[str, Any]]) -> str | None:
+    text = evidence.strip()
+    if not text:
+        return None
+    if quote_in_span(text, quote):
+        return text
+    flags.append(_flag("signal_not_grounded", f"{field_name} is not an exact part of source_quote", field_name))
+    return None
+
+
+def _turn_count(count: int | None, flags: list[dict[str, Any]]) -> int:
+    if isinstance(count, int) and not isinstance(count, bool) and 2 <= count <= 99:
+        return count
+    if count is not None:
+        flags.append(
+            _flag("signal_count_ignored", "multi_turn_count must be an integer from 2 to 99", "multi_turn_count")
+        )
+    return 2
 
 
 def _id_part(text: str) -> str:
@@ -822,25 +998,6 @@ def _load_json(path: Path, run_dir: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"{path.name} must hold an object; run stage=prepare.")
     return data
-
-
-def _references(spans: Sequence[Mapping[str, Any]]) -> list[Any]:
-    refs: list[Any] = []
-    for span in spans:
-        items = span.get("cross_references", [])
-        if isinstance(items, list):
-            refs.extend(items)
-    return refs
-
-
-def _reference_score(items: Any) -> float | None:
-    """Share of cross-references that resolve. None when the clause cites nothing."""
-    if not isinstance(items, list):
-        return None
-    refs = [item for item in items if isinstance(item, dict)]
-    if not refs:
-        return None
-    return round(sum(1 for item in refs if item.get("resolved") is True) / len(refs), 4)
 
 
 def _term_list(items: Any) -> tuple[str, ...]:

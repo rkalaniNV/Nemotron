@@ -32,7 +32,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstr
 
 Operator = Literal["all_of", "any_of", "none_of"]
 # single_condition: a list with one leg has no operator to state; all_of and any_of mean the same.
-OperatorSource = Literal["explicit", "default_any_of", "single_condition"]
+OperatorSource = Literal["explicit", "model_evidence", "default_any_of", "single_condition"]
 ConditionClass = Literal["allow_if", "block_if", "escalate_if", "require_confirmation_if"]
 Action = Literal["escalate", "block", "require_confirmation", "rewrite", "redact", "caution", "allow"]
 Severity = Literal["critical", "high", "medium", "low"]
@@ -74,14 +74,12 @@ _ALL_OF_PHRASES = (
     "đồng thời",
     "đủ các thành phần",
     "cùng lúc",
-    "cả hai",
     "tất cả các thành phần",
     "tất cả các điều kiện",
     "all of the following",
     "both of the following",
-    "at the same time",
 )
-_ANY_OF_PHRASES = ("một trong", "any of the following")
+_ANY_OF_PHRASES = ("một trong các", "any of the following")
 _NONE_OF_PHRASES = (
     "không có điều kiện nào",
     "không có thành phần nào",
@@ -219,6 +217,15 @@ class Decision(_Model):
     critical_action: Action | None = None
 
 
+class RuleSignals(_Model):
+    """Optional facts recorded only after their evidence was found in the source quote."""
+
+    binding_evidence: Text | None = None
+    conditional_evidence: Text | None = None
+    multi_turn_turns: Annotated[int, Field(strict=True, ge=2, le=99)] | None = None
+    code_switch: bool = False
+
+
 class Provenance(_Model):
     document_id: Text
     document_sha256: Sha256 | None = None
@@ -249,6 +256,7 @@ class PolicyRule(_Model):
     unsupported_fields: tuple[Text, ...] = ()
     confidence: Annotated[float, Field(strict=True, ge=0, le=1, allow_inf_nan=False)] | None = None
     status: RuleStatus = "needs_decision"
+    signals: RuleSignals = Field(default_factory=RuleSignals)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -311,11 +319,11 @@ def policy_rule_json_schema() -> dict[str, Any]:
 def detect_operator(text: str) -> Literal["all_of", "any_of", "none_of", "mixed"] | None:
     """Return the operator a source passage states with a clear frame.
 
-    A clear AND frame is wording such as "đồng thời", "cả hai", "tất cả các điều kiện",
-    or "all of the following". A clear OR frame is "một trong", "any of the following",
-    or "either" together with "or". Clear NONE frames include "không có điều kiện nào"
-    and "none of the following". A bare "or", "hoặc", "both", or "either" does not count:
-    those words usually list objects, not a condition operator.
+    A clear AND frame is wording such as "đồng thời", "tất cả các điều kiện",
+    or "all of the following". A clear OR frame is "một trong các" or
+    "any of the following". Clear NONE frames include "không có điều kiện nào"
+    and "none of the following". A bare "or", "hoặc", "both", "either", "cả hai",
+    or "at the same time" does not count: those words usually list objects.
 
     ``mixed`` means the passage uses both kinds of frame. None means it uses neither.
     Matching is case-insensitive, on whole words, after Unicode NFC normalization.
@@ -324,9 +332,7 @@ def detect_operator(text: str) -> Literal["all_of", "any_of", "none_of", "mixed"
         raise TypeError("operator text must be a string")
     normalized = unicodedata.normalize("NFC", text).casefold()
     says_all = any(_has_phrase(normalized, phrase) for phrase in _ALL_OF_PHRASES)
-    says_any = any(_has_phrase(normalized, phrase) for phrase in _ANY_OF_PHRASES) or (
-        _has_phrase(normalized, "either") and _has_phrase(normalized, "or")
-    )
+    says_any = any(_has_phrase(normalized, phrase) for phrase in _ANY_OF_PHRASES)
     says_none = any(_has_phrase(normalized, phrase) for phrase in _NONE_OF_PHRASES)
     stated = [name for name, found in (("all_of", says_all), ("any_of", says_any), ("none_of", says_none)) if found]
     if len(stated) > 1:
@@ -357,8 +363,8 @@ def normalize_candidate(
 ) -> NormalizationResult:
     """Turn extractor output into a storable rule.
 
-    - A bare ``block_if`` list becomes ``any_of`` with ``operator_source: default_any_of``,
-      unless the source states a clear operator frame.
+    - A one-condition ``block_if`` list becomes ``any_of`` with ``operator_source: default_any_of``.
+      A longer bare list stays unresolved unless the source states one clear operator frame.
     - A shared source passage is used only when the rule has one condition. For a rule
       with several conditions, pass ``operator_text`` as ``{condition_name: evidence}``.
     - A model self-score is dropped. ``jurisdiction: global`` is cleared to unspecified.
@@ -530,9 +536,15 @@ def _store_stated_operator(
     elif stated in {"all_of", "any_of", "none_of"}:
         body[name] = {stated: value, "operator_source": "explicit"}
         flags.append(Flag("operator_from_source_wording", f"{name} stored as {stated}", f"rule.{name}"))
-    elif name == "block_if":
+    elif name == "block_if" and len(value) == 1:
         body[name] = {"any_of": value, "operator_source": "default_any_of"}
-        flags.append(Flag("default_any_of", "block_if states no operator; one leg is enough", "rule.block_if"))
+        flags.append(
+            Flag(
+                "default_any_of",
+                "one block_if condition needs no operator; all_of and any_of mean the same",
+                "rule.block_if",
+            )
+        )
     else:
         unresolved[name] = body.pop(name)
         flags.append(Flag("operator_unresolved", f"{name} states no operator and has no default", f"rule.{name}"))

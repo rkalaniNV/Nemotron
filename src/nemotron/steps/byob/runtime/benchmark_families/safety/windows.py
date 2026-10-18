@@ -24,6 +24,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import quote_in_span
+from nemotron.steps.byob.runtime.benchmark_families.safety.spans import structural_definition
+
 
 @dataclass(frozen=True)
 class EvidenceWindow:
@@ -34,6 +37,7 @@ class EvidenceWindow:
     target: Mapping[str, Any]
     neighbors: tuple[Mapping[str, Any], ...]
     glossary: tuple[Mapping[str, str], ...]
+    grounding_texts: tuple[str, ...] = ()
 
     @property
     def window_id(self) -> str:
@@ -86,6 +90,12 @@ def build_windows(
         raise ValueError("spans cite documents that are not in the index: " + ", ".join(unknown))
     sha_by_document = {document["document_id"]: document["sha256"] for document in documents}
     definitions = {term["key"]: term for term in glossary_terms}
+    structural_by_document: dict[str, list[tuple[str, str, str]]] = {}
+    for span in spans:
+        definition = structural_definition(span)
+        if definition is not None:
+            term, text = definition
+            structural_by_document.setdefault(span["document_id"], []).append((span["source_span_id"], term, text))
     by_section: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     positions = []
     for span in spans:
@@ -101,6 +111,11 @@ def build_windows(
             for key in span.get("glossary_terms", [])
             if key in definitions
         )
+        structural = tuple(
+            text
+            for span_id, term, text in structural_by_document.get(span["document_id"], [])
+            if span_id != span["source_span_id"] and quote_in_span(term, span["text"])
+        )
         windows.append(
             EvidenceWindow(
                 document_id=span["document_id"],
@@ -110,6 +125,7 @@ def build_windows(
                 target=span,
                 neighbors=neighbors,
                 glossary=glossary,
+                grounding_texts=tuple(item["text"] for item in neighbors) + structural,
             )
         )
     return windows

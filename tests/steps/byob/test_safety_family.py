@@ -196,16 +196,22 @@ def test_input_dir_without_policy_files_is_refused(tmp_path: Path) -> None:
 # Generate
 
 
-def test_generate_stops_before_publication_and_records_the_outcome(tmp_path: Path) -> None:
+def test_generate_writes_the_review_packet_and_waits_for_a_signature(tmp_path: Path) -> None:
     config, run_dir, _, _ = _prepared(tmp_path)
 
-    caught = _expect(config, "generate", RunStatus.PIPELINE_INCOMPLETE)
+    caught = _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
 
-    assert caught.cli_exit_code == 1
-    assert "no benchmark was published" in str(caught)
+    assert caught.cli_exit_code == 3
+    assert "Review required" in str(caught)
     assert "Rules: 1 eligible" in str(caught)
+    assert "Coverage plan:" in str(caught)
+    assert (run_dir / "review.html").is_file()
+    assert (run_dir / "review_decisions.csv").is_file()
+    assert (run_dir / "publication_review_packet.yaml").is_file()
+    assert not (run_dir / "benchmark.jsonl").exists()
     record = _record(run_dir)
-    assert record["last_outcome"]["status"] == "pipeline_incomplete"
+    assert record["last_outcome"]["status"] == "review_required"
+    assert record["publication_commit"] is False
     assert record["rules"]["eligible_for_generation"] == 1
     assert {"extract", "normalize", "conflicts"} <= set(_cache(run_dir)["stages"])
 
@@ -227,7 +233,13 @@ def test_generate_requires_prepare_for_the_current_config_and_sources(tmp_path: 
 def test_stage_all_refreshes_prepare_before_generate(tmp_path: Path) -> None:
     _run(_config(tmp_path), "prepare")
 
-    _expect(_config(tmp_path, overrides={"mode": "preview"}), "all", RunStatus.PIPELINE_INCOMPLETE)
+    config = _config(tmp_path, overrides={"mode": "preview"})
+    _expect(config, "all", RunStatus.PREVIEW_COMPLETED)
+    run_dir = tmp_path / "out" / "customer-safety-v1"
+    assert (run_dir / "benchmark.jsonl").is_file()
+    assert (run_dir / "quality_report.json").is_file()
+    assert _record(run_dir)["publication_commit"] is True
+    assert not (run_dir / "publication_signoff.json").exists()
 
 
 def test_skip_until_in_yaml_reaches_the_safety_message(tmp_path: Path) -> None:
@@ -258,7 +270,7 @@ def test_review_packet_for_older_policy_files_is_ignored(tmp_path: Path) -> None
     (tmp_path / "policies" / "policy.md").write_text("A different policy.", encoding="utf-8")
     _run(config, "prepare")
 
-    caught = _expect(config, "generate", RunStatus.PIPELINE_INCOMPLETE)
+    caught = _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
     assert "older policy files" in str(caught)
 
 
@@ -271,12 +283,14 @@ def test_review_packet_without_a_version_is_damaged(tmp_path: Path) -> None:
     _expect(config, "generate", RunStatus.INVALID_RUN_ARTIFACT)
 
 
-def test_matching_signoff_is_accepted(tmp_path: Path) -> None:
+def test_a_signed_stub_packet_is_not_published(tmp_path: Path) -> None:
     config, run_dir, digest, fingerprint = _prepared(tmp_path)
     packet = _packet(run_dir, digest, fingerprint)
     _signoff(run_dir, digest, fingerprint, _sha256(packet))
 
-    _expect(config, "generate", RunStatus.PIPELINE_INCOMPLETE)
+    caught = _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    assert "does not match the current review packet" in str(caught)
+    assert not (run_dir / "benchmark.jsonl").exists()
 
 
 def test_signoff_for_an_edited_packet_is_refused(tmp_path: Path) -> None:
@@ -311,7 +325,8 @@ def test_one_signature_without_a_role_unblocks_standard_publication(tmp_path: Pa
     assert signoff["packet_sha256"] == _sha256(packet)
     assert signoff["config_sha256"] == digest
     assert signoff["signatures"][0]["note"] == "Checked section 4."
-    _expect(config, "generate", RunStatus.PIPELINE_INCOMPLETE)
+    caught = _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    assert "does not match the current review packet" in str(caught)
 
 
 def test_signing_again_keeps_one_signature_per_role(tmp_path: Path) -> None:
@@ -331,23 +346,21 @@ def test_signing_again_keeps_one_signature_per_role(tmp_path: Path) -> None:
 
 def test_regulated_profile_takes_the_remaining_role_and_drops_older_packets(tmp_path: Path) -> None:
     config, run_dir, digest, fingerprint = _prepared(tmp_path, profile="regulated")
-    packet = _packet(run_dir, digest, fingerprint)
+    _packet(run_dir, digest, fingerprint)
     with pytest.raises(SafetyStatus) as ambiguous:
         sign_safety_packet(config, approved_by="Lan")
     first = sign_safety_packet(config, approved_by="Lan", role="benchmark_owner")
     caught = _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    replacement = sign_safety_packet(config, approved_by="Lan", role="benchmark_owner")
     second = sign_safety_packet(config, approved_by="Minh")
 
     assert "Pass --role with yours" in str(ambiguous.value)
     assert first["missing_roles"] == ["compliance_owner"]
-    assert "Still waiting for: compliance_owner" in str(caught)
+    assert replacement["replaced_older_signoff"] is True
+    assert "Sign the current packet again" in str(caught)
     assert (second["role"], second["missing_roles"]) == ("compliance_owner", [])
-    _expect(config, "generate", RunStatus.PIPELINE_INCOMPLETE)
-
-    packet.write_text(packet.read_text(encoding="utf-8") + "rebuilt: true\n", encoding="utf-8")
-    rebuilt = sign_safety_packet(config, approved_by="Minh", role="compliance_owner")
-    assert rebuilt["replaced_older_signoff"] is True
-    assert rebuilt["missing_roles"] == ["benchmark_owner"]
+    published = _expect(config, "generate", RunStatus.GOLD_COMPLETED)
+    assert published.cli_exit_code == 0
 
 
 def test_packet_can_narrow_the_required_roles(tmp_path: Path) -> None:
@@ -408,15 +421,15 @@ def _approve(config: Path, *extra: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_approve_script_signs_and_publishes_in_one_command(tmp_path: Path) -> None:
-    config, run_dir, digest, fingerprint = _prepared(tmp_path, files=IR_ONLY)
-    _packet(run_dir, digest, fingerprint)
-
+    config, _, _, _ = _prepared(tmp_path, files=IR_ONLY)
+    ready = _cli(config, "generate")
     result = _approve(config)
 
+    assert ready.returncode == 3, ready.stderr
     assert "Signed by " in result.stdout
     assert "as benchmark_owner." in result.stdout
-    assert result.returncode == 1  # publication is not connected yet, so generate stops after the signature
-    assert result.stderr.startswith("pipeline_incomplete:")
+    assert result.returncode == 2, result.stderr
+    assert result.stderr.startswith("silver_completed:")
     assert "Traceback" not in result.stderr
 
 
@@ -436,6 +449,235 @@ def test_approve_script_waits_for_other_roles_and_can_sign_only(tmp_path: Path) 
     assert "invalid choice" in wrong_role.stderr
 
 
+def test_signed_complete_benchmark_publishes_gold_and_a_later_edit_is_refused(tmp_path: Path) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    packet = run_dir / "publication_review_packet.yaml"
+    signed = _sha256(packet)
+    sign_safety_packet(config, approved_by="Lan")
+
+    published = _expect(config, "generate", RunStatus.GOLD_COMPLETED)
+
+    assert published.cli_exit_code == 0
+    assert _sha256(packet) == signed
+    report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert report["certification"] == "gold"
+    assert report["cases"] > 0
+    assert _record(run_dir)["publication_commit"] is True
+    for name, digest in manifest["files"].items():
+        assert _sha256(run_dir / name) == digest
+    benchmark = run_dir / "benchmark.jsonl"
+    benchmark.write_bytes(benchmark.read_bytes() + b"\n")
+
+    refused = _expect(config, "generate", RunStatus.INVALID_RUN_ARTIFACT)
+
+    assert "benchmark.jsonl changed after it was signed" in str(refused)
+    assert benchmark.read_bytes().endswith(b"\n")
+
+
+def test_signed_benchmark_with_coverage_gaps_publishes_silver(tmp_path: Path) -> None:
+    config = _config(tmp_path, overrides={"budget": {"assisted_max_cases": 1}})
+    run_dir = _run(config, "prepare")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+
+    published = _expect(config, "generate", RunStatus.SILVER_COMPLETED)
+
+    assert published.cli_exit_code == 2
+    report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["certification"] == "silver"
+    assert report["blocking_gaps"]
+    assert (run_dir / "benchmark_development.jsonl").is_file()
+    assert (run_dir / "benchmark_private_test.jsonl").is_file()
+
+
+def test_rejecting_a_rule_drops_its_cases_and_publishes_silver(tmp_path: Path) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    decisions = run_dir / "review_decisions.csv"
+    decisions.write_text(decisions.read_text(encoding="utf-8").replace(",pre_accepted,", ",reject,"), encoding="utf-8")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+
+    published = _expect(config, "generate", RunStatus.SILVER_COMPLETED)
+
+    assert published.cli_exit_code == 2
+    report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["reason"] == "review_removed_cases"
+    assert report["withheld_policies"]
+    rows = [
+        json.loads(line)
+        for line in (run_dir / "benchmark.jsonl").read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    assert all(row["policy_id"] not in report["withheld_policies"] for row in rows)
+
+
+def test_a_pending_card_blocks_publication_after_signing(tmp_path: Path) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    decisions = run_dir / "review_decisions.csv"
+    text = decisions.read_text(encoding="utf-8").replace(",pre_accepted,", ",pending,")
+    decisions.write_text(text, encoding="utf-8")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+
+    caught = _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+
+    assert "still pending" in str(caught)
+    assert not (run_dir / "benchmark.jsonl").exists()
+
+
+def test_approving_an_unresolved_rule_documents_a_silver_limitation(tmp_path: Path) -> None:
+    unresolved = {
+        "rules.yaml": yaml.safe_dump(
+            {
+                "policy_id": "AMBIGUOUS-001",
+                "rule": {
+                    "actor": "assistant",
+                    "action": "respond",
+                    "object": "request",
+                    "block_if": ["condition_a", "condition_b"],
+                },
+                "severity": "high",
+                "provenance": {"source_quote": "Block the ambiguous request."},
+            }
+        )
+    }
+    config, run_dir, _, _ = _prepared(tmp_path, files=unresolved)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    decisions = run_dir / "review_decisions.csv"
+    decisions.write_text(decisions.read_text(encoding="utf-8").replace(",pending,", ",approve,"), encoding="utf-8")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+
+    published = _expect(config, "generate", RunStatus.SILVER_COMPLETED)
+
+    assert published.cli_exit_code == 2
+    report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["reason"] == "review_unresolved_items"
+    assert report["unresolved_rules"] == ["AMBIGUOUS-001"]
+
+
+def test_editing_the_real_packet_after_signing_is_kept_and_refused(tmp_path: Path) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+    packet = run_dir / "publication_review_packet.yaml"
+    packet.write_text(packet.read_text(encoding="utf-8") + "edited: true\n", encoding="utf-8")
+
+    caught = _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+
+    assert "does not match the current review packet" in str(caught)
+    assert "edited: true" in packet.read_text(encoding="utf-8")
+    assert not (run_dir / "benchmark.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "review.html",
+        "review_decisions.csv",
+        "stage_cache/deduplicated_cases.jsonl",
+        "stage_cache/conflict_report.json",
+    ],
+)
+def test_signed_review_content_cannot_change_before_publication(tmp_path: Path, relative: str) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+    changed = run_dir / relative
+    changed.write_bytes(changed.read_bytes() + b"\n")
+
+    caught = _expect(config, "generate", RunStatus.INVALID_RUN_ARTIFACT)
+
+    assert f"{changed.name} changed after the review packet was signed" in str(caught)
+    assert not (run_dir / "run_manifest.json").exists()
+    assert not (run_dir / "benchmark.jsonl").exists()
+
+
+def test_rewriting_manifest_certification_cannot_upgrade_silver(tmp_path: Path) -> None:
+    config = _config(tmp_path, overrides={"budget": {"assisted_max_cases": 1}})
+    run_dir = _run(config, "prepare")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+    _expect(config, "generate", RunStatus.SILVER_COMPLETED)
+    manifest_path = run_dir / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["certification"] = "gold"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    caught = _expect(config, "generate", RunStatus.INVALID_RUN_ARTIFACT)
+
+    assert "run_manifest.json does not match run_record.json" in str(caught)
+
+
+def test_rewriting_the_publication_claim_still_cannot_upgrade_silver(tmp_path: Path) -> None:
+    config = _config(tmp_path, overrides={"budget": {"assisted_max_cases": 1}})
+    run_dir = _run(config, "prepare")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+    _expect(config, "generate", RunStatus.SILVER_COMPLETED)
+    manifest_path = run_dir / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["certification"] = "gold"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    record_path = run_dir / "run_record.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["publication"]["certification"] = "gold"
+    record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+    caught = _expect(config, "generate", RunStatus.INVALID_RUN_ARTIFACT)
+
+    assert "certification does not match the signed review packet" in str(caught)
+
+
+def test_published_manifest_must_list_every_compiled_file(tmp_path: Path) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+    _expect(config, "generate", RunStatus.GOLD_COMPLETED)
+    manifest_path = run_dir / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"].pop("quality_report.json")
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    caught = _expect(config, "generate", RunStatus.INVALID_RUN_ARTIFACT)
+
+    assert "files must list" in str(caught)
+    assert "quality_report.json" in str(caught)
+
+
+def test_torn_publication_commit_is_recovered_when_the_manifest_matches(tmp_path: Path) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+    _expect(config, "generate", RunStatus.GOLD_COMPLETED)
+    record_path = run_dir / "run_record.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["publication_commit"] = False
+    record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+    published = _expect(config, "generate", RunStatus.GOLD_COMPLETED)
+
+    assert published.cli_exit_code == 0
+    assert _record(run_dir)["publication_commit"] is True
+
+
+def test_published_signoff_is_bound_by_the_manifest(tmp_path: Path) -> None:
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    sign_safety_packet(config, approved_by="Lan")
+    _expect(config, "generate", RunStatus.GOLD_COMPLETED)
+    signoff = run_dir / "publication_signoff.json"
+    signoff.write_bytes(signoff.read_bytes() + b"\n")
+
+    caught = _expect(config, "generate", RunStatus.INVALID_RUN_ARTIFACT)
+
+    assert "publication_signoff.json changed after it was signed" in str(caught)
+
+
 # Privacy
 
 
@@ -453,7 +695,7 @@ def test_one_safe_source_prevents_the_privacy_block(tmp_path: Path) -> None:
     config, run_dir, _, _ = _prepared(tmp_path, files={"secret.md": "secret", "sub/clean.md": "public"})
     _quarantine(tmp_path, run_dir, {"secret.md": "quarantined", "sub/clean.md": "safe"})
 
-    _expect(config, "generate", RunStatus.PIPELINE_INCOMPLETE)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
 
 
 def test_incomplete_quarantine_report_is_not_treated_as_safe(tmp_path: Path) -> None:
@@ -492,7 +734,7 @@ def test_run_blocked_row_needs_the_current_inputs(tmp_path: Path) -> None:
 
     stale = {"run_blocked": True, "config_sha256": digest, "source_fingerprint": "old"}
     report.write_text(json.dumps(stale) + "\n" + json.dumps(file_row) + "\n", encoding="utf-8")
-    _expect(config, "generate", RunStatus.PIPELINE_INCOMPLETE)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
 
     current = {"run_blocked": True, "config_sha256": digest, "source_fingerprint": fingerprint}
     report.write_text(json.dumps(current) + "\n", encoding="utf-8")
@@ -641,7 +883,7 @@ def test_second_writer_is_refused_while_the_run_is_locked(tmp_path: Path) -> Non
     [
         ("prepare", 0, ""),
         ("generate", 3, "review_required:"),
-        ("eval", 1, "stage_unavailable:"),
+        ("eval", 1, "invalid_run_artifact:"),
         ("translate", 1, "stage_unavailable:"),
     ],
 )

@@ -38,12 +38,26 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.config import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import (
     COVERAGE_OUTPUTS,
+    GAPS_FILE,
+    PLAN_FILE,
     build_coverage_plan,
     case_cap_for,
     load_eligible_rules,
     load_routed_statuses,
     span_text,
     write_coverage_plan,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import (
+    DATASET_OUTPUTS,
+    load_jsonl_objects,
+    select_dataset,
+    write_dataset,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.eval import (
+    EvalInputError,
+    clear_evaluation,
+    evaluate_published,
+    write_evaluation,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.extract import PROMPT_VERSION
 from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
@@ -56,7 +70,31 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
     rule_input_digests,
     write_artifacts,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.publish import (
+    MANIFEST_NAME,
+    assert_published_intact,
+    clear_published,
+    compile_publication,
+    publication_claim,
+    status_for,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
+    content_matches,
+    install_review,
+    load_review,
+    pending_detail,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.rules import POLICY_RULES_FILE, run_rule_stages
+from nemotron.steps.byob.runtime.benchmark_families.safety.scenarios import (
+    CASES_FILE,
+    CONTRAST_FILE,
+    SCENARIO_OUTPUTS,
+    build_scenarios,
+    load_contrast_families,
+    load_plan_rows,
+    load_unscheduled_slots,
+    write_scenarios,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.sources import (
     SourceChangedError,
     SourceError,
@@ -146,6 +184,8 @@ def prepare_safety(config_path: ConfigPath) -> Path:
         }
         (run_dir / "stage_cache").mkdir(exist_ok=True)
         (run_dir / "quarantine").mkdir(exist_ok=True)
+        clear_published(run_dir)
+        clear_evaluation(run_dir)
         _write_yaml(run_dir / "config_resolved.yaml", resolved.to_dict())
         write_artifacts(run_dir, ingested)
         record["ingest_artifacts"] = rule_input_digests(run_dir / "stage_cache")
@@ -172,7 +212,7 @@ def _ingest_detail(ingested: IngestResult) -> str:
 
 
 def generate_safety(config_path: ConfigPath, /, *, skip_until: str | None = None) -> Path:
-    """Publication entry point. Coverage is planned here; case text arrives in a later task."""
+    """Build, review, resume, and publish one signed safety benchmark."""
     resolved = _load(config_path)
     run_dir = resolved.run_dir
     digest = _digest(resolved)
@@ -187,14 +227,21 @@ def generate_safety(config_path: ConfigPath, /, *, skip_until: str | None = None
             )
         if record is None or not _same_inputs(record, digest, fingerprint):
             raise abort(RunStatus.PREPARE_REQUIRED, run_dir, _changed_inputs(record, digest, fingerprint))
-        if skip_until is not None:
+        manifest: dict[str, Any] | None = None
+        resumed = _resume_published(run_dir, record)
+        if resumed is not None:
+            status, detail, rule_counts = resumed
+        elif skip_until is not None:
             status, detail = (
                 RunStatus.PIPELINE_INCOMPLETE,
                 "skip_until is not available until safety checkpoints exist.",
             )
+            rule_counts = None
         else:
             try:
-                status, detail, rule_counts = _publication_blocker(resolved, digest, fingerprint, sources, record)
+                status, detail, rule_counts, manifest = _publication_blocker(
+                    resolved, digest, fingerprint, sources, record
+                )
             except SafetyStatus as caught:
                 # The exception still stops the command. The record keeps the same status.
                 now = _now()
@@ -208,8 +255,66 @@ def generate_safety(config_path: ConfigPath, /, *, skip_until: str | None = None
         record["status"] = status.value
         record["last_outcome"] = {"stage": "generate", "status": status.value, "at": _now()}
         record["updated_at"] = record["last_outcome"]["at"]
-        _write_json(run_dir / "run_record.json", record)
+        if manifest is not None:
+            _commit_publication(run_dir, record, manifest)
+        else:
+            _write_json(run_dir / "run_record.json", record)
     raise abort(status, run_dir, detail)
+
+
+def _resume_published(
+    run_dir: Path, record: dict[str, Any]
+) -> tuple[RunStatus, str, dict[str, int] | None] | None:
+    """Return the published outcome when the commit is intact, including a torn last write."""
+    if record.get("publication_commit") is True:
+        assert_published_intact(run_dir, record)
+        return _published_outcome(run_dir, record)
+    claim = record.get("publication")
+    if not isinstance(claim, dict) or not claim.get("certification"):
+        return None
+    if not (run_dir / MANIFEST_NAME).is_file():
+        return None
+    try:
+        assert_published_intact(run_dir, {**record, "publication_commit": True})
+    except SafetyStatus:
+        return None
+    record["publication_commit"] = True
+    record["updated_at"] = _now()
+    _write_json(run_dir / "run_record.json", record)
+    return _published_outcome(run_dir, record)
+
+
+def _published_outcome(
+    run_dir: Path, record: dict[str, Any]
+) -> tuple[RunStatus, str, dict[str, int] | None]:
+    published = _read_json(run_dir / MANIFEST_NAME, run_dir)
+    if published is None:
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"{MANIFEST_NAME} is missing after publication.")
+    try:
+        status = status_for(str(published.get("certification") or ""))
+    except KeyError as exc:
+        raise abort(
+            RunStatus.INVALID_RUN_ARTIFACT,
+            run_dir,
+            f"{MANIFEST_NAME} has an unknown certification.",
+        ) from exc
+    rule_counts = record.get("rules") if isinstance(record.get("rules"), dict) else None
+    return status, "", rule_counts
+
+
+def _commit_publication(run_dir: Path, record: dict[str, Any], manifest: dict[str, Any]) -> None:
+    """Write the manifest as the publication commit, then record that the commit exists.
+
+    Compiled files already exist. The run record first stores the claim without
+    ``publication_commit``, then the manifest is written, then the flag is set.
+    A crash after the manifest is recovered by verifying the claim.
+    """
+    record["publication"] = publication_claim(manifest)
+    record["publication_commit"] = False
+    _write_json(run_dir / "run_record.json", record)
+    _write_json(run_dir / MANIFEST_NAME, manifest)
+    record["publication_commit"] = True
+    _write_json(run_dir / "run_record.json", record)
 
 
 def translate_safety(config_path: ConfigPath, /, *, skip_until: str | None = None) -> Path:
@@ -219,54 +324,201 @@ def translate_safety(config_path: ConfigPath, /, *, skip_until: str | None = Non
 
 
 def evaluate_safety(config_path: ConfigPath) -> Path:
-    """Keep evaluation off the shared dispatcher's Silver exit code."""
-    raise _unavailable(config_path)
+    """Score a published benchmark with the path-1 adapter and the path-2 Guardrails log."""
+    resolved = _load(config_path)
+    run_dir = resolved.run_dir
+    if not run_dir.is_dir():
+        raise abort(RunStatus.PREPARE_REQUIRED, run_dir)
+    with _run_lock(run_dir):
+        record = _read_json(run_dir / "run_record.json", run_dir)
+        if record is not None and not _valid_record(record):
+            raise abort(
+                RunStatus.INVALID_RUN_ARTIFACT, run_dir, "run_record.json is damaged; run stage=prepare to recover it."
+            )
+        if record is None or record.get("publication_commit") is not True:
+            raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "Evaluation needs a published benchmark.")
+        assert_published_intact(run_dir, record)
+        evaluation = resolved.extras.get("evaluation")
+        try:
+            path1, path2 = evaluate_published(run_dir, evaluation, config_path=Path(config_path))
+        except EvalInputError as exc:
+            raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, str(exc)) from exc
+        write_evaluation(run_dir, path1, path2)
+        now = _now()
+        record["evaluation"] = {"path1": path1.get("status"), "path2": path2.get("status")}
+        record["last_outcome"] = {"stage": "eval", "status": "evaluated", "at": now}
+        record["updated_at"] = now
+        _write_json(run_dir / "run_record.json", record)
+    return run_dir
 
 
 def _publication_blocker(
     config: ResolvedConfig, digest: str, fingerprint: str, sources: dict[str, str], record: dict[str, Any]
-) -> tuple[RunStatus, str, dict[str, int] | None]:
+) -> tuple[RunStatus, str, dict[str, int] | None, dict[str, Any] | None]:
     """Return the status generate must surface before it stops, with any extra detail and rule counts.
 
     The privacy check runs first: rule extraction is the first stage that may call a model.
     """
     source_stop = _source_blocker(config, digest, fingerprint, sources)
     if source_stop is not None:
-        return source_stop, "", None
+        return source_stop, "", None, None
     run_dir = config.run_dir
     _check_rule_inputs(record, run_dir)
+    packet_path = run_dir / PACKET_NAME
+    previous_packet = _read_packet(packet_path, run_dir)
+    signoff = _read_json(run_dir / SIGNOFF_NAME, run_dir)
+    if previous_packet is not None and signoff is not None and _bound_to(previous_packet, digest, fingerprint):
+        packet_sha256 = _file_sha256(packet_path, run_dir)
+        if not _signs_packet(signoff, digest, fingerprint, packet_sha256):
+            clear_published(run_dir)
+            return (
+                RunStatus.REVIEW_REQUIRED,
+                f"{SIGNOFF_NAME} does not match the current review packet, so it was not accepted. "
+                "Sign the current packet again.",
+                record.get("rules") if isinstance(record.get("rules"), dict) else None,
+                None,
+            )
+        if isinstance(previous_packet.get("content"), dict):
+            mismatched = content_matches(run_dir, previous_packet)
+            if mismatched:
+                raise abort(
+                    RunStatus.INVALID_RUN_ARTIFACT,
+                    run_dir,
+                    f"{mismatched} changed after the review packet was signed.",
+                )
     counts = _rule_stages(config, digest, fingerprint)
     coverage = _coverage_stage(config, digest, fingerprint)
     record["coverage"] = coverage
+    scenarios = _scenario_stage(config, digest, fingerprint)
+    record["scenarios"] = scenarios
+    dataset = _dataset_stage(config, digest, fingerprint)
+    record["dataset"] = dataset
     coverage_note = (
         f"Coverage plan: {coverage['certification']} for eligible rules, "
         f"{coverage['scheduled_cases']} scheduled, {coverage['required_cases']} required, "
         f"{len(coverage['missing_required'])} required omitted, "
         f"{len(coverage['excluded_rules'])} rules excluded."
     )
+    scenario_note = (
+        f"Scenarios: {scenarios['accepted']} accepted, {scenarios['rejected']} rejected, "
+        f"{scenarios['reused_missing_leg']} missing-leg cases reused."
+    )
+    dataset_note = (
+        f"Dataset: {dataset['validated']} validated, {dataset['rejected']} rejected, "
+        f"{dataset['duplicates_removed']} duplicates removed, "
+        f"{dataset['development']} development, {dataset['private_test']} private-test "
+        f"({dataset['split_reason']})."
+    )
     if counts["eligible_for_generation"] + counts["needs_decision"] == 0:
-        return RunStatus.NO_USABLE_RULES, f"{_rule_summary(counts)} {coverage_note}", counts
-    rules_note = f"{_rule_summary(counts)} {coverage_note} Rule file: {run_dir / 'stage_cache' / POLICY_RULES_FILE}."
-    packet_path = run_dir / PACKET_NAME
-    packet = _read_packet(packet_path, run_dir)
-    if packet is None:
-        return RunStatus.PIPELINE_INCOMPLETE, rules_note, counts
-    if not _bound_to(packet, digest, fingerprint):
-        return RunStatus.PIPELINE_INCOMPLETE, f"{rules_note} {_OLDER_PACKET}", counts
-    signoff = _read_json(run_dir / SIGNOFF_NAME, run_dir)
-    if signoff is None:
-        return RunStatus.REVIEW_REQUIRED, "", counts
-    if not _signs_packet(signoff, digest, fingerprint, _file_sha256(packet_path, run_dir)):
+        return (
+            RunStatus.NO_USABLE_RULES,
+            f"{_rule_summary(counts)} {coverage_note} {scenario_note} {dataset_note}",
+            counts,
+            None,
+        )
+    rules_note = (
+        f"{_rule_summary(counts)} {coverage_note} {scenario_note} {dataset_note} "
+        f"Rule file: {run_dir / 'stage_cache' / POLICY_RULES_FILE}."
+    )
+    build = load_review(
+        run_dir,
+        config_sha256=digest,
+        source_fingerprint=fingerprint,
+        mode=config.mode,
+        profile=config.assurance["profile"],
+        example_cap=config.budget["max_review_items"],
+    )
+    current_digest = _file_sha256(packet_path, run_dir) if packet_path.is_file() else ""
+    packet_changed = current_digest != build.digest
+    if packet_changed:
+        older = previous_packet is not None and not _bound_to(previous_packet, digest, fingerprint)
+        install_review(run_dir, build)
+        clear_published(run_dir)
+        record["review"] = _review_record(build)
+        if config.mode != "preview" or build.pending:
+            if older:
+                detail = f"{rules_note} {_OLDER_PACKET}"
+            elif signoff is not None and _signed_roles(signoff):
+                detail = (
+                    f"{SIGNOFF_NAME} does not match the current review packet, so it was not accepted. "
+                    "Sign the current packet again."
+                )
+            elif signoff is not None:
+                detail = _signoff_gaps(signoff, config, build.packet, run_dir)
+            else:
+                detail = rules_note
+            return (
+                RunStatus.REVIEW_REQUIRED,
+                detail,
+                counts,
+                None,
+            )
+    else:
+        # Normalize the decision sheet and refresh the page without changing the signed packet.
+        install_review(run_dir, build)
+        clear_published(run_dir)
+        record["review"] = _review_record(build)
+    if signoff is None and config.mode != "preview":
+        return RunStatus.REVIEW_REQUIRED, "", counts, None
+    if signoff is not None and not _signs_packet(signoff, digest, fingerprint, build.digest):
         return (
             RunStatus.REVIEW_REQUIRED,
             f"{SIGNOFF_NAME} does not match the current review packet, so it was not accepted. "
             "Sign the current packet again.",
             counts,
+            None,
         )
-    gaps = _signoff_gaps(signoff, config, packet, run_dir)
-    if gaps:
-        return RunStatus.REVIEW_REQUIRED, gaps, counts
-    return RunStatus.PIPELINE_INCOMPLETE, rules_note, counts
+    if signoff is not None:
+        gaps = _signoff_gaps(signoff, config, build.packet, run_dir)
+        if gaps:
+            return RunStatus.REVIEW_REQUIRED, gaps, counts, None
+    if build.pending:
+        return RunStatus.REVIEW_REQUIRED, pending_detail(build.pending), counts, None
+    stage_cache = run_dir / "stage_cache"
+    try:
+        cases = load_jsonl_objects(
+            (stage_cache / "deduplicated_cases.jsonl").read_text(encoding="utf-8"),
+            "deduplicated_cases.jsonl",
+        )
+        families = load_jsonl_objects(
+            (stage_cache / CONTRAST_FILE).read_text(encoding="utf-8"),
+            CONTRAST_FILE,
+        )
+        split_manifest = json.loads((stage_cache / "split_manifest.json").read_text(encoding="utf-8"))
+        if not isinstance(split_manifest, dict):
+            raise ValueError("split_manifest.json must contain an object")
+        manifest = compile_publication(
+            run_dir,
+            build.packet,
+            cases=cases,
+            families=families,
+            split_manifest=split_manifest,
+            withheld_policies=build.withheld_policies,
+            mode=config.mode,
+            published_at=_now(),
+            config_sha256=digest,
+            source_fingerprint=fingerprint,
+            packet_sha256=build.digest,
+        )
+    except SafetyStatus:
+        clear_published(run_dir)
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        clear_published(run_dir)
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"benchmark cannot be compiled: {exc}") from exc
+    return status_for(manifest["certification"]), "", counts, manifest
+
+
+def _review_record(build: Any) -> dict[str, Any]:
+    """Small resumable review summary for run_record.json."""
+    return {
+        "packet_sha256": build.digest,
+        "cards": len(build.packet["cards"]),
+        "pending": len(build.pending),
+        "withheld_policies": len(build.withheld_policies),
+        "unresolved_rules": len(build.packet["unresolved_rules"]),
+        "unresolved_conflicts": len(build.packet["unresolved_conflicts"]),
+    }
 
 
 def _rule_stages(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[str, int]:
@@ -282,10 +534,12 @@ def _rule_stages(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[
         )
     bound = {"config_sha256": digest, "source_fingerprint": fingerprint}
     stage_cache = run_dir / "stage_cache"
-    # The plan names rules from the previous result. Drop it with those rules, before the index changes.
-    for name in COVERAGE_OUTPUTS:
+    # The plan and its cases name rules from the previous result. Drop both before the index changes.
+    for name in (*COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *DATASET_OUTPUTS):
         (stage_cache / name).unlink(missing_ok=True)
     index["stages"].pop("coverage_plan", None)
+    index["stages"].pop("scenarios", None)
+    index["stages"].pop("dataset", None)
     # Rule outputs are replaced from here on. Until they are written, the index must not say completed.
     for stage in RULE_STAGES:
         index["stages"][stage] = {"status": "running", **bound, "started_at": _now()}
@@ -337,7 +591,9 @@ def _coverage_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
             case_cap=case_cap_for(config.mode, config.budget),
             budget=config.budget,
             modules=config.generation["modules"],
+            generation=config.generation,
             routed=routed,
+            target_languages=config.proposals.get("target_languages", []),
         )
         summary = write_coverage_plan(stage_cache, plan)
     except Exception as exc:
@@ -356,6 +612,97 @@ def _coverage_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
         "certification": summary["certification"],
         "scheduled_cases": summary["scheduled_cases"],
         "required_cases": summary["required_cases"],
+    }
+    _write_json(index_path, index)
+    return summary
+
+
+def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[str, Any]:
+    """Write one seed per scheduled plan cell. This stage does not call a model."""
+    run_dir = config.run_dir
+    stage_cache = run_dir / "stage_cache"
+    index_path = stage_cache / "cache_index.json"
+    index = _read_json(index_path, run_dir)
+    if index is None or not _valid_cache_index(index):
+        raise abort(
+            RunStatus.INVALID_RUN_ARTIFACT,
+            run_dir,
+            "stage_cache/cache_index.json is missing or damaged; run stage=prepare.",
+        )
+    bound = {"config_sha256": digest, "source_fingerprint": fingerprint}
+    index["stages"]["scenarios"] = {"status": "running", **bound, "started_at": _now()}
+    _write_json(index_path, index)
+    try:
+        rules = load_eligible_rules(yaml.safe_load((stage_cache / "policy_rules_eligible.yaml").read_text("utf-8")))
+        rows = load_plan_rows((stage_cache / PLAN_FILE).read_text(encoding="utf-8"))
+        gaps = json.loads((stage_cache / GAPS_FILE).read_text(encoding="utf-8"))
+        summary = write_scenarios(
+            stage_cache,
+            build_scenarios(
+                rows,
+                load_contrast_families(gaps),
+                rules,
+                unscheduled=load_unscheduled_slots(gaps),
+            ),
+        )
+    except Exception as exc:
+        for name in SCENARIO_OUTPUTS:
+            (stage_cache / name).unlink(missing_ok=True)
+        outcome = exc.status.value if isinstance(exc, SafetyStatus) else type(exc).__name__
+        index["stages"]["scenarios"] = {"status": "failed", "outcome": outcome, **bound, "failed_at": _now()}
+        _write_json(index_path, index)
+        if isinstance(exc, SafetyStatus):
+            raise
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"scenarios cannot be built: {exc}") from exc
+    index["stages"]["scenarios"] = {
+        "status": "completed",
+        **bound,
+        "completed_at": _now(),
+        "accepted": summary["accepted"],
+        "rejected": summary["rejected"],
+    }
+    _write_json(index_path, index)
+    return summary
+
+
+def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[str, Any]:
+    """Check labels, drop exact duplicates, and split the cases. This stage does not call a model."""
+    run_dir = config.run_dir
+    stage_cache = run_dir / "stage_cache"
+    index_path = stage_cache / "cache_index.json"
+    index = _read_json(index_path, run_dir)
+    if index is None or not _valid_cache_index(index):
+        raise abort(
+            RunStatus.INVALID_RUN_ARTIFACT,
+            run_dir,
+            "stage_cache/cache_index.json is missing or damaged; run stage=prepare.",
+        )
+    bound = {"config_sha256": digest, "source_fingerprint": fingerprint}
+    index["stages"]["dataset"] = {"status": "running", **bound, "started_at": _now()}
+    _write_json(index_path, index)
+    try:
+        rules = load_eligible_rules(yaml.safe_load((stage_cache / "policy_rules_eligible.yaml").read_text("utf-8")))
+        spans = span_text(json.loads((stage_cache / "source_index.json").read_text(encoding="utf-8")))
+        cases = load_jsonl_objects((stage_cache / CASES_FILE).read_text(encoding="utf-8"), CASES_FILE)
+        families = load_jsonl_objects((stage_cache / CONTRAST_FILE).read_text(encoding="utf-8"), CONTRAST_FILE)
+        summary = write_dataset(stage_cache, select_dataset(cases, families, rules, spans))
+    except Exception as exc:
+        for name in DATASET_OUTPUTS:
+            (stage_cache / name).unlink(missing_ok=True)
+        outcome = exc.status.value if isinstance(exc, SafetyStatus) else type(exc).__name__
+        index["stages"]["dataset"] = {"status": "failed", "outcome": outcome, **bound, "failed_at": _now()}
+        _write_json(index_path, index)
+        if isinstance(exc, SafetyStatus):
+            raise
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"dataset cannot be built: {exc}") from exc
+    index["stages"]["dataset"] = {
+        "status": "completed",
+        **bound,
+        "completed_at": _now(),
+        "validated": summary["validated"],
+        "rejected": summary["rejected"],
+        "duplicates_removed": summary["duplicates_removed"],
+        "split_complete": summary["split_complete"],
     }
     _write_json(index_path, index)
     return summary
@@ -424,6 +771,9 @@ def sign_safety_packet(
         record = _read_json(run_dir / "run_record.json", run_dir)
         if record is None or not _same_inputs(record, digest, fingerprint):
             raise abort(RunStatus.PREPARE_REQUIRED, run_dir, _changed_inputs(record, digest, fingerprint))
+        if record.get("publication_commit") is True:
+            assert_published_intact(run_dir, record)
+            raise _sign_error("This benchmark is already published. Run stage=prepare before starting a new review.")
         packet_path = run_dir / PACKET_NAME
         packet = _read_packet(packet_path, run_dir)
         if packet is None:

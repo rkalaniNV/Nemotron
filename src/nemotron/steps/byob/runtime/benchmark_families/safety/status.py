@@ -102,7 +102,7 @@ def explain(status: RunStatus, run_dir: Path) -> str:
         return f"Preview benchmark published. This result is not a comparable score. Output directory: {run_dir}."
     if status is RunStatus.PIPELINE_INCOMPLETE:
         return (
-            "Case generation and publication are not connected yet, so no benchmark was published. "
+            "Publication did not finish, so no benchmark was published. "
             f"Output directory: {run_dir}."
         )
     if status is RunStatus.NO_USABLE_RULES:

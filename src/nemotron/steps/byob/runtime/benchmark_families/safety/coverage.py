@@ -20,15 +20,21 @@ it does not call a model. Required cells are scheduled before optional cells. A 
 cell that does not fit is listed in the gap file, and the plan is Silver.
 """
 
+import hashlib
 import json
-import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nemotron.steps.byob.runtime.benchmark_families.safety.actions import ACTION_ORDER
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_json, write_jsonl
+from nemotron.steps.byob.runtime.benchmark_families.safety.case_facts import (
+    acting_groups,
+    case_context,
+    primary_action,
+    violation_facts,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
     ConditionGroup,
     PolicyRule,
@@ -45,6 +51,8 @@ COVERAGE_OUTPUTS = (PLAN_FILE, GAPS_FILE)
 # a separate pass after every required cell.
 _REQUIRED_KIND_ORDER = (
     "clear_violation",
+    "all_legs",
+    "condition_path",
     "clear_allow",
     "boundary",
     "exception",
@@ -55,38 +63,6 @@ _REQUIRED_KIND_ORDER = (
 )
 _OPTIONAL_KIND_ORDER = ("adversarial", "actor_swap", "persona")
 _KIND_RANK = {kind: rank for rank, kind in enumerate(_REQUIRED_KIND_ORDER + _OPTIONAL_KIND_ORDER)}
-_ACTING = (
-    ("escalate_if", "escalate"),
-    ("block_if", "block"),
-    ("require_confirmation_if", "require_confirmation"),
-)
-_STEP = re.compile(
-    r"(?m)^[ \t]*(?:\d{1,2}[.)]|bước[ \t]+\d+|step[ \t]+\d+)[ \t]+\S",
-    re.IGNORECASE,
-)
-_SEQUENCE_PHRASES = (
-    "multi-turn",
-    "multi turn",
-    "nhiều lượt",
-    "nhiều bước",
-    "numbered steps",
-    "trong hội thoại",
-    "in a dialogue",
-    "in the dialogue",
-    "hidden instruction",
-    "instruction hidden",
-)
-_CODE_SWITCH_PHRASES = (
-    "code-switch",
-    "code switch",
-    "codeswitch",
-    "chuyển mã",
-    "trộn ngôn ngữ",
-    "mixed-language",
-    "mixed language",
-)
-# A phrase after one of these, in the same clause, does not describe a required case.
-_NEGATION = re.compile(r"(?<!\w)(?:không|chẳng|chả|chưa|đừng|not|never|without|no)(?!\w)", re.IGNORECASE)
 _RECORD_FIELDS = (
     "certification",
     "reason",
@@ -221,7 +197,9 @@ def build_coverage_plan(
     case_cap: int,
     budget: Mapping[str, Any],
     modules: Mapping[str, Any],
+    generation: Mapping[str, Any] | None = None,
     routed: Sequence[Mapping[str, Any]] | None = None,
+    target_languages: Sequence[str] = (),
 ) -> CoveragePlan:
     """Plan eligible rules. Other statuses are listed under ``excluded_rules`` and add no cell.
 
@@ -237,17 +215,23 @@ def build_coverage_plan(
     required: list[dict[str, Any]] = []
     optional: list[dict[str, Any]] = []
     families: list[dict[str, Any]] = []
+    planned: dict[str, dict[str, Any]] = {}
     max_turns = int(budget["max_turns"])
     for rule in eligible:
-        text = _source_text(rule, spans)
+        _require_source(rule, spans)
         languages = _declared_languages(rule)
         primary = languages[0] if languages else None
-        required.extend(_required_cells(rule, by_id, text, languages, primary, max_turns))
-        optional.extend(_optional_cells(rule, primary, modules))
-        families.extend(_contrast_families(rule, _paired_allow(rule, by_id)))
+        translation = _translation_languages(languages, target_languages)
+        rule_required = _required_cells(rule, by_id, translation, primary, max_turns)
+        rule_optional = _optional_cells(rule, by_id, primary, modules)
+        required.extend(rule_required)
+        optional.extend(rule_optional)
+        for cell in (*rule_required, *rule_optional):
+            planned[cell["slot_id"]] = cell
+        families.extend(_contrast_families(rule, _paired_allow(rule, by_id), planned))
     required.sort(key=_sort_key)
     optional.sort(key=_sort_key)
-    rows, gaps = _schedule(required, optional, case_cap, budget)
+    rows, gaps = _schedule(required, optional, case_cap, budget, generation)
     scheduled = {row["slot_id"] for row in rows}
     marked = tuple(_with_scheduled(family, scheduled) for family in families)
     blocking = [gap for gap in gaps if gap["blocks_gold"]]
@@ -276,86 +260,142 @@ def write_coverage_plan(stage_cache: Path, plan: CoveragePlan) -> dict[str, Any]
 def _required_cells(
     rule: PolicyRule,
     by_id: Mapping[str, PolicyRule],
-    text: str,
-    languages: Sequence[str],
+    translation_languages: Sequence[str],
     primary: str | None,
     max_turns: int,
 ) -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
-    action = _primary_action(rule)
-    allow_action, partner, allow_flags = _allow_case(rule, by_id)
-    if action is not None:
-        cells.append(_cell(rule, "clear_violation", action, primary=primary))
-    cells.append(
-        _cell(rule, "clear_allow", allow_action, primary=primary, flags=allow_flags, paired_policy_id=partner)
-    )
+    rules = tuple(by_id[policy_id] for policy_id in sorted(by_id))
+    _partner_action, partner, allow_flags = _allow_case(rule, by_id)
+    if primary_action(rule) is not None:
+        cells.append(_planned(rule, rules, "clear_violation", primary=primary))
+    cells.extend(_all_leg_cells(rule, rules, primary))
+    cells.extend(_condition_path_cells(rule, rules, primary))
+    cells.append(_planned(rule, rules, "clear_allow", primary=primary, flags=allow_flags, paired_policy_id=partner))
     ambiguous = rule.decision.ambiguous_action
     cells.append(
-        _cell(
+        _planned(
             rule,
+            rules,
             "boundary",
-            ambiguous,
             primary=primary,
             flags=() if ambiguous is not None else ("boundary_action_unspecified",),
         )
     )
     if rule.exceptions:
-        cells.append(_cell(rule, "exception", "allow", primary=primary, exceptions=list(rule.exceptions)))
-    cells.extend(_missing_legs(rule, action, primary, allow_flags, partner))
-    for language in languages[1:]:
+        cells.append(_planned(rule, rules, "exception", primary=primary, exceptions=list(rule.exceptions)))
+    cells.extend(_missing_legs(rule, rules, primary, allow_flags, partner))
+    declared = _declared_languages(rule)
+    for language in translation_languages:
         cells.append(
-            _cell(
+            _planned(
                 rule,
+                rules,
                 "language",
-                action or "allow",
                 primary=primary,
                 language=language,
                 slot_id=_slot(rule.policy_id, "language", language),
+                hold="translation_required",
             )
         )
-    switched = _code_switch_languages(text, languages)
+    switched = _code_switch_languages(rule, declared)
     if switched is not None:
         cells.append(
-            _cell(
+            _planned(
                 rule,
+                rules,
                 "code_switch",
-                action or "allow",
                 primary=primary,
                 languages=switched,
+                hold="translation_required",
             )
         )
-    multi_turn = _multi_turn(rule, text, action, primary, max_turns)
+    multi_turn = _multi_turn(rule, rules, primary, max_turns)
     if multi_turn is not None:
         cells.append(multi_turn)
     return cells
 
 
+def _all_leg_cells(rule: PolicyRule, rules: Sequence[PolicyRule], primary: str | None) -> list[dict[str, Any]]:
+    """One block case per ``all_of`` group that is not already the clear violation.
+
+    The clear violation keeps the strongest action. A second group needs its own case,
+    so its contrast pair can remove exactly one of its own legs.
+    """
+    cells: list[dict[str, Any]] = []
+    for name, group_action, group in acting_groups(rule):
+        if group.operator != "all_of" or len(group.legs) < 2:
+            continue
+        if _block_slot(rule, name, group, group_action) == _slot(rule.policy_id, "clear_violation"):
+            continue
+        cells.append(
+            _planned(
+                rule,
+                rules,
+                "all_legs",
+                primary=primary,
+                slot_id=_slot(rule.policy_id, "all_legs", name),
+                condition_class=name,
+            )
+        )
+    return cells
+
+
+def _condition_path_cells(
+    rule: PolicyRule, rules: Sequence[PolicyRule], primary: str | None
+) -> list[dict[str, Any]]:
+    """One minimal case for every any-of leg and every none-of condition class."""
+    cells: list[dict[str, Any]] = []
+    clear = case_context(rules, rule, "clear_violation")
+    for name, _group_action, group in acting_groups(rule):
+        if group.operator == "all_of":
+            continue
+        triggers: Sequence[str | None] = group.legs if group.operator == "any_of" else (None,)
+        for trigger in triggers:
+            extra: dict[str, Any] = {"condition_class": name}
+            parts = [name]
+            if trigger is not None:
+                extra["trigger_leg"] = trigger
+                parts.append(trigger)
+            context = case_context(rules, rule, "condition_path", trigger_leg=trigger, condition_class=name)
+            if context == clear:
+                continue
+            cells.append(
+                _planned(
+                    rule,
+                    rules,
+                    "condition_path",
+                    primary=primary,
+                    slot_id=_slot(rule.policy_id, "condition_path", *parts),
+                    **extra,
+                )
+            )
+    return cells
+
+
 def _missing_legs(
     rule: PolicyRule,
-    action: str | None,
+    rules: Sequence[PolicyRule],
     primary: str | None,
     allow_flags: Sequence[str],
     partner: str | None,
 ) -> list[dict[str, Any]]:
-    """One allow case per leg of an ``all_of`` group. ``any_of`` adds none, including the default."""
-    del action
+    """One case per leg of an ``all_of`` group. ``any_of`` adds none, including the default."""
     cells: list[dict[str, Any]] = []
-    for name, _group_action, group in _acting_groups(rule):
+    for name, _group_action, group in acting_groups(rule):
         if group.operator != "all_of" or len(group.legs) < 2:
             continue
         for absent in group.legs:
-            present = [leg for leg in group.legs if leg != absent]
             cells.append(
-                _cell(
+                _planned(
                     rule,
+                    rules,
                     "missing_leg",
-                    "allow",
                     primary=primary,
                     flags=allow_flags,
                     slot_id=_slot(rule.policy_id, "missing_leg", name, absent),
                     condition_class=name,
                     absent_leg=absent,
-                    present_legs=present,
                     paired_policy_id=partner,
                 )
             )
@@ -363,19 +403,12 @@ def _missing_legs(
 
 
 def _multi_turn(
-    rule: PolicyRule, text: str, action: str | None, primary: str | None, max_turns: int
+    rule: PolicyRule, rules: Sequence[PolicyRule], primary: str | None, max_turns: int
 ) -> dict[str, Any] | None:
-    steps = len(_STEP.findall(text))
-    if steps < 2 and not any(_affirmed(text, phrase) for phrase in _SEQUENCE_PHRASES):
+    source_turns = rule.signals.multi_turn_turns
+    if source_turns is None:
         return None
-    source_turns = steps if steps >= 2 else 2
-    cell = _cell(
-        rule,
-        "multi_turn",
-        action or "allow",
-        primary=primary,
-        source_turns=source_turns,
-    )
+    cell = _planned(rule, rules, "multi_turn", primary=primary, source_turns=source_turns)
     # A multi-turn case needs two turns. A lower cap cannot be filled by a one-turn case.
     if max_turns < 2:
         cell["hold"] = "max_turns"
@@ -386,42 +419,48 @@ def _multi_turn(
     return cell
 
 
-def _optional_cells(rule: PolicyRule, primary: str | None, modules: Mapping[str, Any]) -> list[dict[str, Any]]:
-    action = _primary_action(rule) or "allow"
+def _optional_cells(
+    rule: PolicyRule, by_id: Mapping[str, PolicyRule], primary: str | None, modules: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    rules = tuple(by_id[policy_id] for policy_id in sorted(by_id))
     cells: list[dict[str, Any]] = []
-    if modules.get("adversarial") is True and _primary_action(rule) is not None:
-        cells.append(
-            _cell(rule, "adversarial", action, primary=primary, priority="optional", flags=("preserves_label",))
-        )
+    preserved = ("preserves_label",)
+    if modules.get("adversarial") is True and primary_action(rule) is not None:
+        cells.append(_planned(rule, rules, "adversarial", primary=primary, priority="optional", flags=preserved))
     if modules.get("political_symmetry") is True:
-        cells.append(
-            _cell(rule, "actor_swap", action, primary=primary, priority="optional", flags=("preserves_label",))
-        )
-    cells.append(_cell(rule, "persona", action, primary=primary, priority="optional", flags=("preserves_label",)))
+        cells.append(_planned(rule, rules, "actor_swap", primary=primary, priority="optional", flags=preserved))
+    cells.append(_planned(rule, rules, "persona", primary=primary, priority="optional", flags=preserved))
     return cells
 
 
-def _contrast_families(rule: PolicyRule, paired_allow: bool) -> list[dict[str, Any]]:
-    action = _primary_action(rule)
-    if action is None:
+def _contrast_families(
+    rule: PolicyRule, paired_allow: bool, planned: Mapping[str, Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    if primary_action(rule) is None:
         return []
     violation = _slot(rule.policy_id, "clear_violation")
     families = []
-    for name, _group_action, group in _acting_groups(rule):
+    for name, group_action, group in acting_groups(rule):
         if group.operator != "all_of" or len(group.legs) < 2:
             continue
+        block_slot = _block_slot(rule, name, group, group_action)
         for absent in group.legs:
+            allow_slot = _slot(rule.policy_id, "missing_leg", name, absent)
             families.append(
                 {
                     "family_id": _family_id(rule.policy_id, name, absent),
                     "policy_id": rule.policy_id,
                     "changed_dimension": absent,
                     "members": [
-                        {"slot_id": violation, "role": "all_legs", "expected_action": action},
                         {
-                            "slot_id": _slot(rule.policy_id, "missing_leg", name, absent),
+                            "slot_id": block_slot,
+                            "role": "all_legs",
+                            "expected_action": planned[block_slot]["expected_action"],
+                        },
+                        {
+                            "slot_id": allow_slot,
                             "role": "missing_leg",
-                            "expected_action": "allow",
+                            "expected_action": planned[allow_slot]["expected_action"],
                         },
                     ],
                 }
@@ -440,8 +479,16 @@ def _contrast_families(rule: PolicyRule, paired_allow: bool) -> list[dict[str, A
             "policy_id": rule.policy_id,
             "changed_dimension": dimension,
             "members": [
-                {"slot_id": violation, "role": "violation", "expected_action": action},
-                {"slot_id": _slot(rule.policy_id, "clear_allow"), "role": "allow", "expected_action": "allow"},
+                {
+                    "slot_id": violation,
+                    "role": "violation",
+                    "expected_action": planned[violation]["expected_action"],
+                },
+                {
+                    "slot_id": _slot(rule.policy_id, "clear_allow"),
+                    "role": "allow",
+                    "expected_action": planned[_slot(rule.policy_id, "clear_allow")]["expected_action"],
+                },
             ],
         }
     ]
@@ -452,6 +499,7 @@ def _schedule(
     optional: Sequence[dict[str, Any]],
     case_cap: int,
     budget: Mapping[str, Any],
+    generation: Mapping[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
@@ -474,11 +522,82 @@ def _schedule(
         rows.append(stored)
         used[policy_id] = used.get(policy_id, 0) + 1
 
-    for cell in required:
+    for cell in _fair_order(required, generation):
         place(cell, blocks_gold=True)
-    for cell in optional:
+    for cell in _fair_order(optional, generation):
         place(cell, blocks_gold=False)
     return rows, gaps
+
+
+def _fair_order(
+    cells: Sequence[dict[str, Any]], generation: Mapping[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Give every policy an anchor, then approach configured mixes without lexical bias."""
+    queues: dict[str, list[dict[str, Any]]] = {}
+    for cell in cells:
+        queues.setdefault(str(cell["policy_id"]), []).append(cell)
+    for queue in queues.values():
+        queue.sort(key=_sort_key)
+    policies = sorted(
+        queues,
+        key=lambda policy_id: (hashlib.sha256(policy_id.encode("utf-8")).hexdigest(), policy_id),
+    )
+    ordered = [queues[policy_id].pop(0) for policy_id in policies if queues[policy_id]]
+    counts = Counter(str(cell["policy_id"]) for cell in ordered)
+    remaining = [cell for policy_id in policies for cell in queues[policy_id]]
+    while remaining:
+        lowest = min(counts[str(cell["policy_id"])] for cell in remaining)
+        candidates = [cell for cell in remaining if counts[str(cell["policy_id"])] == lowest]
+        chosen = min(
+            candidates,
+            key=lambda cell: (
+                _mix_error([*ordered, cell], generation),
+                hashlib.sha256(str(cell["slot_id"]).encode("utf-8")).hexdigest(),
+                str(cell["slot_id"]),
+            ),
+        )
+        remaining.remove(chosen)
+        ordered.append(chosen)
+        counts[str(chosen["policy_id"])] += 1
+    return ordered
+
+
+def _mix_error(cells: Sequence[Mapping[str, Any]], generation: Mapping[str, Any] | None) -> float:
+    if generation is None:
+        return 0.0
+    total_error = 0.0
+    for mix_name in ("decision_mix", "case_family_mix", "turn_mix"):
+        target = generation.get(mix_name)
+        if not isinstance(target, Mapping):
+            continue
+        observed = Counter(
+            bucket
+            for cell in cells
+            if (bucket := _mix_bucket(cell, mix_name)) is not None and bucket in target
+        )
+        total = sum(observed.values())
+        if not total:
+            continue
+        total_error += sum(abs(observed.get(str(name), 0) - float(share) * total) for name, share in target.items())
+    return total_error
+
+
+def _mix_bucket(cell: Mapping[str, Any], mix_name: str) -> str | None:
+    if mix_name == "decision_mix":
+        action = cell.get("expected_action")
+        return action if isinstance(action, str) else None
+    if mix_name == "turn_mix":
+        return "multi_turn" if cell.get("kind") == "multi_turn" else "single_turn"
+    kind = cell.get("kind")
+    if kind in {"clear_violation", "clear_allow"}:
+        return "clear"
+    if kind == "boundary":
+        return "boundary"
+    if kind == "exception":
+        return "exception"
+    if kind in {"all_legs", "condition_path", "missing_leg"}:
+        return "contrast"
+    return None
 
 
 def _certification(required_cases: int, blocking: Sequence[dict[str, Any]]) -> tuple[str, str]:
@@ -497,27 +616,17 @@ def _with_scheduled(family: dict[str, Any], scheduled: set[str]) -> dict[str, An
     return {**family, "members": members}
 
 
-def _acting_groups(rule: PolicyRule) -> list[tuple[str, str, ConditionGroup]]:
-    found = []
-    for name, fallback in _ACTING:
-        group = getattr(rule.rule, name)
-        if group is None:
-            continue
-        if name == "block_if":
-            action = rule.decision.violation_action
-        elif name == "escalate_if":
-            action = rule.decision.critical_action or fallback
-        else:
-            action = fallback
-        found.append((name, action, group))
-    return found
+def _block_slot(rule: PolicyRule, name: str, group: ConditionGroup, group_action: str) -> str:
+    """The case that contains exactly this group's legs.
 
-
-def _primary_action(rule: PolicyRule) -> str | None:
-    found = _acting_groups(rule)
-    if not found:
-        return None
-    return min(found, key=lambda item: ACTION_ORDER.index(item[1]))[1]
+    The clear violation is that case only when its own legs are this group and nothing else.
+    Legs added so a different ``none_of`` group stays quiet do not count.
+    """
+    primary = primary_action(rule)
+    present, absent = violation_facts(rule, primary) if primary is not None else ([], [])
+    if primary == group_action and not absent and present == list(group.legs):
+        return _slot(rule.policy_id, "clear_violation")
+    return _slot(rule.policy_id, "all_legs", name)
 
 
 def _allow_case(rule: PolicyRule, by_id: Mapping[str, PolicyRule]) -> tuple[str, str | None, tuple[str, ...]]:
@@ -547,36 +656,33 @@ def _declared_languages(rule: PolicyRule) -> list[str]:
     return declared
 
 
-def _code_switch_languages(text: str, languages: Sequence[str]) -> list[str] | None:
-    """The declared languages, when the source affirms that this passage is code-switched.
+def _translation_languages(declared: Sequence[str], targets: Sequence[str]) -> list[str]:
+    """Languages that still need a translation, without treating them as clause languages."""
+    seen = {declared[0].casefold()} if declared else set()
+    chosen: list[str] = []
+    for language in (*declared[1:], *targets):
+        if not isinstance(language, str):
+            continue
+        text = language.strip()
+        key = text.casefold()
+        if not text or key == "unspecified" or key in seen:
+            continue
+        seen.add(key)
+        chosen.append(text)
+    return chosen
 
-    One declared language cannot name a pair, so incidental foreign words do not add a cell.
-    """
-    if len(languages) < 2:
-        return None
-    if not any(_affirmed(text, phrase) for phrase in _CODE_SWITCH_PHRASES):
+
+def _code_switch_languages(rule: PolicyRule, languages: Sequence[str]) -> list[str] | None:
+    """Declared languages, when grounded evidence says this rule is code-switched."""
+    if not rule.signals.code_switch or len(languages) < 2:
         return None
     return list(languages)
 
 
-def _source_text(rule: PolicyRule, spans: Mapping[str, str]) -> str:
-    parts = [rule.provenance.source_quote]
+def _require_source(rule: PolicyRule, spans: Mapping[str, str]) -> None:
     span_id = rule.provenance.source_span_id
-    if span_id is not None and span_id in spans:
-        parts.append(spans[span_id])
-    return "\n".join(parts)
-
-
-def _affirmed(text: str, phrase: str) -> bool:
-    """True when ``phrase`` occurs and the same clause does not negate it."""
-    folded = text.casefold()
-    pattern = re.compile(rf"(?<!\w){re.escape(phrase.casefold())}(?!\w)")
-    for match in pattern.finditer(folded):
-        window = folded[max(0, match.start() - 40) : match.start()]
-        clause = re.split(r"[.!?;\n]", window)[-1]
-        if _NEGATION.search(clause) is None:
-            return True
-    return False
+    if span_id is not None and span_id not in spans:
+        raise CoverageInputError(f"{rule.policy_id} cites source span {span_id}, which is not in the source index.")
 
 
 def _rule_cap(severity: str, budget: Mapping[str, Any]) -> int:
@@ -599,6 +705,45 @@ def _module_status(modules: Mapping[str, Any]) -> dict[str, str]:
         "political_symmetry": symmetry_status,
         "production_replay": "not_configured",
     }
+
+
+def _planned(
+    rule: PolicyRule,
+    rules: Sequence[PolicyRule],
+    kind: str,
+    *,
+    primary: str | None,
+    priority: str = "required",
+    flags: Sequence[str] = (),
+    slot_id: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """One cell whose legs and action come from the aggregated facts."""
+    context = case_context(
+        rules,
+        rule,
+        kind,
+        condition_class=extra.get("condition_class") if isinstance(extra.get("condition_class"), str) else None,
+        absent_leg=extra.get("absent_leg") if isinstance(extra.get("absent_leg"), str) else None,
+        trigger_leg=extra.get("trigger_leg") if isinstance(extra.get("trigger_leg"), str) else None,
+    )
+    if context is None:
+        raise CoverageInputError(f"{rule.policy_id} {kind} does not match its rule.")
+    present, absent, action = context
+    if kind != "boundary" and action is None:
+        raise CoverageInputError(f"{rule.policy_id} {kind} has no action its facts support.")
+    return _cell(
+        rule,
+        kind,
+        action,
+        primary=primary,
+        priority=priority,
+        flags=flags,
+        slot_id=slot_id,
+        present_legs=present,
+        absent_legs=absent,
+        **extra,
+    )
 
 
 def _cell(

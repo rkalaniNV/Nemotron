@@ -1,8 +1,8 @@
 """Week 1 integration gate: one policy package through the shared BYOB dispatcher.
 
 The package holds the five-topic policy, a transfer rule file the author already wrote,
-and a file that contains a test secret. Generation is not connected yet, so generate stops
-at pipeline_incomplete. The gate checks the eligible-rule file, not a published benchmark.
+and a file that contains a test secret. Generate reaches the unsigned review packet. The
+gate checks the eligible-rule file and does not sign or publish the benchmark.
 """
 
 import json
@@ -117,12 +117,13 @@ def run(package: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, connecti
     return start
 
 
-def test_generate_stops_at_pipeline_incomplete_without_network(run: Any, connections: list[Any]) -> None:
+def test_generate_reaches_review_without_network(run: Any, connections: list[Any]) -> None:
     result = run()
 
-    assert result.status.status is RunStatus.PIPELINE_INCOMPLETE
-    assert result.status.cli_exit_code == 1
-    assert result.json("run_record.json")["last_outcome"]["status"] == "pipeline_incomplete"
+    assert result.status.status is RunStatus.REVIEW_REQUIRED
+    assert result.status.cli_exit_code == 3
+    assert result.json("run_record.json")["last_outcome"]["status"] == "review_required"
+    assert (result.run_dir / "publication_review_packet.yaml").is_file()
     assert connections == []
 
 
@@ -131,10 +132,10 @@ def test_anti_state_is_all_of_and_dan_is_any_of(run: Any) -> None:
 
     assert result.by_quote(ANTI_STATE)["rule"]["rule"]["block_if"] == {
         "all_of": ["instructional_or_organizing_verb", "anti_government_target"],
-        "operator_source": "explicit",
+        "operator_source": "model_evidence",
     }
     dan = result.by_quote(DAN)["rule"]["rule"]["block_if"]
-    assert dan["operator_source"] == "default_any_of"
+    assert dan["operator_source"] == "model_evidence"
     assert dan["any_of"] == ["bo_qua_moi_quy_dinh", "ignore_previous_instructions", "developer_mode", "dan"]
 
 
@@ -199,7 +200,7 @@ def test_unchanged_rerun_and_a_fresh_run_produce_the_same_eligible_file(run: Any
     again = run()
     fresh = run(output="fresh", reverse=True)
 
-    assert again.status.status is fresh.status.status is RunStatus.PIPELINE_INCOMPLETE
+    assert again.status.status is fresh.status.status is RunStatus.REVIEW_REQUIRED
     assert again.extractor.calls == 0
     assert again.eligible == eligible
     assert fresh.extractor.calls == 1

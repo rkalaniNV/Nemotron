@@ -32,7 +32,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from nemotron.steps.byob.runtime.benchmark_families.safety.actions import ACTION_ORDER, aggregate, rule_matches
+from nemotron.steps.byob.runtime.benchmark_families.safety.actions import (
+    ACTION_ORDER,
+    aggregate,
+    rule_matches,
+    rules_overlap,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import quote_in_span
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import PolicyRule
 
@@ -166,6 +171,8 @@ def _trigger_sets(rule: PolicyRule, names: Sequence[str] | None = None) -> list[
             sets.append(frozenset(group.legs))
         elif group.operator == "any_of":
             sets.extend(frozenset([leg]) for leg in group.legs)
+        else:
+            sets.append(frozenset())
     return list(dict.fromkeys(sets))
 
 
@@ -177,14 +184,12 @@ def _self_contradictions(rule: PolicyRule) -> list[frozenset[str]]:
 
 
 def _share_scope(rules: Sequence[PolicyRule]) -> bool:
-    """True when the rules can apply to one event.
-
-    A rule with no targets does not constrain the event, so it overlaps any target.
-    """
-    concrete = [set(rule.scope.targets) for rule in rules if rule.scope.targets]
-    if len(concrete) < 2:
-        return True
-    return bool(set.intersection(*concrete))
+    """True when every rule can apply to the same scoped event."""
+    return all(
+        rules_overlap(first, second)
+        for position, first in enumerate(rules)
+        for second in rules[position + 1 :]
+    )
 
 
 def _fact_sets(rules: Sequence[PolicyRule]) -> list[frozenset[str]]:
@@ -247,8 +252,10 @@ def _contradiction(
 
 def _has_exact_trigger(rule: PolicyRule, name: str, facts: frozenset[str]) -> bool:
     group = rule.rule.conditions().get(name)
-    if group is None or group.operator == "none_of":
+    if group is None:
         return False
+    if group.operator == "none_of":
+        return not set(group.legs) & facts
     return facts in (
         [frozenset(group.legs)] if group.operator == "all_of" else [frozenset([leg]) for leg in group.legs]
     )

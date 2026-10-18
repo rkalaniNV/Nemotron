@@ -19,6 +19,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     ConfidenceSignals,
     Thresholds,
     compute_confidence,
+    operator_explicitness,
     quote_in_span,
     route_rule,
     route_rule_from_span,
@@ -48,7 +49,7 @@ def candidate(**rule: Any) -> dict[str, Any]:
 
 
 def signals(**overrides: Any) -> ConfidenceSignals:
-    values = {"quote_match": 1.0, "schema_completeness": 1.0, "definition_resolution": 1.0, "low_ambiguity": 1.0}
+    values = {"quote_match": 1.0, "schema_completeness": 1.0, "operator_explicitness": 1.0}
     return ConfidenceSignals(**{**values, **overrides})
 
 
@@ -62,17 +63,14 @@ def normalized(raw: dict[str, Any], **kwargs: Any) -> PolicyRule:
 # Normalization: the documented examples
 
 
-def test_bare_block_if_becomes_default_any_of_and_can_be_eligible() -> None:
+def test_a_multi_leg_bare_block_if_needs_a_decision() -> None:
     rule = normalized(candidate(block_if=["instructional_or_organizing_verb", "prohibited_target"]))
 
-    group = rule.rule.block_if
-    assert group is not None
-    assert group.any_of == ("instructional_or_organizing_verb", "prohibited_target")
-    assert group.operator_source == "default_any_of"
+    assert rule.rule.block_if is None
+    assert rule.unresolved_conditions["block_if"] == ("instructional_or_organizing_verb", "prohibited_target")
 
     routed = route_rule(rule, signals(), quote_found=True)
-    assert routed.rule.status == "eligible_for_generation"
-    assert routed.reasons == ()
+    assert routed.rule.status == "needs_decision"
 
 
 def test_explicit_all_of_is_stored_unchanged() -> None:
@@ -106,7 +104,7 @@ def test_bare_list_without_a_default_needs_a_decision(name: str) -> None:
     [
         ("Chặn khi yêu cầu đồng thời có động từ hướng dẫn và mục tiêu bị cấm.", "all_of"),
         ("Block when the request has all of the following components.", "all_of"),
-        ("Cả hai điều kiện phải có đủ.", "all_of"),
+        ("Chặn khi đồng thời có đủ hai điều kiện.", "all_of"),
         ("Chặn khi có một trong các dấu hiệu sau.", "any_of"),
         ("Block when any of the following signals appear.", "any_of"),
     ],
@@ -155,7 +153,7 @@ def test_condition_evidence_mapping_is_strict(operator_text: dict[str, Any]) -> 
 
 def test_one_bare_allow_list_can_take_the_stated_operator() -> None:
     raw = candidate(allow_if=["news", "academic"])
-    raw["provenance"]["source_quote"] = "Allow either news or academic discussion."
+    raw["provenance"]["source_quote"] = "Allow when any of the following apply."
 
     rule = normalized(raw)
 
@@ -189,16 +187,15 @@ def test_incidental_or_does_not_choose_an_operator() -> None:
 
     rule = normalized(raw)
 
-    assert rule.rule.block_if is not None
-    assert rule.rule.block_if.operator == "any_of"
-    assert rule.rule.block_if.operator_source == "default_any_of"
+    assert rule.rule.block_if is None
+    assert rule.unresolved_conditions["block_if"] == ("weapon", "explosive")
     assert rule.rule.allow_if is None
     assert route_rule(rule, signals(), quote_found=True).rule.status == "needs_decision"
 
 
 def test_clear_all_of_frame_can_be_eligible() -> None:
     raw = candidate(block_if=["verb", "target"])
-    raw["provenance"]["source_quote"] = "Cả hai điều kiện phải có đủ."
+    raw["provenance"]["source_quote"] = "Chặn khi đồng thời có đủ điều kiện."
 
     rule = normalized(raw)
 
@@ -399,12 +396,12 @@ def test_json_schema_rejects_invalid_operator_values(group: dict[str, Any]) -> N
     [
         ("Chặn khi đồng thời có hai thành phần.", "all_of"),
         ("CHẶN KHI ĐỦ CÁC THÀNH PHẦN SAU", "all_of"),
-        ("CẢ HAI ĐIỀU KIỆN PHẢI CÓ.", "all_of"),
+        ("CẢ HAI ĐIỀU KIỆN PHẢI CÓ.", None),
         ("tất cả các điều kiện sau đều bắt buộc.", "all_of"),
-        ("Do this at the same time.", "all_of"),
+        ("Do this at the same time.", None),
         ("Block both of the following conditions.", "all_of"),
         ("Chặn nếu có một trong các dấu hiệu.", "any_of"),
-        ("Either a name or a number.", "any_of"),
+        ("Either a name or a number.", None),
         ("None of the following conditions applies.", "none_of"),
         ("Không có điều kiện nào sau đây.", "none_of"),
         ("Require all of the following, or any of the following exceptions.", "mixed"),
@@ -512,10 +509,13 @@ def test_all_of_missing_leg_is_not_a_block() -> None:
     assert expected_action([block, allow], {"verb"}, include_review=True).action == "not_applicable"
 
 
-def test_default_any_of_blocks_on_one_leg() -> None:
-    rule = normalized(candidate(block_if=["verb", "target"]))
+def test_one_leg_default_any_of_blocks_and_a_bare_pair_does_not() -> None:
+    one = normalized(candidate(block_if=["verb"]))
+    pair = normalized(candidate(block_if=["verb", "target"]))
 
-    assert expected_action([rule], {"verb"}, include_review=True).action == "block"
+    assert expected_action([one], {"verb"}, include_review=True).action == "block"
+    assert pair.rule.block_if is None
+    assert expected_action([pair], {"verb"}, include_review=True).action == "not_applicable"
 
 
 def test_exception_turns_the_rule_off() -> None:
@@ -544,12 +544,36 @@ def test_confidence_weights_sum_to_one() -> None:
 
 
 def test_documented_confidence_example() -> None:
-    assert compute_confidence(signals(low_ambiguity=0.5)) == 0.95
+    assert compute_confidence(signals(operator_explicitness=0.5)) == 0.96
 
 
-def test_one_pass_and_no_cross_reference_count_as_resolved() -> None:
+def test_one_pass_counts_as_full_agreement() -> None:
     assert compute_confidence(signals()) == 1.0
-    assert compute_confidence(signals(pass_agreement=0.5, cross_reference_resolution=0.0)) == 0.8
+    assert compute_confidence(signals(pass_agreement=0.5)) == 0.86
+    assert compute_confidence(signals(schema_completeness=0.0)) == 0.72
+
+
+def test_one_leg_default_any_of_does_not_lower_operator_explicitness() -> None:
+    rule = normalized(candidate(block_if=["target"]))
+
+    assert rule.rule.block_if is not None
+    assert rule.rule.block_if.operator_source == "default_any_of"
+    assert operator_explicitness(rule) == 1.0
+
+
+def test_an_authored_multi_leg_default_any_of_scores_zero_and_stays_eligible() -> None:
+    rule = validate_rule(
+        {
+            **candidate(block_if={"any_of": ["verb", "target"], "operator_source": "default_any_of"}),
+            "confidence": 0.95,
+        }
+    )
+
+    assert operator_explicitness(rule) == 0.0
+    routed = route_rule(rule, signals(operator_explicitness=0.0), quote_found=True)
+
+    assert routed.rule.confidence == 0.92
+    assert routed.rule.status == "eligible_for_generation"
 
 
 @pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), True, "1"])
@@ -570,6 +594,8 @@ def test_signals_must_be_scores(value: Any) -> None:
         ("don't", "don\u2019t stop", True),
         ("ab", "see a\u200bb now", True),
         ("", QUOTE, False),
+        ("不得协助", "系统不得协助用户制作武器。", True),
+        ("card", "discard data", False),
     ],
 )
 def test_quote_in_span(quote: str, span: str, found: bool) -> None:
@@ -583,12 +609,12 @@ def test_quote_in_span(quote: str, span: str, found: bool) -> None:
     ("overrides", "status"),
     [
         ({}, "eligible_for_generation"),
-        ({"low_ambiguity": 0.0}, "eligible_for_generation"),
-        ({"definition_resolution": 0.0, "low_ambiguity": 0.0}, "needs_decision"),
-        ({"schema_completeness": 0.5}, "eligible_for_generation"),
+        ({"operator_explicitness": 0.0}, "eligible_for_generation"),
+        ({"schema_completeness": 0.5}, "needs_decision"),
         ({"schema_completeness": 0.0}, "needs_decision"),
-        ({"schema_completeness": 0.0, "definition_resolution": 0.0}, "quarantined"),
-        ({"schema_completeness": 0.0, "definition_resolution": 0.0, "low_ambiguity": 0.0}, "quarantined"),
+        ({"pass_agreement": 0.0}, "needs_decision"),
+        ({"schema_completeness": 0.0, "operator_explicitness": 0.0}, "quarantined"),
+        ({"schema_completeness": 0.0, "pass_agreement": 0.0}, "quarantined"),
     ],
 )
 def test_confidence_thresholds_route_the_rule(overrides: dict[str, float], status: str) -> None:
@@ -601,12 +627,17 @@ def test_threshold_boundaries_are_inclusive_below() -> None:
     rule = normalized(candidate(block_if=["target"]))
     exactly_eligible = Thresholds(eligible=0.9, decision=0.7)
 
-    at_eligible = route_rule(rule, signals(low_ambiguity=0.0), quote_found=True, thresholds=exactly_eligible)
+    at_eligible = route_rule(
+        rule, signals(schema_completeness=9 / 14), quote_found=True, thresholds=exactly_eligible
+    )
     assert at_eligible.rule.confidence == 0.9
     assert at_eligible.rule.status == "eligible_for_generation"
 
     at_decision = route_rule(
-        rule, signals(schema_completeness=0.0, low_ambiguity=0.0), quote_found=True, thresholds=exactly_eligible
+        rule,
+        signals(schema_completeness=0.0, operator_explicitness=0.75),
+        quote_found=True,
+        thresholds=exactly_eligible,
     )
     assert at_decision.rule.confidence == 0.7
     assert at_decision.rule.status == "needs_decision"
@@ -618,7 +649,7 @@ def test_quote_outside_the_span_is_quarantined_even_with_high_scores() -> None:
     routed = route_rule(rule, signals(), quote_found=False)
 
     assert routed.rule.status == "quarantined"
-    assert routed.rule.confidence == 0.75
+    assert routed.rule.confidence == 0.64
     assert "source quote is not in the cited span" in routed.reasons
 
 
@@ -630,7 +661,7 @@ def test_route_from_span_uses_one_authoritative_quote_check() -> None:
 
     assert found.rule.confidence == 1.0
     assert found.rule.status == "eligible_for_generation"
-    assert missing.rule.confidence == 0.75
+    assert missing.rule.confidence == 0.64
     assert missing.rule.status == "quarantined"
 
 
@@ -664,8 +695,8 @@ def test_unassessed_testability_needs_a_decision() -> None:
     assert "testability has not been assessed" in routed.reasons
 
 
-def test_default_any_of_is_not_a_routing_reason() -> None:
-    rule = normalized(candidate(block_if=["verb", "target"]))
+def test_one_leg_default_any_of_is_not_a_routing_reason() -> None:
+    rule = normalized(candidate(block_if=["verb"]))
 
     routed = route_rule(rule, signals(), quote_found=True)
 
@@ -679,9 +710,9 @@ def test_published_confidence_is_computed_not_copied_from_the_model() -> None:
     raw["model_confidence"] = 0.99
     rule = normalized(raw)
 
-    routed = route_rule(rule, signals(schema_completeness=0.0, definition_resolution=0.0), quote_found=True)
+    routed = route_rule(rule, signals(schema_completeness=0.0, operator_explicitness=0.0), quote_found=True)
 
-    assert routed.rule.confidence == 0.65
+    assert routed.rule.confidence == 0.64
     assert routed.rule.status == "quarantined"
 
 
@@ -838,6 +869,10 @@ def test_ambiguous_action_is_used_when_the_event_is_ambiguous() -> None:
     assert rule_matches(rule, {"target"}, ambiguous=True)[0].action == "caution"
     assert rule_matches(rule, set(), ambiguous=True) == []
     assert expected_action([rule], {"target"}, include_review=True).action == "block"
+    assert (
+        expected_action([rule], {"target"}, include_review=True, ambiguous_rules={"VN-ANTI-STATE-001"}).action
+        == "caution"
+    )
 
 
 def test_quote_found_must_be_a_boolean() -> None:

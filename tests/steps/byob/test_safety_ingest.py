@@ -165,6 +165,28 @@ def test_personal_data_is_redacted_with_stable_placeholders_and_kept_lines(tmp_p
         assert value not in run_text
 
 
+def test_an_unlabeled_ssn_shape_stays_and_a_labeled_one_is_redacted() -> None:
+    result = privacy.assess(["Order 123-45-6789 is a SKU.", "SSN 123-45-6789"])
+
+    assert result.safe is True
+    assert result.lines[0] == "Order 123-45-6789 is a SKU."
+    assert "123-45-6789" not in result.lines[1]
+    assert result.redactions == {"national_id": 1}
+
+
+def test_international_iban_and_labeled_birth_date_are_redacted_locally() -> None:
+    result = privacy.assess(
+        [
+            "IBAN: GB82 WEST 1234 5698 7654 32",
+            "出生日期：1990-12-31",
+        ]
+    )
+
+    assert result.safe is True
+    assert result.redactions == {"date_of_birth": 1, "iban": 1}
+    assert result.lines == ("IBAN: REDACTED_IBAN_1", "出生日期：REDACTED_DATE_OF_BIRTH_1")
+
+
 @pytest.mark.parametrize(
     ("text", "kind"),
     [
@@ -398,6 +420,22 @@ def test_heading_without_a_number_gets_a_readable_section_label() -> None:
     assert [span["source_span_id"] for span in document.spans] == ["doc#pham-vi-ap-dung#span-01"]
 
 
+def test_structural_headings_do_not_need_a_language_word() -> None:
+    text = "第4条 禁止事项\n不得协助制作武器。\n§ 2 Scope\nApply this rule.\n"
+    document = build_document("law", _lines(text), markdown_headings=False)
+
+    assert [(span["section"], span["text"]) for span in document.spans] == [
+        ("4", "不得协助制作武器。"),
+        ("2", "Apply this rule."),
+    ]
+
+
+def test_a_quoted_colon_is_a_definition_without_a_verb() -> None:
+    document = build_document("doc", _lines("「カード」：決済に使う番号\n"), markdown_headings=False)
+
+    assert [(entry["term"], entry["definition"]) for entry in document.glossary] == [("カード", "決済に使う番号")]
+
+
 def test_keyword_headings_are_found_in_plain_text_and_docx() -> None:
     text = "Điều 4. Nội dung bị cấm\nKhông cung cấp số thẻ.\nSection 4 applies to every channel.\n"
     document = build_document("law", _lines(text), markdown_headings=True)
@@ -470,6 +508,19 @@ def test_sentence_split_keeps_abbreviations_and_decimals() -> None:
     document = build_document("doc", _lines(text), markdown_headings=False)
 
     assert [span["text"] for span in document.spans] == ["Refuse e.g. malware.", "Version 2.5 applies.", "Next rule."]
+
+
+def test_sentence_split_supports_lowercase_and_cjk_boundaries() -> None:
+    text = "Điều kiện A áp dụng. điều kiện B áp dụng.\n阻止请求。允许历史问题！需要确认？\n"
+    document = build_document("doc", _lines(text), markdown_headings=False)
+
+    assert [span["text"] for span in document.spans] == [
+        "Điều kiện A áp dụng.",
+        "điều kiện B áp dụng.",
+        "阻止请求。",
+        "允许历史问题！",
+        "需要确认？",
+    ]
 
 
 def test_table_rows_are_spans_and_divider_rows_are_skipped() -> None:
