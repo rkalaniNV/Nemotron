@@ -42,10 +42,11 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStat
 PACKET_NAME = "publication_review_packet.yaml"
 REVIEW_PAGE = "review.html"
 DECISIONS_NAME = "review_decisions.csv"
+DECISION_COLUMNS = ("card_id", "kind", "policy_id", "rule_status", "decision", "note")
 EXAMPLE_CAP = 3
 PACKET_VERSION = 1
 _EXAMPLE_TEXT = 240
-_COLUMNS = ("card_id", "kind", "policy_id", "rule_status", "decision", "note")
+_COLUMNS = DECISION_COLUMNS
 _DECISIONS = frozenset({"pending", "pre_accepted", "approve", "reject", "edit"})
 _REVIEWER_DECISIONS = frozenset({"pending", "approve", "reject", "edit"})
 _RESOLVED = frozenset({"pre_accepted", "approve", "reject"})
@@ -212,9 +213,7 @@ def install_review(run_dir: Path, build: ReviewBuild) -> None:
     write_atomic(run_dir / DECISIONS_NAME, build.csv_text)
 
 
-def load_decisions(
-    path: Path, run_dir: Path
-) -> tuple[dict[str, tuple[str, str]], dict[str, dict[str, str]]]:
+def load_decisions(path: Path, run_dir: Path) -> tuple[dict[str, tuple[str, str]], dict[str, dict[str, str]]]:
     """Read approve, reject, and edit rows. A missing sheet means no decisions yet."""
     if not path.is_file():
         return {}, {}
@@ -469,9 +468,7 @@ def _stable_card_id(kind: str, identity: tuple[Any, ...]) -> str:
     return f"{kind}:{digest}"
 
 
-def _recorded_decision(
-    card_id: str, default: str, decisions: Mapping[str, tuple[str, str]]
-) -> tuple[str, str]:
+def _recorded_decision(card_id: str, default: str, decisions: Mapping[str, tuple[str, str]]) -> tuple[str, str]:
     if card_id not in decisions:
         return default, ""
     decision, note = decisions[card_id]
@@ -520,9 +517,7 @@ def _unresolved_rules(rules: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
 
 
 def _excluded_rules(rules: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
-    rows = [
-        {"policy_id": _policy_id(row), "status": _status(row)} for row in rules if _status(row) in _EXCLUDED
-    ]
+    rows = [{"policy_id": _policy_id(row), "status": _status(row)} for row in rules if _status(row) in _EXCLUDED]
     return sorted(rows, key=lambda item: item["policy_id"])
 
 
@@ -702,6 +697,23 @@ def _gap_key(gap: Mapping[str, Any]) -> tuple[str, str]:
     return str(gap.get("slot_id") or ""), str(gap.get("reason") or "")
 
 
+def write_decisions(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Write the decision sheet in the same columns and line endings generate reads back.
+
+    Extra keys are ignored. An empty sheet is refused so a caller cannot replace a
+    populated file with a header that has no cards.
+    """
+    if not rows:
+        raise ValueError(f"{DECISIONS_NAME} has no cards to write.")
+    cards = []
+    for row in rows:
+        card = {column: "" if row.get(column) is None else str(row.get(column)) for column in DECISION_COLUMNS}
+        if not card["card_id"].strip():
+            raise ValueError(f"{DECISIONS_NAME} has a row without a card_id.")
+        cards.append(card)
+    write_atomic(path, _csv_text(cards))
+
+
 def _csv_text(cards: Sequence[Mapping[str, str]]) -> str:
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=_COLUMNS, lineterminator="\n", extrasaction="ignore")
@@ -842,11 +854,7 @@ def _mapping(value: Any, name: str, run_dir: Path) -> dict[str, Any]:
 
 
 def _file_hashes(run_dir: Path) -> dict[str, str]:
-    return {
-        key: _sha256(run_dir / relative)
-        for key, relative in _CONTENT_FILES.items()
-        if key not in _DERIVED_HASHES
-    }
+    return {key: _sha256(run_dir / relative) for key, relative in _CONTENT_FILES.items() if key not in _DERIVED_HASHES}
 
 
 def _sha256(path: Path) -> str:

@@ -163,7 +163,10 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
             RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"{INDEX_FILE} is damaged: {exc} Run stage=prepare."
         ) from exc
     uncertainties: list[dict[str, Any]] = []
-    extracted, log = _extract(windows, config, run_dir, uncertainties)
+    cited = _cited_window_ids(preauthored)
+    pending = [window for window in windows if window.window_id not in cited]
+    extracted, log = _extract(pending, config, run_dir, uncertainties)
+    log["cited_windows"] = len(windows) - len(pending)
     spans_by_id = {span["source_span_id"]: span for span in spans}
     drafts = [_preauthored_draft(row, spans_by_id, config, run_dir) for row in preauthored]
     taken = {draft.rule.policy_id for draft in drafts}
@@ -199,6 +202,30 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
 
 
 # Extraction
+
+
+def _cited_window_ids(preauthored: Sequence[Mapping[str, Any]]) -> set[str]:
+    """Windows whose clause is already the source quote of a pre-authored rule.
+
+    Only ``quote_found`` citations skip extraction. A mis-cited or self-authored
+    rule leaves the window pending, so leftover policy text still needs a model.
+    """
+    cited: set[str] = set()
+    for row in preauthored:
+        if not isinstance(row, Mapping):
+            continue
+        evidence = row.get("evidence") if isinstance(row.get("evidence"), Mapping) else {}
+        if evidence.get("status") != "quote_found":
+            continue
+        for item in evidence.get("span_ids") or []:
+            if isinstance(item, str) and item.strip():
+                cited.add(item)
+        rule = row.get("rule") if isinstance(row.get("rule"), Mapping) else {}
+        provenance = rule.get("provenance") if isinstance(rule.get("provenance"), Mapping) else {}
+        span_id = provenance.get("source_span_id")
+        if isinstance(span_id, str) and span_id.strip():
+            cited.add(span_id)
+    return cited
 
 
 def _extract(
@@ -307,9 +334,7 @@ def _compare_passes(
         draft.passes = 2
         if match is not None and _operator_map(draft) != _operator_map(match):
             draft.decision_reasons.append("the second extraction pass disagrees on condition operators")
-            uncertainties.append(
-                _uncertainty(window_id, "operator_disagreement", draft.rule.provenance.source_quote)
-            )
+            uncertainties.append(_uncertainty(window_id, "operator_disagreement", draft.rule.provenance.source_quote))
     for other in remaining:
         uncertainties.append(_uncertainty(window_id, "second_pass_only", other.rule.provenance.source_quote))
 
@@ -647,6 +672,7 @@ def _preauthored_draft(
             f"{PREAUTHORED_FILE} has a flags value that is not a list of objects.",
         )
     flags = list(raw_flags)
+    rule = _with_cited_span(rule, evidence, spans, flags)
     updates: dict[str, Any] = {}
     if rule.testability is None:
         # A person wrote these conditions; there is no extraction to doubt.
@@ -682,7 +708,46 @@ def _preauthored_draft(
         decision_reasons=decision_reasons,
         quarantine_reasons=provenance_reasons,
         glossary_terms=tuple(sorted({term for span in spans for term in span.get("glossary_terms", [])})),
+        window_id=rule.provenance.source_span_id,
     )
+
+
+def _with_cited_span(
+    rule: PolicyRule,
+    evidence: Mapping[str, Any],
+    spans: Sequence[Mapping[str, Any]],
+    flags: list[dict[str, Any]],
+) -> PolicyRule:
+    """Bind a unique matching span onto provenance so accepted cases can cite it.
+
+    Ingest does not rewrite the authored IR. Generate fills the span only when the
+    quote matched exactly one source span and the author did not already name one.
+    """
+    if rule.provenance.source_span_id or len(spans) != 1:
+        return rule
+    span = spans[0]
+    span_id = span.get("source_span_id")
+    if not isinstance(span_id, str) or not span_id.strip():
+        return rule
+    provenance = dict(rule.provenance.model_dump())
+    provenance["source_span_id"] = span_id
+    section = span.get("section")
+    if isinstance(section, str) and section.strip():
+        provenance["section"] = section
+    sha = evidence.get("document_sha256")
+    if isinstance(sha, str) and sha:
+        provenance["document_sha256"] = sha
+    document_id = span.get("document_id")
+    if isinstance(document_id, str) and document_id:
+        provenance["document_id"] = document_id
+    flags.append(
+        _flag(
+            "span_bound_from_evidence",
+            "pre-authored quote matched exactly one source span",
+            "provenance.source_span_id",
+        )
+    )
+    return _replace(rule, provenance=provenance)
 
 
 # IDs, pairing, severity, and signals
@@ -748,9 +813,7 @@ def _assign_ids(drafts: Sequence[Draft], uncertainties: list[dict[str, Any]]) ->
             if not acting or not _is_allow_only(draft):
                 continue
             if len(acting) != 1:
-                draft.decision_reasons.append(
-                    f"allow rule has {len(acting)} possible acting partners in its section"
-                )
+                draft.decision_reasons.append(f"allow rule has {len(acting)} possible acting partners in its section")
                 continue
             partner = acting[0].rule.policy_id
             suffixes[partner] = suffixes.get(partner, 0) + 1

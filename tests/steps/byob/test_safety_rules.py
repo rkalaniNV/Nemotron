@@ -371,12 +371,7 @@ TRANSFER_REPLIES = {
 
 def test_a_table_definition_grounds_evidence_without_a_definition_verb(tmp_path: Path, use: Any) -> None:
     quote = "Block a transfer when fraude is suspected."
-    policy = (
-        "## Terms\n\n"
-        "| fraude | mover dinero sin permiso |\n\n"
-        "## Transfers\n\n"
-        f"{quote}\n"
-    )
+    policy = f"## Terms\n\n| fraude | mover dinero sin permiso |\n\n## Transfers\n\n{quote}\n"
     use(ScriptedExtractor({quote: [_candidate(quote, block_if=[_leg("mover_dinero", "mover dinero sin permiso")])]}))
     run_dir = _generate(_config(tmp_path, {"policy.md": policy}))
 
@@ -502,16 +497,16 @@ def test_unresolved_conflict_is_reported_and_quarantines_only_the_critical_rule(
     allow = "Card data requests are allowed for the account owner."
     other = "Block weapon assembly instructions."
     replies = {
-            block: [
-                {
-                    **_candidate(
-                        block,
-                        binding_evidence="must never",
-                        block_if=[_leg("card_data_request", "card data")],
-                    ),
-                    "risk_category": "fraud",
-                }
-            ],
+        block: [
+            {
+                **_candidate(
+                    block,
+                    binding_evidence="must never",
+                    block_if=[_leg("card_data_request", "card data")],
+                ),
+                "risk_category": "fraud",
+            }
+        ],
         allow: [_candidate(allow, "allow", allow_if=[_leg("card_data_request", "Card data requests")])],
         other: [_candidate(other, block_if=[_leg("weapon_assembly", "weapon assembly instructions")])],
     }
@@ -610,6 +605,91 @@ def test_policy_text_without_a_complete_model_config_is_refused(
     caught = _expect(config, RunStatus.INVALID_CONFIG)
 
     assert message in str(caught)
+
+
+def test_preauthored_rules_that_cite_every_clause_need_no_model(tmp_path: Path) -> None:
+    first = "Block the request when both the verb and the target are present."
+    second = "Block a tool call that names a prohibited target."
+    rules = {
+        "policy_rules": [
+            {
+                "policy_id": "RULE-ALPHA",
+                "severity": "high",
+                "testability": "testable",
+                "provenance": {"document_id": "policy", "source_quote": first},
+                "rule": {
+                    "actor": "assistant",
+                    "action": "respond",
+                    "object": "request",
+                    "block_if": {"all_of": ["verb", "target"], "operator_source": "explicit"},
+                },
+            },
+            {
+                "policy_id": "RULE-BETA",
+                "severity": "high",
+                "testability": "testable",
+                "provenance": {"document_id": "policy", "source_quote": second},
+                "rule": {
+                    "actor": "assistant",
+                    "action": "execute",
+                    "object": "tool_call",
+                    "block_if": {"any_of": ["prohibited_target"], "operator_source": "single_condition"},
+                },
+            },
+        ]
+    }
+    config = _config(
+        tmp_path,
+        {
+            "policy.md": f"{first}\n\n{second}\n",
+            "rules.yaml": yaml.safe_dump(rules, sort_keys=False, allow_unicode=True),
+        },
+    )
+    run_dir = _generate(config)
+
+    rows = _rows(run_dir)
+    assert set(rows) == {"RULE-ALPHA", "RULE-BETA"}
+    assert {row["status"] for row in rows.values()} == {"eligible_for_generation"}
+    spans = _spans(run_dir)
+    for row in rows.values():
+        provenance = row["rule"]["provenance"]
+        assert provenance["source_span_id"] in spans
+        span_text = canonical_text(spans[provenance["source_span_id"]]["text"])
+        assert canonical_text(provenance["source_quote"]) in span_text
+        assert "span_bound_from_evidence" in {flag["code"] for flag in row["flags"]}
+    log = json.loads((run_dir / "stage_cache" / "policy_routing_log.json").read_text(encoding="utf-8"))
+    assert log["extraction"]["model"] is None
+    assert log["extraction"]["passes"] == []
+    assert log["extraction"]["cited_windows"] == 2
+    assert _jsonl(run_dir / "stage_cache" / "candidate_policy_rules.jsonl") == []
+
+
+def test_uncited_policy_text_still_requires_a_model(tmp_path: Path) -> None:
+    quote = "Block the request when both the verb and the target are present."
+    extra = "A later clause is not cited by the authored rules."
+    rule = {
+        "policy_id": "RULE-ALPHA",
+        "severity": "high",
+        "testability": "testable",
+        "provenance": {"document_id": "policy", "source_quote": quote},
+        "rule": {
+            "actor": "assistant",
+            "action": "respond",
+            "object": "request",
+            "block_if": {"all_of": ["verb", "target"], "operator_source": "explicit"},
+        },
+    }
+    files = {
+        "policy.md": f"{quote}\n\n{extra}\n",
+        "rules.yaml": yaml.safe_dump(rule, sort_keys=False, allow_unicode=True),
+    }
+    config = _config(tmp_path, files)
+    prepare_safety(config)
+
+    caught = _expect(config, RunStatus.INVALID_CONFIG)
+
+    assert "generation_model_config is required" in str(caught)
+    assert "1 policy clauses" in str(caught)
 
 
 def test_pre_authored_rules_need_no_model(tmp_path: Path) -> None:
@@ -730,10 +810,10 @@ def test_same_quote_with_different_atomic_rules_gets_distinct_ids(tmp_path: Path
     assert len(rows) == 2
     assert len({row["policy_id"] for row in rows}) == 2
     assert {row["status"] for row in rows} == {"eligible_for_generation"}
-    assert {
-        tuple(row["rule"]["rule"]["block_if"]["any_of"])
-        for row in rows
-    } == {("card_data",), ("payment_question",)}
+    assert {tuple(row["rule"]["rule"]["block_if"]["any_of"]) for row in rows} == {
+        ("card_data",),
+        ("payment_question",),
+    }
 
 
 def test_an_allow_rule_with_multiple_possible_partners_waits_for_review(tmp_path: Path, use: Any) -> None:
@@ -883,9 +963,7 @@ def test_disjoint_policy_objects_are_not_treated_as_one_situation() -> None:
             }
         )
 
-    result = detect_conflicts(
-        [rule("BANK", "bank_transfer", "block_if"), rule("HR", "job_application", "allow_if")]
-    )
+    result = detect_conflicts([rule("BANK", "bank_transfer", "block_if"), rule("HR", "job_application", "allow_if")])
 
     assert result.graph == []
     assert result.conflicts == []

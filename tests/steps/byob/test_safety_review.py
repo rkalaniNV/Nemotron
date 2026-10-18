@@ -1,10 +1,19 @@
 """Review packet, capped examples, and the publication tier."""
 
+from pathlib import Path
+
+import pytest
+
 from nemotron.steps.byob.runtime.benchmark_families.safety.publish import publication_tier
 from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
+    DECISION_COLUMNS,
+    DECISIONS_NAME,
     assemble_review,
+    card_is_pending,
     conflict_card_id,
+    load_decisions,
     withheld_case_ids,
+    write_decisions,
 )
 
 _HASHES = {
@@ -287,6 +296,42 @@ def test_pending_cards_cannot_be_pre_accepted_and_edit_notes_must_be_nonempty() 
         assert "rule:OK-1 kind 'conflict' does not match the current review card." in str(exc)
     else:
         raise AssertionError("mismatched decision metadata was accepted")
+
+
+def test_decision_sheet_round_trips_through_the_canonical_writer(tmp_path: Path) -> None:
+    path = tmp_path / DECISIONS_NAME
+    write_decisions(
+        path,
+        [
+            {
+                "card_id": "rule:RULE-1",
+                "kind": "rule",
+                "policy_id": "RULE-1",
+                "rule_status": "eligible_for_generation",
+                "decision": "approve",
+                "note": "",
+                "summary": "extra keys must not become columns",
+            }
+        ],
+    )
+
+    text = path.read_text(encoding="utf-8")
+    assert "\r" not in text
+    assert text.splitlines()[0] == ",".join(DECISION_COLUMNS)
+    assert "summary" not in text.splitlines()[0]
+    decisions, metadata = load_decisions(path, tmp_path)
+    assert decisions == {"rule:RULE-1": ("approve", "")}
+    assert metadata["rule:RULE-1"]["kind"] == "rule"
+    assert not card_is_pending({"decision": "approve", "note": ""})
+
+
+def test_decision_sheet_refuses_an_empty_or_blank_card_list(tmp_path: Path) -> None:
+    path = tmp_path / DECISIONS_NAME
+    with pytest.raises(ValueError, match="has no cards to write"):
+        write_decisions(path, [])
+    with pytest.raises(ValueError, match="without a card_id"):
+        write_decisions(path, [{"kind": "rule", "decision": "approve"}])
+    assert not path.exists()
 
 
 def _review_args(**overrides: object) -> dict:
