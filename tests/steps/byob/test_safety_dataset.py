@@ -5,10 +5,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
+from nemotron.steps.byob.runtime.benchmark_families.safety import dataset as dataset_module
 from nemotron.steps.byob.runtime.benchmark_families.safety import extract
+from nemotron.steps.byob.runtime.benchmark_families.safety import pipeline as pipeline_module
+from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import canonical_text
 from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import (
     DatasetInputError,
+    evaluate_quality_gates,
     load_jsonl_objects,
     select_dataset,
 )
@@ -60,6 +65,97 @@ def test_accepted_cases_point_at_a_rule_and_both_splits_are_filled() -> None:
     assert len(multi["turns"]) >= 2
     assert {turn["expected_action"] for turn in multi["turns"]} == {multi["expected_action"]}
     _assert_pairs_share_a_split(result, build.families)
+
+
+def test_quality_gates_count_only_deduplicated_split_cases() -> None:
+    rules, build = _ready()
+    requirements = {
+        "min_total_cases": 100,
+        "min_development_cases": 1,
+        "min_private_test_cases": 1,
+        "min_cases_per_policy": 1,
+        "min_cases_per_action": {"allow": 1, "block": 1},
+    }
+
+    result = select_dataset(
+        build.cases,
+        build.families,
+        rules,
+        _span_map(*rules),
+        quality_gates=requirements,
+    )
+
+    gates = result.manifest["quality_gates"]
+    assert gates["enabled"] is True
+    assert gates["passed"] is False
+    assert gates["observed"]["total_cases"] == len(result.deduplicated)
+    assert gates["observed"]["development_cases"] == len(result.manifest["splits"]["development"])
+    assert gates["observed"]["private_test_cases"] == len(result.manifest["splits"]["private_test"])
+    assert gates["observed"]["by_policy"]["ALL-2"] == len(result.deduplicated)
+    assert gates["failures"] == [
+        {
+            "gate": "min_total_cases",
+            "required": 100,
+            "actual": len(result.deduplicated),
+            "missing": 100 - len(result.deduplicated),
+        }
+    ]
+    assert result.report["quality_gates"] == gates
+    assert result.summary()["quality_gates_passed"] is False
+    assert gates["on_failure"] == "silver"
+
+
+def test_quality_gates_count_each_language_tag_on_a_case() -> None:
+    rows = [
+        {
+            "case_id": "switch",
+            "policy_id": "P-1",
+            "expected_action": "block",
+            "languages": ["vi", "en"],
+            "split": "development",
+        },
+        {
+            "case_id": "joined",
+            "policy_id": "P-1",
+            "expected_action": "allow",
+            "language": "VI,EN",
+            "split": "private_test",
+        },
+    ]
+
+    gates = evaluate_quality_gates(
+        rows,
+        {
+            "min_cases_per_language": {"VI": 2, "en": 2},
+            "min_cases_per_action": {"Allow": 1, "block": 1},
+        },
+    )
+
+    assert gates["passed"] is True
+    assert gates["observed"]["by_language"]["vi"] == 2
+    assert gates["observed"]["by_language"]["en"] == 2
+    assert gates["observed"]["by_action"]["allow"] == 1
+    assert gates["observed"]["by_action"]["block"] == 1
+
+
+def test_quality_gates_reject_damaged_requirement_types() -> None:
+    with pytest.raises(DatasetInputError, match="min_total_cases must be a non-negative whole number"):
+        evaluate_quality_gates([], {"min_total_cases": True})
+    with pytest.raises(DatasetInputError, match="min_cases_per_language.vi must be"):
+        evaluate_quality_gates([], {"min_cases_per_language": {"vi": -1}})
+    with pytest.raises(DatasetInputError, match="repeats"):
+        evaluate_quality_gates([], {"min_cases_per_language": {"vi": 1, "VI": 2}})
+    with pytest.raises(DatasetInputError, match="on_failure must be silver or fail"):
+        evaluate_quality_gates([], {"on_failure": "retry"})
+
+
+def test_quality_gates_record_on_failure_mode() -> None:
+    failed = evaluate_quality_gates([], {"min_total_cases": 1, "on_failure": "fail"})
+    assert failed["passed"] is False
+    assert failed["on_failure"] == "fail"
+    defaulted = evaluate_quality_gates([], {})
+    assert defaulted["passed"] is True
+    assert defaulted["on_failure"] == "silver"
 
 
 def test_an_exact_duplicate_keeps_the_lowest_case_id() -> None:
@@ -366,6 +462,88 @@ def test_generate_records_both_splits(tmp_path: Path, use: Any) -> None:
     assert json.loads((cache / "cache_index.json").read_text(encoding="utf-8"))["stages"]["dataset"]["status"] == (
         "completed"
     )
+
+
+def test_backfill_fills_room_from_healthy_policies_and_skips_rule_level_rejections(
+    tmp_path: Path, use: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _five_topic_with_gates(tmp_path / "base", use)
+    base_cases = _jsonl(base / "deduplicated_cases.jsonl")
+    base_plan = _jsonl(base / "coverage_plan.jsonl")
+    assert len(base_plan) == 10
+    broken_quote = next(case for case in base_cases if case["policy_id"] == base_plan[0]["policy_id"])["evidence"][
+        "source_quote"
+    ]
+    _break_quote(monkeypatch, broken_quote)
+
+    cache = _five_topic_with_gates(tmp_path / "broken", use)
+
+    rejected = _jsonl(cache / "rejected_cases.jsonl")
+    broken = {row["policy_id"] for row in rejected if "quote_not_in_span" in row["reasons"]}
+    assert broken
+    gaps = json.loads((cache / "coverage_gaps.json").read_text(encoding="utf-8"))
+    added = set(gaps["backfill"]["added_slot_ids"])
+    assert added
+    plan = _jsonl(cache / "coverage_plan.jsonl")
+    backfilled = [row for row in plan if row.get("backfill") is True]
+    assert {row["slot_id"] for row in backfilled} == added
+    assert not {row["policy_id"] for row in backfilled} & broken
+    survivors = _jsonl(cache / "deduplicated_cases.jsonl")
+    assert not {case["policy_id"] for case in survivors} & broken
+    kept_before = sum(1 for case in base_cases if case["policy_id"] not in broken)
+    assert kept_before < len(survivors) <= 10
+
+
+def test_a_backfill_round_that_does_not_lower_the_shortfall_is_rolled_back(
+    tmp_path: Path, use: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _five_topic_with_gates(tmp_path / "base", use)
+    base_cases = _jsonl(base / "deduplicated_cases.jsonl")
+    first_policy = _jsonl(base / "coverage_plan.jsonl")[0]["policy_id"]
+    _break_quote(
+        monkeypatch,
+        next(case for case in base_cases if case["policy_id"] == first_policy)["evidence"]["source_quote"],
+    )
+    monkeypatch.setattr(pipeline_module, "_current_shortfall", lambda stage_cache, run_dir: 10**9)
+
+    cache = _five_topic_with_gates(tmp_path / "broken", use)
+
+    plan = _jsonl(cache / "coverage_plan.jsonl")
+    gaps = json.loads((cache / "coverage_gaps.json").read_text(encoding="utf-8"))
+    assert len(plan) == 10
+    assert all(row.get("backfill") is not True for row in plan)
+    assert "backfill" not in gaps
+    scheduled = {row["slot_id"] for row in plan}
+    assert {case["slot_id"] for case in _jsonl(cache / "scenario_candidates.jsonl")} == scheduled
+    index = json.loads((cache / "cache_index.json").read_text(encoding="utf-8"))
+    assert index["stages"]["coverage_plan"]["scheduled_cases"] == 10
+    assert "backfill_rounds" not in index["stages"]["coverage_plan"]
+
+
+def _five_topic_with_gates(root: Path, use: Any) -> Path:
+    use(ScriptedExtractor(FIVE_TOPIC_REPLIES))
+    root.mkdir()
+    config = _config(root, {"five-topic.md": FIVE_TOPIC})
+    data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    data["budget"] = {"assisted_max_cases": 10}
+    data["quality_gates"] = {"min_total_cases": 1000}
+    config.write_text(yaml.safe_dump(data), encoding="utf-8")
+    prepare_safety(config)
+    with pytest.raises(SafetyStatus) as caught:
+        generate_safety(config)
+    assert caught.value.status is RunStatus.REVIEW_REQUIRED, str(caught.value)
+    return root / "out" / "customer-safety-v1" / "stage_cache"
+
+
+def _break_quote(monkeypatch: pytest.MonkeyPatch, quote: str) -> None:
+    original = dataset_module.quote_in_span
+
+    def patched(candidate: str, span: str) -> bool:
+        if canonical_text(candidate) == canonical_text(quote):
+            return False
+        return original(candidate, span)
+
+    monkeypatch.setattr(dataset_module, "quote_in_span", patched)
 
 
 def test_a_dataset_error_marks_the_stage_failed_and_keeps_scenarios(

@@ -9,8 +9,14 @@ import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import (
     CoverageInputError,
+    apply_backfill,
     build_coverage_plan,
     case_cap_for,
+    cell_distinctness_key,
+    quality_gate_shortfall,
+    rewrite_coverage_plan,
+    rule_level_rejected_policies,
+    select_backfill_cells,
     span_text,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import validate_rule
@@ -586,6 +592,168 @@ def test_a_planner_error_marks_the_stage_failed_and_removes_a_partial_plan(
     index = json.loads((run_dir / "stage_cache" / "cache_index.json").read_text(encoding="utf-8"))
     assert index["stages"]["coverage_plan"]["status"] == "failed"
     assert index["stages"]["coverage_plan"]["outcome"] == "RuntimeError"
+
+
+def test_backfill_promotes_distinct_cells_and_skips_quote_copies(tmp_path: Path) -> None:
+    scheduled = [_backfill_cell("P-1/clear_violation")]
+    surviving = [_backfill_cell("P-1/clear_violation", case_id="P-1/clear_violation")]
+    gaps = [
+        _backfill_cell("P-1/clear_violation-copy", reason="budget_cap"),
+        _backfill_cell("P-1/language/vi", kind="language", language="vi", reason="translation_required"),
+        _backfill_cell("P-1/span", reason="span_missing"),
+        _backfill_cell("P-1/turns", kind="multi_turn", reason="max_turns"),
+        _backfill_cell(
+            "P-1/clear_allow",
+            kind="clear_allow",
+            expected_action="allow",
+            present_legs=[],
+            reason="budget_cap",
+        ),
+        _backfill_cell(
+            "P-1/boundary",
+            kind="boundary",
+            expected_action=None,
+            present_legs=["asks"],
+            reason="budget_cap",
+        ),
+    ]
+    added = select_backfill_cells(
+        gaps,
+        scheduled,
+        surviving,
+        case_cap=3,
+        budget=_budget(),
+        gate_result={"failures": [{"gate": "min_total_cases", "required": 3, "actual": 1, "missing": 2}]},
+    )
+
+    assert {cell["slot_id"] for cell in added} == {"P-1/clear_allow", "P-1/boundary"}
+    assert all(cell_distinctness_key(cell) != cell_distinctness_key(scheduled[0]) for cell in added)
+    rows, summary = apply_backfill(scheduled, _backfill_summary(scheduled, gaps), added)
+    assert rows[0]["slot_id"] == "P-1/clear_violation"
+    assert {row["slot_id"] for row in rows[1:]} == {"P-1/clear_allow", "P-1/boundary"}
+    assert all(row.get("backfill") is True for row in rows[1:])
+    assert {gap["slot_id"] for gap in summary["gaps"]} == {
+        "P-1/clear_violation-copy",
+        "P-1/language/vi",
+        "P-1/span",
+        "P-1/turns",
+    }
+    assert summary["backfill"]["rounds"] == 1
+    members = {
+        member["slot_id"]: member["scheduled"] for member in summary["contrast_families"][0]["members"]
+    }
+    assert members["P-1/clear_allow"] is True
+    rewritten = rewrite_coverage_plan(tmp_path, rows, summary)
+    stored = _jsonl(tmp_path / "coverage_plan.jsonl")
+    assert rewritten["scheduled_cases"] == 3
+    assert set(rewritten["backfill"]["added_slot_ids"]) == {"P-1/clear_allow", "P-1/boundary"}
+    assert [row["slot_id"] for row in stored] == [row["slot_id"] for row in rows]
+
+
+def test_backfill_skips_cells_that_do_not_help_the_shortfall_and_respects_caps() -> None:
+    allow = _backfill_cell(
+        "P-1/clear_allow",
+        kind="clear_allow",
+        expected_action="allow",
+        present_legs=[],
+        reason="budget_cap",
+    )
+    block = _backfill_cell("P-1/adversarial", kind="adversarial", priority="optional", reason="rule_cap")
+    chosen = select_backfill_cells(
+        [block, allow],
+        [],
+        [],
+        case_cap=2,
+        budget=_budget(),
+        gate_result={
+            "failures": [
+                {"gate": "min_cases_per_action", "slice": "allow", "required": 1, "actual": 0, "missing": 1}
+            ]
+        },
+    )
+    assert [cell["slot_id"] for cell in chosen] == ["P-1/clear_allow"]
+
+    full = select_backfill_cells(
+        [allow],
+        [],
+        [_backfill_cell("kept")],
+        case_cap=1,
+        budget=_budget(),
+        gate_result={"failures": [{"gate": "min_total_cases", "required": 4, "actual": 1, "missing": 3}]},
+    )
+    assert full == []
+
+    capped = select_backfill_cells(
+        [allow],
+        [],
+        [_backfill_cell("kept")],
+        case_cap=4,
+        budget=_budget(cases_per_normal_rule=1),
+        gate_result={"failures": [{"gate": "min_total_cases", "required": 4, "actual": 1, "missing": 3}]},
+    )
+    assert capped == []
+
+    blocked = select_backfill_cells(
+        [allow],
+        [],
+        [],
+        case_cap=4,
+        budget=_budget(),
+        gate_result={"failures": [{"gate": "min_cases_per_policy", "slice": "P-1", "required": 2, "actual": 0}]},
+        blocked_policies=rule_level_rejected_policies(
+            [
+                {"policy_id": "P-1", "reasons": ["quote_not_in_span"]},
+                {"policy_id": "P-2", "reasons": ["exact_duplicate"]},
+            ]
+        ),
+    )
+    assert blocked == []
+    assert rule_level_rejected_policies([{"policy_id": "P-2", "reasons": ["exact_duplicate"]}]) == set()
+    assert quality_gate_shortfall({"failures": [{"missing": 3}, {"missing": 2}, {"missing": True}]}) == 5
+
+
+def _backfill_cell(slot_id: str, **fields: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "slot_id": slot_id,
+        "policy_id": "P-1",
+        "kind": "clear_violation",
+        "expected_action": "block",
+        "severity": "medium",
+        "priority": "required",
+        "language": "en",
+        "present_legs": ["asks"],
+        "absent_legs": [],
+        "reason": "budget_cap",
+        "blocks_gold": True,
+    }
+    row.update(fields)
+    return row
+
+
+def _backfill_summary(rows: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "certification": "silver",
+        "reason": "budget_cap",
+        "coverage_of": "eligible_rules",
+        "case_cap": 3,
+        "required_cases": 3,
+        "gold_cases_needed": 3,
+        "scheduled_cases": len(rows),
+        "optional_scheduled": 0,
+        "missing_required": [gap["slot_id"] for gap in gaps if gap.get("blocks_gold") is True],
+        "excluded_rules": [],
+        "modules": {},
+        "gaps": gaps,
+        "contrast_families": [
+            {
+                "family_id": "contrast/P-1",
+                "members": [
+                    {"slot_id": "P-1/clear_violation", "scheduled": True},
+                    {"slot_id": "P-1/clear_allow", "scheduled": False},
+                ],
+            }
+        ],
+    }
 
 
 def _generate(

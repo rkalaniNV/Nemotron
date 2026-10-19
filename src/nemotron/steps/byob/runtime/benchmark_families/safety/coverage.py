@@ -17,13 +17,16 @@
 
 The plan names the cases a later stage must generate. It does not write case text and
 it does not call a model. Required cells are scheduled before optional cells. A required
-cell that does not fit is listed in the gap file, and the plan is Silver.
+cell that does not fit is listed in the gap file, and the plan is Silver. If later
+validation or exact-dedup leaves room under the case cap, quality-gate backfill may
+promote unscheduled distinct cells. It never copies a cell that shares the quote-copy
+identity of a scheduled or surviving row.
 """
 
 import hashlib
 import json
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,6 +48,10 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
 PLAN_FILE = "coverage_plan.jsonl"
 GAPS_FILE = "coverage_gaps.json"
 COVERAGE_OUTPUTS = (PLAN_FILE, GAPS_FILE)
+MAX_BACKFILL_ROUNDS = 8
+_UNGENERATABLE_GAP_REASONS = frozenset({"translation_required", "span_missing", "max_turns"})
+# A case rejected for one of these fails because of its rule, so every other cell of that rule fails too.
+RULE_LEVEL_REJECTIONS = frozenset({"quote_not_in_span", "span_missing", "evidence_mismatch", "evidence_missing"})
 
 # Required cells are filled in this order across every rule, so a short budget keeps a
 # clear violation for each rule before any rule receives a later cell. Optional cells are
@@ -263,6 +270,243 @@ def write_coverage_plan(stage_cache: Path, plan: CoveragePlan) -> dict[str, Any]
     summary = plan.summary()
     write_json(stage_cache / GAPS_FILE, summary)
     return plan.record()
+
+
+def cell_distinctness_key(cell: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Identity used to refuse quote-copy backfill. Turn text is implied by the rule quote."""
+    language = cell.get("language")
+    if not isinstance(language, str) or not language.strip():
+        listed = cell.get("languages")
+        if isinstance(listed, list) and listed and all(isinstance(item, str) for item in listed):
+            language = ",".join(item.strip() for item in listed if item.strip())
+        else:
+            language = cell.get("source_language") if isinstance(cell.get("source_language"), str) else ""
+    present = cell.get("present_legs") if isinstance(cell.get("present_legs"), list) else []
+    absent = cell.get("absent_legs") if isinstance(cell.get("absent_legs"), list) else []
+    action = cell.get("expected_action")
+    return (
+        str(cell.get("policy_id") or ""),
+        str(language or ""),
+        "" if action is None else str(action),
+        str(cell.get("kind") or ""),
+        tuple(str(leg) for leg in present),
+        tuple(str(leg) for leg in absent),
+    )
+
+
+def select_backfill_cells(
+    gaps: Sequence[Mapping[str, Any]],
+    scheduled: Sequence[Mapping[str, Any]],
+    surviving: Sequence[Mapping[str, Any]],
+    *,
+    case_cap: int,
+    budget: Mapping[str, Any],
+    gate_result: Mapping[str, Any],
+    blocked_policies: Collection[str] = (),
+) -> list[dict[str, Any]]:
+    """Choose unscheduled distinct cells that can fill quality-gate shortfalls.
+
+    Held translation/span/turn gaps cannot be generated. A cell whose distinctness
+    key already exists in the surviving dataset or the current plan is a quote-copy
+    and is skipped. A cell of a policy in ``blocked_policies`` would be rejected
+    like that policy's earlier cases and is skipped. The case cap is applied to
+    surviving rows, so rejected plan rows can be replaced.
+    """
+    blocked = {policy_id for policy_id in blocked_policies if isinstance(policy_id, str)}
+    failures = gate_result.get("failures") if isinstance(gate_result.get("failures"), list) else []
+    if not failures:
+        return []
+    occupied = {cell_distinctness_key(row) for row in (*scheduled, *surviving)}
+    scheduled_ids = {
+        str(row.get("slot_id"))
+        for row in scheduled
+        if isinstance(row.get("slot_id"), str) and row.get("slot_id")
+    }
+    policy_counts: dict[str, int] = {}
+    for row in surviving:
+        policy_id = row.get("policy_id")
+        if isinstance(policy_id, str) and policy_id:
+            policy_counts[policy_id] = policy_counts.get(policy_id, 0) + 1
+    room = int(case_cap) - len(surviving)
+    if room <= 0:
+        return []
+    ranked: list[tuple[int, int, str, dict[str, Any]]] = []
+    for gap in gaps:
+        if not isinstance(gap, Mapping):
+            continue
+        slot_id = gap.get("slot_id")
+        if not isinstance(slot_id, str) or not slot_id or slot_id in scheduled_ids:
+            continue
+        reason = str(gap.get("reason") or "")
+        if reason in _UNGENERATABLE_GAP_REASONS:
+            continue
+        if str(gap.get("policy_id") or "") in blocked:
+            continue
+        key = cell_distinctness_key(gap)
+        if key in occupied:
+            continue
+        score = _backfill_score(gap, failures)
+        if score <= 0:
+            continue
+        required = 0 if gap.get("priority") == "optional" else 1
+        ranked.append((required, score, slot_id, dict(gap)))
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            -item[1],
+            hashlib.sha256(item[2].encode("utf-8")).hexdigest(),
+            item[2],
+        )
+    )
+    chosen: list[dict[str, Any]] = []
+    for _required, _score, slot_id, cell in ranked:
+        if len(chosen) >= room:
+            break
+        policy_id = str(cell.get("policy_id") or "")
+        if policy_id:
+            cap = _rule_cap(str(cell.get("severity") or "medium"), budget)
+            if policy_counts.get(policy_id, 0) >= cap:
+                continue
+        key = cell_distinctness_key(cell)
+        if key in occupied:
+            continue
+        chosen.append(cell)
+        occupied.add(key)
+        scheduled_ids.add(slot_id)
+        if policy_id:
+            policy_counts[policy_id] = policy_counts.get(policy_id, 0) + 1
+    return chosen
+
+
+def apply_backfill(
+    rows: Sequence[Mapping[str, Any]],
+    summary: Mapping[str, Any],
+    added: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Move chosen gap cells onto the plan and refresh gap/family bookkeeping."""
+    added_ids = {str(cell["slot_id"]) for cell in added if isinstance(cell.get("slot_id"), str)}
+    new_rows = [dict(row) for row in rows]
+    for cell in added:
+        stored = {key: value for key, value in cell.items() if key not in {"reason", "blocks_gold"}}
+        stored["order"] = len(new_rows)
+        stored["backfill"] = True
+        new_rows.append(stored)
+    remaining = [
+        dict(gap)
+        for gap in summary.get("gaps") or []
+        if isinstance(gap, Mapping) and str(gap.get("slot_id")) not in added_ids
+    ]
+    scheduled_ids = {str(row.get("slot_id")) for row in new_rows if isinstance(row.get("slot_id"), str)}
+    families = []
+    for family in summary.get("contrast_families") or []:
+        if not isinstance(family, Mapping):
+            continue
+        members = []
+        for member in family.get("members") or []:
+            if not isinstance(member, Mapping):
+                continue
+            members.append({**member, "scheduled": member.get("slot_id") in scheduled_ids})
+        families.append({**family, "members": members})
+    blocking = [gap for gap in remaining if gap.get("blocks_gold") is True]
+    required_cases = summary.get("required_cases")
+    required_count = required_cases if isinstance(required_cases, int) and not isinstance(required_cases, bool) else 0
+    certification, reason = _certification(required_count, blocking)
+    added_slots = [str(cell["slot_id"]) for cell in added if isinstance(cell.get("slot_id"), str)]
+    previous = summary.get("backfill") if isinstance(summary.get("backfill"), Mapping) else {}
+    previous_added = [str(slot) for slot in previous.get("added_slot_ids") or [] if isinstance(slot, str)]
+    updated = dict(summary)
+    updated.update(
+        {
+            "certification": certification,
+            "reason": reason,
+            "scheduled_cases": len(new_rows),
+            "optional_scheduled": sum(1 for row in new_rows if row.get("priority") == "optional"),
+            "missing_required": [str(gap["slot_id"]) for gap in blocking if isinstance(gap.get("slot_id"), str)],
+            "gaps": remaining,
+            "contrast_families": families,
+            "backfill": {
+                "rounds": (
+                    previous.get("rounds") + 1
+                    if isinstance(previous.get("rounds"), int) and not isinstance(previous.get("rounds"), bool)
+                    else 1
+                ),
+                "added_slot_ids": previous_added + added_slots,
+            },
+        }
+    )
+    return new_rows, updated
+
+
+def rewrite_coverage_plan(
+    stage_cache: Path, rows: Sequence[Mapping[str, Any]], summary: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Replace the plan files after backfill. Gap rows stay in the gap file."""
+    stored_rows = [dict(row) for row in rows]
+    stored_summary = dict(summary)
+    write_jsonl(stage_cache / PLAN_FILE, stored_rows)
+    write_json(stage_cache / GAPS_FILE, stored_summary)
+    record = {key: stored_summary[key] for key in _RECORD_FIELDS}
+    if isinstance(stored_summary.get("backfill"), Mapping):
+        record["backfill"] = dict(stored_summary["backfill"])
+    return record
+
+
+def rule_level_rejected_policies(rejected: Sequence[Mapping[str, Any]]) -> set[str]:
+    """Policies with a case rejected because of the rule itself, not because of that case."""
+    blocked: set[str] = set()
+    for row in rejected:
+        policy_id = row.get("policy_id")
+        reasons = row.get("reasons")
+        if not isinstance(policy_id, str) or not isinstance(reasons, list):
+            continue
+        if any(reason in RULE_LEVEL_REJECTIONS for reason in reasons):
+            blocked.add(policy_id)
+    return blocked
+
+
+def quality_gate_shortfall(gate_result: Mapping[str, Any]) -> int:
+    """Total missing cases across unmet gates. Backfill must lower it to be kept."""
+    failures = gate_result.get("failures") if isinstance(gate_result.get("failures"), list) else []
+    total = 0
+    for failure in failures:
+        missing = failure.get("missing") if isinstance(failure, Mapping) else None
+        if isinstance(missing, int) and not isinstance(missing, bool) and missing > 0:
+            total += missing
+    return total
+
+
+def _backfill_score(cell: Mapping[str, Any], failures: Sequence[Mapping[str, Any]]) -> int:
+    policy_id = str(cell.get("policy_id") or "")
+    action = cell.get("expected_action")
+    tags = set()
+    language = cell.get("language")
+    if isinstance(language, str) and language.strip():
+        tags.add(language.casefold())
+    source = cell.get("source_language")
+    if isinstance(source, str) and source.strip():
+        tags.add(source.casefold())
+    listed = cell.get("languages")
+    if isinstance(listed, list):
+        tags.update(item.casefold() for item in listed if isinstance(item, str) and item.strip())
+    score = 0
+    for failure in failures:
+        if not isinstance(failure, Mapping):
+            continue
+        gate = failure.get("gate")
+        slice_name = failure.get("slice")
+        if gate in {"min_total_cases", "min_development_cases", "min_private_test_cases"}:
+            score += 1
+        elif gate == "min_cases_per_policy" and isinstance(slice_name, str) and slice_name == policy_id:
+            score += 3
+        elif gate == "min_cases_per_action" and isinstance(slice_name, str) and slice_name == action:
+            score += 3
+        elif (
+            gate == "min_cases_per_language"
+            and isinstance(slice_name, str)
+            and slice_name.casefold() in tags
+        ):
+            score += 3
+    return score
 
 
 def _required_cells(

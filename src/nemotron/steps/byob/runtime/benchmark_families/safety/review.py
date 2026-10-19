@@ -109,6 +109,14 @@ def load_review(
         )
     try:
         decisions, metadata = load_decisions(run_dir / DECISIONS_NAME, run_dir)
+        split_manifest = _mapping(
+            _read_json(cache / "split_manifest.json", run_dir),
+            "split_manifest.json",
+            run_dir,
+        )
+        quality_gates = split_manifest.get("quality_gates")
+        if not isinstance(quality_gates, Mapping):
+            raise ValueError("split_manifest.json must contain quality_gates")
         return assemble_review(
             config_sha256=config_sha256,
             source_fingerprint=source_fingerprint,
@@ -124,6 +132,7 @@ def load_review(
             decision_metadata=metadata,
             content_hashes=_file_hashes(run_dir),
             example_cap=example_cap,
+            quality_gates=quality_gates,
         )
     except (OSError, ValueError) as exc:
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"review packet cannot be built: {exc}") from exc
@@ -145,6 +154,7 @@ def assemble_review(
     content_hashes: Mapping[str, str],
     example_cap: int = EXAMPLE_CAP,
     decision_metadata: Mapping[str, Mapping[str, str]] | None = None,
+    quality_gates: Mapping[str, Any] | None = None,
 ) -> ReviewBuild:
     """Build the packet, the page, and the CSV from in-memory rows.
 
@@ -182,6 +192,7 @@ def assemble_review(
             "scheduled_cases": coverage.get("scheduled_cases"),
             "missing_required": list(coverage.get("missing_required") or []),
         },
+        "quality_gates": dict(quality_gates or {"enabled": False, "passed": True, "failures": []}),
         "blocking_gaps": sorted(blocking, key=_gap_key),
         "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)],
         "unresolved_rules": _unresolved_rules(rules),
@@ -257,6 +268,10 @@ def render_html(packet: Mapping[str, Any]) -> str:
     blocking = packet.get("blocking_gaps") or []
     excluded = packet.get("excluded_rules") or []
     examples = packet.get("examples") or []
+    quality_gates = packet.get("quality_gates") if isinstance(packet.get("quality_gates"), Mapping) else {}
+    gate_failures = [row for row in quality_gates.get("failures") or [] if isinstance(row, Mapping)]
+    gates_enabled = quality_gates.get("enabled") is True
+    on_failure = quality_gates.get("on_failure") if quality_gates.get("on_failure") in {"silver", "fail"} else "silver"
     cards = packet.get("cards") or []
     pre_accepted = sum(1 for card in cards if card.get("decision") == "pre_accepted")
     pending = sum(1 for card in cards if card_is_pending(card))
@@ -270,7 +285,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
         "<p>Record approve, reject, or edit in <code>review_decisions.csv</code>. "
         "An edit needs a note. Then sign the regenerated packet.</p>",
         "<p>Representative examples are capped. Every unresolved rule, unresolved conflict, "
-        "and blocking coverage gap is listed in full.</p>",
+        "blocking coverage gap, and unmet minimum dataset quality gate is listed in full.</p>",
         f"<p>Pre-accepted rules: {pre_accepted}. They stay in the benchmark unless "
         "review_decisions.csv sets reject or edit.</p>",
         "<h2>Review cards</h2>",
@@ -281,6 +296,8 @@ def render_html(packet: Mapping[str, Any]) -> str:
         _conflict_table(conflicts),
         f"<h2>Blocking coverage gaps ({len(blocking)})</h2>",
         _gap_table(blocking),
+        f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
+        _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
         f"<h2>Excluded rules ({len(excluded)})</h2>",
         _excluded_table(excluded),
         "<h2>Representative examples</h2>",
@@ -288,6 +305,42 @@ def render_html(packet: Mapping[str, Any]) -> str:
         "</body></html>\n",
     ]
     return "\n".join(parts)
+
+
+def _quality_gate_table(
+    rows: Sequence[Mapping[str, Any]], *, enabled: bool = False, on_failure: str = "silver"
+) -> str:
+    if not enabled:
+        return "<p>No minimum dataset quality gates are configured.</p>"
+    if on_failure == "fail":
+        consequence = "an unmet gate blocks publication after review."
+    else:
+        consequence = "an unmet gate publishes as Silver."
+    if not rows:
+        return f"<p>All configured minimum dataset gates passed. On failure, {consequence}</p>"
+    body = [
+        f"<p>On failure, {consequence}</p>",
+        "<table><thead><tr><th>Gate</th><th>Slice</th><th>Required</th>"
+        "<th>Actual</th><th>Missing</th></tr></thead><tbody>",
+    ]
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        body.append(
+            "<tr><td>"
+            + _text(row.get("gate"))
+            + "</td><td>"
+            + _text(row.get("slice"))
+            + "</td><td>"
+            + _text(row.get("required"))
+            + "</td><td>"
+            + _text(row.get("actual"))
+            + "</td><td>"
+            + _text(row.get("missing"))
+            + "</td></tr>"
+        )
+    body.append("</tbody></table>")
+    return "\n".join(body)
 
 
 def _card_table(rows: Sequence[Mapping[str, Any]]) -> str:

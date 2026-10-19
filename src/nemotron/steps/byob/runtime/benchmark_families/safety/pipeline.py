@@ -19,7 +19,7 @@ import hashlib
 import json
 import os
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import partial
@@ -39,11 +39,17 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.config import (
 from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import (
     COVERAGE_OUTPUTS,
     GAPS_FILE,
+    MAX_BACKFILL_ROUNDS,
     PLAN_FILE,
+    apply_backfill,
     build_coverage_plan,
     case_cap_for,
     load_eligible_rules,
     load_routed_statuses,
+    quality_gate_shortfall,
+    rewrite_coverage_plan,
+    rule_level_rejected_policies,
+    select_backfill_cells,
     span_text,
     write_coverage_plan,
 )
@@ -72,6 +78,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.publish import (
     MANIFEST_NAME,
+    QUALITY_FILE,
     assert_published_intact,
     clear_published,
     compile_publication,
@@ -397,16 +404,20 @@ def _publication_blocker(
                 )
     counts = _rule_stages(config, digest, fingerprint)
     coverage = _coverage_stage(config, digest, fingerprint)
-    record["coverage"] = coverage
     scenarios = _scenario_stage(config, digest, fingerprint)
-    record["scenarios"] = scenarios
     dataset = _dataset_stage(config, digest, fingerprint)
+    coverage, scenarios, dataset = _backfill_quality_gates(
+        config, digest, fingerprint, coverage, scenarios, dataset
+    )
+    record["coverage"] = coverage
+    record["scenarios"] = scenarios
     record["dataset"] = dataset
     coverage_note = (
         f"Coverage plan: {coverage['certification']} for eligible rules, "
         f"{coverage['scheduled_cases']} scheduled, {coverage['required_cases']} required, "
         f"{len(coverage['missing_required'])} required omitted, "
         f"{len(coverage['excluded_rules'])} rules excluded."
+        f"{_backfill_note(coverage)}"
     )
     scenario_note = (
         f"Scenarios: {scenarios['accepted']} accepted, {scenarios['rejected']} rejected, "
@@ -416,7 +427,7 @@ def _publication_blocker(
         f"Dataset: {dataset['validated']} validated, {dataset['rejected']} rejected, "
         f"{dataset['duplicates_removed']} duplicates removed, "
         f"{dataset['development']} development, {dataset['private_test']} private-test "
-        f"({dataset['split_reason']})."
+        f"({dataset['split_reason']}), {dataset['quality_gate_failures']} minimum quality gates unmet."
     )
     if counts["eligible_for_generation"] + counts["needs_decision"] == 0:
         return (
@@ -515,6 +526,9 @@ def _publication_blocker(
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         clear_published(run_dir)
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"benchmark cannot be compiled: {exc}") from exc
+    if _quality_gates_block_publish(config, run_dir):
+        clear_published(run_dir)
+        return RunStatus.QUALITY_GATES_FAILED, "", counts, None
     return status_for(manifest["certification"]), "", counts, manifest
 
 
@@ -694,7 +708,16 @@ def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dic
         spans = span_text(json.loads((stage_cache / "source_index.json").read_text(encoding="utf-8")))
         cases = load_jsonl_objects((stage_cache / CASES_FILE).read_text(encoding="utf-8"), CASES_FILE)
         families = load_jsonl_objects((stage_cache / CONTRAST_FILE).read_text(encoding="utf-8"), CONTRAST_FILE)
-        summary = write_dataset(stage_cache, select_dataset(cases, families, rules, spans))
+        summary = write_dataset(
+            stage_cache,
+            select_dataset(
+                cases,
+                families,
+                rules,
+                spans,
+                quality_gates=config.extras.get("quality_gates"),
+            ),
+        )
     except Exception as exc:
         for name in DATASET_OUTPUTS:
             (stage_cache / name).unlink(missing_ok=True)
@@ -712,9 +735,170 @@ def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dic
         "rejected": summary["rejected"],
         "duplicates_removed": summary["duplicates_removed"],
         "split_complete": summary["split_complete"],
+        "quality_gates_passed": summary["quality_gates_passed"],
     }
     _write_json(index_path, index)
     return summary
+
+
+def _backfill_quality_gates(
+    config: ResolvedConfig,
+    digest: str,
+    fingerprint: str,
+    coverage: dict[str, Any],
+    scenarios: dict[str, Any],
+    dataset: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Promote unscheduled distinct cells into room left by rejected or duplicate rows.
+
+    Quote-copies are skipped. Held translation, missing-span, and max-turn cells stay
+    unscheduled, and so do cells of a policy whose cases fail because of the rule itself.
+    Required cells already on the plan are not dropped. A round that does not lower the
+    total gate shortfall is rolled back, because a completed contrast family or a new
+    split can remove rows that already passed.
+    """
+    if dataset.get("quality_gates_passed") is True:
+        return coverage, scenarios, dataset
+    if not isinstance(config.extras.get("quality_gates"), Mapping):
+        return coverage, scenarios, dataset
+    run_dir = config.run_dir
+    stage_cache = run_dir / "stage_cache"
+    case_cap = case_cap_for(config.mode, config.budget)
+    for _ in range(MAX_BACKFILL_ROUNDS):
+        if dataset.get("quality_gates_passed") is True:
+            break
+        try:
+            plan_text = (stage_cache / PLAN_FILE).read_text(encoding="utf-8")
+            gaps_text = (stage_cache / GAPS_FILE).read_text(encoding="utf-8")
+            rows = load_plan_rows(plan_text)
+            gaps_doc = json.loads(gaps_text)
+            surviving = load_jsonl_objects(
+                (stage_cache / "deduplicated_cases.jsonl").read_text(encoding="utf-8"),
+                "deduplicated_cases.jsonl",
+            )
+            rejected = load_jsonl_objects(
+                (stage_cache / "rejected_cases.jsonl").read_text(encoding="utf-8"),
+                "rejected_cases.jsonl",
+            )
+            split_manifest = json.loads((stage_cache / "split_manifest.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise abort(
+                RunStatus.INVALID_RUN_ARTIFACT,
+                run_dir,
+                f"quality-gate backfill cannot read artifacts: {exc}",
+            ) from exc
+        if not isinstance(gaps_doc, dict) or not isinstance(split_manifest, dict):
+            raise abort(
+                RunStatus.INVALID_RUN_ARTIFACT,
+                run_dir,
+                "quality-gate backfill needs coverage_gaps.json and split_manifest.json objects.",
+            )
+        gate_result = split_manifest.get("quality_gates") or {}
+        added = select_backfill_cells(
+            gaps_doc.get("gaps") or [],
+            rows,
+            surviving,
+            case_cap=case_cap,
+            budget=config.budget,
+            gate_result=gate_result,
+            blocked_policies=rule_level_rejected_policies(rejected),
+        )
+        if not added:
+            break
+        before = quality_gate_shortfall(gate_result)
+        previous_coverage = coverage
+        new_rows, updated = apply_backfill(rows, gaps_doc, added)
+        coverage = rewrite_coverage_plan(stage_cache, new_rows, updated)
+        _record_coverage_backfill(stage_cache, run_dir, digest, fingerprint, coverage)
+        scenarios = _scenario_stage(config, digest, fingerprint)
+        dataset = _dataset_stage(config, digest, fingerprint)
+        if _current_shortfall(stage_cache, run_dir) < before:
+            continue
+        (stage_cache / PLAN_FILE).write_text(plan_text, encoding="utf-8")
+        (stage_cache / GAPS_FILE).write_text(gaps_text, encoding="utf-8")
+        coverage = previous_coverage
+        _record_coverage_backfill(stage_cache, run_dir, digest, fingerprint, coverage)
+        scenarios = _scenario_stage(config, digest, fingerprint)
+        dataset = _dataset_stage(config, digest, fingerprint)
+        break
+    return coverage, scenarios, dataset
+
+
+def _current_shortfall(stage_cache: Path, run_dir: Path) -> int:
+    try:
+        split_manifest = json.loads((stage_cache / "split_manifest.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "split_manifest.json cannot be read.") from exc
+    gates = split_manifest.get("quality_gates") if isinstance(split_manifest, dict) else None
+    if not isinstance(gates, Mapping):
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "split_manifest.json has damaged quality_gates.")
+    return quality_gate_shortfall(gates)
+
+
+def _record_coverage_backfill(
+    stage_cache: Path,
+    run_dir: Path,
+    digest: str,
+    fingerprint: str,
+    coverage: Mapping[str, Any],
+) -> None:
+    index_path = stage_cache / "cache_index.json"
+    index = _read_json(index_path, run_dir)
+    if index is None or not _valid_cache_index(index):
+        raise abort(
+            RunStatus.INVALID_RUN_ARTIFACT,
+            run_dir,
+            "stage_cache/cache_index.json is missing or damaged; run stage=prepare.",
+        )
+    entry = index["stages"].get("coverage_plan")
+    if not isinstance(entry, dict):
+        raise abort(
+            RunStatus.INVALID_RUN_ARTIFACT,
+            run_dir,
+            "coverage_plan is missing from the cache index after backfill.",
+        )
+    entry["certification"] = coverage.get("certification")
+    entry["scheduled_cases"] = coverage.get("scheduled_cases")
+    entry["required_cases"] = coverage.get("required_cases")
+    entry["config_sha256"] = digest
+    entry["source_fingerprint"] = fingerprint
+    backfill = coverage.get("backfill")
+    if isinstance(backfill, Mapping):
+        entry["backfill_rounds"] = backfill.get("rounds")
+        entry["backfill_added"] = len(backfill.get("added_slot_ids") or [])
+    else:
+        entry.pop("backfill_rounds", None)
+        entry.pop("backfill_added", None)
+    index["stages"]["coverage_plan"] = entry
+    _write_json(index_path, index)
+
+
+def _backfill_note(coverage: Mapping[str, Any]) -> str:
+    backfill = coverage.get("backfill")
+    if not isinstance(backfill, Mapping):
+        return ""
+    added = [slot for slot in backfill.get("added_slot_ids") or [] if isinstance(slot, str)]
+    if not added:
+        return ""
+    rounds = backfill.get("rounds")
+    round_label = rounds if isinstance(rounds, int) and not isinstance(rounds, bool) else 1
+    return f" Backfill added {len(added)} distinct cells in {round_label} round(s)."
+
+
+def _quality_gates_block_publish(config: ResolvedConfig, run_dir: Path) -> bool:
+    if config.mode == "preview":
+        return False
+    path = run_dir / QUALITY_FILE
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"{QUALITY_FILE} cannot be read after compile.") from exc
+    if not isinstance(report, dict):
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"{QUALITY_FILE} is damaged after compile.")
+    gates = report.get("quality_gates")
+    if not isinstance(gates, Mapping):
+        return False
+    return gates.get("passed") is False and gates.get("on_failure") == "fail"
 
 
 def _check_rule_inputs(record: dict[str, Any], run_dir: Path) -> None:

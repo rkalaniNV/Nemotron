@@ -28,7 +28,11 @@ from typing import Any
 import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_json, write_jsonl
-from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import DatasetInputError, load_jsonl_objects
+from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import (
+    DatasetInputError,
+    evaluate_quality_gates,
+    load_jsonl_objects,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
     PACKET_NAME,
     REVIEW_PAGE,
@@ -69,6 +73,7 @@ def publication_tier(
     withheld: bool,
     blocking: bool,
     review_limitations: bool = False,
+    quality_gates_passed: bool = True,
 ) -> tuple[str, str]:
     """Gold needs a complete signed benchmark. Gaps, an incomplete split, or a removal is Silver.
 
@@ -84,6 +89,8 @@ def publication_tier(
         return "silver", coverage_reason or "required_omitted"
     if not split_complete or development == 0 or private == 0:
         return "silver", split_reason or "split_incomplete"
+    if not quality_gates_passed:
+        return "silver", "minimum_dataset_quality_not_met"
     return "gold", "complete"
 
 
@@ -332,6 +339,24 @@ def _publication_payload(
         else:
             continue
         rows.append({**case, "split": split})
+    stored_gates = split_manifest.get("quality_gates")
+    if isinstance(stored_gates, Mapping):
+        gate_requirements = stored_gates.get("requirements")
+        evaluated_policies = stored_gates.get("evaluated_policy_ids")
+        if not isinstance(gate_requirements, Mapping) or not isinstance(evaluated_policies, list):
+            raise abort(
+                RunStatus.INVALID_RUN_ARTIFACT,
+                run_dir,
+                "split_manifest.json has damaged quality_gates.",
+            )
+        retained_policies = [
+            policy_id
+            for policy_id in evaluated_policies
+            if isinstance(policy_id, str) and policy_id not in dropped_policies
+        ]
+        quality_gates = evaluate_quality_gates(rows, gate_requirements, policy_ids=retained_policies)
+    else:
+        quality_gates = evaluate_quality_gates(rows, {})
     coverage = packet.get("coverage") if isinstance(packet.get("coverage"), Mapping) else {}
     tier, reason = publication_tier(
         mode=mode,
@@ -344,6 +369,7 @@ def _publication_payload(
         withheld=bool(dropped),
         blocking=bool(packet.get("blocking_gaps")),
         review_limitations=bool(packet.get("unresolved_rules") or packet.get("unresolved_conflicts")),
+        quality_gates_passed=quality_gates["passed"],
     )
     grouped = {
         BENCHMARK_FILE: rows,
@@ -360,6 +386,7 @@ def _publication_payload(
         "cases": len(rows),
         "development": len(grouped[DEVELOPMENT_FILE]),
         "private_test": len(grouped[PRIVATE_FILE]),
+        "quality_gates": quality_gates,
         "blocking_gaps": list(packet.get("blocking_gaps") or []),
         "withheld_policies": sorted(dropped_policies),
         "withheld_cases": sorted(dropped),

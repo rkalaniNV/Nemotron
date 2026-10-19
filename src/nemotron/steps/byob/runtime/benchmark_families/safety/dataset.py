@@ -34,6 +34,7 @@ is not assigned.
 """
 
 import json
+import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -91,6 +92,7 @@ class DatasetBuild:
 
     def summary(self) -> dict[str, Any]:
         splits = self.manifest["splits"]
+        gates = self.manifest["quality_gates"]
         return {
             "checked": self.report["checked"],
             "validated": self.report["validated"],
@@ -100,6 +102,8 @@ class DatasetBuild:
             "private_test": len(splits["private_test"]),
             "split_complete": self.manifest["complete"],
             "split_reason": self.manifest["reason"],
+            "quality_gates_passed": gates["passed"],
+            "quality_gate_failures": len(gates["failures"]),
         }
 
 
@@ -124,6 +128,7 @@ def select_dataset(
     families: Sequence[Mapping[str, Any]],
     rules: Sequence[PolicyRule],
     spans: Mapping[str, str],
+    quality_gates: Mapping[str, Any] | None = None,
 ) -> DatasetBuild:
     """Check every case, drop exact duplicates, and assign the two splits.
 
@@ -166,6 +171,14 @@ def select_dataset(
     rejected.sort(key=lambda row: str(row["case_id"]))
     manifest = _manifest(deduplicated, drops, pairs, by_id)
     report = _report(reasons, validated, rejected, deduplicated, pairs, drops)
+    gate_result = evaluate_quality_gates(
+        deduplicated,
+        quality_gates or {},
+        policy_ids=tuple(sorted(by_id)),
+        split_manifest=manifest,
+    )
+    manifest["quality_gates"] = gate_result
+    report["quality_gates"] = gate_result
     return DatasetBuild(
         labels=labels,
         validated=validated,
@@ -174,6 +187,190 @@ def select_dataset(
         report=report,
         manifest=manifest,
     )
+
+
+def evaluate_quality_gates(
+    cases: Sequence[Mapping[str, Any]],
+    requirements: Mapping[str, Any],
+    *,
+    policy_ids: Sequence[str] = (),
+    split_manifest: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Evaluate minimum sample gates on final rows, never on raw generated candidates."""
+    if not isinstance(requirements, Mapping):
+        raise DatasetInputError("quality gate requirements must be a mapping")
+    if isinstance(cases, (str, bytes)) or not isinstance(cases, Sequence):
+        raise DatasetInputError("quality gates require a list of case objects")
+    if any(not isinstance(case, Mapping) for case in cases):
+        raise DatasetInputError("quality gates require a list of case objects")
+    rows = [dict(case) for case in cases]
+    split_by_id = _split_assignments(split_manifest) if split_manifest is not None else {}
+
+    by_policy = _tally(
+        rows,
+        lambda case: case.get("policy_id") if isinstance(case.get("policy_id"), str) else "",
+    )
+    by_policy.pop("", None)
+    by_action = _tally(rows, _action_name)
+    by_language = _language_tag_counts(rows)
+    if split_manifest is None:
+        development = sum(case.get("split") == "development" for case in rows)
+        private = sum(case.get("split") == "private_test" for case in rows)
+    else:
+        development = sum(split_by_id.get(str(case.get("case_id"))) == "development" for case in rows)
+        private = sum(split_by_id.get(str(case.get("case_id"))) == "private_test" for case in rows)
+
+    failures: list[dict[str, Any]] = []
+
+    def check(gate: str, required: int, actual: int, slice_name: str | None = None) -> None:
+        if actual >= required:
+            return
+        failure: dict[str, Any] = {
+            "gate": gate,
+            "required": required,
+            "actual": actual,
+            "missing": required - actual,
+        }
+        if slice_name is not None:
+            failure["slice"] = slice_name
+        failures.append(failure)
+
+    check("min_total_cases", _gate_count(requirements, "min_total_cases"), len(rows))
+    check("min_development_cases", _gate_count(requirements, "min_development_cases"), development)
+    check("min_private_test_cases", _gate_count(requirements, "min_private_test_cases"), private)
+    per_policy = _gate_count(requirements, "min_cases_per_policy")
+    checked_policies = sorted(
+        {
+            *(policy_id for policy_id in policy_ids if isinstance(policy_id, str) and policy_id),
+            *by_policy,
+        }
+    )
+    for policy_id in checked_policies:
+        check("min_cases_per_policy", per_policy, by_policy.get(policy_id, 0), policy_id)
+    action_requirements = _gate_mapping(requirements, "min_cases_per_action")
+    for action, required in action_requirements:
+        check("min_cases_per_action", required, by_action.get(action, 0), action)
+    language_requirements = _gate_mapping(requirements, "min_cases_per_language", language=True)
+    for language, required in language_requirements:
+        check("min_cases_per_language", required, by_language.get(_fold_language(language), 0), language)
+    enabled = any(
+        _gate_count(requirements, key) > 0
+        for key in (
+            "min_total_cases",
+            "min_development_cases",
+            "min_private_test_cases",
+            "min_cases_per_policy",
+        )
+    ) or any(required > 0 for _label, required in (*action_requirements, *language_requirements))
+    failures.sort(key=lambda row: (str(row["gate"]), str(row.get("slice") or ""), str(row.get("required"))))
+    copied_requirements = {
+        key: dict(value) if isinstance(value, Mapping) else value for key, value in requirements.items()
+    }
+    return {
+        "enabled": enabled,
+        "passed": not failures,
+        "on_failure": _on_failure_mode(requirements),
+        "requirements": copied_requirements,
+        "evaluated_policy_ids": checked_policies,
+        "observed": {
+            "total_cases": len(rows),
+            "development_cases": development,
+            "private_test_cases": private,
+            "by_policy": by_policy,
+            "by_action": by_action,
+            "by_language": {key: by_language[key] for key in sorted(by_language)},
+        },
+        "failures": failures,
+    }
+
+
+def _on_failure_mode(requirements: Mapping[str, Any]) -> str:
+    if "on_failure" not in requirements:
+        return "silver"
+    value = requirements["on_failure"]
+    if value not in {"silver", "fail"}:
+        raise DatasetInputError("quality_gates.on_failure must be silver or fail")
+    return str(value)
+
+
+def _gate_count(requirements: Mapping[str, Any], key: str) -> int:
+    if key not in requirements:
+        return 0
+    value = requirements[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise DatasetInputError(f"quality_gates.{key} must be a non-negative whole number")
+    return value
+
+
+def _gate_mapping(
+    requirements: Mapping[str, Any], key: str, *, language: bool = False
+) -> tuple[tuple[str, int], ...]:
+    if key not in requirements:
+        return ()
+    value = requirements[key]
+    if not isinstance(value, Mapping) or isinstance(value, (str, bytes)):
+        raise DatasetInputError(f"quality_gates.{key} must be a mapping")
+    rows: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for name, amount in value.items():
+        if not isinstance(name, str) or not name.strip():
+            raise DatasetInputError(f"quality_gates.{key} keys must be non-empty strings")
+        label = unicodedata.normalize("NFC", name.strip())
+        identity = label.casefold()
+        stored = label if language else identity
+        if identity in seen:
+            raise DatasetInputError(f"quality_gates.{key} repeats {name!r}")
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            raise DatasetInputError(f"quality_gates.{key}.{name} must be a non-negative whole number")
+        seen.add(identity)
+        rows.append((stored, amount))
+    return tuple(sorted(rows, key=lambda item: item[0].casefold()))
+
+
+def _split_assignments(split_manifest: Mapping[str, Any]) -> dict[str, str]:
+    splits = split_manifest.get("splits")
+    if not isinstance(splits, Mapping):
+        raise DatasetInputError("quality gates require split_manifest.splits")
+    assigned: dict[str, str] = {}
+    for split in ("development", "private_test"):
+        ids = splits.get(split)
+        if not isinstance(ids, list) or any(not isinstance(case_id, str) for case_id in ids):
+            raise DatasetInputError(f"quality gates require a valid {split} split")
+        for case_id in ids:
+            if case_id in assigned:
+                raise DatasetInputError(f"quality gates found case {case_id} in more than one split")
+            assigned[case_id] = split
+    return assigned
+
+
+def _fold_language(value: str) -> str:
+    return unicodedata.normalize("NFC", value).casefold()
+
+
+def _language_tag_counts(cases: Sequence[Mapping[str, Any]]) -> Counter[str]:
+    """Count each language tag on a case. A code-switched row can satisfy more than one gate."""
+    counts: Counter[str] = Counter()
+    for case in cases:
+        counts.update(_case_language_tags(case))
+    return counts
+
+
+def _case_language_tags(case: Mapping[str, Any]) -> set[str]:
+    tags: list[str] = []
+    language = case.get("language")
+    if isinstance(language, str) and language.strip():
+        tags.append(language)
+    listed = case.get("languages")
+    if isinstance(listed, list):
+        tags.extend(item for item in listed if isinstance(item, str) and item.strip())
+    found: set[str] = set()
+    for tag in tags:
+        for part in tag.split(","):
+            text = part.strip()
+            if not text or text.casefold() == "unspecified":
+                continue
+            found.add(_fold_language(text))
+    return found
 
 
 def write_dataset(stage_cache: Path, build: DatasetBuild) -> dict[str, Any]:

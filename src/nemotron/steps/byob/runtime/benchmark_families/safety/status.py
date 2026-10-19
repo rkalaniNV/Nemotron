@@ -42,6 +42,7 @@ class RunStatus(str, Enum):
     NO_USABLE_SOURCES = "no_usable_sources"
     NO_USABLE_RULES = "no_usable_rules"
     MODEL_UNAVAILABLE = "model_unavailable"
+    QUALITY_GATES_FAILED = "minimum_dataset_quality_not_met"
 
 
 EXIT_CODES = {
@@ -59,6 +60,7 @@ EXIT_CODES = {
     RunStatus.NO_USABLE_SOURCES: 1,
     RunStatus.NO_USABLE_RULES: 1,
     RunStatus.MODEL_UNAVAILABLE: 1,
+    RunStatus.QUALITY_GATES_FAILED: 1,
 }
 
 
@@ -104,6 +106,12 @@ def explain(status: RunStatus, run_dir: Path) -> str:
         return (
             "Publication did not finish, so no benchmark was published. "
             f"Output directory: {run_dir}."
+        )
+    if status is RunStatus.QUALITY_GATES_FAILED:
+        return (
+            "Minimum dataset quality gates were not met, and quality_gates.on_failure is fail, "
+            "so no benchmark was published. The review packet still lists the unmet gates. "
+            f"Review page: {review_page}."
         )
     if status is RunStatus.NO_USABLE_RULES:
         return (

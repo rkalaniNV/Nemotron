@@ -18,7 +18,7 @@ Relative paths in a safety config resolve from `src/nemotron/steps/byob`. Artifa
 | `stage` | What the run does |
 | --- | --- |
 | `prepare` | Validate the config, initialize the run directory, and ingest the policy files locally (see [Ingest](#ingest)). A completed prepare exits 0. It exits 4 when only quarantined files are left, and 1 when every file was rejected. It does not publish a benchmark. |
-| `generate` | Extract and route policy rules, plan coverage, generate scenarios, validate and split the dataset, and create the review packet. An unsigned or incomplete review exits 3. Resuming with the signed current packet publishes Gold with exit 0, or Silver/Preview with exit 2. |
+| `generate` | Extract and route policy rules, plan coverage, generate scenarios, validate and split the dataset, and create the review packet. An unsigned or incomplete review exits 3. Resuming with the signed current packet publishes Gold with exit 0, or Silver/Preview with exit 2. If `quality_gates.on_failure` is `fail` and the minima are still unmet after review, generate exits 1 and does not publish. |
 | `all` | Run `prepare`, then `generate`. It does not evaluate. |
 | `eval` | Score a published safety benchmark. Path 1 calls a direct guard adapter. Path 2 evaluates a complete Guardrails configuration from a live endpoint or recorded log. The two paths write separate metric files and exit 0 when those files are written. Evaluation is not a Gold or Silver publication. An unpublished run exits 1. |
 | `translate` | Not part of this increment. The safety hook exits 1. Exit code 2 remains reserved for a finished Silver or Preview publication. |
@@ -37,6 +37,7 @@ The safety publication statuses are:
 | No usable sources | 1 | Every policy file was rejected as unsupported, unreadable, or invalid, and none was held back for privacy. No external model was called. |
 | No usable rules | 1 | Every extracted or pre-authored rule was quarantined or rejected, so no case is generated. `stage_cache/policy_flags.jsonl` gives each rule's reasons. |
 | Model unavailable | 1 | The extraction model could not be reached, or every reply in a pass was malformed. Rerunning continues from the cached windows. |
+| Minimum dataset quality not met | 1 | `quality_gates.on_failure` is `fail`, and the configured minima are still unmet after review. The review packet remains; no benchmark is published. |
 | Prepare required, damaged or stale run file, or run locked | 1 | The run directory was prepared with a different config or different policy files, or never prepared; a file inside it is damaged or describes older inputs; or another process is writing it. |
 
 Exit code 2 alone does not prove a Silver or Preview result. The shared dispatcher also exits 2 for an unsupported stage, and argparse exits 2 for a usage error. A consumer must read the `code:` prefix on stderr, or the run record, together with the exit code.
@@ -171,6 +172,7 @@ A packet may list `required_roles` to narrow this, for example when no regulated
 - `proposals.moderation_targets` and `proposals.decision_actions` accept the same values as `scope.targets` and `decision.action` in Policy Rule IR. The default targets are `user_input` and `assistant_output`. The default actions are every Policy Rule IR action. Narrow the lists when a run should not label those targets or actions.
 - `languages` is a mapping with `source_language` and `target_languages`, matching the main safety design. It fills the corresponding proposal fields; if both forms are present, they must agree. A source language outside the built-in contextual privacy profiles (`de`, `en`, `es`, `fr`, `ja`, `ko`, `vi`, and `zh`) must provide all four locale label lists under `privacy.additional_labels` before ingest. The required kinds are `credential`, `national_id`, `bank_account`, and `date_of_birth`; values are literal labels, never regular expressions.
 - `generation.decision_mix` may give a share only to an action listed in `proposals.decision_actions`. Narrowing `decision_actions` to `[allow, block]` therefore also needs `caution: 0` and `escalate: 0` in the mix.
+- `quality_gates` is optional. It checks minimum counts only after label validation, exact deduplication, and splitting; it never generates duplicate filler cases. Supported gates are `min_total_cases`, `min_development_cases`, `min_private_test_cases`, the scalar `min_cases_per_policy`, and per-label mappings `min_cases_per_action` and `min_cases_per_language`. `on_failure` is `silver` (default) or `fail`. Counts must be non-negative whole numbers. Action keys are canonical Policy Rule IR actions, compared case-insensitively. Language keys are Unicode NFC-normalized and compared case-insensitively; a code-switched case counts for each of its language tags, including comma-separated leftovers. Duplicate keys that fold to the same action or language are refused. An unmet gate is recorded in `split_manifest.json`, shown in `review.html`, copied to `quality_report.json`, and blocks Gold with publication reason `minimum_dataset_quality_not_met` after coverage and split completeness have already been applied. `on_failure: silver` still publishes that Silver benchmark. `on_failure: fail` still writes the review packet, then refuses publication after sign-off (exit 1). Preview stays Preview. Before review, generate may backfill unscheduled **distinct** coverage cells into room left when scheduled rows did not survive validation or exact-dedup. It skips `translation_required`, `span_missing`, and `max_turns` holds, skips a cell whose identity already exists on the plan or in the surviving dataset, skips every cell of a policy whose cases were rejected for a rule-level reason (`quote_not_in_span`, `span_missing`, `evidence_mismatch`, `evidence_missing`), and never quote-copies the source sentence to inflate counts. A round that does not lower the total gate shortfall (for example because a completed contrast family rejected a row that had passed, or the new split moved cases) is rolled back and backfill stops. Required cells already on the plan are not dropped to make room. Minima that the remaining distinct cells and caps cannot satisfy stay unmet.
 - `generation_model_config`, `judge_model_configs`, `evaluation`, and `languages` must not contain credentials. The same key names BFCL refuses, such as `api_key`, `token`, `authorization`, or anything ending in `_api_key`, stop the run before anything is written. Provide credentials through the provider environment.
 - `input_dir` and `output_dir` must not be the same directory or inside each other.
 
@@ -344,7 +346,7 @@ Required cells are scheduled before optional cells. Every policy receives its fi
 
 Optional cells come after the required cells, and only while the caps still have room: one adversarial case when `generation.modules.adversarial` is true, one actor-swap case when `political_symmetry` is true, and one persona case when `generation.modules.persona` is true. `confirm_if_detected` does not add actor-swap cases. Production replay adds none in this increment, reported as `not_configured`, because the safety config has no evidence paths yet. An optional cell left out does not block Gold.
 
-A required cell that does not fit is not dropped. `coverage_gaps.json` lists it with its slot id and a reason: `budget_cap`, `rule_cap`, `max_turns`, `translation_required`, or `span_missing`, with `blocks_gold: true`. The plan's `certification` is then `silver`, and `gold_cases_needed` is the full required count. When every required cell of the eligible rules is scheduled, `certification` is `gold` even if optional cells remain or other rules were excluded. `run_record.json` repeats the certification, the counts, `missing_required`, and `excluded_rules` under `coverage`.
+A required cell that does not fit is not dropped. `coverage_gaps.json` lists it with its slot id and a reason: `budget_cap`, `rule_cap`, `max_turns`, `translation_required`, or `span_missing`, with `blocks_gold: true`. The plan's `certification` is then `silver`, and `gold_cases_needed` is the full required count. When every required cell of the eligible rules is scheduled, `certification` is `gold` even if optional cells remain or other rules were excluded. `run_record.json` repeats the certification, the counts, `missing_required`, and `excluded_rules` under `coverage`. After the dataset stage, if quality gates are unmet and surviving rows are below the case cap, generate may promote remaining generatable gap cells onto the plan, mark those rows `backfill: true`, and rebuild scenarios and the dataset. The backfill identity is `(policy, language, action, kind, present_legs, absent_legs)`; a matching cell is a quote-copy and is skipped. The case cap is applied to surviving rows, so a rejected plan row can be replaced by a different cell without dropping required cells that are already scheduled.
 
 A slot id joins the policy id, the kind, and any extra part with `/`. A contrast family id uses the same escaping after `contrast/`. A `/` or `\` inside a part is escaped. Read `policy_id`, `kind`, `language`, and `absent_leg` from the row. Do not split the slot id on `:`.
 
@@ -390,6 +392,21 @@ The split keeps a whole group on one side. A group is a real contrast family, th
 
 `run_record.json` stores the counts under `dataset`. Case ids for both splits are in `stage_cache/split_manifest.json`.
 
+Optional minimum dataset gates are configured independently from the maximum generation budget:
+
+```yaml
+quality_gates:
+  min_total_cases: 100
+  min_development_cases: 40
+  min_private_test_cases: 40
+  min_cases_per_policy: 4
+  min_cases_per_action: {allow: 20, block: 20}
+  min_cases_per_language: {vi: 20}
+  on_failure: silver
+```
+
+The gate result contains the configured requirements, `on_failure`, observed total/split/slice counts, and one structured failure per unmet minimum. The per-policy gate covers every eligible policy that still remains after review, including a policy with zero retained cases. A withheld policy is not scored against `min_cases_per_policy`. A damaged requirement type aborts instead of coercing booleans or strings through `int()`. Minimums do not override `budget`. If surviving rows left room under the caps, generate backfills distinct unscheduled cells rather than copying quotes. If the remaining distinct cells still cannot satisfy the minima, `on_failure: silver` publishes Silver so the shortfall is explicit, and `on_failure: fail` leaves the review packet in place and does not publish.
+
 | File in `stage_cache/` | Contents |
 | --- | --- |
 | `label_checks.jsonl` | One row per candidate: the stored action, the aggregated action, and whether they agree. |
@@ -427,7 +444,7 @@ When the decision sheet is complete and the required signatures match the curren
 | `quality_report.json` | Certification, coverage reason, case counts, gaps, withheld policies and cases, unresolved review items, split result, and provenance digests. |
 | `run_manifest.json` | Publication commit. It binds the packet, decision sheet, review page, signoff, benchmark files, and quality report. `files` must list every compiled output. |
 
-Compilation refuses duplicate case ids, unknown split ids, a case missing from both splits, overlap between splits, or any file whose digest differs from the signed packet. Gold requires assisted or expert mode, complete Gold coverage, a complete non-empty development/private split, no withheld cases, and no unresolved rule or conflict. A documented coverage gap, incomplete split, review limitation, or reviewer removal publishes Silver. Preview mode publishes Preview without requiring a signoff and remains non-comparable.
+Compilation refuses duplicate case ids, unknown split ids, a case missing from both splits, overlap between splits, or any file whose digest differs from the signed packet. Gold requires assisted or expert mode, complete Gold coverage, all configured minimum dataset quality gates, a complete non-empty development/private split, no withheld cases, and no unresolved rule or conflict. A documented coverage gap, unmet minimum, incomplete split, review limitation, or reviewer removal publishes Silver. Preview mode publishes Preview without requiring a signoff and remains non-comparable.
 
 After publication, another `generate` is idempotent: it verifies the manifest, the run-record claim, and the Gold/Silver result implied by the signed packet, then returns that status. Editing the certification in the manifest cannot turn Silver into Gold. Editing or deleting the packet, decisions, HTML page, signoff, benchmark, or quality report is detected and refused. Running `prepare` starts a new review cycle and removes the previous publication commit, compiled files, and evaluator metrics.
 
@@ -468,6 +485,8 @@ evaluation:
     adapter: openai_compatible
     endpoint: https://guard.example.com/v1/chat/completions
     model: customer-guard
+    evaluation_mode: native_guard
+    system_prompt: null
     api_key_env: CUSTOMER_GUARD_API_KEY
     timeout_seconds: 30
     max_retries: 2
@@ -477,7 +496,15 @@ evaluation:
       unsafe: block
 ```
 
-By default the adapter prepends a system message that asks for a canonical JSON `decision`. Set `system_prompt: null` or an empty string to send the conversation unchanged, which is required for guards that already have a native chat template. Override `content_path` when the OpenAI envelope stores content elsewhere, and `request_options` for non-identity generation parameters. The response may be a canonical action, a JSON object such as `{"decision":"block"}`, or an exact label declared in `decision_map`. Labels such as `safe`/`unsafe` or locale-specific verbs are never assumed; they must be listed in `decision_map`. Set `decision_format: first_line` when the model returns a decision token followed by extra lines. Parsing uses Unicode-normalized exact labels, never substring keyword matching. Optional `smoke_message` replaces the language-neutral contract probe.
+Path 1 records one explicit `evaluation_mode` in metrics and smoke metadata:
+
+- `native_guard`: send the conversation unchanged; `system_prompt` must be null, empty, or omitted.
+- `fixed_system_prompt`: prepend the same required non-empty `system_prompt` to every event.
+- `canonical_classifier_prompt`: use the pipeline's built-in JSON-classification prompt. This is the backward-compatible default when both fields are omitted.
+
+When `evaluation_mode` is omitted, the adapter infers it compatibly: an omitted `system_prompt` means `canonical_classifier_prompt`, null/empty means `native_guard`, and non-empty means `fixed_system_prompt`. Metrics store `system_prompt_sha256`, never the prompt text, so runs can prove they used the same fixed prompt without disclosing it.
+
+Override `content_path` when the OpenAI envelope stores content elsewhere, and `request_options` for non-identity generation parameters. The response may be a canonical action, a JSON object such as `{"decision":"block"}`, or an exact label declared in `decision_map`. Labels such as `safe`/`unsafe` or locale-specific verbs are never assumed; they must be listed in `decision_map`. Set `decision_format: first_line` when the model returns a decision token followed by extra lines. Parsing uses Unicode-normalized exact labels, never substring keyword matching. Optional `smoke_message` replaces the language-neutral contract probe.
 
 For a live NeMo Guardrails service:
 
@@ -497,6 +524,8 @@ evaluation:
 ```
 
 The default `chat_completions` API format sends `messages`, optional `model`, and a nested `guardrails` object containing `config_id` and `options`. Set `api_format: legacy_chat_completions` for older servers that expect top-level `config_id`, `messages`, and `options`. By default, `options` requests activated-rail logs. `decision_path` and `rails_path` are dotted paths into the response. Only the value at `decision_path` is classified; a natural-language refusal is recorded as malformed rather than inferred as block or allow.
+
+Path 2 live metrics use `evaluation_mode: guardrails_configuration`; replayed logs use `recorded_guardrails_log`. The deterministic Path 1 test adapter uses `scripted_responses`.
 
 Credentials are read only from environment-variable names in `api_key_env` or `headers_env`; secret values are not written to metrics or error messages. A missing path is written as `not_run` with the reason. An unknown adapter, invalid configuration, damaged log, or mismatched event list stops evaluation.
 

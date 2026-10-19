@@ -494,6 +494,85 @@ def test_signed_benchmark_with_coverage_gaps_publishes_silver(tmp_path: Path) ->
     assert (run_dir / "benchmark_private_test.jsonl").is_file()
 
 
+def test_unmet_minimum_dataset_quality_gate_publishes_silver(tmp_path: Path) -> None:
+    config = _config(tmp_path, overrides={"quality_gates": {"min_total_cases": 1000}})
+    run_dir = _run(config, "prepare")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    split = json.loads((run_dir / "stage_cache" / "split_manifest.json").read_text(encoding="utf-8"))
+    assert split["quality_gates"]["passed"] is False
+    assert split["quality_gates"]["failures"][0]["gate"] == "min_total_cases"
+    assert split["quality_gates"]["on_failure"] == "silver"
+    sign_safety_packet(config, approved_by="Lan")
+
+    published = _expect(config, "generate", RunStatus.SILVER_COMPLETED)
+
+    assert published.cli_exit_code == 2
+    report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["reason"] == "minimum_dataset_quality_not_met"
+    assert report["quality_gates"]["passed"] is False
+    assert report["quality_gates"]["on_failure"] == "silver"
+    assert report["quality_gates"]["observed"]["total_cases"] == report["cases"]
+
+
+def test_unmet_quality_gates_with_on_failure_fail_block_publication(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path, overrides={"quality_gates": {"min_total_cases": 1000, "on_failure": "fail"}}
+    )
+    run_dir = _run(config, "prepare")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    html = (run_dir / "review.html").read_text(encoding="utf-8")
+    assert "blocks publication after review" in html
+    sign_safety_packet(config, approved_by="Lan")
+
+    failed = _expect(config, "generate", RunStatus.QUALITY_GATES_FAILED)
+
+    assert failed.cli_exit_code == 1
+    assert "quality_gates.on_failure is fail" in str(failed)
+    assert not (run_dir / "benchmark.jsonl").exists()
+    assert not (run_dir / "run_manifest.json").exists()
+    assert _record(run_dir)["publication_commit"] is False
+    assert (run_dir / "publication_review_packet.yaml").is_file()
+    assert (run_dir / "review.html").is_file()
+
+
+def test_preview_publishes_when_quality_gates_fail_with_on_failure_fail(tmp_path: Path) -> None:
+    _run(_config(tmp_path), "prepare")
+    config = _config(
+        tmp_path,
+        overrides={"mode": "preview", "quality_gates": {"min_total_cases": 1000, "on_failure": "fail"}},
+    )
+    published = _expect(config, "all", RunStatus.PREVIEW_COMPLETED)
+    run_dir = tmp_path / "out" / "customer-safety-v1"
+    assert published.cli_exit_code == 2
+    assert (run_dir / "benchmark.jsonl").is_file()
+    report = json.loads((run_dir / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["certification"] == "preview"
+    assert report["quality_gates"]["passed"] is False
+    assert report["quality_gates"]["on_failure"] == "fail"
+
+
+def test_quality_gate_backfill_does_not_quote_copy_when_the_cap_is_full(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        overrides={
+            "budget": {"assisted_max_cases": 2},
+            "quality_gates": {"min_total_cases": 1000},
+        },
+    )
+    run_dir = _run(config, "prepare")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    plan = [
+        json.loads(line)
+        for line in (run_dir / "stage_cache" / "coverage_plan.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    gaps = json.loads((run_dir / "stage_cache" / "coverage_gaps.json").read_text(encoding="utf-8"))
+    assert len(plan) == 2
+    assert all(row.get("backfill") is not True for row in plan)
+    assert not (gaps.get("backfill") or {}).get("added_slot_ids")
+    assert gaps["gaps"]
+
+
 def test_rejecting_a_rule_drops_its_cases_and_publishes_silver(tmp_path: Path) -> None:
     config, run_dir, _, _ = _prepared(tmp_path)
     _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
@@ -773,6 +852,25 @@ def test_config_status_may_be_omitted(tmp_path: Path) -> None:
         ({"expt_name": ".."}, "expt_name"),
         ({"budget": {"assisted_max_case": 5}}, "Unknown budget keys: assisted_max_case"),
         ({"budget": {"assisted_max_cases": 1.5}}, "budget.assisted_max_cases must be a whole number"),
+        ({"quality_gates": {"min_total_case": 5}}, "Unknown quality_gates keys: min_total_case"),
+        ({"quality_gates": {"min_total_cases": 1.5}}, "quality_gates.min_total_cases must be"),
+        ({"quality_gates": {"on_failure": "retry"}}, "on_failure must be silver or fail"),
+        (
+            {"quality_gates": {"min_cases_per_action": {"unsafe": 2}}},
+            "unsupported action 'unsafe'",
+        ),
+        (
+            {"quality_gates": {"min_cases_per_language": {"vi": -1}}},
+            "quality_gates.min_cases_per_language.vi must be",
+        ),
+        (
+            {"quality_gates": {"min_cases_per_language": {"vi": 1, "VI": 2}}},
+            "quality_gates.min_cases_per_language repeats",
+        ),
+        (
+            {"quality_gates": {"min_cases_per_action": {"Allow": 1, "allow": 2}}},
+            "quality_gates.min_cases_per_action repeats",
+        ),
         ({"generation": {"turn_mixx": {}}}, "Unknown generation keys: turn_mixx"),
         ({"generation": {"turn_mix": {"multi_turn": 0.5}}}, "shares must add up to 1"),
         ({"proposals": {"jurisdicton": "VN"}}, "Unknown proposals keys: jurisdicton"),
@@ -795,6 +893,46 @@ def test_config_status_may_be_omitted(tmp_path: Path) -> None:
         (
             {"evaluation": {"path1": {"adapter": "test", "responses": {}, "file": "responses.json"}}},
             "exactly one of responses or file",
+        ),
+        (
+            {
+                "evaluation": {
+                    "path1": {
+                        "adapter": "openai_compatible",
+                        "endpoint": "https://guard.example",
+                        "model": "guard",
+                        "evaluation_mode": "native_guard",
+                        "system_prompt": "Do not add this.",
+                    }
+                }
+            },
+            "native_guard must not configure",
+        ),
+        (
+            {
+                "evaluation": {
+                    "path1": {
+                        "adapter": "openai_compatible",
+                        "endpoint": "https://guard.example",
+                        "model": "guard",
+                        "evaluation_mode": "fixed_system_prompt",
+                    }
+                }
+            },
+            "fixed_system_prompt requires",
+        ),
+        (
+            {
+                "evaluation": {
+                    "path1": {
+                        "adapter": "openai_compatible",
+                        "endpoint": "https://guard.example",
+                        "model": "guard",
+                        "evaluation_mode": "per_case_policy",
+                    }
+                }
+            },
+            "evaluation_mode must be one of",
         ),
         (
             {

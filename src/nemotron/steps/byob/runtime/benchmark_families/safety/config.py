@@ -17,6 +17,7 @@
 
 import math
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,7 +26,11 @@ from typing import Any
 import yaml
 from yaml.constructor import ConstructorError
 
-from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import PATH1_ADAPTERS, PATH2_ADAPTERS
+from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import (
+    PATH1_ADAPTERS,
+    PATH1_EVALUATION_MODES,
+    PATH2_ADAPTERS,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS, DEFAULT_TARGETS, TARGETS
 
 BYOB_ROOT = Path(__file__).resolve().parents[3]
@@ -91,7 +96,9 @@ ENDPOINT_EVAL_KEYS = frozenset(
     }
 )
 PATH1_TEST_KEYS = frozenset({"adapter", "responses", "file"})
-PATH1_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset({"model", "system_prompt", "request_options", "content_path"})
+PATH1_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset(
+    {"model", "evaluation_mode", "system_prompt", "request_options", "content_path"}
+)
 PATH2_MOCK_KEYS = frozenset({"adapter", "log", "file"})
 PATH2_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset(
     {
@@ -135,6 +142,7 @@ TOP_LEVEL_KEYS = DISPATCH_KEYS | {
     "assurance",
     "budget",
     "generation",
+    "quality_gates",
     "proposals",
     "languages",
     "privacy",
@@ -143,6 +151,18 @@ TOP_LEVEL_KEYS = DISPATCH_KEYS | {
     "evaluation",
     "require_plan_confirmation",
 }
+QUALITY_GATE_FAILURE_MODES = frozenset({"silver", "fail"})
+QUALITY_GATE_KEYS = frozenset(
+    {
+        "min_total_cases",
+        "min_development_cases",
+        "min_private_test_cases",
+        "min_cases_per_policy",
+        "min_cases_per_action",
+        "min_cases_per_language",
+        "on_failure",
+    }
+)
 
 
 class ConfigError(ValueError):
@@ -576,6 +596,10 @@ def _passthrough(raw: dict[str, Any], messages: list[str]) -> dict[str, Any]:
         evaluation = _evaluation(raw["evaluation"], messages)
         if evaluation is not None:
             extras["evaluation"] = evaluation
+    if "quality_gates" in raw:
+        quality_gates = _quality_gates(raw["quality_gates"], messages)
+        if quality_gates is not None:
+            extras["quality_gates"] = quality_gates
     if (
         "generation_model_config" in raw
         and _mapping(raw["generation_model_config"], "generation_model_config", messages) is not None
@@ -599,6 +623,76 @@ def _passthrough(raw: dict[str, Any], messages: list[str]) -> dict[str, Any]:
     for key, value in extras.items():
         _reject_model_secrets(value, key, messages)
     return extras
+
+
+def _quality_gates(value: Any, messages: list[str]) -> dict[str, Any] | None:
+    """Validate minimum counts applied after validation, deduplication, and splitting."""
+    gates = _mapping(value, "quality_gates", messages)
+    if gates is None:
+        return None
+    _unknown_keys("quality_gates", gates, QUALITY_GATE_KEYS, messages)
+    checked: dict[str, Any] = {}
+    if "on_failure" in gates:
+        mode = gates["on_failure"]
+        if mode not in QUALITY_GATE_FAILURE_MODES:
+            messages.append(
+                "quality_gates.on_failure must be silver or fail; "
+                f"received {mode!r}."
+            )
+        else:
+            checked["on_failure"] = mode
+    else:
+        checked["on_failure"] = "silver"
+    for key in (
+        "min_total_cases",
+        "min_development_cases",
+        "min_private_test_cases",
+        "min_cases_per_policy",
+    ):
+        if key not in gates:
+            continue
+        amount = gates[key]
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            messages.append(f"quality_gates.{key} must be a non-negative whole number.")
+        else:
+            checked[key] = amount
+    for key in ("min_cases_per_action", "min_cases_per_language"):
+        if key not in gates:
+            continue
+        minimums = _mapping(gates[key], f"quality_gates.{key}", messages)
+        if minimums is None:
+            continue
+        normalized: dict[str, int] = {}
+        seen: dict[str, str] = {}
+        for name, amount in minimums.items():
+            if not isinstance(name, str) or not name.strip():
+                messages.append(f"quality_gates.{key} keys must be non-empty strings.")
+                continue
+            label = name.strip()
+            if key == "min_cases_per_action":
+                canonical = label.casefold()
+                if canonical not in DECISION_ACTIONS:
+                    messages.append(
+                        f"quality_gates.{key} has unsupported action {label!r}; "
+                        f"allowed: {', '.join(sorted(DECISION_ACTIONS))}."
+                    )
+                    continue
+                stored = canonical
+            else:
+                stored = unicodedata.normalize("NFC", label)
+                canonical = stored.casefold()
+            if canonical in seen:
+                messages.append(
+                    f"quality_gates.{key} repeats {label!r}; it already lists {seen[canonical]!r}."
+                )
+                continue
+            if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+                messages.append(f"quality_gates.{key}.{label} must be a non-negative whole number.")
+                continue
+            seen[canonical] = stored
+            normalized[stored] = amount
+        checked[key] = normalized
+    return checked
 
 
 def _evaluation(value: Any, messages: list[str]) -> dict[str, Any] | None:
@@ -667,6 +761,7 @@ def _live_eval_path(config: Mapping[str, Any], path: str, adapter: str, messages
         model = config.get("model")
         if not isinstance(model, str) or not model.strip():
             messages.append(f"{path}.model must be a non-empty string.")
+        _path1_evaluation_mode(config, path, messages)
     for key in ("api_key_env", "content_path", "decision_path", "rails_path", "config_id", "smoke_message"):
         if key in config and (not isinstance(config[key], str) or not config[key].strip()):
             messages.append(f"{path}.{key} must be a non-empty string.")
@@ -702,6 +797,27 @@ def _live_eval_path(config: Mapping[str, Any], path: str, adapter: str, messages
         if not valid or (key == "timeout_seconds" and number == 0):
             upper = f" through {maximum}" if maximum is not None else " or greater"
             messages.append(f"{path}.{key} must be a number from {minimum}{upper}.")
+
+
+def _path1_evaluation_mode(config: Mapping[str, Any], path: str, messages: list[str]) -> None:
+    mode = config.get("evaluation_mode")
+    prompt_is_set = "system_prompt" in config
+    prompt = config.get("system_prompt")
+    normalized_prompt = prompt if isinstance(prompt, str) and prompt.strip() else None
+    if mode is None:
+        return
+    if not isinstance(mode, str) or mode not in PATH1_EVALUATION_MODES:
+        messages.append(f"{path}.evaluation_mode must be one of {', '.join(sorted(PATH1_EVALUATION_MODES))}.")
+        return
+    if mode == "native_guard" and normalized_prompt is not None:
+        messages.append(f"{path}.native_guard must not configure a non-empty system_prompt.")
+    elif mode == "fixed_system_prompt" and normalized_prompt is None:
+        messages.append(f"{path}.fixed_system_prompt requires a non-empty system_prompt.")
+    elif mode == "canonical_classifier_prompt" and prompt_is_set and normalized_prompt is not None:
+        messages.append(
+            f"{path}.canonical_classifier_prompt uses the built-in prompt; "
+            "remove system_prompt or select fixed_system_prompt."
+        )
 
 
 def _privacy(value: Any, messages: list[str]) -> dict[str, Any] | None:

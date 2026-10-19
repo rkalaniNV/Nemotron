@@ -222,6 +222,14 @@ def test_publication_tier_follows_coverage_review_and_preview() -> None:
         "silver",
         "no_cases",
     )
+    assert publication_tier(mode="assisted", **{**complete, "quality_gates_passed": False}) == (
+        "silver",
+        "minimum_dataset_quality_not_met",
+    )
+    assert publication_tier(
+        mode="assisted",
+        **{**complete, "development": 0, "split_reason": "one_group", "quality_gates_passed": False},
+    ) == ("silver", "one_group")
 
 
 def test_conflict_card_ids_stay_with_the_same_conflict_when_the_list_grows() -> None:

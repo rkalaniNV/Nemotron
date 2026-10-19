@@ -21,6 +21,21 @@ budget:
   assisted_max_cases: 500
   max_review_items: 40
 
+# Optional publication gates. Counts are evaluated after validation, exact
+# deduplication, and the development/private-test split. An unmet gate blocks
+# Gold and is reported in split_manifest.json, review.html, and quality_report.json.
+# on_failure: silver publishes anyway; fail blocks publication after review.
+# The planner may backfill unscheduled distinct cells into room left by rejected
+# rows. It never pads the dataset by copying the same source quote.
+# quality_gates:
+#   min_total_cases: 100
+#   min_development_cases: 40
+#   min_private_test_cases: 40
+#   min_cases_per_policy: 4
+#   min_cases_per_action: {allow: 20, block: 20}
+#   min_cases_per_language: {vi: 20}
+#   on_failure: silver
+
 generation:
   modules:
     adversarial: false
@@ -33,6 +48,8 @@ generation:
 #     adapter: openai_compatible
 #     endpoint: https://guard.example.com/v1/chat/completions
 #     model: customer-guard
+#     evaluation_mode: native_guard
+#     system_prompt: null
 #     api_key_env: CUSTOMER_GUARD_API_KEY
 #     decision_map: {safe: allow, unsafe: block}
 #   path2:
