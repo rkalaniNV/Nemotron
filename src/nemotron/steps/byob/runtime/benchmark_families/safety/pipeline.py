@@ -444,7 +444,7 @@ def _publication_blocker(
     dataset_note = (
         f"Dataset: {dataset['validated']} validated, {dataset['rejected']} rejected, "
         f"{dataset['duplicates_removed']} duplicates removed, "
-        f"{dataset['development']} development, {dataset['private_test']} private-test "
+        f"{dataset['development']} development "
         f"({dataset['split_reason']}), {dataset['quality_gate_failures']} minimum quality gates unmet."
     )
     if counts["eligible_for_generation"] + counts["needs_decision"] == 0:
@@ -717,7 +717,7 @@ def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
 
 
 def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[str, Any]:
-    """Check labels, drop exact duplicates, and split the cases. This stage does not call a model."""
+    """Check labels, drop exact and near duplicates, and assign development."""
     run_dir = config.run_dir
     stage_cache = run_dir / "stage_cache"
     index_path = stage_cache / "cache_index.json"
@@ -744,6 +744,8 @@ def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dic
                 rules,
                 spans,
                 quality_gates=config.extras.get("quality_gates"),
+                semantic_dedup=config.extras.get("semantic_deduplication_config"),
+                work_dir=run_dir,
             ),
         )
     except Exception as exc:

@@ -38,7 +38,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import 
     GuardAdapter,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS
-from nemotron.steps.byob.runtime.benchmark_families.safety.publish import BENCHMARK_FILE, PRIVATE_FILE
+from nemotron.steps.byob.runtime.benchmark_families.safety.publish import BENCHMARK_FILE
 
 PATH1_FILE = "evaluator/path1_metrics.json"
 PATH2_FILE = "evaluator/path2_metrics.json"
@@ -487,15 +487,10 @@ def _add_throughput(metrics: dict[str, Any], events: int, elapsed: float) -> Non
 
 
 def load_eval_cases(run_dir: Path) -> tuple[list[dict[str, Any]], str]:
-    """Prefer the private-test split. Fall back to the combined published benchmark."""
-    private = run_dir / PRIVATE_FILE
-    combined = run_dir / BENCHMARK_FILE
-    if private.is_file():
-        rows = _read_jsonl(private)
-        if rows:
-            return rows, "private_test"
-    if combined.is_file():
-        rows = _read_jsonl(combined)
+    """Read the combined published benchmark."""
+    benchmark = run_dir / BENCHMARK_FILE
+    if benchmark.is_file():
+        rows = _read_jsonl(benchmark)
         if rows:
             return rows, "benchmark"
     raise EvalInputError("a published benchmark.jsonl is required for evaluation.")

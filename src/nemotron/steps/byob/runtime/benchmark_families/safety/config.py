@@ -78,6 +78,15 @@ DEFAULT_PROPOSALS = {
 DEFAULT_ASSURANCE = {"profile": "standard"}
 ASSURANCE_KEYS = frozenset({"profile", "review_sample_rate", "second_judge_on"})
 GENERATION_KEYS = frozenset({"decision_mix", "case_family_mix", "turn_mix", "modules"})
+# Same Curator knobs the MCQ family uses. Safety drops marked near-dups by default.
+DEFAULT_SEMANTIC_DEDUP = {
+    "enabled": True,
+    "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+    "n_clusters": 1,
+    "eps": 0.07,
+    "remove_duplicates": True,
+}
+SEMANTIC_DEDUP_KEYS = frozenset(DEFAULT_SEMANTIC_DEDUP)
 EVALUATION_KEYS = frozenset({"path1", "path2"})
 ENDPOINT_EVAL_KEYS = frozenset(
     {
@@ -151,13 +160,13 @@ TOP_LEVEL_KEYS = DISPATCH_KEYS | {
     "judge_model_configs",
     "evaluation",
     "require_plan_confirmation",
+    "semantic_deduplication_config",
 }
 QUALITY_GATE_FAILURE_MODES = frozenset({"silver", "fail"})
 QUALITY_GATE_KEYS = frozenset(
     {
         "min_total_cases",
         "min_development_cases",
-        "min_private_test_cases",
         "min_cases_per_policy",
         "min_cases_per_action",
         "min_cases_per_language",
@@ -538,27 +547,18 @@ def _check_budget_and_gates(
         return
     min_total = _optional_gate_count(quality_gates, "min_total_cases")
     min_dev = _optional_gate_count(quality_gates, "min_development_cases")
-    min_private = _optional_gate_count(quality_gates, "min_private_test_cases")
     min_policy = _optional_gate_count(quality_gates, "min_cases_per_policy")
-    if min_total is None or min_dev is None or min_private is None or min_policy is None:
+    if min_total is None or min_dev is None or min_policy is None:
         return
-    split_floor = min_dev + min_private
     for label, amount in (
         ("min_total_cases", min_total),
         ("min_development_cases", min_dev),
-        ("min_private_test_cases", min_private),
     ):
         if amount > case_cap:
             messages.append(
                 f"quality_gates.{label} is {amount}, which exceeds budget.{cap_key} ({case_cap}). "
                 "Lower the minimum or raise the cap."
             )
-    if split_floor > case_cap and min_dev <= case_cap and min_private <= case_cap:
-        messages.append(
-            "quality_gates.min_development_cases + min_private_test_cases is "
-            f"{split_floor}, which exceeds budget.{cap_key} ({case_cap}). "
-            "Lower the minima or raise the cap."
-        )
     if min_policy > case_cap:
         messages.append(
             f"quality_gates.min_cases_per_policy is {min_policy}, which exceeds "
@@ -711,9 +711,40 @@ def _passthrough(raw: dict[str, Any], messages: list[str]) -> dict[str, Any]:
             messages.append("require_plan_confirmation must be true or false.")
         else:
             extras["require_plan_confirmation"] = raw["require_plan_confirmation"]
+    if "semantic_deduplication_config" in raw:
+        semantic = _semantic_dedup(raw["semantic_deduplication_config"], messages)
+        if semantic is not None:
+            extras["semantic_deduplication_config"] = semantic
     for key, value in extras.items():
         _reject_model_secrets(value, key, messages)
     return extras
+
+
+def _semantic_dedup(value: Any, messages: list[str]) -> dict[str, Any] | None:
+    """MCQ-compatible Curator settings used after exact dedup to drop near-duplicate scored turns."""
+    supplied = _mapping(value, "semantic_deduplication_config", messages)
+    if supplied is None:
+        return None
+    _unknown_keys("semantic_deduplication_config", supplied, SEMANTIC_DEDUP_KEYS, messages)
+    merged = {**DEFAULT_SEMANTIC_DEDUP, **supplied}
+    enabled = merged["enabled"]
+    if not isinstance(enabled, bool):
+        messages.append("semantic_deduplication_config.enabled must be true or false.")
+    model = merged["model_identifier"]
+    if not isinstance(model, str) or not model.strip():
+        messages.append("semantic_deduplication_config.model_identifier must be a non-empty string.")
+    else:
+        merged["model_identifier"] = model.strip()
+    clusters = merged["n_clusters"]
+    if isinstance(clusters, bool) or not isinstance(clusters, int) or clusters < 1:
+        messages.append("semantic_deduplication_config.n_clusters must be a whole number 1 or greater.")
+    eps = merged["eps"]
+    if not _number(eps) or not 0 < eps < 1:
+        messages.append("semantic_deduplication_config.eps must be a number between 0 and 1.")
+    remove = merged["remove_duplicates"]
+    if not isinstance(remove, bool):
+        messages.append("semantic_deduplication_config.remove_duplicates must be true or false.")
+    return merged
 
 
 def _quality_gates(value: Any, messages: list[str]) -> dict[str, Any] | None:
@@ -737,7 +768,6 @@ def _quality_gates(value: Any, messages: list[str]) -> dict[str, Any] | None:
     for key in (
         "min_total_cases",
         "min_development_cases",
-        "min_private_test_cases",
         "min_cases_per_policy",
     ):
         if key not in gates:

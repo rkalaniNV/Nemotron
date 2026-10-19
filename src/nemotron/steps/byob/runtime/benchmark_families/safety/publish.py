@@ -46,11 +46,11 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStat
 MANIFEST_NAME = "run_manifest.json"
 BENCHMARK_FILE = "benchmark.jsonl"
 DEVELOPMENT_FILE = "benchmark_development.jsonl"
-PRIVATE_FILE = "benchmark_private_test.jsonl"
 QUALITY_FILE = "quality_report.json"
-PUBLISHED_FILES = (BENCHMARK_FILE, DEVELOPMENT_FILE, PRIVATE_FILE, QUALITY_FILE)
-CLAIM_FIELDS = ("certification", "reason", "cases", "development", "private_test", "published_at")
-_MANIFEST_VERSION = 1
+PUBLISHED_FILES = (BENCHMARK_FILE, DEVELOPMENT_FILE, QUALITY_FILE)
+CLAIM_FIELDS = ("certification", "reason", "cases", "development", "published_at")
+_REMOVED_PUBLISHED_FILES = ("benchmark_private_test.jsonl",)
+_MANIFEST_VERSION = 2
 _CASES_FILE = "stage_cache/deduplicated_cases.jsonl"
 _FAMILIES_FILE = "stage_cache/contrast_families.jsonl"
 _SPLIT_FILE = "stage_cache/split_manifest.json"
@@ -66,16 +66,14 @@ def publication_tier(
     mode: str,
     coverage_certification: str,
     coverage_reason: str,
-    split_complete: bool,
     split_reason: str,
     development: int,
-    private: int,
     withheld: bool,
     blocking: bool,
     review_limitations: bool = False,
     quality_gates_passed: bool = True,
 ) -> tuple[str, str]:
-    """Gold needs a complete signed benchmark. Gaps, an incomplete split, or a removal is Silver.
+    """Gold needs a signed benchmark with development cases and no blocking gaps.
 
     Preview stays Preview even when coverage is complete. It is not a comparable score.
     """
@@ -87,7 +85,7 @@ def publication_tier(
         return "silver", "review_unresolved_items"
     if coverage_certification != "gold" or blocking:
         return "silver", coverage_reason or "required_omitted"
-    if not split_complete or development == 0 or private == 0:
+    if development == 0:
         return "silver", split_reason or "split_incomplete"
     if not quality_gates_passed:
         return "silver", "minimum_dataset_quality_not_met"
@@ -154,7 +152,6 @@ def compile_publication(
         "reason": quality["reason"],
         "cases": quality["cases"],
         "development": quality["development"],
-        "private_test": quality["private_test"],
         "published_at": published_at,
         "config_sha256": config_sha256,
         "source_fingerprint": source_fingerprint,
@@ -216,7 +213,7 @@ def assert_published_intact(run_dir: Path, record: Mapping[str, Any]) -> None:
 
 def clear_published(run_dir: Path) -> None:
     """Remove a benchmark that this run is not publishing."""
-    for name in (*PUBLISHED_FILES, MANIFEST_NAME):
+    for name in (*PUBLISHED_FILES, *_REMOVED_PUBLISHED_FILES, MANIFEST_NAME):
         (run_dir / name).unlink(missing_ok=True)
 
 
@@ -260,7 +257,6 @@ def _assert_tier_matches_packet(run_dir: Path, manifest: Mapping[str, Any]) -> N
     expected_files = {
         BENCHMARK_FILE: hashlib.sha256(_jsonl_text(grouped[BENCHMARK_FILE]).encode("utf-8")).hexdigest(),
         DEVELOPMENT_FILE: hashlib.sha256(_jsonl_text(grouped[DEVELOPMENT_FILE]).encode("utf-8")).hexdigest(),
-        PRIVATE_FILE: hashlib.sha256(_jsonl_text(grouped[PRIVATE_FILE]).encode("utf-8")).hexdigest(),
     }
     for name, digest in expected_files.items():
         if files.get(name) != digest:
@@ -273,14 +269,14 @@ def _assert_tier_matches_packet(run_dir: Path, manifest: Mapping[str, Any]) -> N
         on_disk = json.loads((run_dir / QUALITY_FILE).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"{QUALITY_FILE} is damaged after publication.") from exc
-    for key in ("certification", "reason", "cases", "development", "private_test", "published_at"):
+    for key in ("certification", "reason", "cases", "development", "published_at"):
         if not isinstance(on_disk, dict) or on_disk.get(key) != quality.get(key):
             raise abort(
                 RunStatus.INVALID_RUN_ARTIFACT,
                 run_dir,
                 f"{QUALITY_FILE} does not match the signed review packet.",
             )
-    counts = {key: quality[key] for key in ("cases", "development", "private_test")}
+    counts = {key: quality[key] for key in ("cases", "development")}
     if any(manifest.get(key) != value for key, value in counts.items()):
         raise abort(
             RunStatus.INVALID_RUN_ARTIFACT,
@@ -304,7 +300,7 @@ def _publication_payload(
     packet_sha256: str,
 ) -> tuple[list[dict[str, Any]], set[str], dict[str, list[dict[str, Any]]], dict[str, Any], str, str]:
     dropped = withheld_case_ids(cases, families, dropped_policies)
-    development, private = _split_ids(split_manifest, run_dir)
+    development = _split_ids(split_manifest, run_dir)
     indexed: dict[str, Mapping[str, Any]] = {}
     for case in cases:
         case_id = case.get("case_id")
@@ -313,14 +309,14 @@ def _publication_payload(
         if case_id in indexed:
             raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"deduplicated cases repeat {case_id}.")
         indexed[case_id] = case
-    unknown_split_ids = sorted((development | private) - set(indexed))
+    unknown_split_ids = sorted(development - set(indexed))
     if unknown_split_ids:
         raise abort(
             RunStatus.INVALID_RUN_ARTIFACT,
             run_dir,
             f"split_manifest.json names unknown cases: {', '.join(unknown_split_ids)}.",
         )
-    unassigned = sorted(set(indexed) - development - private - dropped)
+    unassigned = sorted(set(indexed) - development - dropped)
     if unassigned:
         raise abort(
             RunStatus.INVALID_RUN_ARTIFACT,
@@ -332,13 +328,9 @@ def _publication_payload(
         case_id = case.get("case_id")
         if not isinstance(case_id, str) or case_id in dropped:
             continue
-        if case_id in development:
-            split = "development"
-        elif case_id in private:
-            split = "private_test"
-        else:
+        if case_id not in development:
             continue
-        rows.append({**case, "split": split})
+        rows.append({**case, "split": "development"})
     stored_gates = split_manifest.get("quality_gates")
     if isinstance(stored_gates, Mapping):
         gate_requirements = stored_gates.get("requirements")
@@ -362,10 +354,8 @@ def _publication_payload(
         mode=mode,
         coverage_certification=str(coverage.get("certification") or ""),
         coverage_reason=str(coverage.get("reason") or ""),
-        split_complete=split_manifest.get("complete") is True,
         split_reason=str(split_manifest.get("reason") or ""),
         development=sum(row["split"] == "development" for row in rows),
-        private=sum(row["split"] == "private_test" for row in rows),
         withheld=bool(dropped),
         blocking=bool(packet.get("blocking_gaps")),
         review_limitations=bool(packet.get("unresolved_rules") or packet.get("unresolved_conflicts")),
@@ -373,8 +363,7 @@ def _publication_payload(
     )
     grouped = {
         BENCHMARK_FILE: rows,
-        DEVELOPMENT_FILE: [row for row in rows if row["split"] == "development"],
-        PRIVATE_FILE: [row for row in rows if row["split"] == "private_test"],
+        DEVELOPMENT_FILE: rows,
     }
     quality = {
         "certification": tier,
@@ -385,7 +374,6 @@ def _publication_payload(
         "assurance_profile": packet.get("assurance_profile"),
         "cases": len(rows),
         "development": len(grouped[DEVELOPMENT_FILE]),
-        "private_test": len(grouped[PRIVATE_FILE]),
         "quality_gates": quality_gates,
         "blocking_gaps": list(packet.get("blocking_gaps") or []),
         "withheld_policies": sorted(dropped_policies),
@@ -419,15 +407,14 @@ def _jsonl_text(rows: Sequence[Mapping[str, Any]]) -> str:
     return "".join(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n" for row in rows)
 
 
-def _split_ids(manifest: Mapping[str, Any], run_dir: Path) -> tuple[set[str], set[str]]:
+def _split_ids(manifest: Mapping[str, Any], run_dir: Path) -> set[str]:
     splits = manifest.get("splits")
     if not isinstance(splits, Mapping):
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "split_manifest.json must name its splits.")
     development = _ids(splits.get("development"), "development", run_dir)
-    private = _ids(splits.get("private_test"), "private_test", run_dir)
-    if development & private:
-        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "split_manifest.json lists a case in both splits.")
-    return development, private
+    if set(splits) != {"development"}:
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "split_manifest.json may only name development.")
+    return development
 
 
 def _ids(value: Any, name: str, run_dir: Path) -> set[str]:

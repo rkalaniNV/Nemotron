@@ -519,7 +519,7 @@ def _backfill_score(cell: Mapping[str, Any], failures: Sequence[Mapping[str, Any
             continue
         gate = failure.get("gate")
         slice_name = failure.get("slice")
-        if gate in {"min_total_cases", "min_development_cases", "min_private_test_cases"}:
+        if gate in {"min_total_cases", "min_development_cases"}:
             score += 1
         elif gate == "min_cases_per_policy" and isinstance(slice_name, str) and slice_name == policy_id:
             score += 3
@@ -549,16 +549,15 @@ def _required_cells(
     cells.extend(_all_leg_cells(rule, rules, primary))
     cells.extend(_condition_path_cells(rule, rules, primary))
     cells.append(_planned(rule, rules, "clear_allow", primary=primary, flags=allow_flags, paired_policy_id=partner))
-    ambiguous = rule.decision.ambiguous_action
-    cells.append(
-        _planned(
-            rule,
-            rules,
-            "boundary",
-            primary=primary,
-            flags=() if ambiguous is not None else ("boundary_action_unspecified",),
+    if rule.decision.ambiguous_action is not None:
+        cells.append(
+            _planned(
+                rule,
+                rules,
+                "boundary",
+                primary=primary,
+            )
         )
-    )
     if rule.exceptions:
         cells.append(_planned(rule, rules, "exception", primary=primary, exceptions=list(rule.exceptions)))
     cells.extend(_missing_legs(rule, rules, primary, allow_flags, partner))
@@ -1094,8 +1093,7 @@ def _quality_gate_preflight(
 
     min_total = _preflight_count(copied, "min_total_cases")
     min_development = _preflight_count(copied, "min_development_cases")
-    min_private = _preflight_count(copied, "min_private_test_cases")
-    fail("min_total_cases", max(min_total, min_development + min_private), upper)
+    fail("min_total_cases", max(min_total, min_development), upper)
 
     per_policy = _preflight_count(copied, "min_cases_per_policy")
     by_policy = capacity.get("by_policy") if isinstance(capacity.get("by_policy"), Mapping) else {}
@@ -1141,7 +1139,6 @@ def _preflight_enabled(requirements: Mapping[str, Any]) -> bool:
         for key in (
             "min_total_cases",
             "min_development_cases",
-            "min_private_test_cases",
             "min_cases_per_policy",
         )
     ):

@@ -193,8 +193,9 @@ class ScriptedExtractor:
         prompt: str = "",
         output_format: Any = None,
         prefix: str = "",
+        inference_parameters: Any = None,
     ) -> dict[str, Any]:
-        del system_prompt, prompt, output_format, prefix
+        del system_prompt, prompt, output_format, prefix, inference_parameters
         if self.fail:
             raise ConnectionError("endpoint refused the connection")
         answers: dict[str, Any] = {}

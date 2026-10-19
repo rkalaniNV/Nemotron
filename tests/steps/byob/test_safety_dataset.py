@@ -1,6 +1,7 @@
 """Labels, deterministic checks, exact deduplication, and the development split."""
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,11 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import (
     evaluate_quality_gates,
     load_jsonl_objects,
     select_dataset,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.deduplication import (
+    run_mcq_semantic_dedup,
+    scored_turn_text,
+    semantic_partitions,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import validate_rule
 from nemotron.steps.byob.runtime.benchmark_families.safety.pipeline import generate_safety, prepare_safety
@@ -37,7 +43,7 @@ def use(monkeypatch: pytest.MonkeyPatch) -> Any:
     return install
 
 
-def test_accepted_cases_point_at_a_rule_and_both_splits_are_filled() -> None:
+def test_accepted_cases_point_at_a_rule_and_stay_in_development() -> None:
     rules, build = _ready()
     spans = _span_map(*rules)
     result = _select(rules, build)
@@ -46,15 +52,14 @@ def test_accepted_cases_point_at_a_rule_and_both_splits_are_filled() -> None:
     assert result.summary()["rejected"] == 0
     assert result.manifest["complete"] is True
     assert result.manifest["reason"] == "complete"
-    assert result.manifest["splits"]["development"]
-    assert result.manifest["splits"]["private_test"]
+    assert set(result.manifest["splits"]) == {"development"}
+    assert len(result.manifest["splits"]["development"]) == len(result.deduplicated)
     assert again.manifest["splits"] == result.manifest["splits"]
     assert result.report["judge"] == {"method": "deterministic", "model": None, "disagreements": 0}
-    assert result.report["semantic_dedup"] == "not_configured"
+    assert result.report["semantic_dedup"] == {"status": "not_configured"}
     assert result.manifest["public_test"] == "not_assigned"
     by_split = result.manifest["balance"]["by_split"]
     assert by_split["development"]["cases"] == len(result.manifest["splits"]["development"])
-    assert by_split["private_test"]["cases"] == len(result.manifest["splits"]["private_test"])
     for case in result.deduplicated:
         assert case["policy_id"] == "ALL-2"
         assert case["evidence"]["source_span_id"] in spans
@@ -67,12 +72,11 @@ def test_accepted_cases_point_at_a_rule_and_both_splits_are_filled() -> None:
     _assert_pairs_share_a_split(result, build.families)
 
 
-def test_quality_gates_count_only_deduplicated_split_cases() -> None:
+def test_quality_gates_count_only_deduplicated_development_cases() -> None:
     rules, build = _ready()
     requirements = {
         "min_total_cases": 100,
         "min_development_cases": 1,
-        "min_private_test_cases": 1,
         "min_cases_per_policy": 1,
         "min_cases_per_action": {"allow": 1, "block": 1},
     }
@@ -90,7 +94,6 @@ def test_quality_gates_count_only_deduplicated_split_cases() -> None:
     assert gates["passed"] is False
     assert gates["observed"]["total_cases"] == len(result.deduplicated)
     assert gates["observed"]["development_cases"] == len(result.manifest["splits"]["development"])
-    assert gates["observed"]["private_test_cases"] == len(result.manifest["splits"]["private_test"])
     assert gates["observed"]["by_policy"]["ALL-2"] == len(result.deduplicated)
     assert gates["failures"] == [
         {
@@ -119,7 +122,7 @@ def test_quality_gates_count_each_language_tag_on_a_case() -> None:
             "policy_id": "P-1",
             "expected_action": "allow",
             "language": "VI,EN",
-            "split": "private_test",
+            "split": "development",
         },
     ]
 
@@ -229,7 +232,7 @@ def test_a_changed_label_rejects_every_family_that_shares_the_case() -> None:
     assert rejected[_one(build, "multi_turn")["case_id"]]["reasons"] == ["attack_removed"]
     validated = {case["case_id"] for case in result.validated}
     assert _one(build, "clear_allow")["case_id"] in validated
-    assert _one(build, "boundary")["case_id"] in validated
+    assert rejected[_one(build, "boundary")["case_id"]]["reasons"] == ["attack_removed"]
     assert result.report["judge"]["disagreements"] == 1
     stored = next(case for case in result.validated if case["case_id"] == _one(build, "clear_allow")["case_id"])
     assert stored["expected_action"] == "allow"
@@ -315,7 +318,7 @@ def test_a_quote_outside_its_span_is_rejected() -> None:
 
     assert result.summary()["validated"] == 0
     assert result.manifest["reason"] == "no_cases"
-    assert result.manifest["splits"] == {"development": [], "private_test": []}
+    assert result.manifest["splits"] == {"development": []}
     assert all("quote_not_in_span" in row["reasons"] for row in result.rejected)
 
 
@@ -371,31 +374,32 @@ def test_a_rule_without_a_span_cannot_enter_the_dataset() -> None:
     assert {tuple(row["reasons"]) for row in result.rejected} == {("span_missing",)}
 
 
-def test_one_group_stays_in_development() -> None:
+def test_one_group_completes_in_development() -> None:
     rules, build = _ready()
     violation = _one(build, "clear_violation")
 
     result = select_dataset([violation], [], rules, _span_map(*rules))
 
-    assert result.manifest["complete"] is False
-    assert result.manifest["reason"] == "one_group"
+    assert result.manifest["complete"] is True
+    assert result.manifest["reason"] == "complete"
     assert result.manifest["splits"]["development"] == [violation["case_id"]]
-    assert result.manifest["splits"]["private_test"] == []
 
 
-def test_a_boundary_with_no_action_stays_unlabeled() -> None:
+def test_a_case_with_no_action_is_rejected() -> None:
     rules, build = _ready()
-    boundary = _one(build, "boundary")
-    assert boundary["expected_action"] is None
+    boundary = _clone(_one(build, "boundary"), expected_action=None)
+    boundary["turns"][0]["expected_action"] = None
+    cases = [boundary if case["case_id"] == boundary["case_id"] else case for case in build.cases]
 
-    result = _select(rules, build)
+    result = select_dataset(cases, build.families, rules, _span_map(*rules))
 
     label = next(row for row in result.labels if row["case_id"] == boundary["case_id"])
-    assert label["status"] == "confirmed"
+    assert label["status"] == "rejected"
     assert label["proposed_action"] is None
-    assert label["aggregated_action"] is None
-    kept = next(case for case in result.validated if case["case_id"] == boundary["case_id"])
-    assert kept["expected_action"] is None
+    assert label["aggregated_action"] == "caution"
+    rejected = next(row for row in result.rejected if row["case_id"] == boundary["case_id"])
+    assert rejected["reasons"] == ["invalid_case"]
+    assert boundary["case_id"] not in {case["case_id"] for case in result.validated}
 
 
 def test_a_case_that_copies_the_violation_stays_on_its_side() -> None:
@@ -443,8 +447,8 @@ def test_a_benign_contrast_pair_stays_on_one_side() -> None:
     result = _select(rules, build)
 
     assert result.manifest["complete"] is True
+    assert result.manifest["reason"] == "complete"
     assert result.manifest["splits"]["development"]
-    assert result.manifest["splits"]["private_test"]
     _assert_pairs_share_a_split(result, build.families)
 
 
@@ -466,7 +470,7 @@ def test_damaged_candidates_stop_the_build() -> None:
         load_jsonl_objects("{", "scenario_candidates.jsonl")
 
 
-def test_generate_records_both_splits(tmp_path: Path, use: Any) -> None:
+def test_generate_records_only_development(tmp_path: Path, use: Any) -> None:
     use(ScriptedExtractor(FIVE_TOPIC_REPLIES))
     config = _config(tmp_path, {"five-topic.md": FIVE_TOPIC})
     prepare_safety(config)
@@ -484,15 +488,13 @@ def test_generate_records_both_splits(tmp_path: Path, use: Any) -> None:
     manifest = json.loads((cache / "split_manifest.json").read_text(encoding="utf-8"))
     assert manifest["complete"] is True
     development = set(manifest["splits"]["development"])
-    private = set(manifest["splits"]["private_test"])
+    assert set(manifest["splits"]) == {"development"}
     assert development
-    assert private
-    assert not development & private
     for family in _jsonl(cache / "contrast_families.jsonl"):
         ids = [member["case_id"] for member in family["members"] if member.get("generation") == "accepted"]
         if len(ids) < 2:
             continue
-        assert all(case_id in development for case_id in ids) or all(case_id in private for case_id in ids)
+        assert all(case_id in development for case_id in ids)
     index = json.loads((cache / "source_index.json").read_text(encoding="utf-8"))
     spans = {span["source_span_id"] for span in index["spans"]}
     for case in _jsonl(cache / "deduplicated_cases.jsonl"):
@@ -622,8 +624,251 @@ def test_a_dataset_error_marks_the_stage_failed_and_keeps_scenarios(
     assert index["stages"]["dataset"]["outcome"] == "RuntimeError"
 
 
+def test_scored_turn_text_uses_the_triggering_user_turn() -> None:
+    assert scored_turn_text(
+        {
+            "turns": [
+                {"role": "user", "text": "Context only.", "scored": False},
+                {"role": "assistant", "text": "Go on.", "scored": False},
+                {"role": "user", "text": "Now block this request.", "scored": True},
+            ]
+        }
+    ) == "Now block this request."
+    assert scored_turn_text({"turns": [{"role": "user", "text": "  only user  "}]}) == "only user"
+    assert scored_turn_text({"turns": []}) == ""
+
+
+def test_semantic_near_dup_drops_an_unprotected_paraphrase(tmp_path: Path) -> None:
+    rules, build = _ready()
+    allow = _one(build, "clear_allow")
+    extra = _with_text(
+        _clone(allow, case_id="near-dup", slot_id="near-dup", origin="paraphrase"),
+        "A nearby allowed request that is not a greeting.",
+    )
+
+    result = select_dataset(
+        [*build.cases, extra],
+        build.families,
+        rules,
+        _span_map(*rules),
+        semantic_dedup=_semantic_settings(),
+        work_dir=tmp_path,
+        semantic_runner=_runner(["near-dup"]),
+    )
+
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert allow["case_id"] in kept
+    assert "near-dup" not in kept
+    assert result.report["semantic_dedup"]["status"] == "applied"
+    assert result.report["semantic_dedup"]["removed"] == 1
+    dropped = next(row for row in result.rejected if row["case_id"] == "near-dup")
+    assert dropped["reasons"] == ["semantic_duplicate"]
+    assert "kept_case_id" not in dropped
+    assert {"case_id": "near-dup"} in result.manifest["dropped_duplicates"]
+
+
+def test_semantic_near_dup_keeps_a_complete_contrast_pair(tmp_path: Path) -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    missing = next(case for case in build.cases if case["kind"] == "missing_leg")
+
+    result = select_dataset(
+        build.cases,
+        build.families,
+        rules,
+        _span_map(*rules),
+        semantic_dedup=_semantic_settings(),
+        work_dir=tmp_path,
+        semantic_runner=_runner([missing["case_id"]]),
+    )
+
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert missing["case_id"] in kept
+    assert violation["case_id"] in kept
+    assert result.report["semantic_dedup"]["protected"] >= 1
+    assert result.report["semantic_dedup"]["removed"] == 0
+
+
+def test_disabled_semantic_dedup_does_not_call_the_runner(tmp_path: Path) -> None:
+    rules, build = _ready()
+
+    def runner(cases: Any, *, work_dir: Path, settings: Mapping[str, Any]) -> dict[str, str]:
+        del cases, work_dir, settings
+        raise AssertionError("disabled semantic runner must not run")
+
+    result = select_dataset(
+        build.cases,
+        build.families,
+        rules,
+        _span_map(*rules),
+        semantic_dedup=_semantic_settings(enabled=False),
+        work_dir=tmp_path,
+        semantic_runner=runner,
+    )
+
+    assert result.report["semantic_dedup"]["status"] == "disabled"
+
+
+def test_unavailable_semantic_dedup_fails_closed(tmp_path: Path) -> None:
+    rules, build = _ready()
+
+    def runner(cases: Any, *, work_dir: Path, settings: Mapping[str, Any]) -> list[str]:
+        del cases, work_dir, settings
+        raise ImportError("nemo_curator")
+
+    with pytest.raises(DatasetInputError, match="semantic deduplication failed: nemo_curator"):
+        select_dataset(
+            build.cases,
+            build.families,
+            rules,
+            _span_map(*rules),
+            semantic_dedup=_semantic_settings(),
+            work_dir=tmp_path,
+            semantic_runner=runner,
+        )
+
+
+def test_marked_semantic_dups_can_be_kept(tmp_path: Path) -> None:
+    rules, build = _ready()
+    allow = _one(build, "clear_allow")
+    extra = _with_text(
+        _clone(allow, case_id="near-dup", slot_id="near-dup", origin="paraphrase"),
+        "A nearby allowed request that is not a greeting.",
+    )
+
+    result = select_dataset(
+        [*build.cases, extra],
+        build.families,
+        rules,
+        _span_map(*rules),
+        semantic_dedup=_semantic_settings(remove_duplicates=False),
+        work_dir=tmp_path,
+        semantic_runner=_runner(["near-dup"]),
+    )
+
+    assert "near-dup" in {case["case_id"] for case in result.deduplicated}
+    assert result.report["semantic_dedup"]["marked"] == 1
+    assert result.report["semantic_dedup"]["removed"] == 0
+
+
+def _semantic_settings(**overrides: Any) -> dict[str, Any]:
+    settings = {
+        "enabled": True,
+        "model_identifier": "sentence-transformers/all-MiniLM-L6-v2",
+        "n_clusters": 1,
+        "eps": 0.07,
+        "remove_duplicates": True,
+    }
+    settings.update(overrides)
+    return settings
+
+
+def test_semantic_partitions_separate_action_and_language() -> None:
+    cases = [
+        {
+            "case_id": "vi-allow-a",
+            "expected_action": "allow",
+            "language": "vi",
+            "turns": [{"role": "user", "text": "Câu A", "scored": True}],
+        },
+        {
+            "case_id": "vi-allow-b",
+            "expected_action": "allow",
+            "language": "VI",
+            "turns": [{"role": "user", "text": "Câu B", "scored": True}],
+        },
+        {
+            "case_id": "vi-block",
+            "expected_action": "block",
+            "language": "vi",
+            "turns": [{"role": "user", "text": "Câu A", "scored": True}],
+        },
+        {
+            "case_id": "en-allow",
+            "expected_action": "allow",
+            "language": "en",
+            "turns": [{"role": "user", "text": "Câu A", "scored": True}],
+        },
+    ]
+
+    partitions = semantic_partitions(cases)
+
+    assert {case["case_id"] for case in partitions[("allow", "vi")]} == {
+        "vi-allow-a",
+        "vi-allow-b",
+    }
+    assert [case["case_id"] for case in partitions[("block", "vi")]] == ["vi-block"]
+    assert [case["case_id"] for case in partitions[("allow", "en")]] == ["en-allow"]
+
+
+def test_semantic_adapter_needs_no_backend_when_every_partition_is_singleton(tmp_path: Path) -> None:
+    cases = [
+        {
+            "case_id": "allow",
+            "expected_action": "allow",
+            "language": "vi",
+            "turns": [{"role": "user", "text": "Cùng bề mặt", "scored": True}],
+        },
+        {
+            "case_id": "block",
+            "expected_action": "block",
+            "language": "vi",
+            "turns": [{"role": "user", "text": "Cùng bề mặt", "scored": True}],
+        },
+    ]
+
+    assert run_mcq_semantic_dedup(
+        cases,
+        work_dir=tmp_path,
+        settings=_semantic_settings(),
+    ) == ()
+
+
+@pytest.mark.parametrize(
+    ("duplicates", "message"),
+    [
+        (["unknown"], "unknown duplicate ids"),
+        (["same", "same"], "repeated a duplicate id"),
+        ([1], "invalid duplicate id"),
+    ],
+)
+def test_semantic_runner_rejects_invalid_duplicate_ids(
+    tmp_path: Path,
+    duplicates: list[Any],
+    message: str,
+) -> None:
+    rules, build = _ready()
+
+    with pytest.raises(DatasetInputError, match=message):
+        select_dataset(
+            build.cases,
+            build.families,
+            rules,
+            _span_map(*rules),
+            semantic_dedup=_semantic_settings(),
+            work_dir=tmp_path,
+            semantic_runner=_runner(duplicates),
+        )
+
+
+def _runner(duplicates: list[Any]) -> Any:
+    def run(cases: Any, *, work_dir: Path, settings: Mapping[str, Any]) -> list[Any]:
+        del cases, work_dir, settings
+        return list(duplicates)
+
+    return run
+
+
 def _ready() -> tuple[list[Any], Any]:
-    rules = [_rule("ALL-2", block=_ALL_OF, quote="Follow the multi-turn policy.", signals={"multi_turn_turns": 2})]
+    rules = [
+        _rule(
+            "ALL-2",
+            block=_ALL_OF,
+            quote="Follow the multi-turn policy.",
+            signals={"multi_turn_turns": 2},
+            ambiguous_action="caution",
+        )
+    ]
     return rules, _cases(rules, modules={"persona": True})[1]
 
 

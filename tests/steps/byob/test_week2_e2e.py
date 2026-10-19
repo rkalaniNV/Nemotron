@@ -28,9 +28,9 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.eval import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS
 from nemotron.steps.byob.runtime.benchmark_families.safety.publish import (
+    BENCHMARK_FILE,
     DEVELOPMENT_FILE,
     MANIFEST_NAME,
-    PRIVATE_FILE,
     QUALITY_FILE,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
@@ -181,17 +181,22 @@ def test_approved_review_publishes_a_complete_fixture_as_gold(start: Any, connec
     assert report["certification"] == "gold"
     assert report["reason"] == "complete"
     assert report["cases"] > 0
-    assert report["development"] > 0
-    assert report["private_test"] > 0
-    assert result.json("stage_cache/split_manifest.json")["complete"] is True
+    assert report["development"] == report["cases"]
+    assert "private_test" not in report
+    split = result.json("stage_cache/split_manifest.json")
+    assert split["complete"] is True
+    assert set(split["splits"]) == {"development"}
     assert result.json("run_record.json")["publication_commit"] is True
     assert (result.run_dir / MANIFEST_NAME).is_file()
+    assert (result.run_dir / BENCHMARK_FILE).is_file()
     assert (result.run_dir / DEVELOPMENT_FILE).is_file()
-    assert (result.run_dir / PRIVATE_FILE).is_file()
+    assert not (result.run_dir / "benchmark_private_test.jsonl").exists()
     spans = {span["source_span_id"]: span for span in result.json("stage_cache/source_index.json")["spans"]}
     for case in _published_cases(result.run_dir):
         span_id = case["evidence"]["source_span_id"]
         assert span_id in spans
+        assert case["split"] == "development"
+        assert case["expected_action"] in ACTIONS
     assert connections == []
 
 
@@ -302,9 +307,7 @@ def _assert_readable(metrics: dict[str, Any], path: str) -> None:
 
 
 def _published_cases(run_dir: Path) -> list[dict[str, Any]]:
-    private = run_dir / PRIVATE_FILE
-    text = private.read_text(encoding="utf-8") if private.is_file() else ""
-    path = private if text.strip() else run_dir / "benchmark.jsonl"
+    path = run_dir / BENCHMARK_FILE
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 

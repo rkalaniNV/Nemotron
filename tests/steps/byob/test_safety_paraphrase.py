@@ -8,7 +8,11 @@ import pytest
 
 from nemotron.steps.byob.runtime.benchmark_families.safety import extract
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import DEFAULT_GENERATION, load_resolved
-from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import apply_paraphrases
+from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import (
+    PARAPHRASE_TEMPERATURE,
+    SYSTEM_PROMPT,
+    apply_paraphrases,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.pipeline import generate_safety, prepare_safety
 from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStatus, SafetyStatus
 from tests.steps.byob.safety_fixtures import FIVE_TOPIC, FIVE_TOPIC_REPLIES, ScriptedExtractor
@@ -20,12 +24,19 @@ _ALL_OF = {"all_of": ["verb", "target"], "operator_source": "explicit"}
 
 
 class FakeCompleter:
-    identity = {"provider": "fake", "model": "paraphrase"}
+    identity = {
+        "provider": "fake",
+        "model": "paraphrase",
+        "inference_parameters": {"temperature": 0.0, "max_tokens": 4096},
+    }
 
     def __init__(self, replies: dict[str, Any] | None = None, *, fail: bool = False) -> None:
         self.replies = replies or {}
         self.fail = fail
         self.requested: list[str] = []
+        self.payloads: list[dict[str, Any]] = []
+        self.waves: list[list[str]] = []
+        self.inference_calls: list[Any] = []
 
     def complete(
         self,
@@ -35,18 +46,23 @@ class FakeCompleter:
         prompt: str = "",
         output_format: Any = None,
         prefix: str = "",
+        inference_parameters: Any = None,
     ) -> dict[str, Any]:
         del system_prompt, prompt, output_format, prefix
+        self.inference_calls.append(inference_parameters)
         if self.fail:
             raise ConnectionError("endpoint refused the connection")
         answers: dict[str, Any] = {}
+        wave: list[str] = []
         for row in rows:
             request_id = row["request_id"]
             self.requested.append(request_id)
+            wave.append(request_id)
+            payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
+            self.payloads.append(payload)
             if request_id in self.replies:
                 answers[request_id] = self.replies[request_id]
                 continue
-            payload = json.loads(row["payload"])
             count = int(payload.get("turn_count") or 1)
             turns = []
             for index in range(1, count + 1):
@@ -54,6 +70,7 @@ class FakeCompleter:
                 if index < count:
                     turns.append({"role": "assistant", "text": f"Assistant reply {request_id} #{index}."})
             answers[request_id] = {"turns": turns}
+        self.waves.append(wave)
         return answers
 
 
@@ -161,6 +178,27 @@ def test_model_failure_keeps_every_seed(tmp_path: Path) -> None:
     assert {case["origin"] for case in updated.cases} == {"seed"}
 
 
+@pytest.mark.parametrize("reply", [None, [], "not a mapping"])
+def test_invalid_batch_reply_keeps_every_seed(tmp_path: Path, reply: Any) -> None:
+    class InvalidBatchCompleter(FakeCompleter):
+        def complete(self, rows: list[Any], **kwargs: Any) -> Any:
+            del rows, kwargs
+            return reply
+
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+
+    updated, report = apply_paraphrases(build, InvalidBatchCompleter(), tmp_path, enabled=True)
+
+    assert report["status"] == "partial"
+    assert report["skipped_reason"] == "invalid_batch_reply"
+    assert report["applied"] == 0
+    assert report["failures"] == [
+        {"slot_id": None, "reason": "model returned a non-mapping batch reply"}
+    ]
+    assert {case["origin"] for case in updated.cases} == {"seed"}
+
+
 def test_disabled_paraphrase_does_not_call_the_model(tmp_path: Path) -> None:
     rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
     _plan, build = _cases([rule])
@@ -194,6 +232,136 @@ def test_default_config_enables_paraphrase() -> None:
     resolved = load_resolved(BYOB_ROOT / "safety" / "config" / "default.yaml")
     assert DEFAULT_GENERATION["modules"]["paraphrase"] is True
     assert resolved.generation["modules"]["paraphrase"] is True
+
+
+def test_paraphrase_prompt_requires_scored_legs_and_bans_greetings() -> None:
+    prompt = SYSTEM_PROMPT.casefold()
+    assert "present_legs" in prompt
+    assert "avoid_repeating" in prompt
+    assert "next to the policy" in prompt
+    assert "greeting" in prompt
+    assert "xin chào" not in prompt
+    assert "hello" not in prompt
+
+
+def test_paraphrase_does_not_use_temperature_zero(tmp_path: Path) -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+    extractor = FakeCompleter()
+
+    _updated, report = apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    assert extractor.inference_calls
+    assert report["inference_parameters"]["temperature"] == PARAPHRASE_TEMPERATURE
+    assert report["inference_parameters"]["max_tokens"] == 4096
+    for params in extractor.inference_calls:
+        assert params["temperature"] == PARAPHRASE_TEMPERATURE
+        assert params["temperature"] != 0
+        assert params["max_tokens"] == 4096
+
+
+def _scored_follow_up(slot_id: str, payload: dict[str, Any]) -> str:
+    count = int(payload.get("turn_count") or 1)
+    return f"User follow-up {slot_id} #{count}."
+
+
+def test_same_rule_paraphrase_payload_includes_prior_scored_turns(tmp_path: Path) -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+    extractor = FakeCompleter()
+
+    apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    assert extractor.payloads
+    assert extractor.payloads[0]["avoid_repeating"] == []
+    first_scored = _scored_follow_up(extractor.requested[0], extractor.payloads[0])
+    later = extractor.payloads[1:]
+    assert later
+    assert first_scored in later[0]["avoid_repeating"]
+    assert all(len(payload["avoid_repeating"]) <= 4 for payload in extractor.payloads)
+
+
+def test_avoid_examples_are_same_rule_only(tmp_path: Path) -> None:
+    first = _rule("ALL-A", block=_ALL_OF, quote="Block A.", span="doc#1#span-01")
+    second = _rule("ALL-B", block=_ALL_OF, quote="Block B.", span="doc#1#span-02")
+    _plan, build = _cases([first, second])
+    extractor = FakeCompleter()
+
+    apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    assert extractor.waves
+    first_wave = extractor.waves[0]
+    assert len(first_wave) == 2
+    by_slot = {case["slot_id"]: case["policy_id"] for case in build.cases}
+    wave_payloads = extractor.payloads[:2]
+    assert all(payload["avoid_repeating"] == [] for payload in wave_payloads)
+    scored = {
+        slot_id: _scored_follow_up(slot_id, payload)
+        for slot_id, payload in zip(first_wave, wave_payloads)
+    }
+    later = list(zip(extractor.requested[2:], extractor.payloads[2:]))
+    assert later
+    seen_policy: set[str] = set()
+    for slot_id, payload in later:
+        own_rule = by_slot[slot_id]
+        other_examples = [scored[prior] for prior in first_wave if by_slot[prior] != own_rule]
+        assert all(example not in payload["avoid_repeating"] for example in other_examples)
+        if own_rule in seen_policy:
+            continue
+        seen_policy.add(own_rule)
+        own_examples = [scored[prior] for prior in first_wave if by_slot[prior] == own_rule]
+        assert own_examples
+        assert all(example in payload["avoid_repeating"] for example in own_examples)
+
+
+def test_paraphrase_keeps_a_nonzero_configured_temperature(tmp_path: Path) -> None:
+    class WarmCompleter(FakeCompleter):
+        identity = {
+            "provider": "fake",
+            "model": "paraphrase",
+            "inference_parameters": {"temperature": 0.4},
+        }
+
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+    extractor = WarmCompleter()
+
+    _updated, report = apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    assert report["inference_parameters"]["temperature"] == 0.4
+    assert extractor.inference_calls[0]["temperature"] == 0.4
+
+
+def test_exact_same_rule_example_is_rejected(tmp_path: Path) -> None:
+    class RepeatingCompleter(FakeCompleter):
+        def complete(self, rows: list[Any], **kwargs: Any) -> dict[str, Any]:
+            del kwargs
+            answers: dict[str, Any] = {}
+            for row in rows:
+                payload = json.loads(row["payload"])
+                count = int(payload.get("turn_count") or 1)
+                turns = []
+                for index in range(1, count):
+                    turns.extend(
+                        [
+                            {"role": "user", "text": f"Context message {index}."},
+                            {"role": "assistant", "text": f"Context reply {index}."},
+                        ]
+                    )
+                turns.append({"role": "user", "text": "Repeat this exact request."})
+                answers[row["request_id"]] = {"turns": turns}
+            return answers
+
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+
+    updated, report = apply_paraphrases(build, RepeatingCompleter(), tmp_path, enabled=True)
+
+    assert report["applied"] == 1
+    assert report["kept_seed"] == len(build.cases) - 1
+    assert sum(case["origin"] == "paraphrase" for case in updated.cases) == 1
+    repeated = [row for row in report["failures"] if row["reason"] == "repeated_same_rule_example"]
+    assert len(repeated) == len(build.cases) - 1
 
 
 def test_generate_paraphrases_seed_turns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

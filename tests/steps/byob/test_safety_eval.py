@@ -635,9 +635,7 @@ def _eval_config(tmp_path: Path, responses: dict[str, dict[str, object]], log_pa
 
 
 def _published_cases(run_dir: Path) -> list[dict]:
-    private = run_dir / "benchmark_private_test.jsonl"
-    text = private.read_text(encoding="utf-8") if private.is_file() else ""
-    path = private if text.strip() else run_dir / "benchmark.jsonl"
+    path = run_dir / "benchmark.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 

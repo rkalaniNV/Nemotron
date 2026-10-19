@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Preliminary labels, deterministic checks, exact deduplication, and the split.
+"""Preliminary labels, deterministic checks, exact and semantic deduplication.
 
 The label is recomputed from the case facts. A stored action that disagrees is
 rejected and is not overwritten. A case with no eligible rule, or a quote that is
@@ -23,21 +23,19 @@ complete contrast family fails, the other members are rejected with it.
 
 An exact duplicate has the same policy, action, language, kind, legs, and
 canonical turn text. The lowest case id is kept. Members of one contrast family
-stay together, and a different action stays as its own row.
+stay together, and a different action stays as its own row. When semantic
+deduplication is enabled, near-duplicate scored turns are marked with the MCQ
+Curator workflow and dropped unless they belong to a complete contrast family.
 
-Each connected group goes to development or private_test. A group holds a
-contrast family, the variants of its violation, and any case that still carries
-that violation's conditions, including an exception and a labeled boundary.
-Both splits are filled when two or more groups exist. One group stays in
-development and the manifest records an incomplete split. This stage does not
-call a model. Semantic deduplication is not configured, and a public test split
-is not assigned.
+Every retained case goes to development. Contrast-family groups remain in the
+manifest for auditability, but are not split into a private holdout. A public
+test split is not assigned.
 """
 
 import json
 import unicodedata
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -82,7 +80,7 @@ class DatasetInputError(ValueError):
 
 @dataclass(frozen=True)
 class DatasetBuild:
-    """Label checks, accepted and rejected rows, the deduplicated rows, and the split."""
+    """Label checks, accepted and rejected rows, and the deduplicated dataset."""
 
     labels: tuple[dict[str, Any], ...]
     validated: tuple[dict[str, Any], ...]
@@ -100,7 +98,6 @@ class DatasetBuild:
             "rejected": self.report["rejected"],
             "duplicates_removed": self.report["duplicates_removed"],
             "development": len(splits["development"]),
-            "private_test": len(splits["private_test"]),
             "split_complete": self.manifest["complete"],
             "split_reason": self.manifest["reason"],
             "quality_gates_passed": gates["passed"],
@@ -130,8 +127,12 @@ def select_dataset(
     rules: Sequence[PolicyRule],
     spans: Mapping[str, str],
     quality_gates: Mapping[str, Any] | None = None,
+    *,
+    semantic_dedup: Mapping[str, Any] | None = None,
+    work_dir: Path | None = None,
+    semantic_runner: Callable[..., Sequence[str]] | None = None,
 ) -> DatasetBuild:
-    """Check every case, drop exact duplicates, and assign the two splits.
+    """Check every case, drop exact and near duplicates, and retain it in development.
 
     A damaged list stops the build. A case that fails a check is rejected and the
     other cases continue. A stored label that disagrees with the aggregated action
@@ -168,10 +169,18 @@ def select_dataset(
         stage = "contrast" if set(reasons[case_id]) <= _CONTRAST_REASONS else "validation"
         rejected.append(_rejection(stored[case_id], reasons[case_id], stage))
     deduplicated, drops = _deduplicate(validated, pairs, by_id)
+    deduplicated, semantic_drops, semantic_report = _semantic_deduplicate(
+        deduplicated,
+        pairs,
+        semantic_dedup,
+        work_dir,
+        semantic_runner,
+    )
+    drops = [*drops, *semantic_drops]
     rejected.extend(drops)
     rejected.sort(key=lambda row: str(row["case_id"]))
-    manifest = _manifest(deduplicated, drops, pairs, by_id)
-    report = _report(reasons, validated, rejected, deduplicated, pairs, drops)
+    manifest = _manifest(deduplicated, drops, pairs, by_id, semantic_report)
+    report = _report(reasons, validated, rejected, deduplicated, pairs, drops, semantic_report)
     gate_result = evaluate_quality_gates(
         deduplicated,
         quality_gates or {},
@@ -216,10 +225,8 @@ def evaluate_quality_gates(
     by_language = _language_tag_counts(rows)
     if split_manifest is None:
         development = sum(case.get("split") == "development" for case in rows)
-        private = sum(case.get("split") == "private_test" for case in rows)
     else:
         development = sum(split_by_id.get(str(case.get("case_id"))) == "development" for case in rows)
-        private = sum(split_by_id.get(str(case.get("case_id"))) == "private_test" for case in rows)
 
     failures: list[dict[str, Any]] = []
 
@@ -238,7 +245,6 @@ def evaluate_quality_gates(
 
     check("min_total_cases", _gate_count(requirements, "min_total_cases"), len(rows))
     check("min_development_cases", _gate_count(requirements, "min_development_cases"), development)
-    check("min_private_test_cases", _gate_count(requirements, "min_private_test_cases"), private)
     per_policy = _gate_count(requirements, "min_cases_per_policy")
     checked_policies = sorted(
         {
@@ -259,7 +265,6 @@ def evaluate_quality_gates(
         for key in (
             "min_total_cases",
             "min_development_cases",
-            "min_private_test_cases",
             "min_cases_per_policy",
         )
     ) or any(required > 0 for _label, required in (*action_requirements, *language_requirements))
@@ -276,7 +281,6 @@ def evaluate_quality_gates(
         "observed": {
             "total_cases": len(rows),
             "development_cases": development,
-            "private_test_cases": private,
             "by_policy": by_policy,
             "by_action": by_action,
             "by_language": {key: by_language[key] for key in sorted(by_language)},
@@ -333,14 +337,13 @@ def _split_assignments(split_manifest: Mapping[str, Any]) -> dict[str, str]:
     if not isinstance(splits, Mapping):
         raise DatasetInputError("quality gates require split_manifest.splits")
     assigned: dict[str, str] = {}
-    for split in ("development", "private_test"):
-        ids = splits.get(split)
-        if not isinstance(ids, list) or any(not isinstance(case_id, str) for case_id in ids):
-            raise DatasetInputError(f"quality gates require a valid {split} split")
-        for case_id in ids:
-            if case_id in assigned:
-                raise DatasetInputError(f"quality gates found case {case_id} in more than one split")
-            assigned[case_id] = split
+    ids = splits.get("development")
+    if not isinstance(ids, list) or any(not isinstance(case_id, str) for case_id in ids):
+        raise DatasetInputError("quality gates require a valid development split")
+    for case_id in ids:
+        if case_id in assigned:
+            raise DatasetInputError(f"quality gates found duplicate case {case_id} in development")
+        assigned[case_id] = "development"
     return assigned
 
 
@@ -673,9 +676,11 @@ def _label_reasons(
     if kind == "exception" and list(case.get("exceptions") or []) != list(rule.exceptions):
         reasons.append("facts_mismatch")
     proposed = case.get("expected_action", _MISSING)
-    if proposed is _MISSING or proposed != action:
+    if proposed is None:
+        reasons.append("invalid_case")
+    elif proposed is _MISSING or proposed != action:
         reasons.append("label_disagreement")
-    elif proposed is not None and proposed not in ACTION_ORDER:
+    elif proposed not in ACTION_ORDER:
         reasons.append("invalid_case")
     return reasons, action, (expected_present, expected_absent)
 
@@ -785,16 +790,25 @@ def _leg_list(value: Any) -> list[str] | None:
     return list(value)
 
 
+def _protected_ids(
+    cases: Sequence[Mapping[str, Any]],
+    pairs: Sequence[tuple[str, Sequence[str]]],
+) -> set[str]:
+    surviving = {str(case["case_id"]) for case in cases}
+    protected: set[str] = set()
+    for _family_id, ids in pairs:
+        members = [str(case_id) for case_id in ids]
+        if members and all(case_id in surviving for case_id in members):
+            protected.update(members)
+    return protected
+
+
 def _deduplicate(
     cases: Sequence[Mapping[str, Any]],
     pairs: Sequence[tuple[str, Sequence[str]]],
     by_id: Mapping[str, PolicyRule],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    surviving = {str(case["case_id"]) for case in cases}
-    protected: set[str] = set()
-    for _family_id, ids in pairs:
-        if all(case_id in surviving for case_id in ids):
-            protected.update(ids)
+    protected = _protected_ids(cases, pairs)
     buckets: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
     for case in sorted(cases, key=lambda item: str(item["case_id"])):
         buckets.setdefault(_signature(case, by_id), []).append(case)
@@ -870,14 +884,99 @@ def _annotate(case: Mapping[str, Any], by_id: Mapping[str, PolicyRule]) -> dict[
     return stored
 
 
-def _duplicate(case: Mapping[str, Any], keeper: str) -> dict[str, Any]:
-    return {
+def _duplicate(
+    case: Mapping[str, Any],
+    keeper: str | None = None,
+    reason: str = "exact_duplicate",
+) -> dict[str, Any]:
+    row = {
         "case_id": case.get("case_id"),
         "policy_id": case.get("policy_id") if isinstance(case.get("policy_id"), str) else None,
-        "reasons": ["exact_duplicate"],
+        "reasons": [reason],
         "stage": "dedup",
-        "kept_case_id": keeper,
     }
+    if keeper is not None:
+        row["kept_case_id"] = keeper
+    return row
+
+
+def _semantic_deduplicate(
+    cases: Sequence[Mapping[str, Any]],
+    pairs: Sequence[tuple[str, Sequence[str]]],
+    settings: Mapping[str, Any] | None,
+    work_dir: Path | None,
+    runner: Callable[..., Sequence[str]] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    kept = [dict(case) for case in cases]
+    if not settings:
+        return kept, [], {"status": "not_configured"}
+    report: dict[str, Any] = {
+        "status": "disabled" if settings.get("enabled") is False else "applied",
+        "model_identifier": settings.get("model_identifier"),
+        "eps": settings.get("eps"),
+        "n_clusters": settings.get("n_clusters"),
+        "remove_duplicates": settings.get("remove_duplicates", True),
+        "marked": 0,
+        "removed": 0,
+        "protected": 0,
+    }
+    if settings.get("enabled") is False:
+        return kept, [], report
+    if len(kept) < 2:
+        report["status"] = "skipped"
+        report["reason"] = "too_few_cases"
+        return kept, [], report
+    try:
+        marked = _run_semantic(kept, work_dir, settings, runner)
+    except Exception as exc:
+        raise DatasetInputError(f"semantic deduplication failed: {exc}") from exc
+    if isinstance(marked, (str, bytes)) or not isinstance(marked, Sequence):
+        raise DatasetInputError("semantic deduplication must return a list of duplicate ids")
+    if any(not isinstance(case_id, str) or not case_id for case_id in marked):
+        raise DatasetInputError("semantic deduplication returned an invalid duplicate id")
+    if len(set(marked)) != len(marked):
+        raise DatasetInputError("semantic deduplication repeated a duplicate id")
+    protected = _protected_ids(kept, pairs)
+    known = {str(case["case_id"]) for case in kept}
+    unknown = sorted(set(marked) - known)
+    if unknown:
+        raise DatasetInputError(
+            "semantic deduplication returned unknown duplicate ids: " + ", ".join(unknown)
+        )
+    marked_ids = set(marked)
+    drops: list[dict[str, Any]] = []
+    remaining: list[dict[str, Any]] = []
+    remove = report["remove_duplicates"] is True
+    for case in kept:
+        case_id = str(case["case_id"])
+        if case_id not in marked_ids:
+            remaining.append(case)
+            continue
+        if case_id in protected:
+            report["protected"] += 1
+            remaining.append(case)
+            continue
+        report["marked"] += 1
+        if remove:
+            drops.append(_duplicate(case, reason="semantic_duplicate"))
+            continue
+        remaining.append(case)
+    report["removed"] = len(drops)
+    remaining.sort(key=lambda item: str(item["case_id"]))
+    return remaining, drops, report
+
+
+def _run_semantic(
+    cases: Sequence[Mapping[str, Any]],
+    work_dir: Path | None,
+    settings: Mapping[str, Any],
+    runner: Callable[..., Sequence[str]] | None,
+) -> Sequence[str]:
+    if runner is not None:
+        return runner(cases, work_dir=work_dir, settings=settings)
+    from nemotron.steps.byob.runtime.benchmark_families.safety.deduplication import run_mcq_semantic_dedup
+
+    return run_mcq_semantic_dedup(cases, work_dir=work_dir, settings=settings)
 
 
 def _manifest(
@@ -885,29 +984,20 @@ def _manifest(
     drops: Sequence[Mapping[str, Any]],
     pairs: Sequence[tuple[str, Sequence[str]]],
     by_id: Mapping[str, PolicyRule],
+    semantic_report: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     groups = _groups(cases, pairs)
     ordered = sorted(
         ((min(members), sorted(members)) for members in groups.values()),
         key=lambda item: (-len(item[1]), item[0]),
     )
-    splits: dict[str, list[str]] = {"development": [], "private_test": []}
-    group_rows: list[dict[str, Any]] = []
-    if not ordered:
-        reason = "no_cases"
-    elif len(ordered) == 1:
-        reason = "one_group"
-        group_id, members = ordered[0]
-        splits["development"] = members
-        group_rows.append({"group_id": group_id, "split": "development", "case_ids": members})
-    else:
-        reason = "complete"
-        assignments = _balanced_assignments(ordered, cases, by_id)
-        for (group_id, members), name in zip(ordered, assignments, strict=True):
-            splits[name].extend(members)
-            group_rows.append({"group_id": group_id, "split": name, "case_ids": members})
-        for name in splits:
-            splits[name] = sorted(splits[name])
+    development = sorted(str(case["case_id"]) for case in cases)
+    splits = {"development": development}
+    group_rows = [
+        {"group_id": group_id, "split": "development", "case_ids": members}
+        for group_id, members in ordered
+    ]
+    reason = "complete" if development else "no_cases"
     case_by_id = {str(case["case_id"]): case for case in cases}
     split_cases = {
         name: [case_by_id[case_id] for case_id in case_ids]
@@ -919,7 +1009,11 @@ def _manifest(
         "splits": splits,
         "groups": group_rows,
         "dropped_duplicates": [
-            {"case_id": row["case_id"], "kept_case_id": row["kept_case_id"]}
+            {
+                key: row[key]
+                for key in ("case_id", "kept_case_id")
+                if key in row
+            }
             for row in sorted(drops, key=lambda item: str(item["case_id"]))
         ],
         "balance": {
@@ -940,56 +1034,9 @@ def _manifest(
                 for name, rows in split_cases.items()
             },
         },
-        "semantic_dedup": "not_configured",
+        "semantic_dedup": dict(semantic_report or {"status": "not_configured"}),
         "public_test": "not_assigned",
     }
-
-
-def _balanced_assignments(
-    groups: Sequence[tuple[str, Sequence[str]]],
-    cases: Sequence[Mapping[str, Any]],
-    by_id: Mapping[str, PolicyRule],
-) -> list[str]:
-    """Greedily balance case count, policy, action, kind, and language without splitting groups."""
-    case_by_id = {str(case["case_id"]): case for case in cases}
-    features = [_group_features(ids, case_by_id, by_id) for _group_id, ids in groups]
-    total = Counter[str]()
-    for counts in features:
-        total.update(counts)
-    current = {"development": Counter[str](), "private_test": Counter[str]()}
-    assignments: list[str] = []
-    for index, counts in enumerate(features):
-        if index == 0:
-            name = "development"
-        elif index == 1:
-            name = "private_test"
-        else:
-            scores = {
-                split: sum(abs(2 * (current[split][key] + counts[key]) - total[key]) for key in total)
-                for split in current
-            }
-            name = min(
-                current,
-                key=lambda split: (scores[split], current[split]["cases"], split),
-            )
-        assignments.append(name)
-        current[name].update(counts)
-    return assignments
-
-
-def _group_features(
-    ids: Sequence[str],
-    case_by_id: Mapping[str, Mapping[str, Any]],
-    by_id: Mapping[str, PolicyRule],
-) -> Counter[str]:
-    counts = Counter({"cases": len(ids)})
-    for case_id in ids:
-        case = case_by_id[case_id]
-        counts[f"policy:{case.get('policy_id')}"] += 1
-        counts[f"action:{_action_name(case)}"] += 1
-        counts[f"kind:{case.get('kind')}"] += 1
-        counts[f"language:{_case_language(case, _rule_for(case, by_id))}"] += 1
-    return counts
 
 
 def _groups(
@@ -1061,6 +1108,7 @@ def _report(
     deduplicated: Sequence[Mapping[str, Any]],
     pairs: Sequence[tuple[str, Sequence[str]]],
     drops: Sequence[Mapping[str, Any]],
+    semantic_report: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     deduped_ids = {str(case["case_id"]) for case in deduplicated}
     kept_pairs = sum(1 for _family_id, ids in pairs if all(case_id in deduped_ids for case_id in ids))
@@ -1076,7 +1124,7 @@ def _report(
         "judge": {"method": "deterministic", "model": None, "disagreements": disagreements},
         "contrast_pairs_kept": kept_pairs,
         "contrast_pairs_rejected": len(pairs) - kept_pairs,
-        "semantic_dedup": "not_configured",
+        "semantic_dedup": dict(semantic_report or {"status": "not_configured"}),
     }
 
 

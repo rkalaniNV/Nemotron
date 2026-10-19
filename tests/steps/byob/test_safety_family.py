@@ -69,8 +69,9 @@ class _EchoExtractor:
         prompt: str = "",
         output_format: Any = None,
         prefix: str = "",
+        inference_parameters: Any = None,
     ) -> dict[str, Any]:
-        del system_prompt, prompt, output_format, prefix
+        del system_prompt, prompt, output_format, prefix, inference_parameters
         answers: dict[str, Any] = {}
         for row in rows:
             payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
@@ -109,6 +110,13 @@ def test_safety_modules_import_nothing_newer_than_python_3_10() -> None:
 def test_checked_in_configs_resolve(name: str) -> None:
     resolved = load_resolved(BYOB_DIR / "safety" / "config" / name)
     assert resolved.input_dir == (BYOB_ROOT / "safety/examples/policies").resolve()
+    if name == "default.yaml":
+        semantic = resolved.extras["semantic_deduplication_config"]
+        assert semantic["enabled"] is True
+        assert semantic["remove_duplicates"] is True
+        assert semantic["model_identifier"]
+    else:
+        assert "semantic_deduplication_config" not in resolved.extras
 
 
 # Prepare
@@ -514,7 +522,7 @@ def test_signed_benchmark_with_coverage_gaps_publishes_silver(tmp_path: Path) ->
     assert report["certification"] == "silver"
     assert report["blocking_gaps"]
     assert (run_dir / "benchmark_development.jsonl").is_file()
-    assert (run_dir / "benchmark_private_test.jsonl").is_file()
+    assert not (run_dir / "benchmark_private_test.jsonl").exists()
 
 
 def test_unmet_minimum_dataset_quality_gate_publishes_silver(tmp_path: Path) -> None:
@@ -557,30 +565,6 @@ def test_impossible_quality_gates_with_on_failure_fail_stop_before_scenario_gene
     assert not (cache / "scenario_candidates.jsonl").exists()
     gaps = json.loads((cache / "coverage_gaps.json").read_text(encoding="utf-8"))
     assert gaps["quality_gate_preflight"]["possible"] is False
-
-
-def test_feasible_preflight_still_enforces_final_gate_after_split(tmp_path: Path) -> None:
-    config = _config(
-        tmp_path,
-        overrides={
-            "quality_gates": {
-                "min_private_test_cases": 2,
-                "on_failure": "fail",
-            }
-        },
-    )
-    run_dir = _run(config, "prepare")
-    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
-    gaps = json.loads((run_dir / "stage_cache" / "coverage_gaps.json").read_text(encoding="utf-8"))
-    assert gaps["quality_gate_preflight"]["possible"] is True
-    split = json.loads((run_dir / "stage_cache" / "split_manifest.json").read_text(encoding="utf-8"))
-    assert split["quality_gates"]["passed"] is False
-    sign_safety_packet(config, approved_by="Lan")
-
-    failed = _expect(config, "generate", RunStatus.QUALITY_GATES_FAILED)
-    assert "quality_gates.on_failure is fail" in str(failed)
-    assert (run_dir / "review.html").is_file()
-    assert not (run_dir / "benchmark.jsonl").exists()
 
 
 def test_preview_publishes_when_quality_gates_fail_with_on_failure_fail(tmp_path: Path) -> None:
@@ -902,7 +886,7 @@ def test_max_turns_one_is_allowed_when_multi_turn_mix_is_zero(tmp_path: Path) ->
     assert resolved["generation"]["turn_mix"]["multi_turn"] == 0.0
 
 
-def test_split_minima_may_define_a_higher_effective_floor_than_min_total(tmp_path: Path) -> None:
+def test_total_and_development_minima_are_preserved(tmp_path: Path) -> None:
     run_dir = _run(
         _config(
             tmp_path,
@@ -910,7 +894,6 @@ def test_split_minima_may_define_a_higher_effective_floor_than_min_total(tmp_pat
                 "quality_gates": {
                     "min_total_cases": 50,
                     "min_development_cases": 40,
-                    "min_private_test_cases": 40,
                 }
             },
         ),
@@ -919,7 +902,6 @@ def test_split_minima_may_define_a_higher_effective_floor_than_min_total(tmp_pat
     resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
     assert resolved["quality_gates"]["min_total_cases"] == 50
     assert resolved["quality_gates"]["min_development_cases"] == 40
-    assert resolved["quality_gates"]["min_private_test_cases"] == 40
 
 
 def test_per_policy_minimum_is_checked_against_extracted_rule_inventory(tmp_path: Path) -> None:
@@ -946,19 +928,14 @@ def test_per_policy_minimum_is_checked_against_extracted_rule_inventory(tmp_path
         ({"budget": {"assisted_max_case": 5}}, "Unknown budget keys: assisted_max_case"),
         ({"budget": {"assisted_max_cases": 1.5}}, "budget.assisted_max_cases must be a whole number"),
         ({"quality_gates": {"min_total_case": 5}}, "Unknown quality_gates keys: min_total_case"),
+        (
+            {"quality_gates": {"min_private_test_cases": 1}},
+            "Unknown quality_gates keys: min_private_test_cases",
+        ),
         ({"quality_gates": {"min_total_cases": 1.5}}, "quality_gates.min_total_cases must be"),
         (
             {"quality_gates": {"min_total_cases": 501}},
             "exceeds budget.assisted_max_cases (500)",
-        ),
-        (
-            {
-                "quality_gates": {
-                    "min_development_cases": 300,
-                    "min_private_test_cases": 300,
-                }
-            },
-            "is 600, which exceeds budget.assisted_max_cases (500)",
         ),
         (
             {"budget": {"max_turns": 1}},
@@ -991,6 +968,22 @@ def test_per_policy_minimum_is_checked_against_extracted_rule_inventory(tmp_path
         (
             {"generation_model_config": {"inference_parameters": {"temperature": "hot"}}},
             "temperature must be a number",
+        ),
+        (
+            {"semantic_deduplication_config": {"cluster_count": 1}},
+            "Unknown semantic_deduplication_config keys: cluster_count",
+        ),
+        (
+            {"semantic_deduplication_config": {"eps": 2}},
+            "semantic_deduplication_config.eps must be a number between 0 and 1",
+        ),
+        (
+            {"semantic_deduplication_config": {"n_clusters": 0}},
+            "semantic_deduplication_config.n_clusters must be a whole number 1 or greater",
+        ),
+        (
+            {"semantic_deduplication_config": {"enabled": "yes"}},
+            "semantic_deduplication_config.enabled must be true or false",
         ),
         ({"generation_model_config": {"api_key": "sk-test"}}, "generation_model_config.api_key looks like a secret"),
         ({"judge_model_configs": [{"provider_api_key": "x"}]}, "judge_model_configs[0].provider_api_key looks like"),

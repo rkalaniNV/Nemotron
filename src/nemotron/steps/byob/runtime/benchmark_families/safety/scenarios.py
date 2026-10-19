@@ -191,9 +191,8 @@ def _cells(rows: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
             raise ScenarioInputError(f"plan row {slot_id} needs an expected_action")
         action = row.get("expected_action")
         if action is None:
-            if row.get("kind") != "boundary":
-                raise ScenarioInputError(f"plan row {slot_id} has an empty expected_action")
-        elif action not in ACTION_ORDER:
+            raise ScenarioInputError(f"plan row {slot_id} has an empty expected_action")
+        if action not in ACTION_ORDER:
             raise ScenarioInputError(f"plan row {slot_id} has an unknown expected_action")
         cells[slot_id] = row
     return cells

@@ -119,10 +119,7 @@ def test_each_scored_multi_turn_keeps_the_planned_decision() -> None:
     assert [turn["turn"] for turn in case["turns"]] == list(range(1, len(case["turns"]) + 1))
     assert {turn["scored"] for turn in case["turns"]} == {True}
     assert {turn["expected_action"] for turn in case["turns"]} == {"block"}
-    boundary = _one(build, "boundary")
-    assert boundary["expected_action"] is None
-    assert boundary["turns"][0]["scored"] is True
-    assert boundary["turns"][0]["expected_action"] is None
+    assert [row for row in build.cases if row["kind"] == "boundary"] == []
 
 
 def test_an_unknown_policy_id_is_rejected_and_not_replaced_by_a_seed() -> None:
@@ -444,6 +441,16 @@ def test_a_boundary_uses_the_facts_that_make_the_rule_match() -> None:
     boundary = _one(build, "boundary")
     assert boundary["present_legs"] == ["verb", "target"]
     assert boundary["expected_action"] == "caution"
+
+
+def test_a_plan_row_with_a_null_action_stops_the_build() -> None:
+    rule = _rule("NULL")
+    plan = _plan([rule])
+    rows = [dict(row) for row in plan.rows]
+    rows[0]["expected_action"] = None
+
+    with pytest.raises(ScenarioInputError, match="empty expected_action"):
+        build_scenarios(rows, plan.contrast_families, [rule], None)
 
 
 def test_a_contrast_slot_that_is_not_in_the_plan_or_the_gaps_stops_the_build() -> None:

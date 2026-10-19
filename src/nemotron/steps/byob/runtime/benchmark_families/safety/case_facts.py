@@ -18,8 +18,9 @@
 The planner and the scenario stage both ask this module what a cell means. A cell's
 expected action is the action ``expected_action`` returns for those facts. When no
 eligible rule matches, an allow, missing-leg, or exception cell is ``allow``. A boundary
-with no ambiguous action stays unlabeled. ``none_of`` legs that the cell does not hold
-absent are put in the facts, so an empty fact list is not an accidental violation.
+is generated only when the rule declares an ambiguous action. ``none_of`` legs that the
+cell does not hold absent are put in the facts, so an empty fact list is not an accidental
+violation.
 """
 
 from collections.abc import Sequence
@@ -97,7 +98,7 @@ def case_context(
     """Present legs, absent legs, and the action those facts demand.
 
     ``None`` means the cell does not describe this rule. A returned action of ``None``
-    is an unlabeled boundary, or a violation whose facts match no rule.
+    is an unsupported boundary, or a violation whose facts match no rule.
     """
     if kind in _VIOLATION_KINDS:
         action = primary_action(rule)

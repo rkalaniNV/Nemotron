@@ -26,7 +26,7 @@ budget:
   # these maxima or assisted_max_cases; the config is refused instead.
 
 # Optional publication gates. Counts are evaluated after validation, exact
-# deduplication, and the development/private-test split. An unmet gate blocks
+# deduplication, and semantic near-dup filtering. An unmet gate blocks
 # Gold and is reported in split_manifest.json, review.html, and quality_report.json.
 # on_failure: silver publishes anyway; fail blocks publication after review.
 # Minima must fit inside the budget caps (load-time error otherwise). The planner
@@ -35,7 +35,6 @@ budget:
 # quality_gates:
 #   min_total_cases: 100
 #   min_development_cases: 40
-#   min_private_test_cases: 40
 #   min_cases_per_policy: 4
 #   min_cases_per_action: {allow: 20, block: 20}
 #   min_cases_per_language: {vi: 20}
@@ -47,7 +46,8 @@ generation:
     persona: false
     # Rewrite seed quote-copies into realistic user turns. Python keeps the
     # coverage cell (legs, expected_action, evidence). Without a generation
-    # model the seeds are kept.
+    # model the seeds are kept. Paraphrase lifts a 0.0 extract temperature so
+    # rewrites can vary; the scored turn must realize present_legs.
     paraphrase: true
   # Optional. Default is single_turn 0.80 / multi_turn 0.20. A positive
   # multi_turn share adds optional multi-turn cells from single-turn rules
@@ -55,6 +55,16 @@ generation:
   # turn_mix:
   #   single_turn: 0.80
   #   multi_turn: 0.20
+
+# Same Curator near-dup knobs as MCQ. Compares scored user turns only inside
+# the same language and expected action after exact dedup. Contrast-family
+# members are not dropped. An enabled stage fails closed when Curator cannot run.
+semantic_deduplication_config:
+  enabled: true
+  model_identifier: sentence-transformers/all-MiniLM-L6-v2
+  n_clusters: 1
+  eps: 0.07
+  remove_duplicates: true
 
 # Add after choosing the systems to evaluate. Credentials are environment-variable
 # names only; never put a key value in this file.

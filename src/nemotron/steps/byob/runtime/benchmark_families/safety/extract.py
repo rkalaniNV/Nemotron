@@ -389,6 +389,7 @@ class DataDesignerExtractor:
         prompt: str,
         output_format: type[BaseModel],
         prefix: str,
+        inference_parameters: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """One structured reply per seed row, keyed by request_id."""
         if not rows:
@@ -400,6 +401,12 @@ class DataDesignerExtractor:
 
         from nemotron.steps.byob.runtime.data_designer_utils import setup_model_config
 
+        model_config = dict(self.model_config)
+        if inference_parameters:
+            model_config["inference_parameters"] = {
+                **dict(model_config.get("inference_parameters") or {}),
+                **dict(inference_parameters),
+            }
         seeds = self.work_dir / "artifacts" / "model_seeds"
         seeds.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -408,7 +415,7 @@ class DataDesignerExtractor:
             seed_path = Path(handle.name)
             pd.DataFrame(list(rows)).to_csv(handle, index=False)
         try:
-            builder = DataDesignerConfigBuilder(model_configs=[setup_model_config(self.model_config)])
+            builder = DataDesignerConfigBuilder(model_configs=[setup_model_config(model_config)])
             builder.with_seed_dataset(LocalFileSeedSource(path=str(seed_path)))
             builder.add_column(
                 name="response",
@@ -416,17 +423,17 @@ class DataDesignerExtractor:
                 system_prompt=system_prompt,
                 prompt=prompt,
                 output_format=output_format,
-                model_alias=str(self.model_config["alias"]),
+                model_alias=str(model_config["alias"]),
             )
             provider_kwargs: dict[str, Any] = {}
-            if self.model_config.get("base_url"):
+            if model_config.get("base_url"):
                 provider_kwargs["model_providers"] = [
                     ModelProvider(
-                        name=str(self.model_config["provider"]),
-                        endpoint=str(self.model_config["base_url"]),
+                        name=str(model_config["provider"]),
+                        endpoint=str(model_config["base_url"]),
                         provider_type="openai",
-                        api_key=str(self.model_config["api_key_env"])
-                        if self.model_config.get("api_key_env")
+                        api_key=str(model_config["api_key_env"])
+                        if model_config.get("api_key_env")
                         else None,
                     )
                 ]

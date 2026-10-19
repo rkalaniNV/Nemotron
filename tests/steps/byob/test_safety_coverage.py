@@ -57,6 +57,7 @@ def _rule(
     span: str | None = "doc#1#span-01",
     status: str = "eligible_for_generation",
     signals: dict[str, Any] | None = None,
+    ambiguous_action: str | None = None,
 ) -> Any:
     body: dict[str, Any] = {"actor": "assistant", "action": "respond", "object": "request"}
     if block is not None:
@@ -73,6 +74,8 @@ def _rule(
         "decision": {"violation_action": "block"},
         "status": status,
     }
+    if ambiguous_action is not None:
+        data["decision"]["ambiguous_action"] = ambiguous_action
     if span is not None:
         data["provenance"]["source_span_id"] = span
     if status == "eligible_for_generation":
@@ -123,6 +126,21 @@ def test_required_rows_are_scheduled_before_optional_rows() -> None:
     assert "required" not in priorities[first_optional:]
     assert plan.certification == "gold"
     assert plan.reason == "complete"
+
+
+def test_a_rule_without_an_ambiguous_action_has_no_boundary_cell() -> None:
+    plan = _plan([_rule("NO-BOUNDARY")])
+
+    assert _kinds(plan, "boundary") == []
+    assert all(row.get("expected_action") is not None for row in (*plan.rows, *plan.gaps))
+
+
+def test_a_rule_with_an_ambiguous_action_has_a_labeled_boundary_cell() -> None:
+    plan = _plan([_rule("BOUNDARY", ambiguous_action="caution")])
+
+    [boundary] = _kinds(plan, "boundary")
+    assert boundary["expected_action"] == "caution"
+    assert boundary["present_legs"] == ["request"]
 
 
 def test_a_two_condition_all_of_rule_gets_one_missing_leg_allow_per_condition() -> None:
@@ -389,7 +407,7 @@ def test_a_grounded_multi_turn_rule_does_not_also_get_a_mix_cell() -> None:
 
 def test_mix_multi_turn_obeys_the_per_rule_cap() -> None:
     plan = _plan(
-        [_rule("SOLO", quote="Block it.")],
+        [_rule("SOLO", quote="Block it.", ambiguous_action="caution")],
         budget=_budget(cases_per_critical_rule=3),
         generation={
             "decision_mix": {"allow": 0.5, "block": 0.5},
@@ -422,15 +440,15 @@ def test_quality_gate_preflight_uses_grounded_inventory_upper_bounds() -> None:
         {
             "gate": "min_total_cases",
             "required": 4,
-            "available_upper_bound": 3,
-            "missing": 1,
+            "available_upper_bound": 2,
+            "missing": 2,
         }
     ]
 
 
 def test_a_mix_multi_turn_omitted_by_the_cap_does_not_block_gold() -> None:
     plan = _plan(
-        [_rule("SOLO", quote="Block it.")],
+        [_rule("SOLO", quote="Block it.", ambiguous_action="caution")],
         cap=3,
         generation={
             "decision_mix": {"allow": 0.5, "block": 0.5},
