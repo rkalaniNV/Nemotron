@@ -116,7 +116,8 @@ def test_the_page_lists_every_unresolved_item_when_examples_are_capped() -> None
     assert "case-3" not in page
     assert "case-4" not in page
     assert "example 4 unique" not in page
-    assert "Cards: 5. Pending: 4. Estimated review time: 3 minutes." in page
+    assert "Cards: 5. Pending: 4." in page
+    assert "Estimated review time" not in page
     assert "review_decisions.csv" in page
     assert "4 cards need a decision." in page
     assert "does not generate new cases" in page
@@ -383,6 +384,90 @@ def test_pending_cards_show_the_quote_and_extracted_meaning() -> None:
     assert "Block terror instructions" in row
     assert "do not teach terror" in row
     assert "block" in row
+
+
+def test_review_recommends_how_to_fix_gaps_and_excluded_rules() -> None:
+    build = assemble_review(
+        **_review_args(
+            rules=[
+                _rule("KEEP", "eligible_for_generation", "Keep this rule."),
+                _rule(
+                    "HELD",
+                    "quarantined",
+                    "Ambiguous clause.",
+                    "confidence 0.58 is below 0.7",
+                    "operator not stated for allow_if",
+                    "allow rule has 7 possible acting partners in its section",
+                    "testability is needs_clarification",
+                ),
+                _rule("BAD", "rejected", "Broken clause.", "unsupported field"),
+            ],
+            coverage={
+                **_coverage(),
+                "certification": "silver",
+                "reason": "rule_cap",
+                "missing_required": ["KEEP/clear_allow"],
+            },
+            gaps=[
+                {
+                    "slot_id": "KEEP/clear_allow",
+                    "policy_id": "KEEP",
+                    "kind": "clear_allow",
+                    "reason": "rule_cap",
+                    "severity": "high",
+                    "blocks_gold": True,
+                }
+            ],
+        ),
+        decisions={},
+    )
+
+    page = build.html
+    assert "Estimated review time" not in page
+    assert page.count("<strong>Recommend:</strong>") == 2
+    gap_recommend = page.split('<p class="recommend">', 1)[1].split("</p>", 1)[0]
+    assert "budget.cases_per_normal_rule" in gap_recommend
+    assert "cases_per_critical_rule" not in gap_recommend
+    assert "extraction confidence" in page
+    assert "all_of" in page
+    assert "one acting pair" in page
+    assert "atomic, testable condition" in page
+    assert "malformed or unsupported" in page
+    assert "<h2>Excluded rules (2)</h2>" in page
+    heading, rest = page.split("Show excluded rules", 1)
+    assert "<h2>Excluded rules (2)</h2>" in heading
+    assert "Recommend:" in heading
+    assert "Recommend:" not in rest.split("</details>", 1)[0]
+
+
+def test_critical_rule_cap_recommends_the_critical_knob() -> None:
+    page = assemble_review(
+        **_review_args(
+            gaps=[
+                {
+                    "slot_id": "KEEP/clear_allow",
+                    "policy_id": "KEEP",
+                    "kind": "clear_allow",
+                    "reason": "rule_cap",
+                    "severity": "critical",
+                    "blocks_gold": True,
+                }
+            ]
+        ),
+        decisions={},
+    ).html
+    recommend = page.split('<p class="recommend">', 1)[1].split("</p>", 1)[0]
+    assert "budget.cases_per_critical_rule" in recommend
+    assert "cases_per_normal_rule" not in recommend
+    assert "Recommend:" in page
+
+
+def test_empty_gap_and_excluded_sections_omit_recommendations() -> None:
+    page = assemble_review(**_review_args(), decisions={}).html
+    assert "Recommend:" not in page
+    assert "Estimated review time" not in page
+    assert "<h2>Excluded rules (0)</h2>" in page
+    assert "Show excluded rules" not in page
 
 
 def test_an_allow_if_rule_shows_allow_not_the_violation_action() -> None:

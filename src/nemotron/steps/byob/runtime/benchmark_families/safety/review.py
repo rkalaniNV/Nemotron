@@ -57,8 +57,8 @@ _CONDITION_NAMES = ("block_if", "allow_if", "escalate_if", "require_confirmation
 _OPERATOR_NAMES = ("all_of", "any_of", "none_of")
 _GAP_MEANING = {
     "rule_cap": (
-        "This rule already used its per-rule case cap. Raise cases_per_normal_rule or "
-        "cases_per_critical_rule, then re-run generate. The CSV cannot add this cell."
+        "This rule already used its per-rule case cap. Raise the matching per-rule "
+        "budget named in Recommend, then re-run generate. The CSV cannot add this cell."
     ),
     "budget_cap": "The run hit assisted_max_cases. Raise that budget, then re-run generate.",
     "translation_required": "A required target language was not generated.",
@@ -307,7 +307,6 @@ def render_html(packet: Mapping[str, Any]) -> str:
     ]
     pre_accepted = len(kept_cards)
     pending = len(pending_cards)
-    estimated_minutes = max(1, (len(cards) + 1) // 2)
     parts = [
         "<!DOCTYPE html>",
         '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">',
@@ -315,7 +314,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
         f"<style>{_PAGE_STYLE}</style></head><body>",
         "<h1>Safety review</h1>",
         _task_banner(pending, pre_accepted, len(excluded), len(blocking)),
-        f"<p>Cards: {len(cards)}. Pending: {pending}. Estimated review time: {estimated_minutes} minutes.</p>",
+        f"<p>Cards: {len(cards)}. Pending: {pending}.</p>",
         "<p>Record approve, reject, or edit in <code>review_decisions.csv</code>. "
         "An edit needs a note. Then sign the regenerated packet. Only <code>decision</code> and "
         "<code>note</code> are read back; the other CSV columns are rebuilt on generate.</p>",
@@ -336,22 +335,20 @@ def render_html(packet: Mapping[str, Any]) -> str:
         f"<h2>Blocking coverage gaps ({len(blocking)})</h2>",
         "<p>These missing cells block Gold. They are not CSV decisions.</p>",
         _gap_table(blocking),
+        _gap_recommendation(blocking),
         f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
         _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
         "<details><summary>Generation capacity preflight</summary>",
         _capacity_preflight(capacity, preflight),
         "</details>",
-        f"<details><summary>Excluded rules ({len(excluded)}) — not in the CSV</summary>",
-        "<p>These rules are not in the CSV and cannot be approved from review.</p>",
-        _excluded_table(excluded),
-        "</details>",
+        *_excluded_section(excluded),
         "<details><summary>Representative examples — capped samples from generated cases</summary>",
         "<p>Capped samples from rules that already generated cases. Pending rules have none.</p>",
         _example_sections(examples),
         "</details>",
         "</body></html>\n",
     ]
-    return "\n".join(parts)
+    return "\n".join(part for part in parts if part)
 
 
 def _quality_gate_table(
@@ -411,6 +408,105 @@ def _capacity_preflight(capacity: Mapping[str, Any], preflight: Mapping[str, Any
     )
 
 
+def _excluded_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    parts = [
+        f"<h2>Excluded rules ({len(rows)})</h2>",
+        "<p>These rules are not in the CSV and cannot be approved from review.</p>",
+    ]
+    recommendation = _excluded_recommendation(rows)
+    if recommendation:
+        parts.append(recommendation)
+    if rows:
+        parts.extend(
+            [
+                "<details><summary>Show excluded rules</summary>",
+                _excluded_table(rows),
+                "</details>",
+            ]
+        )
+    return parts
+
+
+def _gap_recommendation(rows: Sequence[Mapping[str, Any]]) -> str:
+    if not rows:
+        return ""
+    reasons = {str(row.get("reason") or "") for row in rows}
+    actions = []
+    if "rule_cap" in reasons:
+        actions.append(_rule_cap_action(rows))
+    if "budget_cap" in reasons:
+        actions.append("raise <code>budget.assisted_max_cases</code> (or <code>preview_max_cases</code> in preview)")
+    if "max_turns" in reasons:
+        actions.append("raise <code>budget.max_turns</code> to at least 2")
+    if "translation_required" in reasons:
+        actions.append("provide reviewed target-language translations")
+    if "span_missing" in reasons:
+        actions.append("restore an exact source span and quote for the rule")
+    if not actions:
+        actions.append("inspect each reason above and correct the policy or generation budget")
+    return _recommend(
+        actions,
+        "then run <code>generate</code> again. Do not resolve these gaps by editing the CSV.",
+    )
+
+
+def _rule_cap_action(rows: Sequence[Mapping[str, Any]]) -> str:
+    severities = {str(row.get("severity") or "") for row in rows}
+    knobs = []
+    if severities & {"high", "medium", "low"} or "critical" not in severities:
+        knobs.append("<code>budget.cases_per_normal_rule</code>")
+    if "critical" in severities:
+        knobs.append("<code>budget.cases_per_critical_rule</code>")
+    joined = " and ".join(knobs) if len(knobs) == 2 else knobs[0]
+    return f"raise {joined} so every required cell of those rules fits"
+
+
+def _excluded_recommendation(rows: Sequence[Mapping[str, Any]]) -> str:
+    if not rows:
+        return ""
+    blob = " ".join(_reason_blob(row) for row in rows).casefold()
+    statuses = {str(row.get("status") or "") for row in rows}
+    actions = []
+    if "confidence" in blob and "below" in blob:
+        actions.append(
+            "rewrite those clauses more explicitly so extraction confidence can clear the quarantine threshold"
+        )
+    if "operator not stated" in blob:
+        actions.append("state <code>all_of</code>, <code>any_of</code>, or <code>none_of</code> in the source clause")
+    if "acting partners" in blob:
+        actions.append("separate allow exceptions from the blocking clause so each rule has one acting pair")
+    if "needs_clarification" in blob or "non_testable" in blob or "testability" in blob:
+        actions.append("rewrite the clause as one atomic, testable condition with an exact quote")
+    if "evidence" in blob or "quote_not_in_span" in blob or "span_missing" in blob:
+        actions.append("restore an exact source quote inside its span")
+    if "rejected" in statuses:
+        actions.append("correct malformed or unsupported rule fields")
+    if not actions:
+        actions.append("clarify the source policy text using the exclusion reasons shown above")
+    return _recommend(
+        actions,
+        "then run <code>prepare</code> and <code>generate</code> again. "
+        "Excluded rules cannot be restored through <code>review_decisions.csv</code>.",
+    )
+
+
+def _reason_blob(row: Mapping[str, Any]) -> str:
+    reasons = row.get("reasons")
+    if isinstance(reasons, list):
+        return " ".join(str(item) for item in reasons)
+    return str(reasons or "")
+
+
+def _recommend(actions: Sequence[str], suffix: str) -> str:
+    return (
+        '<p class="recommend"><strong>Recommend:</strong> '
+        + "; ".join(actions)
+        + ", "
+        + suffix
+        + "</p>"
+    )
+
+
 _PAGE_STYLE = (
     "body{font:16px/1.45 system-ui,Segoe UI,sans-serif;max-width:52rem;margin:0 auto;"
     "padding:1.25rem;color:#1c1917}"
@@ -430,6 +526,7 @@ _PAGE_STYLE = (
     ".chips span{display:inline-block;border:1px solid #d6d3d1;padding:.1rem .5rem;"
     "margin:0 .35rem .35rem 0;font-size:.8rem}"
     ".mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;color:#57534e}"
+    ".recommend{background:#ecfccb;border-left:4px solid #4d7c0f;padding:.75rem .9rem}"
     "table{width:100%;border-collapse:collapse}"
     "th,td{text-align:left;vertical-align:top;border-bottom:1px solid #e7e5e4;"
     "padding:.4rem .5rem;font-size:.9rem}"
