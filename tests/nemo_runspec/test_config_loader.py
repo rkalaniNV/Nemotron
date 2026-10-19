@@ -32,6 +32,7 @@ def test_build_job_config_preserves_yaml_owned_image_and_resources() -> None:
                     "container_image": "config-image",
                     "nodes": 8,
                     "gpus_per_node": 8,
+                    "nprocs_per_node": 8,
                     "env_vars": {"FROM_CONFIG": "1"},
                 }
             }
@@ -42,6 +43,7 @@ def test_build_job_config_preserves_yaml_owned_image_and_resources() -> None:
             "container_image": "profile-image",
             "nodes": 1,
             "gpus_per_node": 4,
+            "nprocs_per_node": 4,
             "partition": "site-partition",
             "env_vars": {"FROM_PROFILE": "1"},
         }
@@ -60,6 +62,7 @@ def test_build_job_config_preserves_yaml_owned_image_and_resources() -> None:
     assert env.container_image == "config-image"
     assert env.nodes == 8
     assert env.gpus_per_node == 8
+    assert env.nprocs_per_node == 8
     assert env.partition == "site-partition"
     assert env.env_vars.FROM_CONFIG == "1"
     assert env.env_vars.FROM_PROFILE == "1"

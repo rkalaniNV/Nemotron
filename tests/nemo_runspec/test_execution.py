@@ -28,8 +28,10 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -560,6 +562,57 @@ class TestBuildEnvVars:
         env_vars = build_env_vars(job_config, env_config)
         # Explicit env_vars should override auto-detected ones
         assert env_vars["NEMO_RUN_DIR"] == "/custom/path"
+
+
+def test_lepton_cloud_command_keeps_initialization_in_profile(monkeypatch, tmp_path):
+    from nemo_runspec import execution
+    from nemo_runspec.data_mover import Plan
+
+    tasks = []
+
+    class Experiment:
+        def __init__(self, _name):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def add(self, task, **kwargs):
+            tasks.append((task, kwargs["executor"]))
+
+        def run(self, **_kwargs):
+            pass
+
+    monkeypatch.setitem(sys.modules, "nemo_run", SimpleNamespace(
+        LeptonExecutor=SimpleNamespace, Script=SimpleNamespace, Experiment=Experiment,
+    ))
+    monkeypatch.setattr(execution.data_mover, "plan_for", lambda **_kwargs: Plan(
+        packager=_FakePackager(), pod_src_root="/nemo_run/code/src",
+        pre_script_cmds=["SOURCE_EXTRACTION_MARKER=true"],
+    ))
+    monkeypatch.setattr(execution, "_git_mount_commands", lambda: [])
+    config = tmp_path / "train.yaml"
+    config.write_text("model: {}\n")
+    execution.execute_cloud(
+        "src/nemotron/steps/sft/automodel/step.py", config,
+        env={"executor": "lepton", "container_image": "nvcr.io/nvidia/nemo-automodel:26.08.00@sha256:pinned",
+             "nemo_run_dir": "/shared/jobs", "workspace": "/shared", "nodes": 4, "gpus_per_node": 8,
+             "pre_launch_commands": ["echo profile-setup"]},
+        env_vars={}, passthrough=[], attached=False, launch="torchrun",
+    )
+
+    inline = tasks[0][0].inline
+    assert "torchrun --nnodes 4 --nproc-per-node 8" in inline
+    assert "-m nemotron.steps.sft.automodel.step" in inline
+    assert "pip install" not in inline
+    assert "LEPTON_JOB_WORKER_INDEX" not in inline
+    assert "nvidia_entrypoint" not in inline
+    assert tasks[0][1].pre_launch_commands == ["echo profile-setup"]
+    assert tasks[0][1].nodes == 4
+    assert tasks[0][1].launcher is None
 
 
 class TestSlurmSecretEnv:

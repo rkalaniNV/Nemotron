@@ -17,14 +17,14 @@ id = "sft/automodel"
 name = "SFT Training (AutoModel)"
 category = "sft"
 description = """\
-Supervised fine-tuning with the AutoModel stack for HF-format models and JSONL
-datasets that already use OpenAI chat-format messages. Supports full SFT and
-LoRA-style adapter tuning from the same step."""
+Supervised fine-tuning with the AutoModel stack for HF-format models, chat JSONL,
+and preformatted input/output data. The content_safety preset trains the language
+backbone of Nemotron 3.5 Content Safety with its native moderation template."""
 tags = ["sft", "fine-tuning", "automodel", "huggingface", "peft"]
 
 [[consumes]]
 type = "training_jsonl"
-description = "Instruction data in JSONL with a messages field"
+description = "Chat JSONL, preformatted input/output JSONL, or a configured Hugging Face dataset factory"
 required = true
 
 [[produces]]
@@ -47,13 +47,18 @@ name = "meta-llama/Llama-3.1-8B-Instruct"
 description = "Common HF baseline for single-node SFT and LoRA."
 min_gpus = 4
 
+[[models]]
+name = "nvidia/Nemotron-3.5-Content-Safety"
+description = "Gemma 3 4B IT moderator; content_safety preset preserves the full model and freezes vision. The preset requests 4 nodes with 8 H100 GPUs each."
+min_gpus = 1
+
 [[parameters]]
 name = "model.pretrained_model_name_or_path"
 description = "HF base model or checkpoint used for full SFT or LoRA-style AutoModel tuning."
 
 [[parameters]]
 name = "dataset.path_or_dataset_id"
-description = "Chat-format JSONL path or dataset id. AutoModel reads training_jsonl directly; do not point this at packed Parquet."
+description = "JSONL path or dataset id, interpreted by dataset._target_. Use content_safety for the released moderation dataset; do not use packed Parquet."
 
 [[parameters]]
 name = "peft"

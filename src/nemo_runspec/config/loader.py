@@ -251,7 +251,9 @@ def build_job_config(
         # inherited profile defaults. The recipe/config knows which image and
         # resource shape it requires; env.toml provides cluster logistics
         # (account, partition, tunnel, site mounts) the recipe doesn't know about.
-        resource_keys = ("container_image", "nodes", "gpus_per_node", "ntasks_per_node", "nproc_per_node")
+        resource_keys = (
+            "container_image", "nodes", "gpus_per_node", "ntasks_per_node", "nprocs_per_node", "nproc_per_node",
+        )
         for key in resource_keys:
             if key in existing_env:
                 merged_env[key] = existing_env[key]

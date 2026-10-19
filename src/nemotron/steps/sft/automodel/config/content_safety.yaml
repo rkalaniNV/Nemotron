@@ -1,0 +1,131 @@
+# Text-only full language SFT of Nemotron 3.5 Content Safety (Gemma 3 4B IT).
+# Use with the existing sft/automodel step; requires the pinned AutoModel image.
+run:
+  env:
+    container_image: nvcr.io/nvidia/nemo-automodel:26.08.00
+    nodes: 2
+    gpus_per_node: 8
+    nprocs_per_node: 8
+recipe: TrainFinetuneRecipeForNextTokenPrediction
+step_scheduler:
+  global_batch_size: 64
+  local_batch_size: 1
+  max_steps: 100
+  num_epochs: 2
+  ckpt_every_steps: 20
+  val_every_steps: 20
+  log_remote_every_steps: 1
+dist_env:
+  backend: nccl
+  timeout_minutes: 30
+rng:
+  _target_: nemo_automodel.components.training.rng.StatefulRNG
+  seed: 42
+  ranked: true
+model:
+  _target_: nemotron.steps._runners.automodel.load_image_text_model
+  pretrained_model_name_or_path: ${oc.env:CONTENT_SAFETY_MODEL_PATH,nvidia/Nemotron-3.5-Content-Safety}
+  trust_remote_code: false
+  torch_dtype: bfloat16
+  attn_implementation: sdpa
+  revision: 35645ed3543b7e7ffaed2e788699e57a5051497c
+  freeze_modules:
+  - '*vision_tower*'
+  - '*multi_modal_projector*'
+checkpoint:
+  enabled: true
+  checkpoint_dir: ${oc.env:SAFETY_OUTPUT_ROOT,./output}/${wandb.name}/checkpoints
+  model_save_format: safetensors
+  save_consolidated: final
+  v4_compatible: true
+  is_async: false
+distributed:
+  _target_: nemo_automodel.components.distributed.config.FSDP2Config
+  dp_size: 16
+  dp_replicate_size: 1
+  tp_size: 1
+  cp_size: 1
+  pp_size: 1
+  ep_size: 1
+  sequence_parallel: false
+  activation_checkpointing: true
+  reshard_after_forward: true
+peft: null
+loss_fn:
+  _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
+dataset:
+  _target_: nemotron.steps._runners.content_safety.build_nemotron_content_safety_dataset
+  path_or_dataset_id: nvidia/Nemotron-3.5-Content-Safety-Dataset
+  revision: 841f5023b8db12b484180c6121bb10fcf400d1c3
+  split: train
+  seq_length: 2048
+  train_size: 4096
+  validation_size: 256
+  test_size: 256
+  seed: 42
+  languages:
+  - en
+  max_scan_rows: 100000
+  cache_dir: ${oc.env:SAFETY_DATA_CACHE,./output/content-safety-data}
+  tokenizer:
+    pretrained_model_name_or_path: ${model.pretrained_model_name_or_path}
+    revision: ${model.revision}
+    trust_remote_code: false
+packed_sequence:
+  packed_sequence_size: 0
+dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  collate_fn: nemo_automodel.components.datasets.utils.default_collater
+  shuffle: true
+  num_workers: 0
+  pin_memory: true
+validation_dataset:
+  _target_: nemotron.steps._runners.content_safety.build_nemotron_content_safety_dataset
+  path_or_dataset_id: nvidia/Nemotron-3.5-Content-Safety-Dataset
+  revision: 841f5023b8db12b484180c6121bb10fcf400d1c3
+  split: validation
+  seq_length: 2048
+  train_size: 4096
+  validation_size: 256
+  test_size: 256
+  seed: 42
+  languages:
+  - en
+  max_scan_rows: 100000
+  cache_dir: ${oc.env:SAFETY_DATA_CACHE,./output/content-safety-data}
+  tokenizer:
+    pretrained_model_name_or_path: ${model.pretrained_model_name_or_path}
+    revision: ${model.revision}
+    trust_remote_code: false
+validation_dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  collate_fn: nemo_automodel.components.datasets.utils.default_collater
+  num_workers: 0
+  pin_memory: true
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-05
+  weight_decay: 0.01
+  betas:
+  - 0.9
+  - 0.999
+  eps: 1.0e-08
+lr_scheduler:
+  lr_decay_style: cosine
+  min_lr: 1.0e-06
+clip_grad_norm:
+  max_norm: 1.0
+wandb:
+  project: ${oc.env:WANDB_PROJECT,Nemotron-3.5-Content-Safety}
+  entity: ${oc.env:WANDB_ENTITY,nvidia}
+  name: ${oc.env:WANDB_NAME,content-safety-sft}
+  id: ${oc.env:WANDB_RUN_ID,null}
+  group: ${oc.env:WANDB_RUN_GROUP,content-safety}
+  job_type: sft
+  tags:
+  - content-safety
+  - text-only
+  - automodel
+  mode: online
+  resume: never
+  dir: ${oc.env:WANDB_DIR,.}

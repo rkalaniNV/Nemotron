@@ -26,9 +26,9 @@ Before following this guide, complete [Getting Started with Training Steps](../g
 
 - A completed `env.toml` at the repository root with a training profile such as `lepton_sft_automodel`.
   See [Getting Started with Training Steps](../getting-started.md) for the environment snippet and how to generate the full profile file.
-- `HF_TOKEN`, `WANDB_API_KEY`, and `NVIDIA_API_KEY` exported in your shell.
+- Credentials supplied through your environment profile or platform secret store.
 - Instruction data in JSONL form where each record includes a `messages` field in OpenAI chat format.
-- A Hugging Face access token if the base model is gated or must be downloaded from the Hugging Face Hub.
+- Permission to access the configured model and dataset.
 - Enough GPU memory for the model you select.
   Verify memory requirements before scaling beyond a tiny configuration.
 
@@ -65,6 +65,47 @@ $ uv run nemotron steps show sft/automodel
 ```
 
 The `produces` block lists `checkpoint_hf` and the path it writes to.
+
+## Full SFT and LoRA Presets
+
+Use paired presets when comparing full SFT and adapter tuning. Keep their base
+model, tokenizer, dataset, split selection and training budget aligned. The
+LoRA preset should inherit common settings and override only adapter-specific
+options. Keep model and dataset identifiers and immutable revisions in the
+configuration, rather than duplicating them in instructions.
+
+For moderation data, supervise the verdict and applicable labels. Treat the
+source response as evidence to classify. Preserve the model's native template,
+mask the input, and apply the loss's required label shift exactly once. Reject
+examples that exceed the configured length; keep heldout prompts out of the
+training split and deduplicate across splits.
+
+Keep site configuration in an environment profile:
+
+- Use `env_vars` for cache locations, output locations and runtime settings.
+- Use `startup_commands` for small missing runtime dependencies.
+- Let `HF_TOKEN` and `WANDB_API_KEY` come from your local login or environment;
+  do not store them in the profile.
+- Preserve the training image's GPU libraries and model-library versions.
+
+Select the preset, profile and unique run name for each case, then preview the
+compiled configuration before submission:
+
+```console
+$ uv run nemotron steps run sft/automodel -c "$TRAIN_PRESET" -b "$SFT_PROFILE" --dry-run
+$ uv run nemotron steps run peft/automodel -c "$TRAIN_PRESET" -b "$LORA_PROFILE" --dry-run
+$ uv run nemotron steps run sft/automodel -c "$TRAIN_PRESET" -b "$SFT_PROFILE" "wandb.name=$SFT_RUN_NAME"
+$ uv run nemotron steps run peft/automodel -c "$TRAIN_PRESET" -b "$LORA_PROFILE" "wandb.name=$LORA_RUN_NAME"
+```
+
+Configure online tracking through the native `wandb` block. The supplied
+presets default to project `Nemotron-3.5-Content-Safety` and entity `nvidia`;
+override them for your workspace. Use the existing logger's run information and
+metrics to verify uploads after allocation. Full SFT produces a consolidated
+checkpoint; LoRA produces adapters that must retain their base-model revision.
+
+Verify startup, worker count, finite losses and checkpoint integrity before
+comparing model quality. Loss alone does not measure moderation accuracy.
 
 ## Common Issues
 

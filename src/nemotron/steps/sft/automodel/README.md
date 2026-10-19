@@ -43,6 +43,12 @@ Related patterns:
 
 ## Run It
 
+The paired `config/content_safety.yaml` presets share model and dataset
+settings for full SFT and LoRA. Choose the required preset and environment
+profile, then use the standard step command with a unique run name. See
+[the training guide](../../../../../docs/train-models/how-to/run-sft-automodel.md#full-sft-and-lora-presets)
+for configuration, startup hooks, native W&B logging and output checks.
+
 Smoke first to validate wiring, imports, data access, and output paths:
 
 ```bash

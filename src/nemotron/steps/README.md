@@ -109,6 +109,17 @@ developer rulebook:
 
 ## Developer Workflow
 
+Prefer existing options before extending a runner: use `env_vars` for runtime
+settings, `startup_commands` for dependencies, `pre_launch_commands` for work
+needed before source staging, and the executor's native credential options.
+Keep shared code changes limited to behavior those options cannot express.
+Reuse existing files and configuration inheritance where practical.
+
+Keep guideline documents independent of individual runs. Use placeholders for
+job identities, personal names, paths, clusters and service endpoints. Never
+include credential values. W&B project and entity names may remain when useful;
+keep other run details in private profiles or ignored output records.
+
 When modifying an existing step:
 
 1. Read the local README and the full `step.toml`.

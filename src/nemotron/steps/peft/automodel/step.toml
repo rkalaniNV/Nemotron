@@ -19,12 +19,13 @@ category = "peft"
 description = """\
 Parameter-efficient fine-tuning (LoRA) with the AutoModel stack. Same training
 loop as sft/automodel but with a LoRA adapter wired in by default, making larger
-HF backbones practical for adapter-based tuning."""
+HF backbones practical for adapter-based tuning. The content_safety preset uses
+Nemotron 3.5 Content Safety with language-only LoRA and its native safety data."""
 tags = ["peft", "lora", "fine-tuning", "automodel", "huggingface"]
 
 [[consumes]]
 type = "training_jsonl"
-description = "Chat-format JSONL with messages."
+description = "Chat JSONL, preformatted input/output JSONL, or a configured Hugging Face dataset factory"
 required = true
 
 [[produces]]
@@ -47,13 +48,18 @@ name = "meta-llama/Llama-3.1-8B-Instruct"
 description = "Common HF baseline for single-node LoRA."
 min_gpus = 2
 
+[[models]]
+name = "nvidia/Nemotron-3.5-Content-Safety"
+description = "Gemma 3 4B IT moderator; content_safety preset preserves the full model and freezes vision. The preset requests 4 nodes with 8 H100 GPUs each."
+min_gpus = 1
+
 [[parameters]]
 name = "model.pretrained_model_name_or_path"
 description = "HF base model used for adapter training. Record it with the adapter because merge requires the same base."
 
 [[parameters]]
 name = "dataset.path_or_dataset_id"
-description = "Chat-format JSONL path or dataset id. This step consumes JSONL directly, not packed Parquet."
+description = "JSONL path or dataset id, interpreted by dataset._target_. Use content_safety for the released moderation dataset; do not use packed Parquet."
 
 [[parameters]]
 name = "peft.dim"

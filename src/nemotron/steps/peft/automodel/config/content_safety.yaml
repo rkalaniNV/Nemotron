@@ -1,0 +1,24 @@
+# LoRA inherits the model, native safety data, 4 x 8 H100 topology and native W&B settings from SFT.
+defaults: ../../../sft/automodel/config/content_safety.yaml
+peft:
+  _target_: nemo_automodel.components._peft.lora.PeftConfig
+  match_all_linear: false
+  target_modules:
+  - '*language_model*.q_proj'
+  - '*language_model*.k_proj'
+  - '*language_model*.v_proj'
+  - '*language_model*.o_proj'
+  - '*language_model*.gate_proj'
+  - '*language_model*.up_proj'
+  - '*language_model*.down_proj'
+  dim: 16
+  alpha: 32
+  dropout: 0.0
+  use_triton: false
+optimizer:
+  lr: 0.0001
+checkpoint:
+  save_consolidated: false
+wandb:
+  name: ${oc.env:WANDB_NAME,content-safety-lora}
+  job_type: lora
