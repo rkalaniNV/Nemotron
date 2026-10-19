@@ -29,6 +29,7 @@ from typing import Any
 import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.base import ConfigPath
+from nemotron.steps.byob.runtime.benchmark_families.safety import extract as extraction
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_json as _write_json
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_yaml as _write_yaml
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import (
@@ -65,7 +66,6 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.eval import (
     evaluate_published,
     write_evaluation,
 )
-from nemotron.steps.byob.runtime.benchmark_families.safety.extract import PROMPT_VERSION
 from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
     INGEST_VERSION,
     QUARANTINED,
@@ -76,6 +76,11 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
     rule_input_digests,
     write_artifacts,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import (
+    PARAPHRASE_OUTPUTS,
+    apply_paraphrases,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import REPORT_FILE as PARAPHRASE_REPORT
 from nemotron.steps.byob.runtime.benchmark_families.safety.publish import (
     MANIFEST_NAME,
     QUALITY_FILE,
@@ -86,6 +91,8 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.publish import (
     status_for,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
+    DECISIONS_NAME,
+    REVIEW_PAGE,
     content_matches,
     install_review,
     load_review,
@@ -404,6 +411,16 @@ def _publication_blocker(
                 )
     counts = _rule_stages(config, digest, fingerprint)
     coverage = _coverage_stage(config, digest, fingerprint)
+    record["coverage"] = coverage
+    if _quality_gate_preflight_blocks(config, coverage):
+        _clear_review_state(run_dir)
+        clear_published(run_dir)
+        return (
+            RunStatus.QUALITY_GATES_FAILED,
+            _quality_gate_preflight_detail(coverage),
+            counts,
+            None,
+        )
     scenarios = _scenario_stage(config, digest, fingerprint)
     dataset = _dataset_stage(config, digest, fingerprint)
     coverage, scenarios, dataset = _backfill_quality_gates(
@@ -421,7 +438,8 @@ def _publication_blocker(
     )
     scenario_note = (
         f"Scenarios: {scenarios['accepted']} accepted, {scenarios['rejected']} rejected, "
-        f"{scenarios['reused_missing_leg']} missing-leg cases reused."
+        f"{scenarios['reused_missing_leg']} missing-leg cases reused"
+        f"{_paraphrase_note(scenarios)}."
     )
     dataset_note = (
         f"Dataset: {dataset['validated']} validated, {dataset['rejected']} rejected, "
@@ -558,7 +576,7 @@ def _rule_stages(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[
     bound = {"config_sha256": digest, "source_fingerprint": fingerprint}
     stage_cache = run_dir / "stage_cache"
     # The plan and its cases name rules from the previous result. Drop both before the index changes.
-    for name in (*COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *DATASET_OUTPUTS):
+    for name in (*COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS, *DATASET_OUTPUTS):
         (stage_cache / name).unlink(missing_ok=True)
     index["stages"].pop("coverage_plan", None)
     index["stages"].pop("scenarios", None)
@@ -579,7 +597,7 @@ def _rule_stages(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[
     common = {"status": "completed", **bound, "completed_at": now}
     index["stages"]["extract"] = {
         **common,
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": extraction.PROMPT_VERSION,
         "model": result.extraction.get("model"),
         "passes": result.extraction.get("passes", []),
     }
@@ -617,6 +635,7 @@ def _coverage_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
             generation=config.generation,
             routed=routed,
             target_languages=config.proposals.get("target_languages", []),
+            quality_gates=config.extras.get("quality_gates"),
         )
         summary = write_coverage_plan(stage_cache, plan)
     except Exception as exc:
@@ -641,7 +660,7 @@ def _coverage_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
 
 
 def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[str, Any]:
-    """Write one seed per scheduled plan cell. This stage does not call a model."""
+    """Write one conversation per scheduled plan cell. Paraphrase may call a model."""
     run_dir = config.run_dir
     stage_cache = run_dir / "stage_cache"
     index_path = stage_cache / "cache_index.json"
@@ -659,17 +678,25 @@ def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
         rules = load_eligible_rules(yaml.safe_load((stage_cache / "policy_rules_eligible.yaml").read_text("utf-8")))
         rows = load_plan_rows((stage_cache / PLAN_FILE).read_text(encoding="utf-8"))
         gaps = json.loads((stage_cache / GAPS_FILE).read_text(encoding="utf-8"))
-        summary = write_scenarios(
-            stage_cache,
-            build_scenarios(
-                rows,
-                load_contrast_families(gaps),
-                rules,
-                unscheduled=load_unscheduled_slots(gaps),
-            ),
+        build = build_scenarios(
+            rows,
+            load_contrast_families(gaps),
+            rules,
+            unscheduled=load_unscheduled_slots(gaps),
         )
+        extractor = None
+        enabled = config.generation["modules"].get("paraphrase") is True
+        if enabled:
+            try:
+                extractor = extraction.make_extractor(config, run_dir)
+            except ValueError:
+                extractor = None
+        build, paraphrase = apply_paraphrases(build, extractor, stage_cache, enabled=enabled)
+        summary = write_scenarios(stage_cache, build)
+        summary["paraphrase"] = paraphrase
+        _write_json(stage_cache / PARAPHRASE_REPORT, paraphrase)
     except Exception as exc:
-        for name in SCENARIO_OUTPUTS:
+        for name in (*SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS):
             (stage_cache / name).unlink(missing_ok=True)
         outcome = exc.status.value if isinstance(exc, SafetyStatus) else type(exc).__name__
         index["stages"]["scenarios"] = {"status": "failed", "outcome": outcome, **bound, "failed_at": _now()}
@@ -683,6 +710,7 @@ def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
         "completed_at": _now(),
         "accepted": summary["accepted"],
         "rejected": summary["rejected"],
+        "paraphrased": paraphrase["applied"],
     }
     _write_json(index_path, index)
     return summary
@@ -761,6 +789,9 @@ def _backfill_quality_gates(
         return coverage, scenarios, dataset
     if not isinstance(config.extras.get("quality_gates"), Mapping):
         return coverage, scenarios, dataset
+    preflight = coverage.get("quality_gate_preflight")
+    if isinstance(preflight, Mapping) and preflight.get("possible") is False:
+        return coverage, scenarios, dataset
     run_dir = config.run_dir
     stage_cache = run_dir / "stage_cache"
     case_cap = case_cap_for(config.mode, config.budget)
@@ -807,7 +838,13 @@ def _backfill_quality_gates(
             break
         before = quality_gate_shortfall(gate_result)
         previous_coverage = coverage
-        new_rows, updated = apply_backfill(rows, gaps_doc, added)
+        new_rows, updated = apply_backfill(
+            rows,
+            gaps_doc,
+            added,
+            case_cap=case_cap,
+            budget=config.budget,
+        )
         coverage = rewrite_coverage_plan(stage_cache, new_rows, updated)
         _record_coverage_backfill(stage_cache, run_dir, digest, fingerprint, coverage)
         scenarios = _scenario_stage(config, digest, fingerprint)
@@ -873,6 +910,19 @@ def _record_coverage_backfill(
     _write_json(index_path, index)
 
 
+def _paraphrase_note(scenarios: Mapping[str, Any]) -> str:
+    report = scenarios.get("paraphrase")
+    if not isinstance(report, Mapping):
+        return ""
+    applied = report.get("applied")
+    if isinstance(applied, int) and not isinstance(applied, bool) and applied:
+        return f", {applied} paraphrased"
+    reason = report.get("skipped_reason")
+    if report.get("status") == "skipped" and isinstance(reason, str) and reason:
+        return f", paraphrase skipped ({reason})"
+    return ""
+
+
 def _backfill_note(coverage: Mapping[str, Any]) -> str:
     backfill = coverage.get("backfill")
     if not isinstance(backfill, Mapping):
@@ -883,6 +933,40 @@ def _backfill_note(coverage: Mapping[str, Any]) -> str:
     rounds = backfill.get("rounds")
     round_label = rounds if isinstance(rounds, int) and not isinstance(rounds, bool) else 1
     return f" Backfill added {len(added)} distinct cells in {round_label} round(s)."
+
+
+def _quality_gate_preflight_blocks(config: ResolvedConfig, coverage: Mapping[str, Any]) -> bool:
+    if config.mode == "preview":
+        return False
+    gates = config.extras.get("quality_gates")
+    if not isinstance(gates, Mapping) or gates.get("on_failure") != "fail":
+        return False
+    preflight = coverage.get("quality_gate_preflight")
+    return isinstance(preflight, Mapping) and preflight.get("possible") is False
+
+
+def _quality_gate_preflight_detail(coverage: Mapping[str, Any]) -> str:
+    preflight = coverage.get("quality_gate_preflight")
+    failures = preflight.get("failures") if isinstance(preflight, Mapping) else []
+    labels = []
+    for failure in failures if isinstance(failures, list) else []:
+        if not isinstance(failure, Mapping):
+            continue
+        gate = str(failure.get("gate") or "quality gate")
+        slice_name = failure.get("slice")
+        if isinstance(slice_name, str) and slice_name:
+            gate = f"{gate}[{slice_name}]"
+        labels.append(
+            f"{gate}: needs {failure.get('required')}, inventory upper bound "
+            f"{failure.get('available_upper_bound')}"
+        )
+    detail = "; ".join(labels) if labels else "the grounded cell inventory cannot meet the configured minima"
+    return f"Quality-gate preflight stopped before scenario generation: {detail}."
+
+
+def _clear_review_state(run_dir: Path) -> None:
+    for name in (PACKET_NAME, SIGNOFF_NAME, REVIEW_PAGE, DECISIONS_NAME):
+        (run_dir / name).unlink(missing_ok=True)
 
 
 def _quality_gates_block_publish(config: ResolvedConfig, run_dir: Path) -> bool:

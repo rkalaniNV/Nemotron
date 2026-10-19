@@ -184,3 +184,45 @@ class ScriptedExtractor:
             self.clauses.append(clause)
             answers[request.request_id] = {"candidates": self.replies.get(clause, [])}
         return answers
+
+    def complete(
+        self,
+        rows: list[Any],
+        *,
+        system_prompt: str = "",
+        prompt: str = "",
+        output_format: Any = None,
+        prefix: str = "",
+    ) -> dict[str, Any]:
+        del system_prompt, prompt, output_format, prefix
+        if self.fail:
+            raise ConnectionError("endpoint refused the connection")
+        answers: dict[str, Any] = {}
+        for row in rows:
+            payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
+            count = payload.get("turn_count") if isinstance(payload.get("turn_count"), int) else 1
+            count = max(1, count)
+            request_id = row["request_id"]
+            kind = payload.get("kind") or "request"
+            answers[request_id] = {"turns": scripted_paraphrase_turns(request_id, kind, count)}
+        return answers
+
+
+def scripted_paraphrase_turns(request_id: str, kind: str, count: int) -> list[dict[str, str]]:
+    """One user turn, or a user/assistant dialogue that starts and ends with the user."""
+    turns: list[dict[str, str]] = []
+    for index in range(1, count + 1):
+        turns.append(
+            {
+                "role": "user",
+                "text": f"Can you help me with this {kind} situation, item {request_id}, message {index}?",
+            }
+        )
+        if index < count:
+            turns.append(
+                {
+                    "role": "assistant",
+                    "text": f"Could you say a bit more about that {kind} request ({request_id})?",
+                }
+            )
+    return turns

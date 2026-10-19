@@ -16,12 +16,13 @@
 """Scenario seeds and contrast pairs for a coverage plan.
 
 The plan decides the meaning of each case. This stage copies that meaning into a
-conversation. It does not call a model and it does not add a policy requirement.
-A proposal that names an unknown rule, changes the planned meaning, or removes the
-wrong condition is rejected. Its legs must equal the seed's legs, in the seed's
-order, and its turn text must be that seed's sentence. A rejected slot is left
-empty. It is not replaced with a seed. A slot with no proposal receives one seed.
-A plan row that does not match an eligible rule stops the build.
+conversation. The seed itself does not call a model and does not add a policy
+requirement. A later paraphrase pass may rewrite the user turns when that module
+is enabled. A proposal that names an unknown rule, changes the planned meaning, or
+removes the wrong condition is rejected. Its legs must equal the seed's legs, in
+the seed's order, and its turn text must be that seed's sentence. A rejected slot
+is left empty. It is not replaced with a seed. A slot with no proposal receives
+one seed. A plan row that does not match an eligible rule stops the build.
 
 A missing-leg case is written once. Its case id is the plan slot id, and the contrast
 family points at that same id. Its action is allow only when those facts match no rule.

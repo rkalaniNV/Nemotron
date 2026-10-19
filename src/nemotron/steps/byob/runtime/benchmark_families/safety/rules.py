@@ -69,6 +69,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
     normalize_candidate,
     validate_rule,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import PARAPHRASE_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.scenarios import SCENARIO_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStatus, abort
 from nemotron.steps.byob.runtime.benchmark_families.safety.windows import EvidenceWindow, build_windows
@@ -155,7 +156,7 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
         )
     _check_glossary_conflicts(glossary_conflicts, run_dir)
     # Drop the previous routing result first, so a failed run cannot leave rules from older code.
-    for name in (*RULE_OUTPUTS, *COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *DATASET_OUTPUTS):
+    for name in (*RULE_OUTPUTS, *COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS, *DATASET_OUTPUTS):
         (stage_cache / name).unlink(missing_ok=True)
     try:
         windows = build_windows(documents, spans, terms)
@@ -414,12 +415,12 @@ def _candidate_draft(
         if not legs:
             continue
         condition_names.add(name)
-        group = _extracted_operator(name, legs, candidate.condition_operators.get(name), quote, flags)
+        group = _extracted_operator(name, legs, candidate.operators_by_class.get(name), quote, flags)
         if group is None:
             unresolved[name] = legs
         else:
             body[name] = group
-    for name in sorted(set(candidate.condition_operators) - condition_names):
+    for name in sorted(set(candidate.operators_by_class) - condition_names):
         flags.append(_flag("operator_without_conditions", f"the model supplied an operator for empty {name}", name))
         unsupported.append(f"rule.{name}.operator")
     exceptions, _, _ = _legs(candidate.exceptions, sources, "exceptions", unsupported, flags)

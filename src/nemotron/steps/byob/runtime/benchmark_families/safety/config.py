@@ -63,6 +63,7 @@ DEFAULT_GENERATION = {
         "political_symmetry": "confirm_if_detected",
         "production_replay": "auto_if_evidence_exists",
         "persona": False,
+        "paraphrase": True,
     },
 }
 DEFAULT_PROPOSALS = {
@@ -299,6 +300,7 @@ def resolve_config(raw: dict[str, Any]) -> ResolvedConfig:
     _check_decision_mix(generation["decision_mix"], proposals["decision_actions"], messages)
     extras = _passthrough(raw, messages)
     _check_privacy_language(proposals, extras, messages)
+    _check_budget_and_gates(mode, budget, generation, extras.get("quality_gates"), messages)
 
     if messages or input_dir is None or output_dir is None:
         raise ConfigError(messages)
@@ -507,6 +509,95 @@ def _budget(value: Any, messages: list[str]) -> dict[str, Any]:
         if isinstance(number, bool) or not isinstance(number, int) or number < minimum:
             messages.append(f"budget.{key} must be a whole number {minimum} or greater.")
     return merged
+
+
+def _check_budget_and_gates(
+    mode: str,
+    budget: Mapping[str, Any],
+    generation: Mapping[str, Any],
+    quality_gates: Any,
+    messages: list[str],
+) -> None:
+    """Refuse minima and mix targets that the configured maxima cannot satisfy."""
+    if any(isinstance(budget.get(key), bool) or not isinstance(budget.get(key), int) for key in DEFAULT_BUDGET):
+        return
+    cap_key = "preview_max_cases" if mode == "preview" else "assisted_max_cases"
+    case_cap = int(budget[cap_key])
+    mix = generation.get("turn_mix") if isinstance(generation.get("turn_mix"), Mapping) else {}
+    mix_share = mix.get("multi_turn") if isinstance(mix, Mapping) else 0
+    if (
+        isinstance(mix_share, (int, float))
+        and not isinstance(mix_share, bool)
+        and mix_share > 0
+        and int(budget["max_turns"]) < 2
+    ):
+        messages.append(
+            "generation.turn_mix.multi_turn is greater than 0, so budget.max_turns must be at least 2."
+        )
+    if not isinstance(quality_gates, Mapping):
+        return
+    min_total = _optional_gate_count(quality_gates, "min_total_cases")
+    min_dev = _optional_gate_count(quality_gates, "min_development_cases")
+    min_private = _optional_gate_count(quality_gates, "min_private_test_cases")
+    min_policy = _optional_gate_count(quality_gates, "min_cases_per_policy")
+    if min_total is None or min_dev is None or min_private is None or min_policy is None:
+        return
+    split_floor = min_dev + min_private
+    for label, amount in (
+        ("min_total_cases", min_total),
+        ("min_development_cases", min_dev),
+        ("min_private_test_cases", min_private),
+    ):
+        if amount > case_cap:
+            messages.append(
+                f"quality_gates.{label} is {amount}, which exceeds budget.{cap_key} ({case_cap}). "
+                "Lower the minimum or raise the cap."
+            )
+    if split_floor > case_cap and min_dev <= case_cap and min_private <= case_cap:
+        messages.append(
+            "quality_gates.min_development_cases + min_private_test_cases is "
+            f"{split_floor}, which exceeds budget.{cap_key} ({case_cap}). "
+            "Lower the minima or raise the cap."
+        )
+    if min_policy > case_cap:
+        messages.append(
+            f"quality_gates.min_cases_per_policy is {min_policy}, which exceeds "
+            f"budget.{cap_key} ({case_cap}). Lower the minimum or raise the cap."
+        )
+    action_mins = quality_gates.get("min_cases_per_action")
+    if isinstance(action_mins, Mapping):
+        action_total = 0
+        valid = True
+        for amount in action_mins.values():
+            if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+                valid = False
+                break
+            action_total += amount
+        if valid and action_total > case_cap:
+            messages.append(
+                f"quality_gates.min_cases_per_action sums to {action_total}, which exceeds "
+                f"budget.{cap_key} ({case_cap}). Lower the minima or raise the cap."
+            )
+    language_mins = quality_gates.get("min_cases_per_language")
+    if isinstance(language_mins, Mapping):
+        for name, amount in language_mins.items():
+            if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+                continue
+            if amount > case_cap:
+                messages.append(
+                    f"quality_gates.min_cases_per_language.{name} is {amount}, which exceeds "
+                    f"budget.{cap_key} ({case_cap}). Lower the minimum or raise the cap."
+                )
+                break
+
+
+def _optional_gate_count(gates: Mapping[str, Any], key: str) -> int | None:
+    if key not in gates:
+        return 0
+    amount = gates[key]
+    if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+        return None
+    return amount
 
 
 def _mix(

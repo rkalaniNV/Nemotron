@@ -19,6 +19,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.pipeline import _run_
 from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStatus, SafetyStatus
 from nemotron.steps.byob.scripts.runtime import run_byob
 from nemotron.steps.byob.scripts.validate import validate_skill_dir
+from tests.steps.byob.safety_fixtures import scripted_paraphrase_turns
 
 BYOB_DIR = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob"
 REPO_ROOT = BYOB_DIR.parents[3]
@@ -59,6 +60,26 @@ class _EchoExtractor:
                 ]
             }
         return replies
+
+    def complete(
+        self,
+        rows: list[Any],
+        *,
+        system_prompt: str = "",
+        prompt: str = "",
+        output_format: Any = None,
+        prefix: str = "",
+    ) -> dict[str, Any]:
+        del system_prompt, prompt, output_format, prefix
+        answers: dict[str, Any] = {}
+        for row in rows:
+            payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
+            count = payload.get("turn_count") if isinstance(payload.get("turn_count"), int) else 1
+            count = max(1, count)
+            request_id = row["request_id"]
+            kind = payload.get("kind") or "request"
+            answers[request_id] = {"turns": scripted_paraphrase_turns(request_id, kind, count)}
+        return answers
 
 
 @pytest.fixture(autouse=True)
@@ -107,9 +128,11 @@ def test_prepare_initializes_run_dir_without_publishing(tmp_path: Path) -> None:
     assert record["run_dir"] == str(run_dir)
     resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
     assert resolved["budget"]["assisted_max_cases"] == 500
+    assert resolved["budget"]["cases_per_normal_rule"] == 6
     assert resolved["config_status"] == "resolved"
     assert "stage" not in resolved
     assert resolved["generation"]["modules"]["persona"] is False
+    assert resolved["generation"]["modules"]["paraphrase"] is True
     assert "rewrite" in resolved["proposals"]["decision_actions"]
 
 
@@ -495,7 +518,7 @@ def test_signed_benchmark_with_coverage_gaps_publishes_silver(tmp_path: Path) ->
 
 
 def test_unmet_minimum_dataset_quality_gate_publishes_silver(tmp_path: Path) -> None:
-    config = _config(tmp_path, overrides={"quality_gates": {"min_total_cases": 1000}})
+    config = _config(tmp_path, overrides={"quality_gates": {"min_total_cases": 20}})
     run_dir = _run(config, "prepare")
     _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
     split = json.loads((run_dir / "stage_cache" / "split_manifest.json").read_text(encoding="utf-8"))
@@ -514,32 +537,57 @@ def test_unmet_minimum_dataset_quality_gate_publishes_silver(tmp_path: Path) -> 
     assert report["quality_gates"]["observed"]["total_cases"] == report["cases"]
 
 
-def test_unmet_quality_gates_with_on_failure_fail_block_publication(tmp_path: Path) -> None:
+def test_impossible_quality_gates_with_on_failure_fail_stop_before_scenario_generation(
+    tmp_path: Path,
+) -> None:
     config = _config(
-        tmp_path, overrides={"quality_gates": {"min_total_cases": 1000, "on_failure": "fail"}}
+        tmp_path, overrides={"quality_gates": {"min_total_cases": 20, "on_failure": "fail"}}
     )
     run_dir = _run(config, "prepare")
-    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
-    html = (run_dir / "review.html").read_text(encoding="utf-8")
-    assert "blocks publication after review" in html
-    sign_safety_packet(config, approved_by="Lan")
-
     failed = _expect(config, "generate", RunStatus.QUALITY_GATES_FAILED)
 
     assert failed.cli_exit_code == 1
-    assert "quality_gates.on_failure is fail" in str(failed)
+    assert "stopped before scenario generation" in str(failed)
     assert not (run_dir / "benchmark.jsonl").exists()
     assert not (run_dir / "run_manifest.json").exists()
     assert _record(run_dir)["publication_commit"] is False
-    assert (run_dir / "publication_review_packet.yaml").is_file()
+    assert not (run_dir / "publication_review_packet.yaml").exists()
+    assert not (run_dir / "review.html").exists()
+    cache = run_dir / "stage_cache"
+    assert not (cache / "scenario_candidates.jsonl").exists()
+    gaps = json.loads((cache / "coverage_gaps.json").read_text(encoding="utf-8"))
+    assert gaps["quality_gate_preflight"]["possible"] is False
+
+
+def test_feasible_preflight_still_enforces_final_gate_after_split(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        overrides={
+            "quality_gates": {
+                "min_private_test_cases": 2,
+                "on_failure": "fail",
+            }
+        },
+    )
+    run_dir = _run(config, "prepare")
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    gaps = json.loads((run_dir / "stage_cache" / "coverage_gaps.json").read_text(encoding="utf-8"))
+    assert gaps["quality_gate_preflight"]["possible"] is True
+    split = json.loads((run_dir / "stage_cache" / "split_manifest.json").read_text(encoding="utf-8"))
+    assert split["quality_gates"]["passed"] is False
+    sign_safety_packet(config, approved_by="Lan")
+
+    failed = _expect(config, "generate", RunStatus.QUALITY_GATES_FAILED)
+    assert "quality_gates.on_failure is fail" in str(failed)
     assert (run_dir / "review.html").is_file()
+    assert not (run_dir / "benchmark.jsonl").exists()
 
 
 def test_preview_publishes_when_quality_gates_fail_with_on_failure_fail(tmp_path: Path) -> None:
     _run(_config(tmp_path), "prepare")
     config = _config(
         tmp_path,
-        overrides={"mode": "preview", "quality_gates": {"min_total_cases": 1000, "on_failure": "fail"}},
+        overrides={"mode": "preview", "quality_gates": {"min_total_cases": 20, "on_failure": "fail"}},
     )
     published = _expect(config, "all", RunStatus.PREVIEW_COMPLETED)
     run_dir = tmp_path / "out" / "customer-safety-v1"
@@ -556,7 +604,7 @@ def test_quality_gate_backfill_does_not_quote_copy_when_the_cap_is_full(tmp_path
         tmp_path,
         overrides={
             "budget": {"assisted_max_cases": 2},
-            "quality_gates": {"min_total_cases": 1000},
+            "quality_gates": {"min_total_cases": 2},
         },
     )
     run_dir = _run(config, "prepare")
@@ -838,6 +886,51 @@ def test_config_status_may_be_omitted(tmp_path: Path) -> None:
     )
 
 
+def test_max_turns_one_is_allowed_when_multi_turn_mix_is_zero(tmp_path: Path) -> None:
+    run_dir = _run(
+        _config(
+            tmp_path,
+            overrides={
+                "budget": {"max_turns": 1},
+                "generation": {"turn_mix": {"single_turn": 1.0, "multi_turn": 0.0}},
+            },
+        ),
+        "prepare",
+    )
+    resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
+    assert resolved["budget"]["max_turns"] == 1
+    assert resolved["generation"]["turn_mix"]["multi_turn"] == 0.0
+
+
+def test_split_minima_may_define_a_higher_effective_floor_than_min_total(tmp_path: Path) -> None:
+    run_dir = _run(
+        _config(
+            tmp_path,
+            overrides={
+                "quality_gates": {
+                    "min_total_cases": 50,
+                    "min_development_cases": 40,
+                    "min_private_test_cases": 40,
+                }
+            },
+        ),
+        "prepare",
+    )
+    resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
+    assert resolved["quality_gates"]["min_total_cases"] == 50
+    assert resolved["quality_gates"]["min_development_cases"] == 40
+    assert resolved["quality_gates"]["min_private_test_cases"] == 40
+
+
+def test_per_policy_minimum_is_checked_against_extracted_rule_inventory(tmp_path: Path) -> None:
+    run_dir = _run(
+        _config(tmp_path, overrides={"quality_gates": {"min_cases_per_policy": 13}}),
+        "prepare",
+    )
+    resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
+    assert resolved["quality_gates"]["min_cases_per_policy"] == 13
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
@@ -854,6 +947,23 @@ def test_config_status_may_be_omitted(tmp_path: Path) -> None:
         ({"budget": {"assisted_max_cases": 1.5}}, "budget.assisted_max_cases must be a whole number"),
         ({"quality_gates": {"min_total_case": 5}}, "Unknown quality_gates keys: min_total_case"),
         ({"quality_gates": {"min_total_cases": 1.5}}, "quality_gates.min_total_cases must be"),
+        (
+            {"quality_gates": {"min_total_cases": 501}},
+            "exceeds budget.assisted_max_cases (500)",
+        ),
+        (
+            {
+                "quality_gates": {
+                    "min_development_cases": 300,
+                    "min_private_test_cases": 300,
+                }
+            },
+            "is 600, which exceeds budget.assisted_max_cases (500)",
+        ),
+        (
+            {"budget": {"max_turns": 1}},
+            "budget.max_turns must be at least 2",
+        ),
         ({"quality_gates": {"on_failure": "retry"}}, "on_failure must be silver or fail"),
         (
             {"quality_gates": {"min_cases_per_action": {"unsafe": 2}}},

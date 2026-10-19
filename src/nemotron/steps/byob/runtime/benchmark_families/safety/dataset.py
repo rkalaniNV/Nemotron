@@ -17,8 +17,9 @@
 
 The label is recomputed from the case facts. A stored action that disagrees is
 rejected and is not overwritten. A case with no eligible rule, or a quote that is
-not inside its source span, is rejected. When one member of a complete contrast
-family fails, the other members are rejected with it.
+not inside its source span, is rejected. Seed and proposal turns must still be
+the source quote; a paraphrase-origin turn may differ. When one member of a
+complete contrast family fails, the other members are rejected with it.
 
 An exact duplicate has the same policy, action, language, kind, legs, and
 canonical turn text. The lowest case id is kept. Members of one contrast family
@@ -729,10 +730,20 @@ def _turn_reasons(
                 return ["invalid_turns"]
             if turn["expected_action"] != case.get("expected_action", _MISSING):
                 return ["turn_label_disagreement"]
-        if legs is not None and isinstance(kind, str) and _text_differs(turn, rule, legs, kind, index, len(turns)):
+        if (
+            turn["scored"]
+            and case.get("origin") != "paraphrase"
+            and legs is not None
+            and isinstance(kind, str)
+            and _text_differs(turn, rule, legs, kind, index, len(turns))
+        ):
             return ["turn_text_mismatch"]
+    users = [turn for turn in turns if turn.get("role") == "user"]
+    last = turns[-1]
     if kind == "multi_turn":
-        return [] if scored >= 2 else ["invalid_turns"]
+        if len(users) < 2 or last.get("role") != "user" or last.get("scored") is not True:
+            return ["invalid_turns"]
+        return [] if scored >= 1 else ["invalid_turns"]
     return [] if scored == 1 else ["invalid_turns"]
 
 

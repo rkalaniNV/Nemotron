@@ -6,6 +6,7 @@ import pytest
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.publish import publication_tier
 from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
+    CSV_COLUMNS,
     DECISION_COLUMNS,
     DECISIONS_NAME,
     assemble_review,
@@ -55,6 +56,13 @@ def _coverage() -> dict:
         "required_cases": 1,
         "scheduled_cases": 1,
         "missing_required": [],
+        "capacity": {
+            "case_cap": 10,
+            "planned_candidates": 1,
+            "additional_distinct_cells": 2,
+            "final_case_upper_bound": 3,
+        },
+        "quality_gate_preflight": {"enabled": True, "possible": True, "failures": []},
     }
 
 
@@ -95,6 +103,8 @@ def test_the_page_lists_every_unresolved_item_when_examples_are_capped() -> None
     )
 
     page = build.html
+    assert "Generation capacity preflight" in page
+    assert "Final-case upper bound" in page
     assert "NEED-1" in page
     assert "NEED-2" in page
     assert "Quote one" in page
@@ -108,6 +118,9 @@ def test_the_page_lists_every_unresolved_item_when_examples_are_capped() -> None
     assert "example 4 unique" not in page
     assert "Cards: 5. Pending: 4. Estimated review time: 3 minutes." in page
     assert "review_decisions.csv" in page
+    assert "4 cards need a decision." in page
+    assert "does not generate new cases" in page
+    assert "CSV row: rule:NEED-1" in page
     conflict_ids = {conflict_card_id(row) for row in conflicts}
     assert set(build.pending) == {"rule:NEED-1", "rule:NEED-2", *conflict_ids}
     assert "rule:OK-1" not in build.pending
@@ -325,12 +338,93 @@ def test_decision_sheet_round_trips_through_the_canonical_writer(tmp_path: Path)
 
     text = path.read_text(encoding="utf-8")
     assert "\r" not in text
-    assert text.splitlines()[0] == ",".join(DECISION_COLUMNS)
+    assert text.splitlines()[0] == ",".join(CSV_COLUMNS)
+    assert text.splitlines()[0].startswith(",".join(DECISION_COLUMNS))
     assert "summary" not in text.splitlines()[0]
     decisions, metadata = load_decisions(path, tmp_path)
     assert decisions == {"rule:RULE-1": ("approve", "")}
     assert metadata["rule:RULE-1"]["kind"] == "rule"
     assert not card_is_pending({"decision": "approve", "note": ""})
+
+
+def test_pending_cards_show_the_quote_and_extracted_meaning() -> None:
+    build = assemble_review(
+        **_review_args(
+            rules=[
+                {
+                    "policy_id": "NEED-1",
+                    "status": "needs_decision",
+                    "reasons": ["confidence 0.86 is below 0.9"],
+                    "rule": {
+                        "title": "Block terror instructions",
+                        "severity": "high",
+                        "decision": {"violation_action": "block"},
+                        "provenance": {
+                            "source_quote": "do not teach terror",
+                            "section": "topic-x",
+                        },
+                        "rule": {"block_if": {"any_of": ["teach_terror"]}},
+                    },
+                }
+            ]
+        ),
+        decisions={},
+    )
+
+    page = build.html
+    assert "Block terror instructions" in page
+    assert "do not teach terror" in page
+    assert "block_if any of: teach_terror" in page
+    assert "confidence 0.86 is below 0.9" in page
+    assert "does not generate new cases" in page
+    header = build.csv_text.splitlines()[0]
+    assert header == ",".join(CSV_COLUMNS)
+    row = next(line for line in build.csv_text.splitlines() if line.startswith("rule:NEED-1"))
+    assert "Block terror instructions" in row
+    assert "do not teach terror" in row
+    assert "block" in row
+
+
+def test_an_allow_if_rule_shows_allow_not_the_violation_action() -> None:
+    build = assemble_review(
+        **_review_args(
+            rules=[
+                {
+                    "policy_id": "ALLOW-1",
+                    "status": "needs_decision",
+                    "reasons": ["allow rule has 14 possible acting partners in its section"],
+                    "rule": {
+                        "title": "Allow general knowledge",
+                        "severity": "low",
+                        "decision": {"violation_action": "block"},
+                        "provenance": {"source_quote": "Linux là gì"},
+                        "rule": {"allow_if": {"all_of": ["general_knowledge"]}},
+                    },
+                }
+            ]
+        ),
+        decisions={},
+    )
+
+    page = build.html
+    assert "Allow general knowledge" in page
+    assert "allow_if all of: general_knowledge" in page
+    row = next(line for line in build.csv_text.splitlines() if line.startswith("rule:ALLOW-1"))
+    assert ",allow," in row
+    assert page.count(">allow<") >= 1
+
+
+def test_a_six_column_decision_sheet_still_loads(tmp_path: Path) -> None:
+    path = tmp_path / DECISIONS_NAME
+    path.write_text(
+        "card_id,kind,policy_id,rule_status,decision,note\nrule:RULE-1,rule,RULE-1,needs_decision,approve,\n",
+        encoding="utf-8",
+    )
+
+    decisions, metadata = load_decisions(path, tmp_path)
+
+    assert decisions == {"rule:RULE-1": ("approve", "")}
+    assert metadata["rule:RULE-1"]["kind"] == "rule"
 
 
 def test_decision_sheet_refuses_an_empty_or_blank_card_list(tmp_path: Path) -> None:

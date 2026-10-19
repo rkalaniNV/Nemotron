@@ -42,7 +42,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.windows import EvidenceWindow
 
-PROMPT_VERSION = 6
+PROMPT_VERSION = 7
 CACHE_DIR = "extraction"
 MODEL_CONFIG_KEYS = ("alias", "provider", "model")
 _DROPPED_KEYS = MODEL_ONLY_KEYS | {"confidence"}
@@ -64,10 +64,11 @@ For each rule:
   that need explicit user confirmation under require_confirmation_if, and situations the
   clause explicitly permits or says not to block under allow_if. Each condition carries
   evidence: the exact words of the clause or of a glossary definition that state that condition.
-- condition_operators: for every condition class with two or more conditions, return its
-  all_of, any_of, or none_of operator and operator evidence copied exactly from source_quote.
-  Also return none_of for a single condition when absence of that condition is what triggers
-  the rule. Do not infer an operator without exact evidence; omit that condition class instead.
+- condition_operators: a list. For every condition class with two or more conditions, append
+  one object with condition_class, operator (all_of, any_of, or none_of), and operator evidence
+  copied exactly from source_quote. Also append none_of for a single condition when absence of
+  that condition is what triggers the rule. Do not infer an operator without exact evidence;
+  omit that condition class instead. Use an empty list when no operator is stated.
 - scope: when the clause itself states a domain, jurisdiction, language, audience, or moderation
   target, return each value with exact evidence from source_quote. Omit scope values that the
   clause does not state; run-level proposal scope is the fallback.
@@ -124,6 +125,12 @@ class ExtractedOperator(BaseModel):
     evidence: str = Field(min_length=1)
 
 
+class ExtractedOperatorBinding(ExtractedOperator):
+    """One condition class plus its grounded operator. A list writes to Parquet when empty."""
+
+    condition_class: ConditionClass
+
+
 class ExtractedScopeItem(BaseModel):
     """One rule-specific scope value and the source words that state it."""
 
@@ -157,7 +164,7 @@ class ExtractedCandidate(BaseModel):
     action: str = "unspecified"
     object: str = "unspecified"
     conditions: ExtractedConditions = Field(default_factory=ExtractedConditions)
-    condition_operators: dict[ConditionClass, ExtractedOperator] = Field(default_factory=dict)
+    condition_operators: list[ExtractedOperatorBinding] = Field(default_factory=list)
     scope: ExtractedScope = Field(default_factory=ExtractedScope)
     exceptions: list[ExtractedLeg] = Field(default_factory=list)
     expected_action: Action
@@ -171,6 +178,32 @@ class ExtractedCandidate(BaseModel):
     multi_turn_evidence: str = ""
     multi_turn_count: int | None = None
     code_switch_evidence: str = ""
+
+    @field_validator("condition_operators", mode="before")
+    @classmethod
+    def _operator_bindings(cls, value: Any) -> Any:
+        """Accept the older mapping form used by fixtures and cached replies."""
+        if value in (None, {}):
+            return []
+        if isinstance(value, Mapping):
+            rows = []
+            for name, payload in value.items():
+                if isinstance(payload, Mapping):
+                    rows.append({"condition_class": name, **dict(payload)})
+                elif isinstance(payload, ExtractedOperator):
+                    rows.append(
+                        {
+                            "condition_class": name,
+                            "operator": payload.operator,
+                            "evidence": payload.evidence,
+                        }
+                    )
+            return rows
+        return value
+
+    @property
+    def operators_by_class(self) -> dict[str, ExtractedOperatorBinding]:
+        return {item.condition_class: item for item in self.condition_operators}
 
     @field_validator("risk_category", mode="before")
     @classmethod
@@ -339,6 +372,27 @@ class DataDesignerExtractor:
         self.work_dir = work_dir
 
     def extract(self, requests: Sequence[ExtractionRequest]) -> dict[str, Any]:
+        rows = [{"request_id": item.request_id, "window": item.window} for item in requests]
+        return self.complete(
+            rows,
+            system_prompt=SYSTEM_PROMPT,
+            prompt=PROMPT,
+            output_format=ExtractionResponse,
+            prefix="safety-extract-",
+        )
+
+    def complete(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        system_prompt: str,
+        prompt: str,
+        output_format: type[BaseModel],
+        prefix: str,
+    ) -> dict[str, Any]:
+        """One structured reply per seed row, keyed by request_id."""
+        if not rows:
+            return {}
         import pandas as pd
         import pyarrow.parquet as pq
         from data_designer.config import DataDesignerConfigBuilder, LocalFileSeedSource, ModelProvider
@@ -349,21 +403,19 @@ class DataDesignerExtractor:
         seeds = self.work_dir / "artifacts" / "model_seeds"
         seeds.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            "w", suffix=".csv", prefix="safety-extract-", dir=seeds, delete=False, encoding="utf-8"
+            "w", suffix=".csv", prefix=prefix, dir=seeds, delete=False, encoding="utf-8"
         ) as handle:
             seed_path = Path(handle.name)
-            pd.DataFrame([{"request_id": item.request_id, "window": item.window} for item in requests]).to_csv(
-                handle, index=False
-            )
+            pd.DataFrame(list(rows)).to_csv(handle, index=False)
         try:
             builder = DataDesignerConfigBuilder(model_configs=[setup_model_config(self.model_config)])
             builder.with_seed_dataset(LocalFileSeedSource(path=str(seed_path)))
             builder.add_column(
                 name="response",
                 column_type="llm-structured",
-                system_prompt=SYSTEM_PROMPT,
-                prompt=PROMPT,
-                output_format=ExtractionResponse,
+                system_prompt=system_prompt,
+                prompt=prompt,
+                output_format=output_format,
                 model_alias=str(self.model_config["alias"]),
             )
             provider_kwargs: dict[str, Any] = {}
@@ -382,17 +434,16 @@ class DataDesignerExtractor:
                 artifact_path=str(self.work_dir / "artifacts" / "data_designer"), **provider_kwargs
             )
             designer.validate(builder)
-            created = designer.create(config_builder=builder, num_records=len(requests))
-            rows = pq.read_table(created.artifact_storage.final_dataset_path, columns=["request_id", "response"])
+            created = designer.create(config_builder=builder, num_records=len(rows))
+            table = pq.read_table(created.artifact_storage.final_dataset_path, columns=["request_id", "response"])
         finally:
             seed_path.unlink(missing_ok=True)
         replies: dict[str, Any] = {}
         repeated: set[str] = set()
-        for row in rows.to_pylist():
+        for row in table.to_pylist():
             if row["request_id"] in replies:
                 repeated.add(row["request_id"])
             replies[row["request_id"]] = row["response"]
-        # Two answers for one window cannot be told apart; the window is asked again.
         for request_id in repeated:
             del replies[request_id]
         return replies

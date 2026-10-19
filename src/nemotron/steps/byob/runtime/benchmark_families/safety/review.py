@@ -15,12 +15,16 @@
 
 """One review packet, its HTML page, and the decision sheet that round-trips it.
 
-Eligible rules start pre-accepted. A rule that still needs a decision, and every
-unresolved conflict, is a card. Representative examples are capped. The unresolved
-lists are not. A reviewer records approve, reject, or edit in the CSV. Conflict
-cards are identified by content, not by position. The signed packet binds the
-decision sheet and the HTML page. Reject, or edit with a note, withholds that
-rule and any contrast family that contains it.
+The HTML page is the reading surface: each pending card shows the source quote,
+the extracted meaning, and what approve, reject, or edit does. The CSV is the
+action sheet. Eligible rules start pre-accepted. A rule that still needs a
+decision, and every unresolved conflict, is a card. Representative examples are
+capped. The unresolved lists are not. A reviewer records approve, reject, or
+edit in the CSV. Display columns on the CSV are rebuilt on generate; only
+decision and note are read back. Conflict cards are identified by content, not
+by position. The signed packet binds the decision sheet and the HTML page.
+Reject, or edit with a note, withholds that rule and any contrast family that
+contains it.
 """
 
 import csv
@@ -43,10 +47,24 @@ PACKET_NAME = "publication_review_packet.yaml"
 REVIEW_PAGE = "review.html"
 DECISIONS_NAME = "review_decisions.csv"
 DECISION_COLUMNS = ("card_id", "kind", "policy_id", "rule_status", "decision", "note")
+DISPLAY_COLUMNS = ("title", "quote", "expected_action", "why")
+CSV_COLUMNS = (*DECISION_COLUMNS, *DISPLAY_COLUMNS)
 EXAMPLE_CAP = 3
 PACKET_VERSION = 1
 _EXAMPLE_TEXT = 240
-_COLUMNS = DECISION_COLUMNS
+_COLUMNS = CSV_COLUMNS
+_CONDITION_NAMES = ("block_if", "allow_if", "escalate_if", "require_confirmation_if")
+_OPERATOR_NAMES = ("all_of", "any_of", "none_of")
+_GAP_MEANING = {
+    "rule_cap": (
+        "This rule already used its per-rule case cap. Raise cases_per_normal_rule or "
+        "cases_per_critical_rule, then re-run generate. The CSV cannot add this cell."
+    ),
+    "budget_cap": "The run hit assisted_max_cases. Raise that budget, then re-run generate.",
+    "translation_required": "A required target language was not generated.",
+    "span_missing": "The source span for this cell is missing.",
+    "max_turns": "This cell needs more turns than budget.max_turns allows.",
+}
 _DECISIONS = frozenset({"pending", "pre_accepted", "approve", "reject", "edit"})
 _REVIEWER_DECISIONS = frozenset({"pending", "approve", "reject", "edit"})
 _RESOLVED = frozenset({"pre_accepted", "approve", "reject"})
@@ -191,6 +209,8 @@ def assemble_review(
             "required_cases": coverage.get("required_cases"),
             "scheduled_cases": coverage.get("scheduled_cases"),
             "missing_required": list(coverage.get("missing_required") or []),
+            "capacity": dict(coverage.get("capacity") or {}),
+            "quality_gate_preflight": dict(coverage.get("quality_gate_preflight") or {}),
         },
         "quality_gates": dict(quality_gates or {"enabled": False, "passed": True, "failures": []}),
         "blocking_gaps": sorted(blocking, key=_gap_key),
@@ -235,11 +255,11 @@ def load_decisions(path: Path, run_dir: Path) -> tuple[dict[str, tuple[str, str]
     if not text.strip():
         return {}, {}
     reader = csv.DictReader(io.StringIO(text, newline=""))
-    if reader.fieldnames is None or not set(_COLUMNS) <= set(reader.fieldnames):
+    if reader.fieldnames is None or not set(DECISION_COLUMNS) <= set(reader.fieldnames):
         raise abort(
             RunStatus.INVALID_RUN_ARTIFACT,
             run_dir,
-            f"{DECISIONS_NAME} must have columns {', '.join(_COLUMNS)}.",
+            f"{DECISIONS_NAME} must have columns {', '.join(DECISION_COLUMNS)}.",
         )
     found: dict[str, tuple[str, str]] = {}
     metadata: dict[str, dict[str, str]] = {}
@@ -262,46 +282,73 @@ def load_decisions(path: Path, run_dir: Path) -> tuple[dict[str, tuple[str, str]
 
 
 def render_html(packet: Mapping[str, Any]) -> str:
-    """Render the page from the packet so a capped example cannot hide an unresolved item."""
+    """Render the page so a reviewer can decide from the quote, not from an id table."""
     unresolved = packet.get("unresolved_rules") or []
     conflicts = packet.get("unresolved_conflicts") or []
     blocking = packet.get("blocking_gaps") or []
     excluded = packet.get("excluded_rules") or []
     examples = packet.get("examples") or []
+    coverage = packet.get("coverage") if isinstance(packet.get("coverage"), Mapping) else {}
+    capacity = coverage.get("capacity") if isinstance(coverage.get("capacity"), Mapping) else {}
+    preflight = (
+        coverage.get("quality_gate_preflight")
+        if isinstance(coverage.get("quality_gate_preflight"), Mapping)
+        else {}
+    )
     quality_gates = packet.get("quality_gates") if isinstance(packet.get("quality_gates"), Mapping) else {}
     gate_failures = [row for row in quality_gates.get("failures") or [] if isinstance(row, Mapping)]
     gates_enabled = quality_gates.get("enabled") is True
     on_failure = quality_gates.get("on_failure") if quality_gates.get("on_failure") in {"silver", "fail"} else "silver"
-    cards = packet.get("cards") or []
-    pre_accepted = sum(1 for card in cards if card.get("decision") == "pre_accepted")
-    pending = sum(1 for card in cards if card_is_pending(card))
+    cards = [card for card in packet.get("cards") or [] if isinstance(card, Mapping)]
+    pending_cards = [card for card in cards if card_is_pending(card)]
+    kept_cards = [card for card in cards if card.get("decision") == "pre_accepted"]
+    decided_cards = [
+        card for card in cards if str(card.get("decision") or "") in {"approve", "reject", "edit"}
+    ]
+    pre_accepted = len(kept_cards)
+    pending = len(pending_cards)
     estimated_minutes = max(1, (len(cards) + 1) // 2)
     parts = [
         "<!DOCTYPE html>",
         '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">',
-        "<title>Safety review</title></head><body>",
+        "<title>Safety review</title>",
+        f"<style>{_PAGE_STYLE}</style></head><body>",
         "<h1>Safety review</h1>",
+        _task_banner(pending, pre_accepted, len(excluded), len(blocking)),
         f"<p>Cards: {len(cards)}. Pending: {pending}. Estimated review time: {estimated_minutes} minutes.</p>",
         "<p>Record approve, reject, or edit in <code>review_decisions.csv</code>. "
-        "An edit needs a note. Then sign the regenerated packet.</p>",
+        "An edit needs a note. Then sign the regenerated packet. Only <code>decision</code> and "
+        "<code>note</code> are read back; the other CSV columns are rebuilt on generate.</p>",
         "<p>Representative examples are capped. Every unresolved rule, unresolved conflict, "
         "blocking coverage gap, and unmet minimum dataset quality gate is listed in full.</p>",
         f"<p>Pre-accepted rules: {pre_accepted}. They stay in the benchmark unless "
         "review_decisions.csv sets reject or edit.</p>",
-        "<h2>Review cards</h2>",
-        _card_table(cards),
-        f"<h2>Unresolved rules ({len(unresolved)})</h2>",
+        _decision_legend(),
+        _pending_section(pending_cards),
+        _kept_section(kept_cards),
+        _decided_section(decided_cards),
+        "<details><summary>Table view of the same pending items</summary>",
+        f"<h3>Unresolved rules ({len(unresolved)})</h3>",
         _rule_table(unresolved),
-        f"<h2>Unresolved conflicts ({len(conflicts)})</h2>",
+        f"<h3>Unresolved conflicts ({len(conflicts)})</h3>",
         _conflict_table(conflicts),
+        "</details>",
         f"<h2>Blocking coverage gaps ({len(blocking)})</h2>",
+        "<p>These missing cells block Gold. They are not CSV decisions.</p>",
         _gap_table(blocking),
         f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
         _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
-        f"<h2>Excluded rules ({len(excluded)})</h2>",
+        "<details><summary>Generation capacity preflight</summary>",
+        _capacity_preflight(capacity, preflight),
+        "</details>",
+        f"<details><summary>Excluded rules ({len(excluded)}) — not in the CSV</summary>",
+        "<p>These rules are not in the CSV and cannot be approved from review.</p>",
         _excluded_table(excluded),
-        "<h2>Representative examples</h2>",
+        "</details>",
+        "<details><summary>Representative examples — capped samples from generated cases</summary>",
+        "<p>Capped samples from rules that already generated cases. Pending rules have none.</p>",
         _example_sections(examples),
+        "</details>",
         "</body></html>\n",
     ]
     return "\n".join(parts)
@@ -343,27 +390,206 @@ def _quality_gate_table(
     return "\n".join(body)
 
 
-def _card_table(rows: Sequence[Mapping[str, Any]]) -> str:
-    if not rows:
-        return "<p>None.</p>"
+def _capacity_preflight(capacity: Mapping[str, Any], preflight: Mapping[str, Any]) -> str:
+    if not capacity:
+        return "<p>No capacity preflight is available.</p>"
+    possible = preflight.get("possible")
+    result = "possible from grounded inventory" if possible is not False else "impossible from grounded inventory"
+    return (
+        "<p>This is an upper bound before validation, exact deduplication, and splitting.</p>"
+        "<p><strong>"
+        + _text(result)
+        + "</strong></p><ul><li>Global case cap: "
+        + _text(capacity.get("case_cap"))
+        + "</li><li>Planned candidates: "
+        + _text(capacity.get("planned_candidates"))
+        + "</li><li>Final-case upper bound: "
+        + _text(capacity.get("final_case_upper_bound"))
+        + "</li><li>Additional distinct inventory cells: "
+        + _text(capacity.get("additional_distinct_cells"))
+        + "</li></ul>"
+    )
+
+
+_PAGE_STYLE = (
+    "body{font:16px/1.45 system-ui,Segoe UI,sans-serif;max-width:52rem;margin:0 auto;"
+    "padding:1.25rem;color:#1c1917}"
+    "h1{font-size:1.45rem;margin:0 0 .6rem}"
+    "h2{font-size:1.15rem;margin:1.6rem 0 .6rem}"
+    "h3{font-size:1rem;margin:.2rem 0 .5rem}"
+    ".banner{background:#1c1917;color:#fafaf9;padding:1rem 1.1rem;margin:0 0 1rem}"
+    ".banner p{margin:.35rem 0 0}"
+    ".legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:1rem 0}"
+    ".legend div{border:1px solid #d6d3d1;padding:.75rem}"
+    ".legend p{margin:0}"
+    ".legend p + p{margin:.25rem 0 0}"
+    ".item{border:1px solid #d6d3d1;border-left:4px solid #b45309;padding:1rem 1.05rem;margin:0 0 1rem}"
+    ".item.conflict{border-left-color:#6d28d9}"
+    ".why{margin:0 0 .6rem;font-weight:650}"
+    "blockquote{margin:.35rem 0 .8rem;padding:.75rem .9rem;background:#f5f5f4}"
+    ".chips span{display:inline-block;border:1px solid #d6d3d1;padding:.1rem .5rem;"
+    "margin:0 .35rem .35rem 0;font-size:.8rem}"
+    ".mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;color:#57534e}"
+    "table{width:100%;border-collapse:collapse}"
+    "th,td{text-align:left;vertical-align:top;border-bottom:1px solid #e7e5e4;"
+    "padding:.4rem .5rem;font-size:.9rem}"
+    "details{margin:1rem 0}"
+    "summary{cursor:pointer;font-weight:650}"
+    "@media(max-width:40rem){.legend{grid-template-columns:1fr}}"
+)
+
+
+def _task_banner(pending: int, kept: int, excluded: int, blocking: int) -> str:
+    if pending:
+        headline = f"{pending} card{'s' if pending != 1 else ''} need a decision."
+        next_step = (
+            "Open each card below, compare the policy quote with the extracted meaning, "
+            "then record approve, reject, or edit in review_decisions.csv."
+        )
+    else:
+        headline = "No cards need a decision."
+        next_step = (
+            "You can sign the packet. Change a pre-accepted row to reject or edit only "
+            "if that extraction is wrong."
+        )
+    extras = []
+    if kept:
+        extras.append(f"{kept} auto-kept")
+    if excluded:
+        extras.append(f"{excluded} excluded")
+    if blocking:
+        extras.append(f"{blocking} coverage gaps block Gold")
+    extra = " · ".join(extras)
+    return (
+        '<div class="banner"><p><strong>'
+        + _text(headline)
+        + "</strong></p><p>"
+        + _text(next_step)
+        + "</p>"
+        + (f"<p>{_text(extra)}</p>" if extra else "")
+        + "</div>"
+    )
+
+
+def _decision_legend() -> str:
+    return (
+        "<section><h2>What you are deciding</h2>"
+        "<p>Each pending card is one extracted policy rule or one unresolved conflict. "
+        "Compare the source quote with the extracted meaning. Approving a rule that is "
+        "not eligible_for_generation does not generate new cases; it remains a documented "
+        "Silver limitation.</p>"
+        '<div class="legend">'
+        "<div><p><strong>approve</strong></p><p>Keep this extraction. For a pending rule, "
+        "that documents a limitation and does not generate new cases.</p></div>"
+        "<div><p><strong>reject</strong></p><p>Remove this rule, or the rules named on a "
+        "conflict, and any contrast family that contains them.</p></div>"
+        "<div><p><strong>edit + note</strong></p><p>Same removal as reject for this run. "
+        "The note records the intended correction. A note is required.</p></div>"
+        "</div>"
+        "<p>Do not change <code>pre_accepted</code> rows unless the extraction is wrong. "
+        "Coverage gaps are not CSV decisions.</p></section>"
+    )
+
+
+def _pending_section(cards: Sequence[Mapping[str, Any]]) -> str:
+    heading = f"<h2>Decide these {len(cards)} cards</h2>" if cards else "<h2>Decide these cards</h2>"
+    if not cards:
+        return heading + "<p>None. No pending review items.</p>"
+    parts = [
+        heading,
+        "<p>These rows are <code>pending</code> in review_decisions.csv. They block signing "
+        "until each one is approve, reject, or edit with a note.</p>",
+    ]
+    total = len(cards)
+    for index, card in enumerate(cards, start=1):
+        parts.append(_decision_card(card, index, total))
+    return "\n".join(parts)
+
+
+def _kept_section(cards: Sequence[Mapping[str, Any]]) -> str:
+    if not cards:
+        return ""
+    return (
+        f"<details><summary>Auto-kept rules ({len(cards)}) — no action unless wrong</summary>"
+        "<p>These eligible rules already generated cases. They stay in the benchmark unless "
+        "review_decisions.csv sets reject or edit.</p>"
+        + _compact_card_table(cards)
+        + "</details>"
+    )
+
+
+def _decided_section(cards: Sequence[Mapping[str, Any]]) -> str:
+    if not cards:
+        return ""
+    return (
+        f"<details><summary>Already decided ({len(cards)})</summary>"
+        + _compact_card_table(cards)
+        + "</details>"
+    )
+
+
+def _decision_card(card: Mapping[str, Any], index: int, total: int) -> str:
+    kind = str(card.get("kind") or "rule")
+    css = "item conflict" if kind == "conflict" else "item"
+    title = str(card.get("title") or card.get("policy_id") or card.get("card_id") or "")
+    why = str(card.get("why") or card.get("summary") or "")
+    quote = str(card.get("quote") or "")
+    conditions = str(card.get("conditions") or "")
+    chips = []
+    for value in (
+        kind,
+        card.get("expected_action"),
+        card.get("severity"),
+        card.get("section"),
+        card.get("decision"),
+    ):
+        if value:
+            chips.append(f"<span>{_text(value)}</span>")
+    if kind == "conflict":
+        consequence = (
+            "Approve keeps this conflict as a documented Silver limitation. "
+            "Reject or edit withholds the named rules."
+        )
+    else:
+        consequence = (
+            "This rule is not eligible for generation. Approve keeps it as a documented "
+            "Silver limitation and does not generate new cases. Reject or edit removes it."
+        )
+    quote_block = f"<p>Policy quote</p><blockquote>{_text(quote)}</blockquote>" if quote else ""
+    extracted = f"<p>Extracted as</p><p>{_text(conditions)}</p>" if conditions else ""
+    return (
+        f'<article class="{css}">'
+        f"<p class=\"why\">Decision {index} of {total}: {_text(why)}</p>"
+        f"<h3>{_text(title)}</h3>"
+        f'<p class="chips">{"".join(chips)}</p>'
+        + quote_block
+        + extracted
+        + f"<p>{_text(consequence)}</p>"
+        f'<p class="mono">CSV row: {_text(card.get("card_id"))}</p>'
+        "</article>"
+    )
+
+
+def _compact_card_table(rows: Sequence[Mapping[str, Any]]) -> str:
     body = [
-        "<table><thead><tr><th>Card</th><th>Kind</th><th>Policy</th>"
-        "<th>Status</th><th>Decision</th><th>Summary</th></tr></thead><tbody>"
+        "<table><thead><tr><th>Title / quote</th><th>Action</th>"
+        "<th>Decision</th><th>CSV row</th></tr></thead><tbody>"
     ]
     for row in rows:
+        title = str(row.get("title") or "")
+        quote = str(row.get("quote") or "")
+        label = title if title else quote
+        detail = quote if title and quote and quote != title else ""
         body.append(
             "<tr><td>"
-            + _text(row.get("card_id"))
+            + _text(label)
+            + ("<br>" + _text(detail) if detail else "")
             + "</td><td>"
-            + _text(row.get("kind"))
-            + "</td><td>"
-            + _text(row.get("policy_id"))
-            + "</td><td>"
-            + _text(row.get("rule_status"))
+            + _text(row.get("expected_action"))
             + "</td><td>"
             + _text(row.get("decision"))
-            + "</td><td>"
-            + _text(row.get("summary"))
+            + "</td><td class=\"mono\">"
+            + _text(row.get("card_id"))
             + "</td></tr>"
         )
     body.append("</tbody></table>")
@@ -463,7 +689,12 @@ def _rule_card(row: Mapping[str, Any], decisions: Mapping[str, tuple[str, str]])
     card_id = f"rule:{policy_id}"
     default = "pre_accepted" if status == "eligible_for_generation" else "pending"
     decision, note = _recorded_decision(card_id, default, decisions)
-    summary = "Pre-accepted eligible rule." if status == "eligible_for_generation" else "; ".join(_reasons(row))
+    why = (
+        "Auto-kept eligible rule."
+        if status == "eligible_for_generation"
+        else "; ".join(_reasons(row)) or "Needs a reviewer decision."
+    )
+    summary = "Pre-accepted eligible rule." if status == "eligible_for_generation" else why
     return {
         "card_id": card_id,
         "kind": "rule",
@@ -472,6 +703,13 @@ def _rule_card(row: Mapping[str, Any], decisions: Mapping[str, tuple[str, str]])
         "summary": summary,
         "decision": decision,
         "note": note,
+        "title": _heading(row),
+        "quote": _quote(row),
+        "expected_action": _expected_action(row),
+        "severity": _severity(row),
+        "section": _section(row),
+        "conditions": _conditions_text(row),
+        "why": why,
     }
 
 
@@ -479,14 +717,22 @@ def _conflict_card(row: Mapping[str, Any], decisions: Mapping[str, tuple[str, st
     card_id = conflict_card_id(row)
     decision, note = _recorded_decision(card_id, "pending", decisions)
     policies = sorted(_policy_list(row.get("policy_ids")))
+    detail = str(row.get("detail") or "")
     return {
         "card_id": card_id,
         "kind": "conflict",
         "policy_id": "|".join(policies),
         "rule_status": str(row.get("type") or "conflict"),
-        "summary": str(row.get("detail") or ""),
+        "summary": detail,
         "decision": decision,
         "note": note,
+        "title": str(row.get("type") or "conflict"),
+        "quote": "",
+        "expected_action": "",
+        "severity": "",
+        "section": "",
+        "conditions": ", ".join(policies),
+        "why": detail or "Unresolved conflict.",
     }
 
 
@@ -494,14 +740,22 @@ def _glossary_card(row: Mapping[str, Any], decisions: Mapping[str, tuple[str, st
     card_id = glossary_card_id(row)
     decision, note = _recorded_decision(card_id, "pending", decisions)
     key = str(row.get("key") or "")
+    summary = f'"{key}" has conflicting definitions'
     return {
         "card_id": card_id,
         "kind": "conflict",
         "policy_id": "",
         "rule_status": "glossary",
-        "summary": f'"{key}" has conflicting definitions',
+        "summary": summary,
         "decision": decision,
         "note": note,
+        "title": "glossary",
+        "quote": key,
+        "expected_action": "",
+        "severity": "",
+        "section": "",
+        "conditions": "",
+        "why": summary,
     }
 
 
@@ -570,7 +824,17 @@ def _unresolved_rules(rules: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
 
 
 def _excluded_rules(rules: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
-    rows = [{"policy_id": _policy_id(row), "status": _status(row)} for row in rules if _status(row) in _EXCLUDED]
+    rows = [
+        {
+            "policy_id": _policy_id(row),
+            "status": _status(row),
+            "title": _heading(row),
+            "quote": _quote(row),
+            "reasons": "; ".join(_reasons(row)),
+        }
+        for row in rules
+        if _status(row) in _EXCLUDED
+    ]
     return sorted(rows, key=lambda item: item["policy_id"])
 
 
@@ -710,14 +974,75 @@ def _reasons(row: Mapping[str, Any]) -> list[str]:
 
 
 def _quote(row: Mapping[str, Any]) -> str:
-    rule = row.get("rule")
-    if not isinstance(rule, Mapping):
-        return ""
-    provenance = rule.get("provenance")
+    nested = _stored_rule(row)
+    provenance = nested.get("provenance")
     if not isinstance(provenance, Mapping):
         return ""
     quote = provenance.get("source_quote")
     return quote if isinstance(quote, str) else ""
+
+
+def _stored_rule(row: Mapping[str, Any]) -> Mapping[str, Any]:
+    rule = row.get("rule")
+    return rule if isinstance(rule, Mapping) else {}
+
+
+def _heading(row: Mapping[str, Any]) -> str:
+    nested = _stored_rule(row)
+    title = nested.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    quote = _quote(row)
+    if quote:
+        return quote if len(quote) <= 80 else quote[:77] + "..."
+    return _policy_id(row)
+
+
+def _expected_action(row: Mapping[str, Any]) -> str:
+    nested = _stored_rule(row)
+    body = nested.get("rule")
+    if isinstance(body, Mapping):
+        has_allow = isinstance(body.get("allow_if"), Mapping)
+        has_block = isinstance(body.get("block_if"), Mapping)
+        has_escalate = isinstance(body.get("escalate_if"), Mapping)
+        if has_allow and not has_block and not has_escalate:
+            return "allow"
+        if has_escalate and not has_block:
+            return "escalate"
+    decision = nested.get("decision")
+    if not isinstance(decision, Mapping):
+        return ""
+    action = decision.get("violation_action")
+    return action if isinstance(action, str) else ""
+
+
+def _severity(row: Mapping[str, Any]) -> str:
+    severity = _stored_rule(row).get("severity")
+    return severity if isinstance(severity, str) else ""
+
+
+def _section(row: Mapping[str, Any]) -> str:
+    provenance = _stored_rule(row).get("provenance")
+    if not isinstance(provenance, Mapping):
+        return ""
+    section = provenance.get("section")
+    return section if isinstance(section, str) else ""
+
+
+def _conditions_text(row: Mapping[str, Any]) -> str:
+    body = _stored_rule(row).get("rule")
+    if not isinstance(body, Mapping):
+        return ""
+    parts: list[str] = []
+    for name in _CONDITION_NAMES:
+        group = body.get(name)
+        if not isinstance(group, Mapping):
+            continue
+        for operator in _OPERATOR_NAMES:
+            legs = group.get(operator)
+            if isinstance(legs, (list, tuple)) and legs:
+                parts.append(f"{name} {operator.replace('_', ' ')}: {', '.join(str(leg) for leg in legs)}")
+    return "; ".join(parts)
 
 
 def _policy_list(value: Any) -> list[str]:
@@ -760,7 +1085,7 @@ def write_decisions(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         raise ValueError(f"{DECISIONS_NAME} has no cards to write.")
     cards = []
     for row in rows:
-        card = {column: "" if row.get(column) is None else str(row.get(column)) for column in DECISION_COLUMNS}
+        card = {column: "" if row.get(column) is None else str(row.get(column)) for column in CSV_COLUMNS}
         if not card["card_id"].strip():
             raise ValueError(f"{DECISIONS_NAME} has a row without a card_id.")
         cards.append(card)
@@ -772,7 +1097,7 @@ def _csv_text(cards: Sequence[Mapping[str, str]]) -> str:
     writer = csv.DictWriter(buffer, fieldnames=_COLUMNS, lineterminator="\n", extrasaction="ignore")
     writer.writeheader()
     for card in cards:
-        writer.writerow({column: card[column] for column in _COLUMNS})
+        writer.writerow({column: card.get(column, "") for column in _COLUMNS})
     return buffer.getvalue()
 
 
@@ -821,17 +1146,20 @@ def _conflict_table(rows: Sequence[Mapping[str, Any]]) -> str:
 def _gap_table(rows: Sequence[Mapping[str, Any]]) -> str:
     if not rows:
         return "<p>None.</p>"
-    body = ["<table><thead><tr><th>Slot</th><th>Policy</th><th>Kind</th><th>Reason</th></tr></thead><tbody>"]
+    body = [
+        "<table><thead><tr><th>Missing cell</th><th>Kind</th><th>Reason</th><th>What to do</th></tr></thead><tbody>"
+    ]
     for row in rows:
+        reason = str(row.get("reason") or "")
         body.append(
             "<tr><td>"
             + _text(row.get("slot_id"))
             + "</td><td>"
-            + _text(row.get("policy_id"))
-            + "</td><td>"
             + _text(row.get("kind"))
             + "</td><td>"
-            + _text(row.get("reason"))
+            + _text(reason)
+            + "</td><td>"
+            + _text(_GAP_MEANING.get(reason, "This required cell was not scheduled."))
             + "</td></tr>"
         )
     body.append("</tbody></table>")
@@ -841,10 +1169,25 @@ def _gap_table(rows: Sequence[Mapping[str, Any]]) -> str:
 def _excluded_table(rows: Sequence[Mapping[str, Any]]) -> str:
     if not rows:
         return "<p>None.</p>"
-    body = ["<ul>"]
+    body = [
+        "<table><thead><tr><th>Title / quote</th><th>Status</th><th>Why excluded</th></tr></thead><tbody>"
+    ]
     for row in rows:
-        body.append("<li>" + _text(row.get("policy_id")) + " (" + _text(row.get("status")) + ")</li>")
-    body.append("</ul>")
+        title = str(row.get("title") or row.get("policy_id") or "")
+        quote = str(row.get("quote") or "")
+        policy_id = str(row.get("policy_id") or "")
+        body.append(
+            "<tr><td>"
+            + _text(title)
+            + (f"<br>{_text(quote)}" if quote and quote != title else "")
+            + (f'<br><span class="mono">{_text(policy_id)}</span>' if policy_id else "")
+            + "</td><td>"
+            + _text(row.get("status"))
+            + "</td><td>"
+            + _text(row.get("reasons"))
+            + "</td></tr>"
+        )
+    body.append("</tbody></table>")
     return "\n".join(body)
 
 

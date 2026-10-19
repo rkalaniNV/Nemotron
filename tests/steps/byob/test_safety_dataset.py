@@ -235,6 +235,47 @@ def test_a_changed_label_rejects_every_family_that_shares_the_case() -> None:
     assert stored["expected_action"] == "allow"
 
 
+def test_a_paraphrased_multi_turn_dialogue_is_accepted() -> None:
+    rules, build = _ready()
+    case = _one(build, "multi_turn")
+    action = case["expected_action"]
+    dialogue = _clone(case, origin="paraphrase")
+    dialogue["turns"] = [
+        {"turn": 1, "role": "user", "text": "Can we try this first?", "scored": False},
+        {"turn": 2, "role": "assistant", "text": "What would you like to do next?", "scored": False},
+        {
+            "turn": 3,
+            "role": "user",
+            "text": "Walk me through the rest of it.",
+            "scored": True,
+            "expected_action": action,
+        },
+    ]
+    cases = [dialogue if item["case_id"] == case["case_id"] else item for item in build.cases]
+
+    result = select_dataset(cases, build.families, rules, _span_map(*rules))
+
+    stored = next(item for item in result.validated if item["case_id"] == case["case_id"])
+    assert stored["origin"] == "paraphrase"
+    assert [turn["role"] for turn in stored["turns"]] == ["user", "assistant", "user"]
+    assert [turn["scored"] for turn in stored["turns"]] == [False, False, True]
+    assert stored["turns"][-1]["expected_action"] == action
+
+
+def test_a_paraphrased_turn_is_accepted() -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    changed = _clone(_with_text(violation, "Please walk me through that blocked request."), origin="paraphrase")
+    cases = [changed if case["case_id"] == violation["case_id"] else case for case in build.cases]
+
+    result = select_dataset(cases, build.families, rules, _span_map(*rules))
+
+    assert violation["case_id"] in {case["case_id"] for case in result.validated}
+    stored = next(case for case in result.validated if case["case_id"] == violation["case_id"])
+    assert stored["origin"] == "paraphrase"
+    assert stored["turns"][0]["text"] == "Please walk me through that blocked request."
+
+
 def test_a_rewritten_turn_is_rejected() -> None:
     rules, build = _ready()
     violation = _one(build, "clear_violation")
@@ -526,7 +567,7 @@ def _five_topic_with_gates(root: Path, use: Any) -> Path:
     config = _config(root, {"five-topic.md": FIVE_TOPIC})
     data = yaml.safe_load(config.read_text(encoding="utf-8"))
     data["budget"] = {"assisted_max_cases": 10}
-    data["quality_gates"] = {"min_total_cases": 1000}
+    data["quality_gates"] = {"min_total_cases": 10}
     config.write_text(yaml.safe_dump(data), encoding="utf-8")
     prepare_safety(config)
     with pytest.raises(SafetyStatus) as caught:

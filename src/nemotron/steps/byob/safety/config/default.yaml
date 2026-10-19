@@ -20,13 +20,18 @@ assurance:
 budget:
   assisted_max_cases: 500
   max_review_items: 40
+  # Per-rule max for high/medium/low. Critical uses cases_per_critical_rule (12).
+  # cases_per_normal_rule: 6
+  # Mix multi-turn is optional and never exceeds this cap. Minima cannot exceed
+  # these maxima or assisted_max_cases; the config is refused instead.
 
 # Optional publication gates. Counts are evaluated after validation, exact
 # deduplication, and the development/private-test split. An unmet gate blocks
 # Gold and is reported in split_manifest.json, review.html, and quality_report.json.
 # on_failure: silver publishes anyway; fail blocks publication after review.
-# The planner may backfill unscheduled distinct cells into room left by rejected
-# rows. It never pads the dataset by copying the same source quote.
+# Minima must fit inside the budget caps (load-time error otherwise). The planner
+# may backfill unscheduled distinct cells into room left by rejected rows. It
+# never pads the dataset by copying the same source quote.
 # quality_gates:
 #   min_total_cases: 100
 #   min_development_cases: 40
@@ -40,6 +45,16 @@ generation:
   modules:
     adversarial: false
     persona: false
+    # Rewrite seed quote-copies into realistic user turns. Python keeps the
+    # coverage cell (legs, expected_action, evidence). Without a generation
+    # model the seeds are kept.
+    paraphrase: true
+  # Optional. Default is single_turn 0.80 / multi_turn 0.20. A positive
+  # multi_turn share adds optional multi-turn cells from single-turn rules
+  # even when the quote does not ground multi_turn_turns.
+  # turn_mix:
+  #   single_turn: 0.80
+  #   multi_turn: 0.20
 
 # Add after choosing the systems to evaluate. Credentials are environment-variable
 # names only; never put a key value in this file.

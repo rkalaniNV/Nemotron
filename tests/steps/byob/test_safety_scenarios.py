@@ -587,6 +587,7 @@ def test_a_scenario_error_marks_the_stage_failed_and_removes_partial_files(
     assert not (cache / "contrast_families.jsonl").exists()
     assert not (cache / "scenario_rejections.jsonl").exists()
     assert not (cache / "overrefusal_cases.jsonl").exists()
+    assert not (cache / "paraphrase_report.json").exists()
     index = json.loads((cache / "cache_index.json").read_text(encoding="utf-8"))
     assert index["stages"]["coverage_plan"]["status"] == "completed"
     assert index["stages"]["scenarios"]["status"] == "failed"

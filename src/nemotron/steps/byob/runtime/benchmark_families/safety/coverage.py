@@ -17,10 +17,11 @@
 
 The plan names the cases a later stage must generate. It does not write case text and
 it does not call a model. Required cells are scheduled before optional cells. A required
-cell that does not fit is listed in the gap file, and the plan is Silver. If later
-validation or exact-dedup leaves room under the case cap, quality-gate backfill may
-promote unscheduled distinct cells. It never copies a cell that shares the quote-copy
-identity of a scheduled or surviving row.
+cell that does not fit is listed in the gap file, and the plan is Silver. Per-rule and
+global maxima are hard caps. Mix-derived multi-turn is the first optional kind considered
+when room remains. If later validation or exact-dedup leaves room under the case cap,
+quality-gate backfill may promote unscheduled distinct cells. It never copies a cell that
+shares the quote-copy identity of a scheduled or surviving row.
 """
 
 import hashlib
@@ -68,6 +69,7 @@ _REQUIRED_KIND_ORDER = (
     "code_switch",
     "multi_turn",
 )
+# Mix-derived multi-turn reuses kind "multi_turn" so turn_mix can rank it.
 _OPTIONAL_KIND_ORDER = ("adversarial", "actor_swap", "persona")
 _KIND_RANK = {kind: rank for rank, kind in enumerate(_REQUIRED_KIND_ORDER + _OPTIONAL_KIND_ORDER)}
 _RECORD_FIELDS = (
@@ -82,6 +84,8 @@ _RECORD_FIELDS = (
     "missing_required",
     "excluded_rules",
     "modules",
+    "capacity",
+    "quality_gate_preflight",
 )
 
 
@@ -102,6 +106,8 @@ class CoveragePlan:
     required_cases: int
     excluded_rules: tuple[dict[str, str], ...]
     modules: dict[str, str]
+    capacity: dict[str, Any]
+    quality_gate_preflight: dict[str, Any]
 
     @property
     def scheduled_cases(self) -> int:
@@ -125,6 +131,8 @@ class CoveragePlan:
             "missing_required": missing,
             "excluded_rules": [dict(row) for row in self.excluded_rules],
             "modules": self.modules,
+            "capacity": dict(self.capacity),
+            "quality_gate_preflight": dict(self.quality_gate_preflight),
             "gaps": [dict(gap) for gap in self.gaps],
             "contrast_families": [dict(family) for family in self.contrast_families],
         }
@@ -207,6 +215,7 @@ def build_coverage_plan(
     generation: Mapping[str, Any] | None = None,
     routed: Sequence[Mapping[str, Any]] | None = None,
     target_languages: Sequence[str] = (),
+    quality_gates: Mapping[str, Any] | None = None,
 ) -> CoveragePlan:
     """Plan eligible rules. Other statuses are listed under ``excluded_rules`` and add no cell.
 
@@ -238,7 +247,14 @@ def build_coverage_plan(
                 cell["hold"] = "span_missing"
             rule_optional = []
         else:
-            rule_optional = _optional_cells(rule, by_id, primary, modules)
+            rule_optional = _optional_cells(
+                rule,
+                by_id,
+                primary,
+                modules,
+                max_turns=max_turns,
+                mix_multi_turn=_wants_mix_multi_turn(generation) and rule.signals.multi_turn_turns is None,
+            )
         required.extend(rule_required)
         optional.extend(rule_optional)
         for cell in (*rule_required, *rule_optional):
@@ -251,6 +267,7 @@ def build_coverage_plan(
     marked = tuple(_with_scheduled(family, scheduled) for family in families)
     blocking = [gap for gap in gaps if gap["blocks_gold"]]
     certification, reason = _certification(len(required), blocking)
+    capacity = _capacity(rows, gaps, case_cap, budget)
     return CoveragePlan(
         rows=tuple(rows),
         gaps=tuple(gaps),
@@ -261,6 +278,8 @@ def build_coverage_plan(
         required_cases=len(required),
         excluded_rules=excluded,
         modules=_module_status(modules),
+        capacity=capacity,
+        quality_gate_preflight=_quality_gate_preflight(capacity, quality_gates),
     )
 
 
@@ -364,8 +383,7 @@ def select_backfill_cells(
             break
         policy_id = str(cell.get("policy_id") or "")
         if policy_id:
-            cap = _rule_cap(str(cell.get("severity") or "medium"), budget)
-            if policy_counts.get(policy_id, 0) >= cap:
+            if policy_counts.get(policy_id, 0) >= _rule_limit(cell, budget):
                 continue
         key = cell_distinctness_key(cell)
         if key in occupied:
@@ -382,6 +400,9 @@ def apply_backfill(
     rows: Sequence[Mapping[str, Any]],
     summary: Mapping[str, Any],
     added: Sequence[Mapping[str, Any]],
+    *,
+    case_cap: int,
+    budget: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Move chosen gap cells onto the plan and refresh gap/family bookkeeping."""
     added_ids = {str(cell["slot_id"]) for cell in added if isinstance(cell.get("slot_id"), str)}
@@ -414,6 +435,8 @@ def apply_backfill(
     added_slots = [str(cell["slot_id"]) for cell in added if isinstance(cell.get("slot_id"), str)]
     previous = summary.get("backfill") if isinstance(summary.get("backfill"), Mapping) else {}
     previous_added = [str(slot) for slot in previous.get("added_slot_ids") or [] if isinstance(slot, str)]
+    capacity = _capacity(new_rows, remaining, case_cap, budget)
+    requirements = _preflight_requirements(summary)
     updated = dict(summary)
     updated.update(
         {
@@ -424,6 +447,8 @@ def apply_backfill(
             "missing_required": [str(gap["slot_id"]) for gap in blocking if isinstance(gap.get("slot_id"), str)],
             "gaps": remaining,
             "contrast_families": families,
+            "capacity": capacity,
+            "quality_gate_preflight": _quality_gate_preflight(capacity, requirements),
             "backfill": {
                 "rounds": (
                     previous.get("rounds") + 1
@@ -672,11 +697,29 @@ def _multi_turn(
 
 
 def _optional_cells(
-    rule: PolicyRule, by_id: Mapping[str, PolicyRule], primary: str | None, modules: Mapping[str, Any]
+    rule: PolicyRule,
+    by_id: Mapping[str, PolicyRule],
+    primary: str | None,
+    modules: Mapping[str, Any],
+    *,
+    max_turns: int,
+    mix_multi_turn: bool,
 ) -> list[dict[str, Any]]:
     rules = tuple(by_id[policy_id] for policy_id in sorted(by_id))
     cells: list[dict[str, Any]] = []
     preserved = ("preserves_label",)
+    if mix_multi_turn and primary_action(rule) is not None and max_turns >= 2:
+        cells.append(
+            _planned(
+                rule,
+                rules,
+                "multi_turn",
+                primary=primary,
+                priority="optional",
+                flags=("mix_turns", *preserved),
+                turns=min(2, max_turns),
+            )
+        )
     if modules.get("adversarial") is True and primary_action(rule) is not None:
         cells.append(_planned(rule, rules, "adversarial", primary=primary, priority="optional", flags=preserved))
     if modules.get("political_symmetry") is True:
@@ -684,6 +727,17 @@ def _optional_cells(
     if modules.get("persona") is True:
         cells.append(_planned(rule, rules, "persona", primary=primary, priority="optional", flags=preserved))
     return cells
+
+
+def _wants_mix_multi_turn(generation: Mapping[str, Any] | None) -> bool:
+    """Optional multi-turn cells exist only when the configured mix asks for some."""
+    if not isinstance(generation, Mapping):
+        return False
+    mix = generation.get("turn_mix")
+    if not isinstance(mix, Mapping):
+        return False
+    share = mix.get("multi_turn")
+    return isinstance(share, (int, float)) and not isinstance(share, bool) and share > 0
 
 
 def _contrast_families(
@@ -765,7 +819,7 @@ def _schedule(
             gaps.append({**stored, "reason": hold, "blocks_gold": True})
             return
         policy_id = str(cell["policy_id"])
-        if used.get(policy_id, 0) >= _rule_cap(str(cell["severity"]), budget):
+        if used.get(policy_id, 0) >= _rule_limit(cell, budget):
             gaps.append({**stored, "reason": "rule_cap", "blocks_gold": blocks_gold})
             return
         if len(rows) >= case_cap:
@@ -943,6 +997,173 @@ def _rule_cap(severity: str, budget: Mapping[str, Any]) -> int:
     return int(budget[key])
 
 
+def _rule_limit(cell: Mapping[str, Any], budget: Mapping[str, Any]) -> int:
+    """Every cell, including a mix-derived cell, obeys the per-rule maximum."""
+    return _rule_cap(str(cell.get("severity") or "medium"), budget)
+
+
+def _capacity(
+    rows: Sequence[Mapping[str, Any]],
+    gaps: Sequence[Mapping[str, Any]],
+    case_cap: int,
+    budget: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Conservative final-count upper bounds from grounded inventory."""
+    inventory = [dict(row) for row in rows]
+    occupied = {cell_distinctness_key(row) for row in rows}
+    distinct_gaps = 0
+    for gap in gaps:
+        if str(gap.get("reason") or "") in _UNGENERATABLE_GAP_REASONS:
+            continue
+        key = cell_distinctness_key(gap)
+        if key in occupied:
+            continue
+        occupied.add(key)
+        inventory.append(dict(gap))
+        distinct_gaps += 1
+
+    by_policy_inventory: dict[str, int] = {}
+    policy_caps: dict[str, int] = {}
+    by_action_inventory: dict[str, int] = {}
+    by_language_inventory: dict[str, int] = {}
+    for cell in inventory:
+        policy_id = str(cell.get("policy_id") or "")
+        if policy_id:
+            by_policy_inventory[policy_id] = by_policy_inventory.get(policy_id, 0) + 1
+            policy_caps[policy_id] = _rule_limit(cell, budget)
+        action = cell.get("expected_action")
+        action_name = "unlabeled" if action is None else str(action)
+        by_action_inventory[action_name] = by_action_inventory.get(action_name, 0) + 1
+        for language in _cell_languages(cell):
+            by_language_inventory[language] = by_language_inventory.get(language, 0) + 1
+
+    by_policy = {
+        policy_id: min(count, policy_caps[policy_id], case_cap)
+        for policy_id, count in sorted(by_policy_inventory.items())
+    }
+    final_upper_bound = min(case_cap, sum(by_policy.values()))
+    return {
+        "case_cap": case_cap,
+        "planned_candidates": len(rows),
+        "additional_distinct_cells": distinct_gaps,
+        "final_case_upper_bound": final_upper_bound,
+        "by_policy": by_policy,
+        "by_action": {
+            action: min(count, final_upper_bound)
+            for action, count in sorted(by_action_inventory.items())
+        },
+        "by_language": {
+            language: min(count, final_upper_bound)
+            for language, count in sorted(by_language_inventory.items())
+        },
+    }
+
+
+def _cell_languages(cell: Mapping[str, Any]) -> tuple[str, ...]:
+    languages: list[str] = []
+    listed = cell.get("languages")
+    if isinstance(listed, list):
+        languages.extend(item for item in listed if isinstance(item, str) and item.strip())
+    for key in ("language", "source_language"):
+        language = cell.get(key)
+        if isinstance(language, str) and language.strip():
+            languages.append(language)
+    return tuple(dict.fromkeys(item.casefold() for item in languages))
+
+
+def _quality_gate_preflight(
+    capacity: Mapping[str, Any], requirements: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Prove only inventory-level impossibilities; final gates run after split."""
+    copied = dict(requirements) if isinstance(requirements, Mapping) else {}
+    failures: list[dict[str, Any]] = []
+    upper = int(capacity.get("final_case_upper_bound") or 0)
+
+    def fail(gate: str, required: int, available: int, slice_name: str | None = None) -> None:
+        if required <= available:
+            return
+        row: dict[str, Any] = {
+            "gate": gate,
+            "required": required,
+            "available_upper_bound": available,
+            "missing": required - available,
+        }
+        if slice_name is not None:
+            row["slice"] = slice_name
+        failures.append(row)
+
+    min_total = _preflight_count(copied, "min_total_cases")
+    min_development = _preflight_count(copied, "min_development_cases")
+    min_private = _preflight_count(copied, "min_private_test_cases")
+    fail("min_total_cases", max(min_total, min_development + min_private), upper)
+
+    per_policy = _preflight_count(copied, "min_cases_per_policy")
+    by_policy = capacity.get("by_policy") if isinstance(capacity.get("by_policy"), Mapping) else {}
+    for policy_id, available in sorted(by_policy.items()):
+        if isinstance(available, int) and not isinstance(available, bool):
+            fail("min_cases_per_policy", per_policy, available, str(policy_id))
+
+    for gate, capacity_key in (
+        ("min_cases_per_action", "by_action"),
+        ("min_cases_per_language", "by_language"),
+    ):
+        minima = copied.get(gate)
+        available_by_slice = (
+            capacity.get(capacity_key) if isinstance(capacity.get(capacity_key), Mapping) else {}
+        )
+        if not isinstance(minima, Mapping):
+            continue
+        for name, required in minima.items():
+            if isinstance(required, bool) or not isinstance(required, int):
+                continue
+            key = str(name).casefold()
+            available = available_by_slice.get(key, 0)
+            if isinstance(available, int) and not isinstance(available, bool):
+                fail(gate, required, available, str(name))
+
+    failures.sort(key=lambda row: (str(row["gate"]), str(row.get("slice") or "")))
+    return {
+        "enabled": _preflight_enabled(copied),
+        "possible": not failures,
+        "requirements": copied,
+        "failures": failures,
+    }
+
+
+def _preflight_count(requirements: Mapping[str, Any], key: str) -> int:
+    value = requirements.get(key, 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _preflight_enabled(requirements: Mapping[str, Any]) -> bool:
+    if any(
+        _preflight_count(requirements, key) > 0
+        for key in (
+            "min_total_cases",
+            "min_development_cases",
+            "min_private_test_cases",
+            "min_cases_per_policy",
+        )
+    ):
+        return True
+    for key in ("min_cases_per_action", "min_cases_per_language"):
+        minima = requirements.get(key)
+        if isinstance(minima, Mapping) and any(
+            isinstance(value, int) and not isinstance(value, bool) and value > 0
+            for value in minima.values()
+        ):
+            return True
+    return False
+
+
+def _preflight_requirements(summary: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    preflight = summary.get("quality_gate_preflight")
+    if not isinstance(preflight, Mapping):
+        return None
+    requirements = preflight.get("requirements")
+    return requirements if isinstance(requirements, Mapping) else None
+
+
 def _module_status(modules: Mapping[str, Any]) -> dict[str, str]:
     symmetry = modules.get("political_symmetry")
     if symmetry is True:
@@ -957,6 +1178,7 @@ def _module_status(modules: Mapping[str, Any]) -> dict[str, str]:
         "adversarial": "enabled" if modules.get("adversarial") is True else "disabled",
         "political_symmetry": symmetry_status,
         "persona": "enabled" if modules.get("persona") is True else "disabled",
+        "paraphrase": "enabled" if modules.get("paraphrase") is True else "disabled",
         "production_replay": "not_configured",
     }
 

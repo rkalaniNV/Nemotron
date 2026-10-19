@@ -108,6 +108,12 @@ def explain(status: RunStatus, run_dir: Path) -> str:
             f"Output directory: {run_dir}."
         )
     if status is RunStatus.QUALITY_GATES_FAILED:
+        if not review_page.is_file():
+            return (
+                "Minimum dataset quality gates cannot be met by the grounded cell inventory, "
+                "and quality_gates.on_failure is fail, so generation stopped before scenario-model calls. "
+                f"Capacity details: {run_dir / 'stage_cache' / 'coverage_gaps.json'}."
+            )
         return (
             "Minimum dataset quality gates were not met, and quality_gates.on_failure is fail, "
             "so no benchmark was published. The review packet still lists the unmet gates. "

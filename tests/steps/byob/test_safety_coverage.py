@@ -28,6 +28,7 @@ _MODULES = {
     "political_symmetry": "confirm_if_detected",
     "production_replay": "auto_if_evidence_exists",
     "persona": False,
+    "paraphrase": True,
 }
 
 
@@ -100,6 +101,7 @@ def _plan(rules: list[Any], **options: Any) -> Any:
         generation=options.pop("generation", None),
         routed=options.pop("routed", None),
         target_languages=options.pop("target_languages", ()),
+        quality_gates=options.pop("quality_gates", None),
     )
 
 
@@ -334,6 +336,128 @@ def test_code_switch_requires_grounded_evidence_and_two_declared_languages() -> 
     assert cell["languages"] == ["vi-VN", "en-US"]
     assert cell["reason"] == "translation_required"
     assert [row for row in plan.gaps if row["kind"] == "code_switch" and row["policy_id"] == "NEG"] == []
+
+
+def test_turn_mix_adds_optional_multi_turn_from_a_single_turn_rule() -> None:
+    rule = _rule("SOLO", quote="Block it.")
+    plan = _plan(
+        [rule],
+        generation={
+            "decision_mix": {"allow": 0.5, "block": 0.5},
+            "case_family_mix": {"clear": 1.0, "boundary": 0.0, "exception": 0.0, "contrast": 0.0},
+            "turn_mix": {"single_turn": 0.80, "multi_turn": 0.20},
+        },
+    )
+
+    [cell] = [row for row in (*plan.rows, *plan.gaps) if row["kind"] == "multi_turn"]
+    assert cell["priority"] == "optional"
+    assert cell["turns"] == 2
+    assert cell["expected_action"] == "block"
+    assert "mix_turns" in cell["flags"]
+    assert cell.get("blocks_gold") is not True
+
+
+def test_a_zero_multi_turn_mix_does_not_invent_cells() -> None:
+    plan = _plan(
+        [_rule("SOLO", quote="Block it.")],
+        generation={
+            "decision_mix": {"allow": 0.5, "block": 0.5},
+            "case_family_mix": {"clear": 1.0, "boundary": 0.0, "exception": 0.0, "contrast": 0.0},
+            "turn_mix": {"single_turn": 1.0, "multi_turn": 0.0},
+        },
+    )
+
+    assert [row for row in (*plan.rows, *plan.gaps) if row["kind"] == "multi_turn"] == []
+
+
+def test_a_grounded_multi_turn_rule_does_not_also_get_a_mix_cell() -> None:
+    plan = _plan(
+        [_rule("TURN", signals={"multi_turn_turns": 4})],
+        generation={
+            "decision_mix": {"allow": 0.5, "block": 0.5},
+            "case_family_mix": {"clear": 1.0, "boundary": 0.0, "exception": 0.0, "contrast": 0.0},
+            "turn_mix": {"single_turn": 0.80, "multi_turn": 0.20},
+        },
+    )
+
+    cells = [row for row in (*plan.rows, *plan.gaps) if row["kind"] == "multi_turn"]
+    assert len(cells) == 1
+    assert cells[0]["priority"] == "required"
+    assert cells[0]["turns"] == 4
+    assert "mix_turns" not in cells[0].get("flags", [])
+
+
+def test_mix_multi_turn_obeys_the_per_rule_cap() -> None:
+    plan = _plan(
+        [_rule("SOLO", quote="Block it.")],
+        budget=_budget(cases_per_critical_rule=3),
+        generation={
+            "decision_mix": {"allow": 0.5, "block": 0.5},
+            "case_family_mix": {"clear": 1.0, "boundary": 0.0, "exception": 0.0, "contrast": 0.0},
+            "turn_mix": {"single_turn": 0.80, "multi_turn": 0.20},
+        },
+    )
+
+    assert plan.certification == "gold"
+    assert [row for row in plan.rows if row["kind"] == "multi_turn"] == []
+    [cell] = [row for row in plan.gaps if row["kind"] == "multi_turn"]
+    assert cell["priority"] == "optional"
+    assert cell["reason"] == "rule_cap"
+    assert cell["blocks_gold"] is False
+    assert "mix_turns" in cell["flags"]
+    assert plan.summary()["capacity"]["planned_candidates"] == 3
+    assert plan.summary()["capacity"]["final_case_upper_bound"] == 3
+
+
+def test_quality_gate_preflight_uses_grounded_inventory_upper_bounds() -> None:
+    plan = _plan(
+        [_rule("SOLO")],
+        quality_gates={"min_total_cases": 4, "on_failure": "fail"},
+    )
+
+    preflight = plan.summary()["quality_gate_preflight"]
+    assert preflight["possible"] is False
+    assert preflight["requirements"]["min_total_cases"] == 4
+    assert preflight["failures"] == [
+        {
+            "gate": "min_total_cases",
+            "required": 4,
+            "available_upper_bound": 3,
+            "missing": 1,
+        }
+    ]
+
+
+def test_a_mix_multi_turn_omitted_by_the_cap_does_not_block_gold() -> None:
+    plan = _plan(
+        [_rule("SOLO", quote="Block it.")],
+        cap=3,
+        generation={
+            "decision_mix": {"allow": 0.5, "block": 0.5},
+            "case_family_mix": {"clear": 1.0, "boundary": 0.0, "exception": 0.0, "contrast": 0.0},
+            "turn_mix": {"single_turn": 0.80, "multi_turn": 0.20},
+        },
+    )
+
+    assert plan.certification == "gold"
+    [gap] = [row for row in plan.gaps if row["kind"] == "multi_turn"]
+    assert gap["priority"] == "optional"
+    assert gap["blocks_gold"] is False
+
+
+def test_max_turns_below_two_does_not_invent_a_mix_multi_turn_gap() -> None:
+    plan = _plan(
+        [_rule("SOLO", quote="Block it.")],
+        budget=_budget(cases_per_critical_rule=20, max_turns=1),
+        generation={
+            "decision_mix": {"allow": 0.5, "block": 0.5},
+            "case_family_mix": {"clear": 1.0, "boundary": 0.0, "exception": 0.0, "contrast": 0.0},
+            "turn_mix": {"single_turn": 0.80, "multi_turn": 0.20},
+        },
+    )
+
+    assert [row for row in (*plan.rows, *plan.gaps) if row["kind"] == "multi_turn"] == []
+    assert plan.certification == "gold"
 
 
 def test_sequence_phrases_do_not_add_a_multi_turn_case() -> None:
@@ -628,7 +752,13 @@ def test_backfill_promotes_distinct_cells_and_skips_quote_copies(tmp_path: Path)
 
     assert {cell["slot_id"] for cell in added} == {"P-1/clear_allow", "P-1/boundary"}
     assert all(cell_distinctness_key(cell) != cell_distinctness_key(scheduled[0]) for cell in added)
-    rows, summary = apply_backfill(scheduled, _backfill_summary(scheduled, gaps), added)
+    rows, summary = apply_backfill(
+        scheduled,
+        _backfill_summary(scheduled, gaps),
+        added,
+        case_cap=3,
+        budget=_budget(),
+    )
     assert rows[0]["slot_id"] == "P-1/clear_violation"
     assert {row["slot_id"] for row in rows[1:]} == {"P-1/clear_allow", "P-1/boundary"}
     assert all(row.get("backfill") is True for row in rows[1:])
@@ -639,6 +769,8 @@ def test_backfill_promotes_distinct_cells_and_skips_quote_copies(tmp_path: Path)
         "P-1/turns",
     }
     assert summary["backfill"]["rounds"] == 1
+    assert summary["capacity"]["planned_candidates"] == 3
+    assert summary["capacity"]["final_case_upper_bound"] == 3
     members = {
         member["slot_id"]: member["scheduled"] for member in summary["contrast_families"][0]["members"]
     }
