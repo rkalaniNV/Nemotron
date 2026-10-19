@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 PATH1_ADAPTERS = frozenset({"openai_compatible", "test"})
 PATH2_ADAPTERS = frozenset({"mocked_guardrails", "nemo_guardrails"})
+PATH1_EVALUATION_MODES = frozenset({"canonical_classifier_prompt", "fixed_system_prompt", "native_guard"})
 SMOKE_MESSAGE = "ADAPTER_SMOKE"
 
 
@@ -20,6 +21,7 @@ class GuardAdapter(Protocol):
 
     name: str
     max_concurrency: int
+    evaluation_mode: str
 
     @property
     def public_identity(self) -> Mapping[str, Any]:

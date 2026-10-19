@@ -197,6 +197,8 @@ def test_eval_stage_scores_a_published_benchmark(tmp_path: Path) -> None:
     path2 = json.loads((run_dir / PATH2_FILE).read_text(encoding="utf-8"))
     assert path1["status"] == "completed"
     assert path2["status"] == "completed"
+    assert path1["evaluation_mode"] == "scripted_responses"
+    assert path2["evaluation_mode"] == "recorded_guardrails_log"
     assert path1["parse_failures"] == 0
     assert path1["timeouts"] == 0
     assert path1["model_errors"] == 0
@@ -297,6 +299,7 @@ def test_adapter_smoke_uses_only_synthetic_input_and_writes_no_prompt(tmp_path: 
     written = (tmp_path / SMOKE_FILE).read_text(encoding="utf-8")
     assert "ADAPTER_SMOKE" not in written
     assert json.loads(written)["paths"]["path1"]["status"] == "passed"
+    assert json.loads(written)["paths"]["path1"]["evaluation_mode"] == "scripted_responses"
 
 
 def test_multi_turn_case_scores_each_labelled_turn() -> None:
@@ -380,6 +383,8 @@ def test_openai_compatible_adapter_calls_endpoint_without_answer_key(
     assert adapter.public_identity["endpoint"].endswith("?<redacted>")
     assert "2026-01-01" not in json.dumps(adapter.public_identity)
     assert "secret-never-persisted" not in json.dumps(adapter.public_identity)
+    assert adapter.public_identity["evaluation_mode"] == "canonical_classifier_prompt"
+    assert adapter.public_identity["system_prompt_sha256"].startswith("sha256:")
 
 
 def test_openai_compatible_adapter_attributes_rate_limit() -> None:
@@ -475,6 +480,7 @@ def test_nemo_guardrails_adapter_calls_live_configuration() -> None:
 
     assert reply["decision"] == "block"
     assert reply["rails"] == [{"name": "input safety", "activated": True, "duration_ms": 7.5}]
+    assert adapter.public_identity["evaluation_mode"] == "guardrails_configuration"
 
 
 def test_unmapped_vendor_labels_are_malformed_not_guessed() -> None:
@@ -508,6 +514,7 @@ def test_system_prompt_can_be_omitted_for_native_templates() -> None:
         {
             "endpoint": "https://guard.example/v1/chat/completions",
             "model": "customer-guard",
+            "evaluation_mode": "native_guard",
             "system_prompt": None,
             "retry_backoff_seconds": 0,
         },
@@ -519,6 +526,38 @@ def test_system_prompt_can_be_omitted_for_native_templates() -> None:
         adapter.close()
 
     assert reply["decision"] == "allow"
+    assert adapter.public_identity["evaluation_mode"] == "native_guard"
+    assert adapter.public_identity["system_prompt_sha256"] is None
+
+
+def test_fixed_system_prompt_mode_records_only_prompt_digest() -> None:
+    prompt = "Apply the customer policy consistently."
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["messages"][0] == {"role": "system", "content": prompt}
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"decision":"allow"}'}}]})
+
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions",
+            "model": "customer-guard",
+            "evaluation_mode": "fixed_system_prompt",
+            "system_prompt": prompt,
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(handle),
+    )
+    try:
+        reply = adapter.decide({"messages": [{"role": "user", "content": "hello"}], "targets": ["user_input"]})
+    finally:
+        adapter.close()
+
+    identity = adapter.public_identity
+    assert reply["decision"] == "allow"
+    assert identity["evaluation_mode"] == "fixed_system_prompt"
+    assert identity["system_prompt_sha256"].startswith("sha256:")
+    assert prompt not in json.dumps(identity)
 
 
 def test_guardrails_does_not_infer_a_decision_from_refusal_text() -> None:

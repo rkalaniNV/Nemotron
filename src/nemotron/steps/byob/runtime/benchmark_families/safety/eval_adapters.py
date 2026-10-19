@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -15,7 +16,10 @@ from urllib.parse import urlparse
 
 import httpx
 
-from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import EvalInputError
+from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import (
+    PATH1_EVALUATION_MODES,
+    EvalInputError,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS
 
 _ACTIONS = frozenset(ACTIONS)
@@ -146,16 +150,7 @@ class OpenAICompatibleAdapter(EndpointAdapter):
         if not isinstance(model, str) or not model.strip():
             raise EvalInputError("evaluation.path1.model must be a non-empty string.")
         self.model = model.strip()
-        if "system_prompt" not in config:
-            self.system_prompt: str | None = _DEFAULT_SYSTEM_PROMPT
-        else:
-            system_prompt = config.get("system_prompt")
-            if system_prompt is None:
-                self.system_prompt = None
-            elif not isinstance(system_prompt, str):
-                raise EvalInputError("evaluation.path1.system_prompt must be a string or null.")
-            else:
-                self.system_prompt = system_prompt if system_prompt.strip() else None
+        self.evaluation_mode, self.system_prompt = _path1_prompt_contract(config)
         raw_options = config.get("request_options") or {}
         if not isinstance(raw_options, Mapping):
             raise EvalInputError("evaluation.path1.request_options must be an object.")
@@ -167,7 +162,12 @@ class OpenAICompatibleAdapter(EndpointAdapter):
 
     @property
     def public_identity(self) -> dict[str, Any]:
-        return {**super().public_identity, "model": self.model}
+        return {
+            **super().public_identity,
+            "model": self.model,
+            "evaluation_mode": self.evaluation_mode,
+            "system_prompt_sha256": _prompt_digest(self.system_prompt),
+        }
 
     def decide(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         if not self._supports(request):
@@ -194,6 +194,7 @@ class NemoGuardrailsAdapter(EndpointAdapter):
     """Run a conversation through a live NeMo Guardrails HTTP service."""
 
     name = "nemo_guardrails"
+    evaluation_mode = "guardrails_configuration"
 
     def __init__(
         self,
@@ -228,6 +229,7 @@ class NemoGuardrailsAdapter(EndpointAdapter):
             "config_id": self.config_id,
             "model": self.model,
             "api_format": self.api_format,
+            "evaluation_mode": self.evaluation_mode,
         }
 
     def decide(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -253,6 +255,47 @@ class NemoGuardrailsAdapter(EndpointAdapter):
         reply = self._canonical_reply(_get_path(document, self.decision_path), latency)
         reply["rails"] = _normalize_rails(_get_path(document, self.rails_path))
         return reply
+
+
+def _path1_prompt_contract(config: Mapping[str, Any]) -> tuple[str, str | None]:
+    supplied_mode = config.get("evaluation_mode")
+    prompt_is_set = "system_prompt" in config
+    prompt = config.get("system_prompt")
+    if prompt is not None and not isinstance(prompt, str):
+        raise EvalInputError("evaluation.path1.system_prompt must be a string or null.")
+    normalized_prompt = prompt if isinstance(prompt, str) and prompt.strip() else None
+    if supplied_mode is None:
+        if not prompt_is_set:
+            mode = "canonical_classifier_prompt"
+        elif normalized_prompt is None:
+            mode = "native_guard"
+        else:
+            mode = "fixed_system_prompt"
+    elif isinstance(supplied_mode, str) and supplied_mode in PATH1_EVALUATION_MODES:
+        mode = supplied_mode
+    else:
+        raise EvalInputError(
+            "evaluation.path1.evaluation_mode must be one of " + ", ".join(sorted(PATH1_EVALUATION_MODES)) + "."
+        )
+    if mode == "native_guard":
+        if normalized_prompt is not None:
+            raise EvalInputError("native_guard must not configure a non-empty system_prompt.")
+        return mode, None
+    if mode == "fixed_system_prompt":
+        if normalized_prompt is None:
+            raise EvalInputError("fixed_system_prompt requires a non-empty system_prompt.")
+        return mode, normalized_prompt
+    if prompt_is_set and normalized_prompt is not None:
+        raise EvalInputError(
+            "canonical_classifier_prompt uses the built-in prompt; remove system_prompt or select fixed_system_prompt."
+        )
+    return mode, _DEFAULT_SYSTEM_PROMPT
+
+
+def _prompt_digest(prompt: str | None) -> str | None:
+    if prompt is None:
+        return None
+    return "sha256:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
 def _endpoint(config: Mapping[str, Any]) -> str:

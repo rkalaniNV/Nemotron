@@ -67,6 +67,7 @@ class TestAdapter:
     __test__ = False
     name = "test"
     max_concurrency = 1
+    evaluation_mode = "scripted_responses"
 
     def __init__(self, responses: Mapping[str, Mapping[str, Any]]) -> None:
         self.responses = {str(key): dict(value) for key, value in responses.items() if isinstance(value, Mapping)}
@@ -157,7 +158,13 @@ def evaluate_published(
         if path2_adapter is not None:
             started = time.perf_counter()
             path2_rows = _adapter_rows(events, path2_adapter)
-            path2 = score_path2(events, path2_rows, split=split, adapter=path2_adapter.name)
+            path2 = score_path2(
+                events,
+                path2_rows,
+                split=split,
+                adapter=path2_adapter.name,
+                evaluation_mode=path2_adapter.evaluation_mode,
+            )
             _add_throughput(path2, len(events), time.perf_counter() - started)
             path2["target"] = dict(path2_adapter.public_identity)
         elif path2_rows is not None:
@@ -225,6 +232,7 @@ def _smoke_adapter(
             status = "malformed"
     entry = {
         "adapter": adapter.name,
+        "evaluation_mode": adapter.evaluation_mode,
         "status": "passed" if status == PARSE_OK else "failed",
         "parse_status": status,
         "decision": decision,
@@ -259,6 +267,7 @@ def score_path1(events: Sequence[Mapping[str, Any]], adapter: GuardAdapter, *, s
     elapsed = time.perf_counter() - started
     rows = [score_reply(event, reply) for event, reply in zip(events, replies, strict=True)]
     summary = summarize(rows, path="path1", adapter=adapter.name, split=split)
+    summary["evaluation_mode"] = adapter.evaluation_mode
     _add_throughput(summary, len(events), elapsed)
     identity = getattr(adapter, "public_identity", None)
     if isinstance(identity, Mapping):
@@ -291,6 +300,7 @@ def score_path2(
     *,
     split: str,
     adapter: str = "mocked_guardrails",
+    evaluation_mode: str = "recorded_guardrails_log",
 ) -> dict[str, Any]:
     """Compare expected decisions to Guardrails results and record rail timing."""
     by_id = _index_log(log_rows)
@@ -311,6 +321,7 @@ def score_path2(
         row["rails"] = _rails(logged.get("rails"))
         rows.append(row)
     summary = summarize(rows, path="path2", adapter=adapter, split=split)
+    summary["evaluation_mode"] = evaluation_mode
     summary["rails"] = _rail_summary(rows)
     summary["comparisons"] = [{**_comparison(row), "rails": row.get("rails") or []} for row in rows]
     scored = [row for row in rows if row.get("scored")]
