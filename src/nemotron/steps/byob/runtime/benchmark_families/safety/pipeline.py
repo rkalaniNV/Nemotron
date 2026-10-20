@@ -48,6 +48,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import (
     load_eligible_rules,
     load_routed_statuses,
     quality_gate_shortfall,
+    realize_held_cells,
     rewrite_coverage_plan,
     rule_level_rejected_policies,
     select_backfill_cells,
@@ -76,6 +77,11 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
     rule_input_digests,
     write_artifacts,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.localize import (
+    LOCALIZE_OUTPUTS,
+    apply_localizations,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.localize import REPORT_FILE as LOCALIZE_REPORT
 from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import (
     PARAPHRASE_OUTPUTS,
     apply_paraphrases,
@@ -417,6 +423,7 @@ def _publication_blocker(
             None,
         )
     scenarios = _scenario_stage(config, digest, fingerprint)
+    coverage = _coverage_after_localization(coverage, scenarios)
     dataset = _dataset_stage(config, digest, fingerprint)
     coverage, scenarios, dataset = _backfill_quality_gates(config, digest, fingerprint, coverage, scenarios, dataset)
     record["coverage"] = coverage
@@ -432,7 +439,7 @@ def _publication_blocker(
     scenario_note = (
         f"Scenarios: {scenarios['accepted']} accepted, {scenarios['rejected']} rejected, "
         f"{scenarios['reused_missing_leg']} missing-leg cases reused"
-        f"{_paraphrase_note(scenarios)}."
+        f"{_paraphrase_note(scenarios)}{_localize_note(scenarios)}."
     )
     dataset_note = (
         f"Dataset: {dataset['validated']} validated, {dataset['rejected']} rejected, "
@@ -569,7 +576,7 @@ def _rule_stages(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[
     bound = {"config_sha256": digest, "source_fingerprint": fingerprint}
     stage_cache = run_dir / "stage_cache"
     # The plan and its cases name rules from the previous result. Drop both before the index changes.
-    for name in (*COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS, *DATASET_OUTPUTS):
+    for name in (*COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS, *LOCALIZE_OUTPUTS, *DATASET_OUTPUTS):
         (stage_cache / name).unlink(missing_ok=True)
     index["stages"].pop("coverage_plan", None)
     index["stages"].pop("scenarios", None)
@@ -653,7 +660,7 @@ def _coverage_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
 
 
 def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dict[str, Any]:
-    """Write one conversation per scheduled plan cell. Paraphrase may call a model."""
+    """Write one conversation per scheduled plan cell. Paraphrase and localization may call a model."""
     run_dir = config.run_dir
     stage_cache = run_dir / "stage_cache"
     index_path = stage_cache / "cache_index.json"
@@ -680,23 +687,53 @@ def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
         extractor = None
         enabled = config.generation["modules"].get("paraphrase") is True
         variants_added = 0
+        try:
+            extractor = extraction.make_extractor(config, run_dir)
+        except ValueError:
+            extractor = None
+        case_cap = case_cap_for(config.mode, config.budget)
         if enabled:
             build, variants_added = expand_paraphrase_variants(
                 build,
                 variants_per_cell=int(config.generation.get("paraphrases_per_cell", 1)),
-                case_cap=case_cap_for(config.mode, config.budget),
+                case_cap=case_cap,
             )
-            try:
-                extractor = extraction.make_extractor(config, run_dir)
-            except ValueError:
-                extractor = None
         build, paraphrase = apply_paraphrases(build, extractor, stage_cache, enabled=enabled, rules=rules)
         paraphrase["variants_added"] = variants_added
+        country = config.proposals.get("country")
+        country_text = country.strip() if isinstance(country, str) else ""
+        if country_text.casefold() in {"", "unspecified"}:
+            country_text = ""
+        build, localization = apply_localizations(
+            build,
+            gaps if isinstance(gaps, Mapping) else {},
+            extractor,
+            stage_cache,
+            country=country_text,
+            planned_rows=rows,
+            case_cap=case_cap,
+        )
+        if localization.get("status") == "applied":
+            plan_rows = load_plan_rows((stage_cache / PLAN_FILE).read_text(encoding="utf-8"))
+            gaps_doc = json.loads((stage_cache / GAPS_FILE).read_text(encoding="utf-8"))
+            if not isinstance(gaps_doc, dict):
+                raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "coverage_gaps.json must be an object.")
+            new_rows, updated_gaps = realize_held_cells(
+                plan_rows,
+                gaps_doc,
+                localization.get("realized_slot_ids") or [],
+                case_cap=case_cap,
+                budget=config.budget,
+            )
+            localization["coverage"] = rewrite_coverage_plan(stage_cache, new_rows, updated_gaps)
+            _record_coverage_backfill(stage_cache, run_dir, digest, fingerprint, localization["coverage"])
         summary = write_scenarios(stage_cache, build)
         summary["paraphrase"] = paraphrase
+        summary["localization"] = localization
         _write_json(stage_cache / PARAPHRASE_REPORT, paraphrase)
+        _write_json(stage_cache / LOCALIZE_REPORT, localization)
     except Exception as exc:
-        for name in (*SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS):
+        for name in (*SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS, *LOCALIZE_OUTPUTS):
             (stage_cache / name).unlink(missing_ok=True)
         outcome = exc.status.value if isinstance(exc, SafetyStatus) else type(exc).__name__
         index["stages"]["scenarios"] = {"status": "failed", "outcome": outcome, **bound, "failed_at": _now()}
@@ -711,6 +748,7 @@ def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
         "accepted": summary["accepted"],
         "rejected": summary["rejected"],
         "paraphrased": paraphrase["applied"],
+        "localized": localization.get("applied") if isinstance(localization.get("applied"), int) else 0,
     }
     _write_json(index_path, index)
     return summary
@@ -850,6 +888,7 @@ def _backfill_quality_gates(
         coverage = rewrite_coverage_plan(stage_cache, new_rows, updated)
         _record_coverage_backfill(stage_cache, run_dir, digest, fingerprint, coverage)
         scenarios = _scenario_stage(config, digest, fingerprint)
+        coverage = _coverage_after_localization(coverage, scenarios)
         dataset = _dataset_stage(config, digest, fingerprint)
         if _current_shortfall(stage_cache, run_dir) < before:
             continue
@@ -858,6 +897,7 @@ def _backfill_quality_gates(
         coverage = previous_coverage
         _record_coverage_backfill(stage_cache, run_dir, digest, fingerprint, coverage)
         scenarios = _scenario_stage(config, digest, fingerprint)
+        coverage = _coverage_after_localization(coverage, scenarios)
         dataset = _dataset_stage(config, digest, fingerprint)
         break
     return coverage, scenarios, dataset
@@ -908,8 +948,23 @@ def _record_coverage_backfill(
     else:
         entry.pop("backfill_rounds", None)
         entry.pop("backfill_added", None)
+    localization = coverage.get("localization")
+    if isinstance(localization, Mapping):
+        entry["localization_realized"] = len(localization.get("realized_slot_ids") or [])
+    else:
+        entry.pop("localization_realized", None)
     index["stages"]["coverage_plan"] = entry
     _write_json(index_path, index)
+
+
+def _coverage_after_localization(coverage: Mapping[str, Any], scenarios: Mapping[str, Any]) -> dict[str, Any]:
+    localization = scenarios.get("localization")
+    if not isinstance(localization, Mapping):
+        return dict(coverage)
+    updated = localization.get("coverage")
+    if isinstance(updated, Mapping) and updated.get("certification"):
+        return dict(updated)
+    return dict(coverage)
 
 
 def _paraphrase_note(scenarios: Mapping[str, Any]) -> str:
@@ -922,6 +977,19 @@ def _paraphrase_note(scenarios: Mapping[str, Any]) -> str:
     reason = report.get("skipped_reason")
     if report.get("status") == "skipped" and isinstance(reason, str) and reason:
         return f", paraphrase skipped ({reason})"
+    return ""
+
+
+def _localize_note(scenarios: Mapping[str, Any]) -> str:
+    report = scenarios.get("localization")
+    if not isinstance(report, Mapping):
+        return ""
+    applied = report.get("applied")
+    if isinstance(applied, int) and not isinstance(applied, bool) and applied:
+        return f", {applied} localized"
+    reason = report.get("skipped_reason")
+    if report.get("status") == "skipped" and isinstance(reason, str) and reason:
+        return f", localization skipped ({reason})"
     return ""
 
 

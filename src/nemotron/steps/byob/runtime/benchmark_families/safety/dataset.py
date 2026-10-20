@@ -18,7 +18,7 @@
 The label is recomputed from the case facts. A stored action that disagrees is
 rejected and is not overwritten. A case with no eligible rule, or a quote that is
 not inside its source span, is rejected. Seed and proposal turns must still be
-the source quote; a paraphrase-origin turn may differ. An allow case marked
+the source quote; a paraphrase or translation origin may differ. An allow case marked
 ``surface_required`` whose scored turn is still the source quote is rejected
 with ``unrealized_surface`` and does not break its contrast pair. A required
 case rejected this way is listed in ``unrealized_surfaces`` and blocks Gold. When one
@@ -156,9 +156,7 @@ def select_dataset(
         aggregated[case_id] = action
     pairs = _complete_pairs(parsed_families, stored)
     _close_related(stored, reasons, pairs, eligible, by_id)
-    labels = tuple(
-        _label_row(stored[case_id], aggregated[case_id], reasons[case_id]) for case_id in sorted(stored)
-    )
+    labels = tuple(_label_row(stored[case_id], aggregated[case_id], reasons[case_id]) for case_id in sorted(stored))
     validated_rows = []
     for case_id in sorted(stored):
         if reasons[case_id]:
@@ -319,9 +317,7 @@ def _gate_count(requirements: Mapping[str, Any], key: str) -> int:
     return value
 
 
-def _gate_mapping(
-    requirements: Mapping[str, Any], key: str, *, language: bool = False
-) -> tuple[tuple[str, int], ...]:
+def _gate_mapping(requirements: Mapping[str, Any], key: str, *, language: bool = False) -> tuple[tuple[str, int], ...]:
     if key not in requirements:
         return ()
     value = requirements[key]
@@ -581,11 +577,7 @@ def _close_pairs(reasons: dict[str, list[str]], pairs: Sequence[tuple[str, Seque
     """A complete family is kept whole. One failed member rejects the members that passed."""
     changed = False
     for _family_id, ids in pairs:
-        failed = [
-            case_id
-            for case_id in ids
-            if reasons[case_id] and not set(reasons[case_id]) <= _SURFACE_REASONS
-        ]
+        failed = [case_id for case_id in ids if reasons[case_id] and not set(reasons[case_id]) <= _SURFACE_REASONS]
         if not failed or len(failed) == len(ids):
             continue
         for case_id in ids:
@@ -735,9 +727,7 @@ def _evidence_reasons(case: Mapping[str, Any], rule: PolicyRule, spans: Mapping[
     return reasons
 
 
-def _turn_reasons(
-    case: Mapping[str, Any], rule: PolicyRule, legs: tuple[list[str], list[str]] | None
-) -> list[str]:
+def _turn_reasons(case: Mapping[str, Any], rule: PolicyRule, legs: tuple[list[str], list[str]] | None) -> list[str]:
     turns = case.get("turns")
     if not isinstance(turns, list) or not turns:
         return ["invalid_turns"]
@@ -754,7 +744,7 @@ def _turn_reasons(
                 return ["turn_label_disagreement"]
         if (
             turn["scored"]
-            and case.get("origin") != "paraphrase"
+            and case.get("origin") not in {"paraphrase", "translation"}
             and legs is not None
             and isinstance(kind, str)
             and _text_differs(turn, rule, legs, kind, index, len(turns))
@@ -859,6 +849,8 @@ def _leg_list(value: Any) -> list[str] | None:
 def _protected_ids(
     cases: Sequence[Mapping[str, Any]],
     pairs: Sequence[tuple[str, Sequence[str]]],
+    *,
+    localizations: bool = False,
 ) -> set[str]:
     surviving = {str(case["case_id"]) for case in cases}
     protected: set[str] = set()
@@ -866,6 +858,16 @@ def _protected_ids(
         members = [str(case_id) for case_id in ids]
         if members and all(case_id in surviving for case_id in members):
             protected.update(members)
+    if localizations:
+        for case in cases:
+            if (
+                case.get("kind") in {"language", "code_switch"}
+                or case.get("origin") == "translation"
+                or case.get("localization_variant")
+            ):
+                case_id = str(case.get("case_id") or "")
+                if case_id:
+                    protected.add(case_id)
     return protected
 
 
@@ -1002,13 +1004,11 @@ def _semantic_deduplicate(
         raise DatasetInputError("semantic deduplication returned an invalid duplicate id")
     if len(set(marked)) != len(marked):
         raise DatasetInputError("semantic deduplication repeated a duplicate id")
-    protected = _protected_ids(kept, pairs)
+    protected = _protected_ids(kept, pairs, localizations=True)
     known = {str(case["case_id"]) for case in kept}
     unknown = sorted(set(marked) - known)
     if unknown:
-        raise DatasetInputError(
-            "semantic deduplication returned unknown duplicate ids: " + ", ".join(unknown)
-        )
+        raise DatasetInputError("semantic deduplication returned unknown duplicate ids: " + ", ".join(unknown))
     marked_ids = set(marked)
     drops: list[dict[str, Any]] = []
     remaining: list[dict[str, Any]] = []
@@ -1059,27 +1059,17 @@ def _manifest(
     )
     development = sorted(str(case["case_id"]) for case in cases)
     splits = {"development": development}
-    group_rows = [
-        {"group_id": group_id, "split": "development", "case_ids": members}
-        for group_id, members in ordered
-    ]
+    group_rows = [{"group_id": group_id, "split": "development", "case_ids": members} for group_id, members in ordered]
     reason = "complete" if development else "no_cases"
     case_by_id = {str(case["case_id"]): case for case in cases}
-    split_cases = {
-        name: [case_by_id[case_id] for case_id in case_ids]
-        for name, case_ids in splits.items()
-    }
+    split_cases = {name: [case_by_id[case_id] for case_id in case_ids] for name, case_ids in splits.items()}
     return {
         "complete": reason == "complete",
         "reason": reason,
         "splits": splits,
         "groups": group_rows,
         "dropped_duplicates": [
-            {
-                key: row[key]
-                for key in ("case_id", "kept_case_id")
-                if key in row
-            }
+            {key: row[key] for key in ("case_id", "kept_case_id") if key in row}
             for row in sorted(drops, key=lambda item: str(item["case_id"]))
         ],
         "balance": {
@@ -1093,9 +1083,7 @@ def _manifest(
                     "by_policy": _tally(rows, lambda case: str(case.get("policy_id"))),
                     "by_action": _tally(rows, _action_name),
                     "by_kind": _tally(rows, lambda case: str(case.get("kind"))),
-                    "by_language": _tally(
-                        rows, lambda case: _case_language(case, _rule_for(case, by_id))
-                    ),
+                    "by_language": _tally(rows, lambda case: _case_language(case, _rule_for(case, by_id))),
                 }
                 for name, rows in split_cases.items()
             },
@@ -1105,9 +1093,7 @@ def _manifest(
     }
 
 
-def _groups(
-    cases: Sequence[Mapping[str, Any]], pairs: Sequence[tuple[str, Sequence[str]]]
-) -> dict[str, list[str]]:
+def _groups(cases: Sequence[Mapping[str, Any]], pairs: Sequence[tuple[str, Sequence[str]]]) -> dict[str, list[str]]:
     """Union a contrast pair with the variants that copy the same violation."""
     parent = {str(case["case_id"]): str(case["case_id"]) for case in cases}
 

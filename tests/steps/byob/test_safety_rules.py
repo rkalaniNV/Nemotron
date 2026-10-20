@@ -203,10 +203,19 @@ def test_extracted_rules_keep_configured_source_and_target_languages(tmp_path: P
     assert row["rule"]["scope"]["languages"] == ["vi-VN"]
     assert row["rule"]["scope"]["domains"] == ["unspecified"]
     coverage = json.loads((run_dir / "stage_cache" / "coverage_gaps.json").read_text(encoding="utf-8"))
-    [translated] = [case for case in coverage["gaps"] if case["kind"] == "language"]
+    assert [case for case in coverage["gaps"] if case["kind"] == "language"] == []
+    cases = [
+        json.loads(line)
+        for line in (run_dir / "stage_cache" / "scenario_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    [translated] = [case for case in cases if case["kind"] == "language"]
     assert translated["source_language"] == "vi-VN"
     assert translated["language"] == "en-US"
-    assert translated["reason"] == "translation_required"
+    assert translated["origin"] == "translation"
+    assert translated["localization_applied"] is True
+    assert translated["evidence"]["source_quote"] == quote
+    assert coverage["certification"] == "gold"
 
 
 def test_rule_specific_grounded_scope_overrides_run_scope(tmp_path: Path, use: Any) -> None:

@@ -22,7 +22,9 @@ is enabled. A proposal that names an unknown rule, changes the planned meaning, 
 removes the wrong condition is rejected. Its legs must equal the seed's legs, in
 the seed's order, and its turn text must be that seed's sentence. A rejected slot
 is left empty. It is not replaced with a seed. A slot with no proposal receives
-one seed. A plan row that does not match an eligible rule stops the build.
+one seed. Language and code-switch cells are not seeded as quote copies; Stage 10
+fills them after paraphrase. A plan row that does not match an eligible rule stops
+the build.
 
 A missing-leg case is written once. Its case id is the plan slot id, and the contrast
 family points at that same id. Its action is allow only when those facts match no rule.
@@ -48,6 +50,8 @@ REJECTIONS_FILE = "scenario_rejections.jsonl"
 CONTRAST_FILE = "contrast_families.jsonl"
 OVERREFUSAL_FILE = "overrefusal_cases.jsonl"
 SCENARIO_OUTPUTS = (CASES_FILE, REJECTIONS_FILE, CONTRAST_FILE, OVERREFUSAL_FILE)
+_UNSEEDED_KINDS = frozenset({"language", "code_switch"})
+
 
 class ScenarioInputError(ValueError):
     """The plan, a contrast family, or a proposal list cannot be read."""
@@ -138,6 +142,8 @@ def build_scenarios(
             cases.append(accepted[slot_id])
             continue
         if slot_id in rejected_slots:
+            continue
+        if cell.get("kind") in _UNSEEDED_KINDS:
             continue
         case, reasons = _seed(cell, by_id[str(cell["policy_id"])], by_id)
         if reasons:
@@ -339,9 +345,7 @@ def _seed(
     return (None, reasons) if reasons else (case, [])
 
 
-def _validate(
-    case: Mapping[str, Any], cell: Mapping[str, Any], by_id: Mapping[str, PolicyRule]
-) -> list[str]:
+def _validate(case: Mapping[str, Any], cell: Mapping[str, Any], by_id: Mapping[str, PolicyRule]) -> list[str]:
     reasons: list[str] = []
     policy_id = case.get("policy_id")
     cell_id = cell.get("policy_id")
@@ -673,9 +677,7 @@ def _sentence(
     total: int,
 ) -> str:
     exceptions = list(rule.exceptions) if cell.get("kind") == "exception" else []
-    return seed_sentence(
-        rule, present, absent, number, total, kind=str(cell.get("kind")), exceptions=exceptions
-    )
+    return seed_sentence(rule, present, absent, number, total, kind=str(cell.get("kind")), exceptions=exceptions)
 
 
 def seed_sentence(

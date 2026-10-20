@@ -338,6 +338,74 @@ def test_a_paraphrased_multi_turn_dialogue_is_accepted() -> None:
     assert stored["turns"][-1]["expected_action"] == action
 
 
+def test_a_translated_turn_is_accepted() -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    changed = _clone(
+        _with_text(violation, "Please walk me through that blocked request."),
+        origin="translation",
+        kind="language",
+        language="en-US",
+        localization_applied=True,
+    )
+    changed["case_id"] = f"{violation['case_id']}/language/en-US"
+    changed["slot_id"] = changed["case_id"]
+    result = select_dataset([*build.cases, changed], build.families, rules, _span_map(*rules))
+
+    stored = next(case for case in result.validated if case["case_id"] == changed["case_id"])
+    assert stored["origin"] == "translation"
+    assert stored["kind"] == "language"
+    assert stored["turns"][0]["text"] == "Please walk me through that blocked request."
+
+
+def test_identical_translations_still_exact_dedup() -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    first = _clone(
+        _with_text(violation, "Please walk me through that blocked request."),
+        origin="translation",
+        kind="language",
+        language="en-US",
+        localization_applied=True,
+        case_id="lang-a",
+        slot_id="lang-a",
+    )
+    second = _clone(first, case_id="lang-b", slot_id="lang-b")
+    result = select_dataset([*build.cases, first, second], build.families, rules, _span_map(*rules))
+
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert "lang-a" in kept
+    assert "lang-b" not in kept
+    assert {"case_id": "lang-b", "kept_case_id": "lang-a"} in result.manifest["dropped_duplicates"]
+
+
+def test_semantic_near_dup_keeps_a_translation(tmp_path: Path) -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    translated = _clone(
+        _with_text(violation, "Please walk me through that blocked request."),
+        origin="translation",
+        kind="language",
+        language=violation.get("language") or "en",
+        localization_applied=True,
+        case_id="translated-dup",
+        slot_id="translated-dup",
+    )
+    result = select_dataset(
+        [*build.cases, translated],
+        build.families,
+        rules,
+        _span_map(*rules),
+        semantic_dedup=_semantic_settings(),
+        work_dir=tmp_path,
+        semantic_runner=_runner(["translated-dup"]),
+    )
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert "translated-dup" in kept
+    assert result.report["semantic_dedup"]["protected"] >= 1
+    assert result.report["semantic_dedup"]["removed"] == 0
+
+
 def test_a_paraphrased_turn_is_accepted() -> None:
     rules, build = _ready()
     violation = _one(build, "clear_violation")
@@ -698,15 +766,18 @@ def test_a_dataset_error_marks_the_stage_failed_and_keeps_scenarios(
 
 
 def test_scored_turn_text_uses_the_triggering_user_turn() -> None:
-    assert scored_turn_text(
-        {
-            "turns": [
-                {"role": "user", "text": "Context only.", "scored": False},
-                {"role": "assistant", "text": "Go on.", "scored": False},
-                {"role": "user", "text": "Now block this request.", "scored": True},
-            ]
-        }
-    ) == "Now block this request."
+    assert (
+        scored_turn_text(
+            {
+                "turns": [
+                    {"role": "user", "text": "Context only.", "scored": False},
+                    {"role": "assistant", "text": "Go on.", "scored": False},
+                    {"role": "user", "text": "Now block this request.", "scored": True},
+                ]
+            }
+        )
+        == "Now block this request."
+    )
     assert scored_turn_text({"turns": [{"role": "user", "text": "  only user  "}]}) == "only user"
     assert scored_turn_text({"turns": []}) == ""
 
@@ -890,11 +961,14 @@ def test_semantic_adapter_needs_no_backend_when_every_partition_is_singleton(tmp
         },
     ]
 
-    assert run_mcq_semantic_dedup(
-        cases,
-        work_dir=tmp_path,
-        settings=_semantic_settings(),
-    ) == ()
+    assert (
+        run_mcq_semantic_dedup(
+            cases,
+            work_dir=tmp_path,
+            settings=_semantic_settings(),
+        )
+        == ()
+    )
 
 
 @pytest.mark.parametrize(
@@ -991,9 +1065,7 @@ def _assert_pairs_share_a_split(result: Any, families: list[dict[str, Any]] | tu
 
 def _assert_ids_share_a_split(result: Any, case_ids: list[str]) -> None:
     sides = [
-        name
-        for name, listed in result.manifest["splits"].items()
-        if any(case_id in listed for case_id in case_ids)
+        name for name, listed in result.manifest["splits"].items() if any(case_id in listed for case_id in case_ids)
     ]
     assert len(sides) == 1
     assert all(case_id in result.manifest["splits"][sides[0]] for case_id in case_ids)

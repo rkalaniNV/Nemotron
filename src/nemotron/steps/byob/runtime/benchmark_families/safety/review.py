@@ -61,7 +61,11 @@ _GAP_MEANING = {
         "budget named in Recommend, then re-run generate. The CSV cannot add this cell."
     ),
     "budget_cap": "The run hit assisted_max_cases. Raise that budget, then re-run generate.",
-    "translation_required": "A required target language was not generated.",
+    "translation_required": (
+        "A required target-language or code-switch cell was not generated. Stage 10 "
+        "translates it after paraphrase; a missing model, an identity copy of the source, "
+        "or a dropped identifier leaves this gap."
+    ),
     "span_missing": "The source span for this cell is missing.",
     "max_turns": "This cell needs more turns than budget.max_turns allows.",
 }
@@ -225,6 +229,7 @@ def assemble_review(
         ),
         "contrast_pairs": _contrast_pairs(cases),
         "adversarial_cases": _adversarial_cases(cases),
+        "localized_cases": _localized_cases(cases),
         "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)],
         "unresolved_rules": _unresolved_rules(rules),
         "excluded_rules": _excluded_rules(rules),
@@ -302,9 +307,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
     coverage = packet.get("coverage") if isinstance(packet.get("coverage"), Mapping) else {}
     capacity = coverage.get("capacity") if isinstance(coverage.get("capacity"), Mapping) else {}
     preflight = (
-        coverage.get("quality_gate_preflight")
-        if isinstance(coverage.get("quality_gate_preflight"), Mapping)
-        else {}
+        coverage.get("quality_gate_preflight") if isinstance(coverage.get("quality_gate_preflight"), Mapping) else {}
     )
     quality_gates = packet.get("quality_gates") if isinstance(packet.get("quality_gates"), Mapping) else {}
     gate_failures = [row for row in quality_gates.get("failures") or [] if isinstance(row, Mapping)]
@@ -313,9 +316,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
     cards = [card for card in packet.get("cards") or [] if isinstance(card, Mapping)]
     pending_cards = [card for card in cards if card_is_pending(card)]
     kept_cards = [card for card in cards if card.get("decision") == "pre_accepted"]
-    decided_cards = [
-        card for card in cards if str(card.get("decision") or "") in {"approve", "reject", "edit"}
-    ]
+    decided_cards = [card for card in cards if str(card.get("decision") or "") in {"approve", "reject", "edit"}]
     pre_accepted = len(kept_cards)
     pending = len(pending_cards)
     parts = [
@@ -350,6 +351,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
         *_unrealized_section(packet.get("unrealized_surfaces") or []),
         *_contrast_section(packet.get("contrast_pairs") or []),
         *_adversarial_section(packet.get("adversarial_cases") or []),
+        *_localized_section(packet.get("localized_cases") or []),
         f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
         _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
         "<details><summary>Generation capacity preflight</summary>",
@@ -453,7 +455,10 @@ def _gap_recommendation(rows: Sequence[Mapping[str, Any]]) -> str:
     if "max_turns" in reasons:
         actions.append("raise <code>budget.max_turns</code> to at least 2")
     if "translation_required" in reasons:
-        actions.append("provide reviewed target-language translations")
+        actions.append(
+            "configure a generation model and re-run generate so Stage 10 can translate, "
+            "or provide reviewed native translations"
+        )
     if "span_missing" in reasons:
         actions.append("restore an exact source span and quote for the rule")
     if not actions:
@@ -512,13 +517,7 @@ def _reason_blob(row: Mapping[str, Any]) -> str:
 
 
 def _recommend(actions: Sequence[str], suffix: str) -> str:
-    return (
-        '<p class="recommend"><strong>Recommend:</strong> '
-        + "; ".join(actions)
-        + ", "
-        + suffix
-        + "</p>"
-    )
+    return '<p class="recommend"><strong>Recommend:</strong> ' + "; ".join(actions) + ", " + suffix + "</p>"
 
 
 _PAGE_STYLE = (
@@ -560,8 +559,7 @@ def _task_banner(pending: int, kept: int, excluded: int, blocking: int) -> str:
     else:
         headline = "No cards need a decision."
         next_step = (
-            "You can sign the packet. Change a pre-accepted row to reject or edit only "
-            "if that extraction is wrong."
+            "You can sign the packet. Change a pre-accepted row to reject or edit only if that extraction is wrong."
         )
     extras = []
     if kept:
@@ -623,20 +621,14 @@ def _kept_section(cards: Sequence[Mapping[str, Any]]) -> str:
     return (
         f"<details><summary>Auto-kept rules ({len(cards)}) — no action unless wrong</summary>"
         "<p>These eligible rules already generated cases. They stay in the benchmark unless "
-        "review_decisions.csv sets reject or edit.</p>"
-        + _compact_card_table(cards)
-        + "</details>"
+        "review_decisions.csv sets reject or edit.</p>" + _compact_card_table(cards) + "</details>"
     )
 
 
 def _decided_section(cards: Sequence[Mapping[str, Any]]) -> str:
     if not cards:
         return ""
-    return (
-        f"<details><summary>Already decided ({len(cards)})</summary>"
-        + _compact_card_table(cards)
-        + "</details>"
-    )
+    return f"<details><summary>Already decided ({len(cards)})</summary>" + _compact_card_table(cards) + "</details>"
 
 
 def _decision_card(card: Mapping[str, Any], index: int, total: int) -> str:
@@ -658,8 +650,7 @@ def _decision_card(card: Mapping[str, Any], index: int, total: int) -> str:
             chips.append(f"<span>{_text(value)}</span>")
     if kind == "conflict":
         consequence = (
-            "Approve keeps this conflict as a documented Silver limitation. "
-            "Reject or edit withholds the named rules."
+            "Approve keeps this conflict as a documented Silver limitation. Reject or edit withholds the named rules."
         )
     else:
         consequence = (
@@ -670,12 +661,9 @@ def _decision_card(card: Mapping[str, Any], index: int, total: int) -> str:
     extracted = f"<p>Extracted as</p><p>{_text(conditions)}</p>" if conditions else ""
     return (
         f'<article class="{css}">'
-        f"<p class=\"why\">Decision {index} of {total}: {_text(why)}</p>"
+        f'<p class="why">Decision {index} of {total}: {_text(why)}</p>'
         f"<h3>{_text(title)}</h3>"
-        f'<p class="chips">{"".join(chips)}</p>'
-        + quote_block
-        + extracted
-        + f"<p>{_text(consequence)}</p>"
+        f'<p class="chips">{"".join(chips)}</p>' + quote_block + extracted + f"<p>{_text(consequence)}</p>"
         f'<p class="mono">CSV row: {_text(card.get("card_id"))}</p>'
         "</article>"
     )
@@ -683,8 +671,7 @@ def _decision_card(card: Mapping[str, Any], index: int, total: int) -> str:
 
 def _compact_card_table(rows: Sequence[Mapping[str, Any]]) -> str:
     body = [
-        "<table><thead><tr><th>Title / quote</th><th>Action</th>"
-        "<th>Decision</th><th>CSV row</th></tr></thead><tbody>"
+        "<table><thead><tr><th>Title / quote</th><th>Action</th><th>Decision</th><th>CSV row</th></tr></thead><tbody>"
     ]
     for row in rows:
         title = str(row.get("title") or "")
@@ -699,7 +686,7 @@ def _compact_card_table(rows: Sequence[Mapping[str, Any]]) -> str:
             + _text(row.get("expected_action"))
             + "</td><td>"
             + _text(row.get("decision"))
-            + "</td><td class=\"mono\">"
+            + '</td><td class="mono">'
             + _text(row.get("card_id"))
             + "</td></tr>"
         )
@@ -1151,6 +1138,59 @@ def _adversarial_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
     return body
 
 
+def _localized_cases(cases: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows = [
+        {
+            "case_id": case.get("case_id"),
+            "policy_id": case.get("policy_id"),
+            "kind": case.get("kind"),
+            "language": case.get("language"),
+            "languages": case.get("languages"),
+            "translated_from": case.get("translated_from"),
+            "localization_variant": case.get("localization_variant"),
+            "expected_action": case.get("expected_action"),
+            "text": _scored_text(case),
+        }
+        for case in cases
+        if case.get("origin") == "translation" and case.get("localization_applied") is True
+    ]
+    return sorted(rows, key=lambda row: str(row.get("case_id") or ""))
+
+
+def _localized_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    if not rows:
+        return []
+    body = [
+        f"<details><summary>Localized cases to spot-check ({len(rows)})</summary>",
+        "<p>Each case is a translation or code-switch of a realized sibling. Reject the rule "
+        "in the CSV if the rewrite changed the policy meaning, dropped an identifier, or is "
+        "still the source-language quote.</p>",
+        "<table><thead><tr><th>Case</th><th>Kind</th><th>Language</th><th>From</th>"
+        "<th>Expected</th><th>Scored text</th></tr></thead><tbody>",
+    ]
+    for row in rows:
+        language = row.get("language") or ",".join(
+            item for item in (row.get("languages") or []) if isinstance(item, str)
+        )
+        body.append(
+            "<tr><td>"
+            + _text(row.get("case_id"))
+            + "</td><td>"
+            + _text(row.get("kind"))
+            + "</td><td>"
+            + _text(language)
+            + "</td><td>"
+            + _text(row.get("translated_from"))
+            + "</td><td>"
+            + _text(row.get("expected_action"))
+            + "</td><td>"
+            + _text(row.get("text"))
+            + "</td></tr>"
+        )
+    body.extend(["</tbody></table>", "</details>"])
+    return body
+
+
 def _example_case(case: Mapping[str, Any]) -> dict[str, Any]:
     turns = case.get("turns")
     text = ""
@@ -1420,9 +1460,7 @@ def _gap_table(rows: Sequence[Mapping[str, Any]]) -> str:
 def _excluded_table(rows: Sequence[Mapping[str, Any]]) -> str:
     if not rows:
         return "<p>None.</p>"
-    body = [
-        "<table><thead><tr><th>Title / quote</th><th>Status</th><th>Why excluded</th></tr></thead><tbody>"
-    ]
+    body = ["<table><thead><tr><th>Title / quote</th><th>Status</th><th>Why excluded</th></tr></thead><tbody>"]
     for row in rows:
         title = str(row.get("title") or row.get("policy_id") or "")
         quote = str(row.get("quote") or "")

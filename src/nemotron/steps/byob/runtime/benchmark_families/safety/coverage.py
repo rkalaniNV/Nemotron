@@ -478,6 +478,130 @@ def apply_backfill(
     return new_rows, updated
 
 
+def realize_held_cells(
+    rows: Sequence[Mapping[str, Any]],
+    summary: Mapping[str, Any],
+    realized_slot_ids: Sequence[str],
+    *,
+    case_cap: int,
+    budget: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Move successfully translated language/code-switch cells onto the plan.
+
+    A previously localized row that failed this round returns to the gap list
+    as ``translation_required``. A realized required cell that does not fit
+    ``case_cap`` or the per-rule cap stays a blocking ``budget_cap`` or
+    ``rule_cap`` gap.
+    """
+    realized = {str(slot) for slot in realized_slot_ids if isinstance(slot, str) and slot}
+    gap_by_id: dict[str, dict[str, Any]] = {}
+    for gap in summary.get("gaps") or []:
+        if isinstance(gap, Mapping) and isinstance(gap.get("slot_id"), str):
+            gap_by_id[str(gap["slot_id"])] = dict(gap)
+
+    new_rows: list[dict[str, Any]] = []
+    restored_gaps: list[dict[str, Any]] = []
+    kept_localized: set[str] = set()
+    policy_counts: dict[str, int] = {}
+    for row in rows:
+        copied = dict(row)
+        slot_id = str(copied.get("slot_id") or "")
+        localized_kind = copied.get("kind") in {"language", "code_switch"} or copied.get("localized") is True
+        if localized_kind:
+            if slot_id in realized:
+                cap_reason = _localized_cap_reason(copied, new_rows, policy_counts, case_cap, budget)
+                if cap_reason:
+                    restored_gaps.append(_held_gap(copied, cap_reason))
+                else:
+                    _append_localized(copied, new_rows, policy_counts)
+                    kept_localized.add(slot_id)
+            else:
+                restored_gaps.append(_held_gap(copied, "translation_required"))
+            continue
+        copied["order"] = len(new_rows)
+        new_rows.append(copied)
+        policy_id = str(copied.get("policy_id") or "")
+        policy_counts[policy_id] = policy_counts.get(policy_id, 0) + 1
+
+    added_slots: list[str] = []
+    for slot_id in realized_slot_ids:
+        if not isinstance(slot_id, str) or slot_id in kept_localized:
+            continue
+        gap = gap_by_id.get(slot_id)
+        if gap is None:
+            continue
+        stored = {
+            key: value for key, value in gap.items() if key not in {"reason", "blocks_gold", "recommendation", "hold"}
+        }
+        cap_reason = _localized_cap_reason(stored, new_rows, policy_counts, case_cap, budget)
+        if cap_reason:
+            restored_gaps.append(_held_gap(stored, cap_reason))
+            continue
+        _append_localized(stored, new_rows, policy_counts)
+        added_slots.append(slot_id)
+        kept_localized.add(slot_id)
+
+    remaining = [
+        dict(gap)
+        for gap in summary.get("gaps") or []
+        if isinstance(gap, Mapping) and str(gap.get("slot_id") or "") not in realized
+    ]
+    remaining.extend(restored_gaps)
+    scheduled_ids = {str(row.get("slot_id")) for row in new_rows if isinstance(row.get("slot_id"), str)}
+    families = []
+    for family in summary.get("contrast_families") or []:
+        if not isinstance(family, Mapping):
+            continue
+        members = []
+        for member in family.get("members") or []:
+            if not isinstance(member, Mapping):
+                continue
+            members.append({**member, "scheduled": member.get("slot_id") in scheduled_ids})
+        families.append({**family, "members": members})
+    blocking = [gap for gap in remaining if gap.get("blocks_gold") is True]
+    required_cases = summary.get("required_cases")
+    required_count = required_cases if isinstance(required_cases, int) and not isinstance(required_cases, bool) else 0
+    certification, reason = _certification(required_count, blocking)
+    previous_capacity = summary.get("capacity")
+    surface_variants = (
+        previous_capacity.get("surface_variants_per_cell", 1) if isinstance(previous_capacity, Mapping) else 1
+    )
+    capacity = _capacity(
+        new_rows,
+        remaining,
+        case_cap,
+        budget,
+        surface_variants_per_cell=surface_variants,
+    )
+    requirements = _preflight_requirements(summary)
+    updated = dict(summary)
+    previous_localization = summary.get("localization") if isinstance(summary.get("localization"), Mapping) else {}
+    previous_realized = [
+        str(slot) for slot in previous_localization.get("realized_slot_ids") or [] if isinstance(slot, str)
+    ]
+    updated.update(
+        {
+            "certification": certification,
+            "reason": reason,
+            "scheduled_cases": len(new_rows),
+            "optional_scheduled": sum(1 for row in new_rows if row.get("priority") == "optional"),
+            "missing_required": [str(gap["slot_id"]) for gap in blocking if isinstance(gap.get("slot_id"), str)],
+            "gaps": remaining,
+            "contrast_families": families,
+            "capacity": capacity,
+            "quality_gate_preflight": _quality_gate_preflight(capacity, requirements),
+            "localization": {
+                "realized_slot_ids": sorted(realized),
+                "added_slot_ids": added_slots,
+                "previous_realized_slot_ids": previous_realized,
+            },
+        }
+    )
+    if isinstance(summary.get("backfill"), Mapping):
+        updated["backfill"] = dict(summary["backfill"])
+    return new_rows, updated
+
+
 def rewrite_coverage_plan(
     stage_cache: Path, rows: Sequence[Mapping[str, Any]], summary: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -489,6 +613,8 @@ def rewrite_coverage_plan(
     record = {key: stored_summary[key] for key in _RECORD_FIELDS}
     if isinstance(stored_summary.get("backfill"), Mapping):
         record["backfill"] = dict(stored_summary["backfill"])
+    if isinstance(stored_summary.get("localization"), Mapping):
+        record["localization"] = dict(stored_summary["localization"])
     return record
 
 
@@ -1027,6 +1153,38 @@ def _rule_cap(severity: str, budget: Mapping[str, Any]) -> int:
 def _rule_limit(cell: Mapping[str, Any], budget: Mapping[str, Any]) -> int:
     """Every cell, including a mix-derived cell, obeys the per-rule maximum."""
     return _rule_cap(str(cell.get("severity") or "medium"), budget)
+
+
+def _localized_cap_reason(
+    cell: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    policy_counts: Mapping[str, int],
+    case_cap: int,
+    budget: Mapping[str, Any],
+) -> str | None:
+    if case_cap and len(rows) >= case_cap:
+        return "budget_cap"
+    policy_id = str(cell.get("policy_id") or "")
+    if policy_counts.get(policy_id, 0) >= _rule_limit(cell, budget):
+        return "rule_cap"
+    return None
+
+
+def _append_localized(cell: dict[str, Any], rows: list[dict[str, Any]], policy_counts: dict[str, int]) -> None:
+    cell["order"] = len(rows)
+    cell["localized"] = True
+    rows.append(cell)
+    policy_id = str(cell.get("policy_id") or "")
+    policy_counts[policy_id] = policy_counts.get(policy_id, 0) + 1
+
+
+def _held_gap(cell: Mapping[str, Any], reason: str) -> dict[str, Any]:
+    stored = {
+        key: value
+        for key, value in cell.items()
+        if key not in {"reason", "blocks_gold", "order", "localized", "backfill", "recommendation", "hold"}
+    }
+    return {**stored, "reason": reason, "blocks_gold": True}
 
 
 def _capacity(
