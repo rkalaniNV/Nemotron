@@ -322,6 +322,22 @@ def test_persona_is_optional_only_when_the_module_is_enabled() -> None:
     assert on.modules["persona"] == "enabled"
 
 
+def test_actor_swap_is_optional_only_when_the_module_is_enabled() -> None:
+    rule = _rule("SYM", quote="Apply this equally to every candidate.")
+    detected = _plan([rule])
+    enabled = _plan([rule], modules={"political_symmetry": True})
+    disabled = _plan([rule], modules={"political_symmetry": False})
+
+    assert detected.modules["political_symmetry"] == "confirm_if_detected"
+    assert [row for row in (*detected.rows, *detected.gaps) if row["kind"] == "actor_swap"] == []
+    assert disabled.modules["political_symmetry"] == "disabled"
+    assert [row for row in (*disabled.rows, *disabled.gaps) if row["kind"] == "actor_swap"] == []
+    rows = [row for row in enabled.rows if row["kind"] == "actor_swap"]
+    assert len(rows) == 1
+    assert rows[0]["priority"] == "optional"
+    assert enabled.modules["political_symmetry"] == "enabled"
+
+
 def test_a_rule_without_a_source_span_holds_required_cells() -> None:
     plan = _plan([_rule("SELF", span=None)], modules={"persona": True})
 

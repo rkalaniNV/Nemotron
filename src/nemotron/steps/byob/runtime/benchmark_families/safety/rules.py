@@ -69,9 +69,11 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
     normalize_candidate,
     validate_rule,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.localize import LOCALIZE_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import PARAPHRASE_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.scenarios import SCENARIO_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStatus, abort
+from nemotron.steps.byob.runtime.benchmark_families.safety.symmetry import SYMMETRY_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.windows import EvidenceWindow, build_windows
 
 EXTRACTED = "extracted"
@@ -156,7 +158,15 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
         )
     _check_glossary_conflicts(glossary_conflicts, run_dir)
     # Drop the previous routing result first, so a failed run cannot leave rules from older code.
-    for name in (*RULE_OUTPUTS, *COVERAGE_OUTPUTS, *SCENARIO_OUTPUTS, *PARAPHRASE_OUTPUTS, *DATASET_OUTPUTS):
+    for name in (
+        *RULE_OUTPUTS,
+        *COVERAGE_OUTPUTS,
+        *SCENARIO_OUTPUTS,
+        *PARAPHRASE_OUTPUTS,
+        *LOCALIZE_OUTPUTS,
+        *SYMMETRY_OUTPUTS,
+        *DATASET_OUTPUTS,
+    ):
         (stage_cache / name).unlink(missing_ok=True)
     try:
         windows = build_windows(documents, spans, terms)

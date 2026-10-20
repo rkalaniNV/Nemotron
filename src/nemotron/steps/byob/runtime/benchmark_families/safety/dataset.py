@@ -18,7 +18,7 @@
 The label is recomputed from the case facts. A stored action that disagrees is
 rejected and is not overwritten. A case with no eligible rule, or a quote that is
 not inside its source span, is rejected. Seed and proposal turns must still be
-the source quote; a paraphrase or translation origin may differ. An allow case marked
+the source quote; a paraphrase, translation, or actor-swap origin may differ. An allow case marked
 ``surface_required`` whose scored turn is still the source quote is rejected
 with ``unrealized_surface`` and does not break its contrast pair. A required
 case rejected this way is listed in ``unrealized_surfaces`` and blocks Gold. When one
@@ -76,7 +76,7 @@ _WITH_VIOLATION = frozenset(
 _MISSING = object()
 _ROLES = frozenset({"user", "assistant", "tool"})
 _CONTRAST_REASONS = frozenset({"contrast_pair_broken", "attack_removed"})
-_SURFACE_REASONS = frozenset({"unrealized_surface", "attack_unrealized"})
+_SURFACE_REASONS = frozenset({"unrealized_surface", "attack_unrealized", "swap_unrealized"})
 
 
 class DatasetInputError(ValueError):
@@ -744,7 +744,7 @@ def _turn_reasons(case: Mapping[str, Any], rule: PolicyRule, legs: tuple[list[st
                 return ["turn_label_disagreement"]
         if (
             turn["scored"]
-            and case.get("origin") not in {"paraphrase", "translation"}
+            and case.get("origin") not in {"paraphrase", "translation", "actor_swap"}
             and legs is not None
             and isinstance(kind, str)
             and _text_differs(turn, rule, legs, kind, index, len(turns))
@@ -763,10 +763,13 @@ def _surface_reasons(case: Mapping[str, Any], rule: PolicyRule) -> list[str]:
     """Quote-copy allow rows are not over-refusal probes. They do not break the pair.
 
     An adversarial row whose attack was never applied is a plain violation under a
-    misleading kind, so it is dropped. It is optional and does not block Gold.
+    misleading kind, so it is dropped. An actor-swap row whose swap was never applied
+    is dropped the same way. Both are optional and do not block Gold.
     """
     if case.get("kind") == "adversarial" and case.get("attack_applied") is not True:
         return ["attack_unrealized"]
+    if case.get("kind") == "actor_swap" and case.get("swap_applied") is not True:
+        return ["swap_unrealized"]
     if case.get("surface_required") is not True or case.get("expected_action") != "allow":
         return []
     scored = None
@@ -861,9 +864,10 @@ def _protected_ids(
     if localizations:
         for case in cases:
             if (
-                case.get("kind") in {"language", "code_switch"}
-                or case.get("origin") == "translation"
+                case.get("kind") in {"language", "code_switch", "actor_swap"}
+                or case.get("origin") in {"translation", "actor_swap"}
                 or case.get("localization_variant")
+                or case.get("swap_applied") is True
             ):
                 case_id = str(case.get("case_id") or "")
                 if case_id:

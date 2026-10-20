@@ -230,6 +230,7 @@ def assemble_review(
         "contrast_pairs": _contrast_pairs(cases),
         "adversarial_cases": _adversarial_cases(cases),
         "localized_cases": _localized_cases(cases),
+        "symmetry_pairs": _symmetry_pairs(cases),
         "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)],
         "unresolved_rules": _unresolved_rules(rules),
         "excluded_rules": _excluded_rules(rules),
@@ -352,6 +353,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
         *_contrast_section(packet.get("contrast_pairs") or []),
         *_adversarial_section(packet.get("adversarial_cases") or []),
         *_localized_section(packet.get("localized_cases") or []),
+        *_symmetry_section(packet.get("symmetry_pairs") or []),
         f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
         _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
         "<details><summary>Generation capacity preflight</summary>",
@@ -1183,6 +1185,65 @@ def _localized_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
             + _text(row.get("translated_from"))
             + "</td><td>"
             + _text(row.get("expected_action"))
+            + "</td><td>"
+            + _text(row.get("text"))
+            + "</td></tr>"
+        )
+    body.extend(["</tbody></table>", "</details>"])
+    return body
+
+
+def _symmetry_pairs(cases: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    by_id = {str(case.get("case_id") or ""): case for case in cases if isinstance(case, Mapping)}
+    rows = []
+    for case in cases:
+        if not isinstance(case, Mapping) or case.get("swap_applied") is not True:
+            continue
+        sibling = by_id.get(str(case.get("swapped_from") or ""))
+        rows.append(
+            {
+                "case_id": case.get("case_id"),
+                "policy_id": case.get("policy_id"),
+                "swap_axis": case.get("swap_axis"),
+                "swap_from": case.get("swap_from"),
+                "swap_to": case.get("swap_to"),
+                "claim": case.get("symmetry_claim"),
+                "evidence": case.get("symmetry_evidence"),
+                "expected_action": case.get("expected_action"),
+                "sibling_text": _scored_text(sibling) if sibling is not None else "",
+                "text": _scored_text(case),
+            }
+        )
+    return sorted(rows, key=lambda row: str(row.get("case_id") or ""))
+
+
+def _symmetry_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    if not rows:
+        return []
+    body = [
+        f"<details><summary>Symmetry pairs to spot-check ({len(rows)})</summary>",
+        "<p>Each case keeps the sibling's expected action and changes only the named actor. "
+        "Reject the rule in the CSV if the rewrite changed the request, dropped an identifier, "
+        "or treated one actor more harshly than the other.</p>",
+        "<table><thead><tr><th>Case</th><th>Axis</th><th>From</th><th>To</th>"
+        "<th>Evidence</th><th>Expected</th><th>Sibling text</th><th>Swapped text</th></tr></thead><tbody>",
+    ]
+    for row in rows:
+        body.append(
+            "<tr><td>"
+            + _text(row.get("case_id"))
+            + "</td><td>"
+            + _text(row.get("swap_axis"))
+            + "</td><td>"
+            + _text(row.get("swap_from"))
+            + "</td><td>"
+            + _text(row.get("swap_to"))
+            + "</td><td>"
+            + _text(row.get("evidence"))
+            + "</td><td>"
+            + _text(row.get("expected_action"))
+            + "</td><td>"
+            + _text(row.get("sibling_text"))
             + "</td><td>"
             + _text(row.get("text"))
             + "</td></tr>"

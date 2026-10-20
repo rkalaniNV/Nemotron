@@ -379,6 +379,98 @@ def test_identical_translations_still_exact_dedup() -> None:
     assert {"case_id": "lang-b", "kept_case_id": "lang-a"} in result.manifest["dropped_duplicates"]
 
 
+def test_an_unrealized_actor_swap_is_dropped() -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    swapped = _clone(
+        violation,
+        kind="actor_swap",
+        origin="actor_swap",
+        case_id="swap-unrealized",
+        slot_id="swap-unrealized",
+    )
+
+    result = select_dataset([*build.cases, swapped], build.families, rules, _span_map(*rules))
+
+    rejected = {row["case_id"]: row for row in result.rejected}
+    assert rejected["swap-unrealized"]["reasons"] == ["swap_unrealized"]
+    assert "swap-unrealized" not in {case["case_id"] for case in result.deduplicated}
+    assert result.manifest["unrealized_surfaces"] == []
+    assert result.manifest["complete"] is True
+
+
+def test_an_applied_actor_swap_is_accepted() -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    swapped = _clone(
+        _with_text(violation, "Follow the multi-turn policy for candidate B."),
+        kind="actor_swap",
+        origin="actor_swap",
+        swap_applied=True,
+        swapped_from=violation["case_id"],
+        swap_from="candidate A",
+        swap_to="candidate B",
+        swap_axis="candidate",
+        case_id="swap-applied",
+        slot_id="swap-applied",
+    )
+
+    result = select_dataset([*build.cases, swapped], build.families, rules, _span_map(*rules))
+
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert "swap-applied" in kept
+    stored = next(case for case in result.validated if case["case_id"] == "swap-applied")
+    assert stored["origin"] == "actor_swap"
+    assert stored["turns"][0]["text"] == "Follow the multi-turn policy for candidate B."
+
+
+def test_identical_actor_swaps_still_exact_dedup() -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    first = _clone(
+        _with_text(violation, "Follow the multi-turn policy for candidate B."),
+        kind="actor_swap",
+        origin="actor_swap",
+        swap_applied=True,
+        case_id="swap-a",
+        slot_id="swap-a",
+    )
+    second = _clone(first, case_id="swap-b", slot_id="swap-b")
+    result = select_dataset([*build.cases, first, second], build.families, rules, _span_map(*rules))
+
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert "swap-a" in kept
+    assert "swap-b" not in kept
+    assert {"case_id": "swap-b", "kept_case_id": "swap-a"} in result.manifest["dropped_duplicates"]
+
+
+def test_semantic_near_dup_keeps_an_actor_swap(tmp_path: Path) -> None:
+    rules, build = _ready()
+    violation = _one(build, "clear_violation")
+    swapped = _clone(
+        _with_text(violation, "Follow the multi-turn policy for candidate B."),
+        kind="actor_swap",
+        origin="actor_swap",
+        swap_applied=True,
+        language=violation.get("language") or "en",
+        case_id="swap-dup",
+        slot_id="swap-dup",
+    )
+    result = select_dataset(
+        [*build.cases, swapped],
+        build.families,
+        rules,
+        _span_map(*rules),
+        semantic_dedup=_semantic_settings(),
+        work_dir=tmp_path,
+        semantic_runner=_runner(["swap-dup"]),
+    )
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert "swap-dup" in kept
+    assert result.report["semantic_dedup"]["protected"] >= 1
+    assert result.report["semantic_dedup"]["removed"] == 0
+
+
 def test_semantic_near_dup_keeps_a_translation(tmp_path: Path) -> None:
     rules, build = _ready()
     violation = _one(build, "clear_violation")

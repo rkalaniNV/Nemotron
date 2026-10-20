@@ -23,7 +23,8 @@ removes the wrong condition is rejected. Its legs must equal the seed's legs, in
 the seed's order, and its turn text must be that seed's sentence. A rejected slot
 is left empty. It is not replaced with a seed. A slot with no proposal receives
 one seed. Language and code-switch cells are not seeded as quote copies; Stage 10
-fills them after paraphrase. A plan row that does not match an eligible rule stops
+fills them after paraphrase. Actor-swap cells are not seeded as quote copies;
+Stage 11 fills them after localization. A plan row that does not match an eligible rule stops
 the build.
 
 A missing-leg case is written once. Its case id is the plan slot id, and the contrast
@@ -50,7 +51,7 @@ REJECTIONS_FILE = "scenario_rejections.jsonl"
 CONTRAST_FILE = "contrast_families.jsonl"
 OVERREFUSAL_FILE = "overrefusal_cases.jsonl"
 SCENARIO_OUTPUTS = (CASES_FILE, REJECTIONS_FILE, CONTRAST_FILE, OVERREFUSAL_FILE)
-_UNSEEDED_KINDS = frozenset({"language", "code_switch"})
+_UNSEEDED_KINDS = frozenset({"language", "code_switch", "actor_swap"})
 
 
 class ScenarioInputError(ValueError):

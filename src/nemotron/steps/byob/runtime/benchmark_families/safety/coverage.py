@@ -870,7 +870,7 @@ def _optional_cells(
                 ),
             )
         )
-    if modules.get("political_symmetry") is True:
+    if modules.get("political_symmetry") is True and primary_action(rule) is not None:
         cells.append(_planned(rule, rules, "actor_swap", primary=primary, priority="optional", flags=preserved))
     if modules.get("persona") is True:
         cells.append(_planned(rule, rules, "persona", primary=primary, priority="optional", flags=preserved))
