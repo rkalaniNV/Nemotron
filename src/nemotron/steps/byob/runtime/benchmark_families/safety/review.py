@@ -224,6 +224,7 @@ def assemble_review(
             key=lambda row: str(row.get("case_id") or ""),
         ),
         "contrast_pairs": _contrast_pairs(cases),
+        "adversarial_cases": _adversarial_cases(cases),
         "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)],
         "unresolved_rules": _unresolved_rules(rules),
         "excluded_rules": _excluded_rules(rules),
@@ -348,6 +349,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
         _gap_recommendation(blocking),
         *_unrealized_section(packet.get("unrealized_surfaces") or []),
         *_contrast_section(packet.get("contrast_pairs") or []),
+        *_adversarial_section(packet.get("adversarial_cases") or []),
         f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
         _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
         "<details><summary>Generation capacity preflight</summary>",
@@ -1098,6 +1100,51 @@ def _contrast_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
             + _text(block_text)
             + "</td><td>"
             + _text(row.get("allow_text"))
+            + "</td></tr>"
+        )
+    body.extend(["</tbody></table>", "</details>"])
+    return body
+
+
+def _adversarial_cases(cases: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows = [
+        {
+            "case_id": case.get("case_id"),
+            "policy_id": case.get("policy_id"),
+            "attack_family": case.get("attack_family"),
+            "attack_frame": case.get("attack_frame") if isinstance(case.get("attack_frame"), str) else None,
+            "expected_action": case.get("expected_action"),
+            "text": _scored_text(case),
+        }
+        for case in cases
+        if case.get("kind") == "adversarial" and case.get("attack_applied") is True
+    ]
+    return sorted(rows, key=lambda row: str(row.get("case_id") or ""))
+
+
+def _adversarial_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    if not rows:
+        return []
+    body = [
+        f"<details><summary>Adversarial cases to spot-check ({len(rows)})</summary>",
+        "<p>Each case wraps a violation in an attack and keeps its expected action. Reject the rule "
+        "in the CSV if the attack turned the request into something the policy allows, such as "
+        "discussion, analysis, or fiction review.</p>",
+        "<table><thead><tr><th>Case</th><th>Attack</th><th>Expected</th><th>Frame</th>"
+        "<th>Scored text</th></tr></thead><tbody>",
+    ]
+    for row in rows:
+        body.append(
+            "<tr><td>"
+            + _text(row.get("case_id"))
+            + "</td><td>"
+            + _text(row.get("attack_family"))
+            + "</td><td>"
+            + _text(row.get("expected_action"))
+            + "</td><td>"
+            + _text(row.get("attack_frame") or "(character transform)")
+            + "</td><td>"
+            + _text(row.get("text"))
             + "</td></tr>"
         )
     body.extend(["</tbody></table>", "</details>"])

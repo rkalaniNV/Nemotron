@@ -134,8 +134,14 @@ def package(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def start(package: Path, tmp_path: Path, connections: list[Any]):
-    def run(output: str = "out", budget: dict[str, int] | None = None, *, paraphrase: bool = False) -> Run:
-        config = _config(tmp_path, package, tmp_path / output, budget, paraphrase=paraphrase)
+    def run(
+        output: str = "out",
+        budget: dict[str, int] | None = None,
+        *,
+        paraphrase: bool = False,
+        adversarial: bool = False,
+    ) -> Run:
+        config = _config(tmp_path, package, tmp_path / output, budget, paraphrase=paraphrase, adversarial=adversarial)
         first = _cli(config, "all")
         return Run(config, tmp_path / output / "customer-safety-v1", first)
 
@@ -224,6 +230,19 @@ def test_paraphrase_without_a_model_publishes_silver_without_quote_allows(start:
     assert {row["reason"] for row in report["unrealized_surfaces"]} == {"unrealized_surface"}
     assert result.json("stage_cache/coverage_gaps.json")["certification"] == "gold"
     assert "allow" not in {case["expected_action"] for case in _published_cases(result.run_dir)}
+
+
+def test_unrealized_adversarial_cells_are_dropped_without_blocking_gold(start: Any) -> None:
+    result = start(output="adversarial", adversarial=True)
+    planned = [row for row in result.jsonl("stage_cache/coverage_plan.jsonl") if row["kind"] == "adversarial"]
+    assert planned and all(row["attack_family"] for row in planned)
+    published = _approve_and_publish(result)
+
+    assert published.returncode == 0, published.stderr
+    assert published.stderr.startswith("gold_completed:")
+    assert "adversarial" not in {case["kind"] for case in _published_cases(result.run_dir)}
+    rejected = {row["case_id"]: row for row in result.jsonl("stage_cache/rejected_cases.jsonl")}
+    assert {rejected[row["slot_id"]]["reasons"][0] for row in planned} == {"attack_unrealized"}
 
 
 def test_insufficient_budget_publishes_silver_and_lists_missing_coverage(start: Any) -> None:
@@ -410,6 +429,7 @@ def _config(
     name: str | None = None,
     evaluation: dict[str, Any] | None = None,
     paraphrase: bool = False,
+    adversarial: bool = False,
 ) -> Path:
     """The gate has no model. With paraphrase on, seed allow cells cannot be realized."""
     data: dict[str, Any] = {
@@ -419,7 +439,7 @@ def _config(
         "mode": "assisted",
         "input_dir": str(policies),
         "output_dir": str(output),
-        "generation": {"modules": {"paraphrase": paraphrase}},
+        "generation": {"modules": {"paraphrase": paraphrase, "adversarial": adversarial}},
     }
     if budget is not None:
         data["budget"] = budget

@@ -557,6 +557,8 @@ def _assemble(
         case["paired_policy_id"] = cell["paired_policy_id"]
     if isinstance(cell.get("language"), str):
         case["language"] = cell["language"]
+    if isinstance(cell.get("source_language"), str):
+        case["source_language"] = cell["source_language"]
     languages = cell.get("languages")
     if isinstance(languages, (list, tuple)) and languages:
         case["languages"] = list(languages)
@@ -571,6 +573,9 @@ def _assemble(
             case["trigger_leg"] = cell["trigger_leg"]
     if cell.get("kind") == "exception":
         case["exceptions"] = list(rule.exceptions)
+    if cell.get("kind") == "adversarial" and isinstance(cell.get("attack_family"), str):
+        case["attack_family"] = cell["attack_family"]
+        case["robustness_tags"] = [cell["attack_family"]]
     return case
 
 

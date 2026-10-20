@@ -76,7 +76,7 @@ _WITH_VIOLATION = frozenset(
 _MISSING = object()
 _ROLES = frozenset({"user", "assistant", "tool"})
 _CONTRAST_REASONS = frozenset({"contrast_pair_broken", "attack_removed"})
-_SURFACE_REASONS = frozenset({"unrealized_surface"})
+_SURFACE_REASONS = frozenset({"unrealized_surface", "attack_unrealized"})
 
 
 class DatasetInputError(ValueError):
@@ -770,7 +770,13 @@ def _turn_reasons(
 
 
 def _surface_reasons(case: Mapping[str, Any], rule: PolicyRule) -> list[str]:
-    """Quote-copy allow rows are not over-refusal probes. They do not break the pair."""
+    """Quote-copy allow rows are not over-refusal probes. They do not break the pair.
+
+    An adversarial row whose attack was never applied is a plain violation under a
+    misleading kind, so it is dropped. It is optional and does not block Gold.
+    """
+    if case.get("kind") == "adversarial" and case.get("attack_applied") is not True:
+        return ["attack_unrealized"]
     if case.get("surface_required") is not True or case.get("expected_action") != "allow":
         return []
     scored = None

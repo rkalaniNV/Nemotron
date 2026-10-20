@@ -69,6 +69,14 @@ def test_a_seed_names_its_rule_and_keeps_the_source_quote() -> None:
     assert violation["turns"][0]["text"] == "Block it."
 
 
+def test_a_seed_copies_the_planner_source_language() -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.", languages=("vi-VN",))
+    _plan_rows, build = _cases([rule])
+
+    assert {case.get("source_language") for case in build.cases} == {"vi-VN"}
+    assert "language" not in _one(build, "clear_violation")
+
+
 def test_a_missing_leg_case_removes_one_condition_and_is_reused() -> None:
     rule = _rule("ALL-2", block=_ALL_OF)
     plan, build = _cases([rule])

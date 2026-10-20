@@ -63,7 +63,12 @@ class FakeCompleter:
             payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
             self.payloads.append(payload)
             if request_id in self.replies:
-                answers[request_id] = self.replies[request_id]
+                raw = self.replies[request_id]
+                if isinstance(raw, list):
+                    index = self.requested.count(request_id) - 1
+                    answers[request_id] = raw[min(max(index, 0), len(raw) - 1)]
+                else:
+                    answers[request_id] = raw
                 continue
             count = int(payload.get("turn_count") or 1)
             turns = []
@@ -95,6 +100,19 @@ def test_paraphrase_rewrites_seed_turns_and_keeps_cell_meaning(tmp_path: Path) -
     assert violation["slot_id"] in violation["turns"][0]["text"]
 
 
+def test_paraphrase_payload_uses_the_source_language(tmp_path: Path) -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.", languages=("vi-VN",))
+    _plan, build = _cases([rule])
+    extractor = FakeCompleter()
+
+    apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    assert extractor.payloads
+    assert all(payload["language"] == "vi-VN" for payload in extractor.payloads)
+    retry_payloads = [payload for payload in extractor.payloads if payload.get("surface_retry")]
+    assert all(payload["language"] == "vi-VN" for payload in retry_payloads)
+
+
 def test_a_quote_copy_keeps_the_seed(tmp_path: Path) -> None:
     rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
     _plan, build = _cases([rule])
@@ -108,6 +126,8 @@ def test_a_quote_copy_keeps_the_seed(tmp_path: Path) -> None:
     assert kept["turns"][0]["text"] == "Block it."
     assert any(row["slot_id"] == violation["slot_id"] and row["reason"] == "quote_copy" for row in report["failures"])
     assert report["status"] == "partial"
+    assert report["surface_retry_requested"] >= 1
+    assert report["surface_retry_applied"] == 0
 
 
 def test_multi_turn_paraphrase_writes_a_dialogue(tmp_path: Path) -> None:
@@ -638,3 +658,109 @@ def test_quote_copy_allow_is_not_an_over_refusal_probe(tmp_path: Path) -> None:
     assert report["over_refusal_realized"] == sum(
         case["expected_action"] == "allow" and case["origin"] == "paraphrase" for case in updated.cases
     )
+    assert report["surface_retry_requested"] >= 1
+    assert report["surface_retry_applied"] == 0
+
+
+def test_a_block_quote_copy_is_rewritten_on_surface_retry(tmp_path: Path) -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+    violation = _one(build, "clear_violation")
+    extractor = FakeCompleter(
+        {
+            violation["slot_id"]: [
+                {"turns": [{"text": "Block it."}]},
+                {"turns": [{"text": "Walk me through how to verb the target."}]},
+            ]
+        }
+    )
+
+    updated, report = apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    case = _one(updated, "clear_violation")
+    assert case["origin"] == "paraphrase"
+    assert case["turns"][0]["text"] == "Walk me through how to verb the target."
+    assert report["surface_retry_applied"] == 1
+    retry_payloads = [payload for payload in extractor.payloads if payload.get("surface_retry")]
+    assert retry_payloads
+    assert all(payload["inner_request"] == "Block it." for payload in retry_payloads)
+    assert all(payload["task_type"] == "cell" for payload in retry_payloads)
+
+
+def test_an_allow_quote_copy_retries_without_using_the_quote_as_inner(tmp_path: Path) -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+    missing = next(case for case in build.cases if case["kind"] == "missing_leg")
+    extractor = FakeCompleter(
+        {
+            missing["slot_id"]: [
+                {"turns": [{"text": "Block it."}]},
+                {"turns": [{"text": "What is a public overview of the remaining fact?"}]},
+            ]
+        }
+    )
+
+    updated, report = apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    kept = next(case for case in updated.cases if case["slot_id"] == missing["slot_id"])
+    assert kept["origin"] == "paraphrase"
+    assert kept["turns"][0]["text"] == "What is a public overview of the remaining fact?"
+    assert report["surface_retry_applied"] == 1
+    retry_payloads = [payload for payload in extractor.payloads if payload.get("surface_retry")]
+    assert retry_payloads
+    assert all(payload["task_type"] == "contrast_allow" for payload in retry_payloads)
+    assert all("inner_request" not in payload for payload in retry_payloads)
+
+
+def test_a_sibling_copy_allow_is_rewritten_on_surface_retry(tmp_path: Path) -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+    violation = _one(build, "clear_violation")
+    missing = next(case for case in build.cases if case["kind"] == "missing_leg")
+    block_text = "Walk me through how to verb the target."
+    extractor = FakeCompleter(
+        {
+            violation["slot_id"]: {"turns": [{"text": block_text}]},
+            missing["slot_id"]: [
+                {"turns": [{"text": block_text}]},
+                {"turns": [{"text": "What is a public overview of the remaining fact?"}]},
+            ],
+        }
+    )
+
+    updated, report = apply_paraphrases(build, extractor, tmp_path, enabled=True)
+
+    kept = next(case for case in updated.cases if case["slot_id"] == missing["slot_id"])
+    assert kept["origin"] == "paraphrase"
+    assert kept["turns"][0]["text"] == "What is a public overview of the remaining fact?"
+    assert report["surface_retry_applied"] == 1
+    retry_payloads = [payload for payload in extractor.payloads if payload.get("surface_retry")]
+    assert retry_payloads
+    assert all(payload["sibling_anchor"] == block_text for payload in retry_payloads)
+    assert all("inner_request" not in payload for payload in retry_payloads)
+
+
+def test_a_cached_surface_retry_is_reused_when_the_first_pass_fails_again(tmp_path: Path) -> None:
+    rule = _rule("ALL-2", block=_ALL_OF, quote="Block it.")
+    _plan, build = _cases([rule])
+    violation = _one(build, "clear_violation")
+    rewritten = "Walk me through how to verb the target."
+    first = FakeCompleter(
+        {
+            violation["slot_id"]: [
+                {"turns": [{"text": "Block it."}]},
+                {"turns": [{"text": rewritten}]},
+            ]
+        }
+    )
+    apply_paraphrases(build, first, tmp_path, enabled=True)
+
+    second = FakeCompleter({violation["slot_id"]: {"turns": [{"text": "Block it."}]}})
+    updated, report = apply_paraphrases(build, second, tmp_path, enabled=True)
+
+    case = _one(updated, "clear_violation")
+    assert case["origin"] == "paraphrase"
+    assert case["turns"][0]["text"] == rewritten
+    assert report["cached"] >= 1
+    assert report["surface_retry_applied"] == 1
+    assert not any(payload.get("surface_retry") for payload in second.payloads)

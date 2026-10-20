@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_json, write_jsonl
+from nemotron.steps.byob.runtime.benchmark_families.safety.attacks import attack_family
 from nemotron.steps.byob.runtime.benchmark_families.safety.case_facts import (
     acting_groups,
     case_context,
@@ -729,7 +730,20 @@ def _optional_cells(
             )
         )
     if modules.get("adversarial") is True and primary_action(rule) is not None:
-        cells.append(_planned(rule, rules, "adversarial", primary=primary, priority="optional", flags=preserved))
+        cells.append(
+            _planned(
+                rule,
+                rules,
+                "adversarial",
+                primary=primary,
+                priority="optional",
+                flags=preserved,
+                attack_family=attack_family(
+                    rule.policy_id,
+                    rule.provenance.source_quote if isinstance(rule.provenance.source_quote, str) else "",
+                ),
+            )
+        )
     if modules.get("political_symmetry") is True:
         cells.append(_planned(rule, rules, "actor_swap", primary=primary, priority="optional", flags=preserved))
     if modules.get("persona") is True:
