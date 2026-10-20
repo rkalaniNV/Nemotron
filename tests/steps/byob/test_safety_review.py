@@ -238,6 +238,10 @@ def test_publication_tier_follows_coverage_review_and_preview() -> None:
         "silver",
         "minimum_dataset_quality_not_met",
     )
+    assert publication_tier(mode="assisted", **{**complete, "unrealized_surfaces": True}) == (
+        "silver",
+        "allow_surface_unrealized",
+    )
 
 
 def test_conflict_card_ids_stay_with_the_same_conflict_when_the_list_grows() -> None:

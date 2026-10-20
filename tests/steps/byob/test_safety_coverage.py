@@ -231,9 +231,7 @@ def test_every_secondary_any_of_action_path_is_required() -> None:
     [clear] = _kinds(plan, "clear_violation")
     assert clear["present_legs"] == ["self_harm_signal"]
     paths = _kinds(plan, "condition_path")
-    assert {
-        (row["trigger_leg"], tuple(row["present_legs"]), row["expected_action"]) for row in paths
-    } == {
+    assert {(row["trigger_leg"], tuple(row["present_legs"]), row["expected_action"]) for row in paths} == {
         ("hate_slur", ("hate_slur",), "block"),
         ("violence_instruction", ("violence_instruction",), "block"),
     }
@@ -444,6 +442,20 @@ def test_quality_gate_preflight_uses_grounded_inventory_upper_bounds() -> None:
             "missing": 2,
         }
     ]
+
+
+def test_quality_gate_preflight_counts_configured_paraphrase_variants() -> None:
+    plan = _plan(
+        [_rule("SOLO")],
+        generation={"paraphrases_per_cell": 2},
+        quality_gates={"min_total_cases": 4, "on_failure": "fail"},
+    )
+
+    summary = plan.summary()
+    assert summary["capacity"]["planned_candidates"] == 2
+    assert summary["capacity"]["surface_variants_per_cell"] == 2
+    assert summary["capacity"]["final_case_upper_bound"] == 4
+    assert summary["quality_gate_preflight"]["possible"] is True
 
 
 def test_a_mix_multi_turn_omitted_by_the_cap_does_not_block_gold() -> None:
@@ -789,9 +801,7 @@ def test_backfill_promotes_distinct_cells_and_skips_quote_copies(tmp_path: Path)
     assert summary["backfill"]["rounds"] == 1
     assert summary["capacity"]["planned_candidates"] == 3
     assert summary["capacity"]["final_case_upper_bound"] == 3
-    members = {
-        member["slot_id"]: member["scheduled"] for member in summary["contrast_families"][0]["members"]
-    }
+    members = {member["slot_id"]: member["scheduled"] for member in summary["contrast_families"][0]["members"]}
     assert members["P-1/clear_allow"] is True
     rewritten = rewrite_coverage_plan(tmp_path, rows, summary)
     stored = _jsonl(tmp_path / "coverage_plan.jsonl")
@@ -816,9 +826,7 @@ def test_backfill_skips_cells_that_do_not_help_the_shortfall_and_respects_caps()
         case_cap=2,
         budget=_budget(),
         gate_result={
-            "failures": [
-                {"gate": "min_cases_per_action", "slice": "allow", "required": 1, "actual": 0, "missing": 1}
-            ]
+            "failures": [{"gate": "min_cases_per_action", "slice": "allow", "required": 1, "actual": 0, "missing": 1}]
         },
     )
     assert [cell["slot_id"] for cell in chosen] == ["P-1/clear_allow"]

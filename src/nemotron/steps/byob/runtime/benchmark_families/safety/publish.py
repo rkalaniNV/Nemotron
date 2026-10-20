@@ -72,8 +72,12 @@ def publication_tier(
     blocking: bool,
     review_limitations: bool = False,
     quality_gates_passed: bool = True,
+    unrealized_surfaces: bool = False,
 ) -> tuple[str, str]:
     """Gold needs a signed benchmark with development cases and no blocking gaps.
+
+    A required allow cell whose surface is still the source quote is not an
+    over-refusal probe, so the benchmark cannot claim Gold without it.
 
     Preview stays Preview even when coverage is complete. It is not a comparable score.
     """
@@ -85,6 +89,8 @@ def publication_tier(
         return "silver", "review_unresolved_items"
     if coverage_certification != "gold" or blocking:
         return "silver", coverage_reason or "required_omitted"
+    if unrealized_surfaces:
+        return "silver", "allow_surface_unrealized"
     if development == 0:
         return "silver", split_reason or "split_incomplete"
     if not quality_gates_passed:
@@ -331,6 +337,7 @@ def _publication_payload(
         if case_id not in development:
             continue
         rows.append({**case, "split": "development"})
+    _tag_contrast_families(rows, families)
     stored_gates = split_manifest.get("quality_gates")
     if isinstance(stored_gates, Mapping):
         gate_requirements = stored_gates.get("requirements")
@@ -350,6 +357,10 @@ def _publication_payload(
     else:
         quality_gates = evaluate_quality_gates(rows, {})
     coverage = packet.get("coverage") if isinstance(packet.get("coverage"), Mapping) else {}
+    surfaces = split_manifest.get("unrealized_surfaces", [])
+    if not isinstance(surfaces, list) or any(not isinstance(row, Mapping) for row in surfaces):
+        raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, "split_manifest.json has damaged unrealized_surfaces.")
+    unrealized = [dict(row) for row in surfaces if row.get("policy_id") not in dropped_policies]
     tier, reason = publication_tier(
         mode=mode,
         coverage_certification=str(coverage.get("certification") or ""),
@@ -360,6 +371,7 @@ def _publication_payload(
         blocking=bool(packet.get("blocking_gaps")),
         review_limitations=bool(packet.get("unresolved_rules") or packet.get("unresolved_conflicts")),
         quality_gates_passed=quality_gates["passed"],
+        unrealized_surfaces=bool(unrealized),
     )
     grouped = {
         BENCHMARK_FILE: rows,
@@ -376,6 +388,7 @@ def _publication_payload(
         "development": len(grouped[DEVELOPMENT_FILE]),
         "quality_gates": quality_gates,
         "blocking_gaps": list(packet.get("blocking_gaps") or []),
+        "unrealized_surfaces": unrealized,
         "withheld_policies": sorted(dropped_policies),
         "withheld_cases": sorted(dropped),
         "unresolved_rules": [row.get("policy_id") for row in packet.get("unresolved_rules") or []],
@@ -388,6 +401,28 @@ def _publication_payload(
         "published_at": published_at,
     }
     return rows, dropped, grouped, quality, tier, reason
+
+
+def _tag_contrast_families(rows: list[dict[str, Any]], families: Sequence[Mapping[str, Any]]) -> None:
+    """Name each published family on its members, so eval can score both sides of a pair.
+
+    A family counts only when every member is published. A pair with a dropped side
+    cannot measure consistency.
+    """
+    by_id = {str(row["case_id"]): row for row in rows}
+    tags: dict[str, list[str]] = {}
+    for family in families:
+        family_id = family.get("family_id")
+        members = family.get("members")
+        if not isinstance(family_id, str) or not isinstance(members, list):
+            continue
+        ids = [member.get("case_id") for member in members if isinstance(member, Mapping)]
+        if len(ids) < 2 or not all(isinstance(case_id, str) and case_id in by_id for case_id in ids):
+            continue
+        for case_id in ids:
+            tags.setdefault(case_id, []).append(family_id)
+    for case_id, family_ids in tags.items():
+        by_id[case_id]["contrast_family_ids"] = sorted(set(family_ids))
 
 
 def _load_packet(run_dir: Path) -> dict[str, Any]:

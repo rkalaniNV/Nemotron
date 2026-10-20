@@ -79,6 +79,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
 from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import (
     PARAPHRASE_OUTPUTS,
     apply_paraphrases,
+    expand_paraphrase_variants,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import REPORT_FILE as PARAPHRASE_REPORT
 from nemotron.steps.byob.runtime.benchmark_families.safety.publish import (
@@ -156,9 +157,7 @@ def prepare_safety(config_path: ConfigPath) -> Path:
         index = _refresh_cache_index(index, digest, fingerprint)
         try:
             privacy_config = resolved.extras.get("privacy", {})
-            privacy_labels = (
-                privacy_config.get("additional_labels", {}) if isinstance(privacy_config, dict) else {}
-            )
+            privacy_labels = privacy_config.get("additional_labels", {}) if isinstance(privacy_config, dict) else {}
             ingested = ingest_sources(
                 resolved.input_dir,
                 sources,
@@ -285,9 +284,7 @@ def generate_safety(config_path: ConfigPath, /, *, skip_until: str | None = None
     raise abort(status, run_dir, detail)
 
 
-def _resume_published(
-    run_dir: Path, record: dict[str, Any]
-) -> tuple[RunStatus, str, dict[str, int] | None] | None:
+def _resume_published(run_dir: Path, record: dict[str, Any]) -> tuple[RunStatus, str, dict[str, int] | None] | None:
     """Return the published outcome when the commit is intact, including a torn last write."""
     if record.get("publication_commit") is True:
         assert_published_intact(run_dir, record)
@@ -307,9 +304,7 @@ def _resume_published(
     return _published_outcome(run_dir, record)
 
 
-def _published_outcome(
-    run_dir: Path, record: dict[str, Any]
-) -> tuple[RunStatus, str, dict[str, int] | None]:
+def _published_outcome(run_dir: Path, record: dict[str, Any]) -> tuple[RunStatus, str, dict[str, int] | None]:
     published = _read_json(run_dir / MANIFEST_NAME, run_dir)
     if published is None:
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"{MANIFEST_NAME} is missing after publication.")
@@ -423,9 +418,7 @@ def _publication_blocker(
         )
     scenarios = _scenario_stage(config, digest, fingerprint)
     dataset = _dataset_stage(config, digest, fingerprint)
-    coverage, scenarios, dataset = _backfill_quality_gates(
-        config, digest, fingerprint, coverage, scenarios, dataset
-    )
+    coverage, scenarios, dataset = _backfill_quality_gates(config, digest, fingerprint, coverage, scenarios, dataset)
     record["coverage"] = coverage
     record["scenarios"] = scenarios
     record["dataset"] = dataset
@@ -686,12 +679,19 @@ def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
         )
         extractor = None
         enabled = config.generation["modules"].get("paraphrase") is True
+        variants_added = 0
         if enabled:
+            build, variants_added = expand_paraphrase_variants(
+                build,
+                variants_per_cell=int(config.generation.get("paraphrases_per_cell", 1)),
+                case_cap=case_cap_for(config.mode, config.budget),
+            )
             try:
                 extractor = extraction.make_extractor(config, run_dir)
             except ValueError:
                 extractor = None
-        build, paraphrase = apply_paraphrases(build, extractor, stage_cache, enabled=enabled)
+        build, paraphrase = apply_paraphrases(build, extractor, stage_cache, enabled=enabled, rules=rules)
+        paraphrase["variants_added"] = variants_added
         summary = write_scenarios(stage_cache, build)
         summary["paraphrase"] = paraphrase
         _write_json(stage_cache / PARAPHRASE_REPORT, paraphrase)
@@ -959,8 +959,7 @@ def _quality_gate_preflight_detail(coverage: Mapping[str, Any]) -> str:
         if isinstance(slice_name, str) and slice_name:
             gate = f"{gate}[{slice_name}]"
         labels.append(
-            f"{gate}: needs {failure.get('required')}, inventory upper bound "
-            f"{failure.get('available_upper_bound')}"
+            f"{gate}: needs {failure.get('required')}, inventory upper bound {failure.get('available_upper_bound')}"
         )
     detail = "; ".join(labels) if labels else "the grounded cell inventory cannot meet the configured minima"
     return f"Quality-gate preflight stopped before scenario generation: {detail}."

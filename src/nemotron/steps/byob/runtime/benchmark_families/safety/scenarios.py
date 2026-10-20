@@ -553,6 +553,8 @@ def _assemble(
     flags = cell.get("flags")
     if isinstance(flags, (list, tuple)) and flags:
         case["flags"] = [flag for flag in flags if isinstance(flag, str)]
+    if isinstance(cell.get("paired_policy_id"), str):
+        case["paired_policy_id"] = cell["paired_policy_id"]
     if isinstance(cell.get("language"), str):
         case["language"] = cell["language"]
     languages = cell.get("languages")

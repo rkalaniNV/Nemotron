@@ -58,6 +58,7 @@ DEFAULT_GENERATION = {
     "decision_mix": {"allow": 0.40, "block": 0.40, "caution": 0.10, "escalate": 0.10},
     "case_family_mix": {"clear": 0.35, "boundary": 0.25, "exception": 0.15, "contrast": 0.25},
     "turn_mix": {"single_turn": 0.80, "multi_turn": 0.20},
+    "paraphrases_per_cell": 1,
     "modules": {
         "adversarial": False,
         "political_symmetry": "confirm_if_detected",
@@ -77,7 +78,7 @@ DEFAULT_PROPOSALS = {
 }
 DEFAULT_ASSURANCE = {"profile": "standard"}
 ASSURANCE_KEYS = frozenset({"profile", "review_sample_rate", "second_judge_on"})
-GENERATION_KEYS = frozenset({"decision_mix", "case_family_mix", "turn_mix", "modules"})
+GENERATION_KEYS = frozenset({"decision_mix", "case_family_mix", "turn_mix", "paraphrases_per_cell", "modules"})
 # Same Curator knobs the MCQ family uses. Safety drops marked near-dups by default.
 DEFAULT_SEMANTIC_DEDUP = {
     "enabled": True,
@@ -468,7 +469,7 @@ def _assurance(value: Any, messages: list[str]) -> dict[str, Any]:
 def _generation(value: Any, messages: list[str]) -> dict[str, Any]:
     supplied = _mapping(value, "generation", messages)
     if supplied is None:
-        return {key: dict(section) for key, section in DEFAULT_GENERATION.items()}
+        supplied = {}
     _unknown_keys("generation", supplied, GENERATION_KEYS, messages)
     modules = dict(DEFAULT_GENERATION["modules"])
     module_values = _mapping(supplied.get("modules", {}), "generation.modules", messages)
@@ -481,6 +482,10 @@ def _generation(value: Any, messages: list[str]) -> dict[str, Any]:
                 f"generation.modules.{name} must be true, false, or one of "
                 f"{', '.join(sorted(MODULE_STRING_FLAGS))}; received {flag!r}."
             )
+    variants = supplied.get("paraphrases_per_cell", DEFAULT_GENERATION["paraphrases_per_cell"])
+    if isinstance(variants, bool) or not isinstance(variants, int) or not 1 <= variants <= 5:
+        messages.append("generation.paraphrases_per_cell must be a whole number from 1 through 5.")
+        variants = DEFAULT_GENERATION["paraphrases_per_cell"]
     mixes = {
         key: _mix(
             f"generation.{key}",
@@ -491,7 +496,7 @@ def _generation(value: Any, messages: list[str]) -> dict[str, Any]:
         )
         for key in ("decision_mix", "case_family_mix", "turn_mix")
     }
-    return {**mixes, "modules": modules}
+    return {**mixes, "paraphrases_per_cell": variants, "modules": modules}
 
 
 def _check_decision_mix(mix: Any, actions: Any, messages: list[str]) -> None:
@@ -540,9 +545,7 @@ def _check_budget_and_gates(
         and mix_share > 0
         and int(budget["max_turns"]) < 2
     ):
-        messages.append(
-            "generation.turn_mix.multi_turn is greater than 0, so budget.max_turns must be at least 2."
-        )
+        messages.append("generation.turn_mix.multi_turn is greater than 0, so budget.max_turns must be at least 2.")
     if not isinstance(quality_gates, Mapping):
         return
     min_total = _optional_gate_count(quality_gates, "min_total_cases")
@@ -757,10 +760,7 @@ def _quality_gates(value: Any, messages: list[str]) -> dict[str, Any] | None:
     if "on_failure" in gates:
         mode = gates["on_failure"]
         if mode not in QUALITY_GATE_FAILURE_MODES:
-            messages.append(
-                "quality_gates.on_failure must be silver or fail; "
-                f"received {mode!r}."
-            )
+            messages.append(f"quality_gates.on_failure must be silver or fail; received {mode!r}.")
         else:
             checked["on_failure"] = mode
     else:
@@ -803,9 +803,7 @@ def _quality_gates(value: Any, messages: list[str]) -> dict[str, Any] | None:
                 stored = unicodedata.normalize("NFC", label)
                 canonical = stored.casefold()
             if canonical in seen:
-                messages.append(
-                    f"quality_gates.{key} repeats {label!r}; it already lists {seen[canonical]!r}."
-                )
+                messages.append(f"quality_gates.{key} repeats {label!r}; it already lists {seen[canonical]!r}.")
                 continue
             if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
                 messages.append(f"quality_gates.{key}.{label} must be a non-negative whole number.")

@@ -134,8 +134,8 @@ def package(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def start(package: Path, tmp_path: Path, connections: list[Any]):
-    def run(output: str = "out", budget: dict[str, int] | None = None) -> Run:
-        config = _config(tmp_path, package, tmp_path / output, budget)
+    def run(output: str = "out", budget: dict[str, int] | None = None, *, paraphrase: bool = False) -> Run:
+        config = _config(tmp_path, package, tmp_path / output, budget, paraphrase=paraphrase)
         first = _cli(config, "all")
         return Run(config, tmp_path / output / "customer-safety-v1", first)
 
@@ -186,6 +186,15 @@ def test_approved_review_publishes_a_complete_fixture_as_gold(start: Any, connec
     split = result.json("stage_cache/split_manifest.json")
     assert split["complete"] is True
     assert set(split["splits"]) == {"development"}
+    assert split["unrealized_surfaces"] == []
+    published_cases = _published_cases(result.run_dir)
+    assert {case["expected_action"] for case in published_cases} >= {"allow", "block"}
+    tagged: dict[str, set[str]] = {}
+    for case in published_cases:
+        for family_id in case.get("contrast_family_ids") or []:
+            tagged.setdefault(family_id, set()).add(case["expected_action"])
+    assert tagged
+    assert all(actions == {"allow", "block"} for actions in tagged.values())
     assert result.json("run_record.json")["publication_commit"] is True
     assert (result.run_dir / MANIFEST_NAME).is_file()
     assert (result.run_dir / BENCHMARK_FILE).is_file()
@@ -198,6 +207,23 @@ def test_approved_review_publishes_a_complete_fixture_as_gold(start: Any, connec
         assert case["split"] == "development"
         assert case["expected_action"] in ACTIONS
     assert connections == []
+
+
+def test_paraphrase_without_a_model_publishes_silver_without_quote_allows(start: Any) -> None:
+    result = start(output="unrealized", paraphrase=True)
+    assert result.first.returncode == 3, result.first.stderr
+    assert "Unrealized allow surfaces" in result.text(REVIEW_PAGE)
+    published = _approve_and_publish(result)
+
+    assert published.returncode == 2, published.stderr
+    assert published.stderr.startswith("silver_completed:")
+    report = result.json(QUALITY_FILE)
+    assert report["certification"] == "silver"
+    assert report["reason"] == "allow_surface_unrealized"
+    assert report["unrealized_surfaces"]
+    assert {row["reason"] for row in report["unrealized_surfaces"]} == {"unrealized_surface"}
+    assert result.json("stage_cache/coverage_gaps.json")["certification"] == "gold"
+    assert "allow" not in {case["expected_action"] for case in _published_cases(result.run_dir)}
 
 
 def test_insufficient_budget_publishes_silver_and_lists_missing_coverage(start: Any) -> None:
@@ -383,7 +409,9 @@ def _config(
     *,
     name: str | None = None,
     evaluation: dict[str, Any] | None = None,
+    paraphrase: bool = False,
 ) -> Path:
+    """The gate has no model. With paraphrase on, seed allow cells cannot be realized."""
     data: dict[str, Any] = {
         "family": "safety",
         "expt_name": "customer-safety-v1",
@@ -391,6 +419,7 @@ def _config(
         "mode": "assisted",
         "input_dir": str(policies),
         "output_dir": str(output),
+        "generation": {"modules": {"paraphrase": paraphrase}},
     }
     if budget is not None:
         data["budget"] = budget

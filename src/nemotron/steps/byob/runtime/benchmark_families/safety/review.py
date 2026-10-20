@@ -135,6 +135,9 @@ def load_review(
         quality_gates = split_manifest.get("quality_gates")
         if not isinstance(quality_gates, Mapping):
             raise ValueError("split_manifest.json must contain quality_gates")
+        surfaces = split_manifest.get("unrealized_surfaces", [])
+        if not isinstance(surfaces, list) or any(not isinstance(row, Mapping) for row in surfaces):
+            raise ValueError("split_manifest.json has damaged unrealized_surfaces")
         return assemble_review(
             config_sha256=config_sha256,
             source_fingerprint=source_fingerprint,
@@ -151,6 +154,7 @@ def load_review(
             content_hashes=_file_hashes(run_dir),
             example_cap=example_cap,
             quality_gates=quality_gates,
+            unrealized_surfaces=surfaces,
         )
     except (OSError, ValueError) as exc:
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"review packet cannot be built: {exc}") from exc
@@ -173,6 +177,7 @@ def assemble_review(
     example_cap: int = EXAMPLE_CAP,
     decision_metadata: Mapping[str, Mapping[str, str]] | None = None,
     quality_gates: Mapping[str, Any] | None = None,
+    unrealized_surfaces: Sequence[Mapping[str, Any]] = (),
 ) -> ReviewBuild:
     """Build the packet, the page, and the CSV from in-memory rows.
 
@@ -214,6 +219,11 @@ def assemble_review(
         },
         "quality_gates": dict(quality_gates or {"enabled": False, "passed": True, "failures": []}),
         "blocking_gaps": sorted(blocking, key=_gap_key),
+        "unrealized_surfaces": sorted(
+            (dict(row) for row in unrealized_surfaces if isinstance(row, Mapping)),
+            key=lambda row: str(row.get("case_id") or ""),
+        ),
+        "contrast_pairs": _contrast_pairs(cases),
         "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)],
         "unresolved_rules": _unresolved_rules(rules),
         "excluded_rules": _excluded_rules(rules),
@@ -336,6 +346,8 @@ def render_html(packet: Mapping[str, Any]) -> str:
         "<p>These missing cells block Gold. They are not CSV decisions.</p>",
         _gap_table(blocking),
         _gap_recommendation(blocking),
+        *_unrealized_section(packet.get("unrealized_surfaces") or []),
+        *_contrast_section(packet.get("contrast_pairs") or []),
         f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
         _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
         "<details><summary>Generation capacity preflight</summary>",
@@ -995,6 +1007,101 @@ def _examples(cases: Sequence[Mapping[str, Any]], example_cap: int) -> list[dict
             }
         )
     return sections
+
+
+def _contrast_pairs(cases: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Every paraphrased contrast allow beside the block text it was anchored to."""
+    rows = []
+    for case in cases:
+        anchor = case.get("contrast_anchor")
+        if not isinstance(anchor, Mapping) or case.get("origin") != "paraphrase":
+            continue
+        rows.append(
+            {
+                "case_id": case.get("case_id"),
+                "policy_id": case.get("policy_id"),
+                "anchored": anchor.get("anchored") is not False and bool(anchor.get("text")),
+                "changed_dimension": anchor.get("changed_dimension"),
+                "block_case_id": anchor.get("case_id"),
+                "block_text": str(anchor.get("text") or "")[:_EXAMPLE_TEXT],
+                "allow_text": _scored_text(case)[:_EXAMPLE_TEXT],
+            }
+        )
+    return sorted(rows, key=lambda row: (bool(row.get("anchored")), str(row.get("case_id") or "")))
+
+
+def _scored_text(case: Mapping[str, Any]) -> str:
+    turns = case.get("turns")
+    if not isinstance(turns, list):
+        return ""
+    texts = [
+        turn["text"]
+        for turn in turns
+        if isinstance(turn, Mapping) and turn.get("scored") is True and isinstance(turn.get("text"), str)
+    ]
+    return texts[-1] if texts else ""
+
+
+def _unrealized_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    if not rows:
+        return []
+    body = [
+        f"<h2>Unrealized allow surfaces ({len(rows)})</h2>",
+        "<p>These required allow cells still repeat the source quote, so they are not over-refusal "
+        "probes. They were rejected and block Gold. They are not CSV decisions.</p>",
+        "<table><thead><tr><th>Case</th><th>Policy</th><th>Kind</th></tr></thead><tbody>",
+    ]
+    for row in rows:
+        body.append(
+            "<tr><td>"
+            + _text(row.get("case_id"))
+            + "</td><td>"
+            + _text(row.get("policy_id"))
+            + "</td><td>"
+            + _text(row.get("kind"))
+            + "</td></tr>"
+        )
+    body.append("</tbody></table>")
+    body.append(
+        _recommend(
+            [
+                "set <code>generation_model_config</code> so paraphrase can run",
+                "check <code>stage_cache/paraphrase_report.json</code> for failed replies",
+            ],
+            "then run <code>generate</code> again.",
+        )
+    )
+    return body
+
+
+def _contrast_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    if not rows:
+        return []
+    unanchored = sum(1 for row in rows if not row.get("anchored"))
+    body = [
+        f"<details><summary>Contrast pairs to spot-check ({len(rows)}, {unanchored} without anchor)</summary>",
+        "<p>Each allow was written from its block sibling with one fact removed. Reject the rule "
+        "in the CSV if an allow still states the removed fact. Rows without an anchor are listed "
+        "first: the block sibling kept its seed, so the allow was written without it and needs "
+        "the closest check.</p>",
+        "<table><thead><tr><th>Allow case</th><th>Removed</th><th>Block text</th>"
+        "<th>Allow text</th></tr></thead><tbody>",
+    ]
+    for row in rows:
+        block_text = row.get("block_text") if row.get("anchored") else "(no anchor: block kept its seed)"
+        body.append(
+            "<tr><td>"
+            + _text(row.get("case_id"))
+            + "</td><td>"
+            + _text(row.get("changed_dimension"))
+            + "</td><td>"
+            + _text(block_text)
+            + "</td><td>"
+            + _text(row.get("allow_text"))
+            + "</td></tr>"
+        )
+    body.extend(["</tbody></table>", "</details>"])
+    return body
 
 
 def _example_case(case: Mapping[str, Any]) -> dict[str, Any]:

@@ -108,6 +108,45 @@ def test_path1_metrics_match_hand_computed_fixture() -> None:
     assert metrics["throughput_events_per_second"] > 0
 
 
+def test_contrast_pair_consistency_needs_both_sides_right() -> None:
+    def member(case_id: str, action: str, family: str) -> dict:
+        return {**_case(case_id, action), "contrast_family_ids": [family]}
+
+    events = [
+        events_from_case(member("v1", "block", "F-ok"))[0],
+        events_from_case(member("a1", "allow", "F-ok"))[0],
+        events_from_case(member("v2", "block", "F-bad"))[0],
+        events_from_case(member("a2", "allow", "F-bad"))[0],
+        events_from_case(member("v3", "block", "F-unscored"))[0],
+        events_from_case(member("a3", "allow", "F-unscored"))[0],
+    ]
+    adapter = TestAdapter(
+        {
+            "v1#1": {"decision": "block", "latency_ms": 1},
+            "a1#1": {"decision": "allow", "latency_ms": 1},
+            "v2#1": {"decision": "block", "latency_ms": 1},
+            "a2#1": {"decision": "block", "latency_ms": 1},
+            "v3#1": {"decision": "block", "latency_ms": 1},
+            "a3#1": {"parse_status": "timeout", "latency_ms": 1},
+        }
+    )
+
+    metrics = score_path1(events, adapter, split="fixture")
+
+    assert events[0]["contrast_family_ids"] == ["F-ok"]
+    assert metrics["contrast_families"] == 3
+    assert metrics["contrast_families_scored"] == 2
+    assert metrics["contrast_pair_consistency"] == 0.5
+
+
+def test_contrast_pair_consistency_is_undefined_without_families() -> None:
+    events = [events_from_case(_case("u1", "block"))[0]]
+    metrics = score_path1(events, TestAdapter({"u1#1": {"decision": "block", "latency_ms": 1}}), split="fixture")
+
+    assert metrics["contrast_families"] == 0
+    assert metrics["contrast_pair_consistency"] is None
+
+
 def test_failures_are_not_counted_as_allow_or_block() -> None:
     event = events_from_case(_case("u1", "block"))[0]
     malformed = score_reply(event, {"parse_status": "malformed", "decision": "allow", "latency_ms": 1})

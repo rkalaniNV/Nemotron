@@ -18,8 +18,12 @@
 The label is recomputed from the case facts. A stored action that disagrees is
 rejected and is not overwritten. A case with no eligible rule, or a quote that is
 not inside its source span, is rejected. Seed and proposal turns must still be
-the source quote; a paraphrase-origin turn may differ. When one member of a
-complete contrast family fails, the other members are rejected with it.
+the source quote; a paraphrase-origin turn may differ. An allow case marked
+``surface_required`` whose scored turn is still the source quote is rejected
+with ``unrealized_surface`` and does not break its contrast pair. A required
+case rejected this way is listed in ``unrealized_surfaces`` and blocks Gold. When one
+member of a complete contrast family fails a non-surface check, the other
+members are rejected with it.
 
 An exact duplicate has the same policy, action, language, kind, legs, and
 canonical turn text. The lowest case id is kept. Members of one contrast family
@@ -72,6 +76,7 @@ _WITH_VIOLATION = frozenset(
 _MISSING = object()
 _ROLES = frozenset({"user", "assistant", "tool"})
 _CONTRAST_REASONS = frozenset({"contrast_pair_broken", "attack_removed"})
+_SURFACE_REASONS = frozenset({"unrealized_surface"})
 
 
 class DatasetInputError(ValueError):
@@ -166,7 +171,13 @@ def select_dataset(
     for case_id in sorted(stored):
         if not reasons[case_id]:
             continue
-        stage = "contrast" if set(reasons[case_id]) <= _CONTRAST_REASONS else "validation"
+        found = set(reasons[case_id])
+        if found <= _CONTRAST_REASONS:
+            stage = "contrast"
+        elif found <= _SURFACE_REASONS:
+            stage = "surface"
+        else:
+            stage = "validation"
         rejected.append(_rejection(stored[case_id], reasons[case_id], stage))
     deduplicated, drops = _deduplicate(validated, pairs, by_id)
     deduplicated, semantic_drops, semantic_report = _semantic_deduplicate(
@@ -188,6 +199,7 @@ def select_dataset(
         split_manifest=manifest,
     )
     manifest["quality_gates"] = gate_result
+    manifest["unrealized_surfaces"] = _unrealized_required(stored, reasons)
     report["quality_gates"] = gate_result
     return DatasetBuild(
         labels=labels,
@@ -569,7 +581,11 @@ def _close_pairs(reasons: dict[str, list[str]], pairs: Sequence[tuple[str, Seque
     """A complete family is kept whole. One failed member rejects the members that passed."""
     changed = False
     for _family_id, ids in pairs:
-        failed = [case_id for case_id in ids if reasons[case_id]]
+        failed = [
+            case_id
+            for case_id in ids
+            if reasons[case_id] and not set(reasons[case_id]) <= _SURFACE_REASONS
+        ]
         if not failed or len(failed) == len(ids):
             continue
         for case_id in ids:
@@ -645,6 +661,7 @@ def _judge(
     reasons, action, legs = _label_reasons(case, rule, rules)
     reasons.extend(_evidence_reasons(case, rule, spans))
     reasons.extend(_turn_reasons(case, rule, legs))
+    reasons.extend(_surface_reasons(case, rule))
     return _unique(reasons), action
 
 
@@ -750,6 +767,49 @@ def _turn_reasons(
             return ["invalid_turns"]
         return [] if scored >= 1 else ["invalid_turns"]
     return [] if scored == 1 else ["invalid_turns"]
+
+
+def _surface_reasons(case: Mapping[str, Any], rule: PolicyRule) -> list[str]:
+    """Quote-copy allow rows are not over-refusal probes. They do not break the pair."""
+    if case.get("surface_required") is not True or case.get("expected_action") != "allow":
+        return []
+    scored = None
+    turns = case.get("turns")
+    if isinstance(turns, list):
+        texts = [
+            turn.get("text")
+            for turn in turns
+            if isinstance(turn, Mapping) and turn.get("scored") is True and isinstance(turn.get("text"), str)
+        ]
+        scored = texts[-1] if texts else None
+    quote = rule.provenance.source_quote
+    if not isinstance(scored, str) or not scored.strip() or not quote:
+        return []
+    if canonical_text(scored) != canonical_text(quote):
+        return []
+    return ["unrealized_surface"]
+
+
+def _unrealized_required(
+    cases: Mapping[str, Mapping[str, Any]], reasons: Mapping[str, Sequence[str]]
+) -> list[dict[str, Any]]:
+    """Required allow cells whose surface was never realized. Each one blocks Gold."""
+    rows = []
+    for case_id in sorted(cases):
+        case = cases[case_id]
+        if "unrealized_surface" not in reasons.get(case_id, ()) or case.get("priority") != "required":
+            continue
+        if case.get("variant_of") is not None:
+            continue
+        rows.append(
+            {
+                "case_id": case_id,
+                "policy_id": case.get("policy_id") if isinstance(case.get("policy_id"), str) else None,
+                "kind": case.get("kind"),
+                "reason": "unrealized_surface",
+            }
+        )
+    return rows
 
 
 def _text_differs(

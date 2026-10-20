@@ -41,6 +41,9 @@ budget:
 #   on_failure: silver
 
 generation:
+  # Generate more than one distinct surface for each scheduled coverage cell.
+  # Base cells are always kept; variants fill remaining assisted_max_cases room.
+  paraphrases_per_cell: 1
   modules:
     adversarial: false
     persona: false
@@ -56,9 +59,10 @@ generation:
   #   single_turn: 0.80
   #   multi_turn: 0.20
 
-# Same Curator near-dup knobs as MCQ. Compares scored user turns only inside
-# the same language and expected action after exact dedup. Contrast-family
-# members are not dropped. An enabled stage fails closed when Curator cannot run.
+# Same near-dup pipeline and knobs as MCQ. It uses Curator when its RAPIDS
+# semantic backend is available and the shared CPU backend otherwise. Comparisons
+# stay inside one language and expected action; protected contrast members remain.
+# An enabled stage fails closed when neither backend can run.
 semantic_deduplication_config:
   enabled: true
   model_identifier: sentence-transformers/all-MiniLM-L6-v2

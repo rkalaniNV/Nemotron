@@ -21,13 +21,6 @@ import shutil
 from abc import ABC, abstractmethod
 
 import pandas as pd
-from nemo_curator.backends.ray_actor_pool import RayActorPoolExecutor
-from nemo_curator.backends.ray_data import RayDataExecutor
-from nemo_curator.pipeline import Pipeline
-from nemo_curator.stages.deduplication.semantic import SemanticDeduplicationWorkflow
-from nemo_curator.stages.text.embedders import EmbeddingCreatorStage
-from nemo_curator.stages.text.io.reader import ParquetReader
-from nemo_curator.stages.text.io.writer import ParquetWriter
 
 from nemotron.steps.byob.runtime.config import ByobConfig
 
@@ -49,17 +42,9 @@ class TextSemanticDeduplication(ABC):
         self.embeddings_path = os.path.join(self.cache_path, "embeddings")
         self.semantic_cache_path = os.path.join(self.cache_path, "semantic_dedup")
 
-        self.workflow = SemanticDeduplicationWorkflow(
-            input_path=self.embeddings_path,
-            output_path=self.output_path,
-            cache_path=self.semantic_cache_path,
-            n_clusters=self.config.semantic_deduplication_config["n_clusters"],
-            id_field="id",
-            embedding_field="embeddings",
-            eps=self.config.semantic_deduplication_config["eps"],
-        )
-        self.executor = RayDataExecutor()
-        self.kmeans_executor = RayActorPoolExecutor()
+        self.workflow = None
+        self.executor = None
+        self.kmeans_executor = None
         if os.path.exists(self.output_path):
             logger.warning(f"Output path {self.output_path} already exists. Removing it.")
             shutil.rmtree(self.output_path)
@@ -74,6 +59,13 @@ class TextSemanticDeduplication(ABC):
         pass
 
     def _compute_embeddings(self, input_file: str) -> None:
+        from nemo_curator.backends.ray_data import RayDataExecutor
+        from nemo_curator.pipeline import Pipeline
+        from nemo_curator.stages.text.embedders import EmbeddingCreatorStage
+        from nemo_curator.stages.text.io.reader import ParquetReader
+        from nemo_curator.stages.text.io.writer import ParquetWriter
+
+        self.executor = RayDataExecutor()
         embedding_pipeline = Pipeline(
             stages=[
                 ParquetReader(file_paths=input_file, _generate_ids=False),
@@ -87,6 +79,65 @@ class TextSemanticDeduplication(ABC):
             name="byob_semantic_dedup_embedding_pipeline",
         )
         embedding_pipeline.run(self.executor)
+
+    def _run_curator(self, input_file: str) -> None:
+        from nemo_curator.backends.ray_actor_pool import RayActorPoolExecutor
+        from nemo_curator.stages.deduplication.semantic import SemanticDeduplicationWorkflow
+
+        self._compute_embeddings(input_file)
+        self.workflow = SemanticDeduplicationWorkflow(
+            input_path=self.embeddings_path,
+            output_path=self.output_path,
+            cache_path=self.semantic_cache_path,
+            n_clusters=self.config.semantic_deduplication_config["n_clusters"],
+            id_field="id",
+            embedding_field="embeddings",
+            eps=self.config.semantic_deduplication_config["eps"],
+        )
+        self.kmeans_executor = RayActorPoolExecutor()
+        self.workflow.run(kmeans_executor=self.kmeans_executor, pairwise_executor=self.executor)
+
+    def _run_cpu(self, dataset: pd.DataFrame) -> None:
+        """CPU equivalent for environments where Curator's semantic stage needs RAPIDS."""
+        from sentence_transformers import SentenceTransformer
+        from sklearn.cluster import DBSCAN, KMeans
+
+        if dataset.empty:
+            return
+        model = SentenceTransformer(self.config.semantic_deduplication_config["model_identifier"])
+        embeddings = model.encode(
+            dataset["text"].astype(str).tolist(),
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        requested = int(self.config.semantic_deduplication_config["n_clusters"])
+        cluster_count = max(1, min(requested, len(dataset)))
+        partitions = (
+            KMeans(n_clusters=cluster_count, random_state=42, n_init=10).fit_predict(embeddings)
+            if cluster_count > 1
+            else [0] * len(dataset)
+        )
+        duplicate_indexes: list[int] = []
+        for partition in sorted(set(partitions)):
+            indexes = [index for index, value in enumerate(partitions) if value == partition]
+            if len(indexes) < 2:
+                continue
+            labels = DBSCAN(
+                eps=float(self.config.semantic_deduplication_config["eps"]),
+                min_samples=2,
+                metric="cosine",
+            ).fit_predict(embeddings[indexes])
+            for label in sorted(set(labels)):
+                if label < 0:
+                    continue
+                members = [indexes[offset] for offset, value in enumerate(labels) if value == label]
+                duplicate_indexes.extend(members[1:])
+        if duplicate_indexes:
+            duplicates = dataset.iloc[sorted(duplicate_indexes)][["id"]]
+            path = os.path.join(self.output_path, "duplicates")
+            os.makedirs(path, exist_ok=True)
+            duplicates.to_parquet(os.path.join(path, "part.0.parquet"), index=False)
 
     def _mark_duplicates(self, dataset: pd.DataFrame):
         paths = glob.glob(os.path.join(self.output_path, "duplicates/*.parquet"))
@@ -102,8 +153,11 @@ class TextSemanticDeduplication(ABC):
         dataset_temp = self.prepare_input_data(dataset)
         input_file = os.path.join(self.input_path, "questions.parquet")
         dataset_temp.to_parquet(input_file)
-        self._compute_embeddings(input_file)
-        self.workflow.run(kmeans_executor=self.kmeans_executor, pairwise_executor=self.executor)
+        try:
+            self._run_curator(input_file)
+        except (ImportError, ModuleNotFoundError) as exc:
+            logger.warning("Curator GPU semantic backend is unavailable; using the CPU backend: %s", exc)
+            self._run_cpu(dataset_temp)
         dataset_dedup = self._mark_duplicates(dataset)
         num_duplicates = dataset_dedup["is_duplicate"].sum()
         logger.info(f"Found {num_duplicates}/{len(dataset_dedup)} duplicate questions")

@@ -267,7 +267,14 @@ def build_coverage_plan(
     marked = tuple(_with_scheduled(family, scheduled) for family in families)
     blocking = [gap for gap in gaps if gap["blocks_gold"]]
     certification, reason = _certification(len(required), blocking)
-    capacity = _capacity(rows, gaps, case_cap, budget)
+    surface_variants = _surface_variants_per_cell(generation, modules)
+    capacity = _capacity(
+        rows,
+        gaps,
+        case_cap,
+        budget,
+        surface_variants_per_cell=surface_variants,
+    )
     return CoveragePlan(
         rows=tuple(rows),
         gaps=tuple(gaps),
@@ -337,9 +344,7 @@ def select_backfill_cells(
         return []
     occupied = {cell_distinctness_key(row) for row in (*scheduled, *surviving)}
     scheduled_ids = {
-        str(row.get("slot_id"))
-        for row in scheduled
-        if isinstance(row.get("slot_id"), str) and row.get("slot_id")
+        str(row.get("slot_id")) for row in scheduled if isinstance(row.get("slot_id"), str) and row.get("slot_id")
     }
     policy_counts: dict[str, int] = {}
     for row in surviving:
@@ -435,7 +440,17 @@ def apply_backfill(
     added_slots = [str(cell["slot_id"]) for cell in added if isinstance(cell.get("slot_id"), str)]
     previous = summary.get("backfill") if isinstance(summary.get("backfill"), Mapping) else {}
     previous_added = [str(slot) for slot in previous.get("added_slot_ids") or [] if isinstance(slot, str)]
-    capacity = _capacity(new_rows, remaining, case_cap, budget)
+    previous_capacity = summary.get("capacity")
+    surface_variants = (
+        previous_capacity.get("surface_variants_per_cell", 1) if isinstance(previous_capacity, Mapping) else 1
+    )
+    capacity = _capacity(
+        new_rows,
+        remaining,
+        case_cap,
+        budget,
+        surface_variants_per_cell=surface_variants,
+    )
     requirements = _preflight_requirements(summary)
     updated = dict(summary)
     updated.update(
@@ -525,11 +540,7 @@ def _backfill_score(cell: Mapping[str, Any], failures: Sequence[Mapping[str, Any
             score += 3
         elif gate == "min_cases_per_action" and isinstance(slice_name, str) and slice_name == action:
             score += 3
-        elif (
-            gate == "min_cases_per_language"
-            and isinstance(slice_name, str)
-            and slice_name.casefold() in tags
-        ):
+        elif gate == "min_cases_per_language" and isinstance(slice_name, str) and slice_name.casefold() in tags:
             score += 3
     return score
 
@@ -617,9 +628,7 @@ def _all_leg_cells(rule: PolicyRule, rules: Sequence[PolicyRule], primary: str |
     return cells
 
 
-def _condition_path_cells(
-    rule: PolicyRule, rules: Sequence[PolicyRule], primary: str | None
-) -> list[dict[str, Any]]:
+def _condition_path_cells(rule: PolicyRule, rules: Sequence[PolicyRule], primary: str | None) -> list[dict[str, Any]]:
     """One minimal case for every any-of leg and every none-of condition class."""
     cells: list[dict[str, Any]] = []
     clear = case_context(rules, rule, "clear_violation")
@@ -756,6 +765,11 @@ def _contrast_families(
                 {
                     "family_id": _family_id(rule.policy_id, name, absent),
                     "policy_id": rule.policy_id,
+                    "shared_semantics": {
+                        "policy_id": rule.policy_id,
+                        "condition_class": name,
+                        "present_legs": [leg for leg in group.legs if leg != absent],
+                    },
                     "changed_dimension": absent,
                     "members": [
                         {
@@ -783,6 +797,10 @@ def _contrast_families(
         {
             "family_id": _family_id(rule.policy_id),
             "policy_id": rule.policy_id,
+            "shared_semantics": {
+                "policy_id": rule.policy_id,
+                **({"paired_policy_id": rule.paired_with} if rule.paired_with else {}),
+            },
             "changed_dimension": dimension,
             "members": [
                 {
@@ -835,9 +853,7 @@ def _schedule(
     return rows, gaps
 
 
-def _fair_order(
-    cells: Sequence[dict[str, Any]], generation: Mapping[str, Any] | None
-) -> list[dict[str, Any]]:
+def _fair_order(cells: Sequence[dict[str, Any]], generation: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     """Give every policy an anchor, then approach configured mixes without lexical bias."""
     queues: dict[str, list[dict[str, Any]]] = {}
     for cell in cells:
@@ -877,9 +893,7 @@ def _mix_error(cells: Sequence[Mapping[str, Any]], generation: Mapping[str, Any]
         if not isinstance(target, Mapping):
             continue
         observed = Counter(
-            bucket
-            for cell in cells
-            if (bucket := _mix_bucket(cell, mix_name)) is not None and bucket in target
+            bucket for cell in cells if (bucket := _mix_bucket(cell, mix_name)) is not None and bucket in target
         )
         total = sum(observed.values())
         if not total:
@@ -1006,8 +1020,11 @@ def _capacity(
     gaps: Sequence[Mapping[str, Any]],
     case_cap: int,
     budget: Mapping[str, Any],
+    *,
+    surface_variants_per_cell: int = 1,
 ) -> dict[str, Any]:
     """Conservative final-count upper bounds from grounded inventory."""
+    variants = max(1, surface_variants_per_cell)
     inventory = [dict(row) for row in rows]
     occupied = {cell_distinctness_key(row) for row in rows}
     distinct_gaps = 0
@@ -1037,7 +1054,7 @@ def _capacity(
             by_language_inventory[language] = by_language_inventory.get(language, 0) + 1
 
     by_policy = {
-        policy_id: min(count, policy_caps[policy_id], case_cap)
+        policy_id: min(min(count, policy_caps[policy_id]) * variants, case_cap)
         for policy_id, count in sorted(by_policy_inventory.items())
     }
     final_upper_bound = min(case_cap, sum(by_policy.values()))
@@ -1045,17 +1062,27 @@ def _capacity(
         "case_cap": case_cap,
         "planned_candidates": len(rows),
         "additional_distinct_cells": distinct_gaps,
+        "surface_variants_per_cell": variants,
         "final_case_upper_bound": final_upper_bound,
         "by_policy": by_policy,
         "by_action": {
-            action: min(count, final_upper_bound)
-            for action, count in sorted(by_action_inventory.items())
+            action: min(count * variants, final_upper_bound) for action, count in sorted(by_action_inventory.items())
         },
         "by_language": {
-            language: min(count, final_upper_bound)
+            language: min(count * variants, final_upper_bound)
             for language, count in sorted(by_language_inventory.items())
         },
     }
+
+
+def _surface_variants_per_cell(
+    generation: Mapping[str, Any] | None,
+    modules: Mapping[str, Any],
+) -> int:
+    if not isinstance(generation, Mapping) or modules.get("paraphrase") is not True:
+        return 1
+    value = generation.get("paraphrases_per_cell", 1)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 1
 
 
 def _cell_languages(cell: Mapping[str, Any]) -> tuple[str, ...]:
@@ -1070,9 +1097,7 @@ def _cell_languages(cell: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item.casefold() for item in languages))
 
 
-def _quality_gate_preflight(
-    capacity: Mapping[str, Any], requirements: Mapping[str, Any] | None
-) -> dict[str, Any]:
+def _quality_gate_preflight(capacity: Mapping[str, Any], requirements: Mapping[str, Any] | None) -> dict[str, Any]:
     """Prove only inventory-level impossibilities; final gates run after split."""
     copied = dict(requirements) if isinstance(requirements, Mapping) else {}
     failures: list[dict[str, Any]] = []
@@ -1106,9 +1131,7 @@ def _quality_gate_preflight(
         ("min_cases_per_language", "by_language"),
     ):
         minima = copied.get(gate)
-        available_by_slice = (
-            capacity.get(capacity_key) if isinstance(capacity.get(capacity_key), Mapping) else {}
-        )
+        available_by_slice = capacity.get(capacity_key) if isinstance(capacity.get(capacity_key), Mapping) else {}
         if not isinstance(minima, Mapping):
             continue
         for name, required in minima.items():
@@ -1146,8 +1169,7 @@ def _preflight_enabled(requirements: Mapping[str, Any]) -> bool:
     for key in ("min_cases_per_action", "min_cases_per_language"):
         minima = requirements.get(key)
         if isinstance(minima, Mapping) and any(
-            isinstance(value, int) and not isinstance(value, bool) and value > 0
-            for value in minima.values()
+            isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in minima.values()
         ):
             return True
     return False

@@ -548,9 +548,7 @@ def test_unmet_minimum_dataset_quality_gate_publishes_silver(tmp_path: Path) -> 
 def test_impossible_quality_gates_with_on_failure_fail_stop_before_scenario_generation(
     tmp_path: Path,
 ) -> None:
-    config = _config(
-        tmp_path, overrides={"quality_gates": {"min_total_cases": 20, "on_failure": "fail"}}
-    )
+    config = _config(tmp_path, overrides={"quality_gates": {"min_total_cases": 20, "on_failure": "fail"}})
     run_dir = _run(config, "prepare")
     failed = _expect(config, "generate", RunStatus.QUALITY_GATES_FAILED)
 
@@ -960,6 +958,10 @@ def test_per_policy_minimum_is_checked_against_extracted_rule_inventory(tmp_path
         ),
         ({"generation": {"turn_mixx": {}}}, "Unknown generation keys: turn_mixx"),
         ({"generation": {"turn_mix": {"multi_turn": 0.5}}}, "shares must add up to 1"),
+        (
+            {"generation": {"paraphrases_per_cell": 0}},
+            "generation.paraphrases_per_cell must be a whole number from 1 through 5",
+        ),
         ({"proposals": {"jurisdicton": "VN"}}, "Unknown proposals keys: jurisdicton"),
         ({"proposals": {"target_languages": "en"}}, "proposals.target_languages must be a list"),
         ({"proposals": {"decision_actions": ["allow", "ban"]}}, "unsupported entries ban"),

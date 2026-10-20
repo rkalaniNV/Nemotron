@@ -43,6 +43,79 @@ def use(monkeypatch: pytest.MonkeyPatch) -> Any:
     return install
 
 
+def test_unrealized_surface_drops_the_allow_and_keeps_the_block() -> None:
+    rules, build = _ready()
+    missing = next(case for case in build.cases if case.get("absent_legs") == ["verb"])
+    flagged = _clone(missing, surface_required=True)
+    cases = [flagged if case["case_id"] == flagged["case_id"] else case for case in build.cases]
+
+    result = select_dataset(cases, build.families, rules, _span_map(*rules))
+
+    rejected = {row["case_id"]: row for row in result.rejected}
+    assert rejected[flagged["case_id"]]["reasons"] == ["unrealized_surface"]
+    assert rejected[flagged["case_id"]]["stage"] == "surface"
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert _one(build, "clear_violation")["case_id"] in kept
+    assert flagged["case_id"] not in kept
+    other = next(case for case in build.cases if case.get("absent_legs") == ["target"])
+    assert other["case_id"] in kept
+    assert _one(build, "clear_allow")["case_id"] in kept
+    assert _one(build, "persona")["case_id"] in kept
+    assert result.report["reasons"]["unrealized_surface"] == 1
+    assert result.manifest["unrealized_surfaces"] == [
+        {
+            "case_id": flagged["case_id"],
+            "policy_id": flagged["policy_id"],
+            "kind": "missing_leg",
+            "reason": "unrealized_surface",
+        }
+    ]
+
+
+def test_an_unrealized_variant_or_optional_allow_does_not_block_gold() -> None:
+    rules, build = _ready()
+    missing = next(case for case in build.cases if case.get("absent_legs") == ["verb"])
+    variant = _clone(
+        missing,
+        case_id=f"{missing['case_id']}/paraphrase-2",
+        slot_id=f"{missing['case_id']}/paraphrase-2",
+        variant_of=missing["case_id"],
+        surface_variant=2,
+        surface_required=True,
+    )
+    optional = _clone(
+        _one(build, "clear_allow"),
+        case_id="optional-allow",
+        slot_id="optional-allow",
+        priority="optional",
+        surface_required=True,
+    )
+
+    result = select_dataset([*build.cases, variant, optional], build.families, rules, _span_map(*rules))
+
+    rejected = {row["case_id"]: row["reasons"] for row in result.rejected}
+    assert rejected[variant["case_id"]] == ["unrealized_surface"]
+    assert rejected["optional-allow"] == ["unrealized_surface"]
+    assert result.manifest["unrealized_surfaces"] == []
+
+
+def test_a_realized_allow_surface_is_kept() -> None:
+    rules, build = _ready()
+    allow = _one(build, "clear_allow")
+    realized = _clone(
+        _with_text(allow, "Ask a historical question about the same topic."),
+        origin="paraphrase",
+        surface_required=True,
+    )
+    cases = [realized if case["case_id"] == allow["case_id"] else case for case in build.cases]
+
+    result = select_dataset(cases, build.families, rules, _span_map(*rules))
+
+    kept = {case["case_id"] for case in result.deduplicated}
+    assert allow["case_id"] in kept
+    assert result.summary()["rejected"] == 0
+
+
 def test_accepted_cases_point_at_a_rule_and_stay_in_development() -> None:
     rules, build = _ready()
     spans = _span_map(*rules)
