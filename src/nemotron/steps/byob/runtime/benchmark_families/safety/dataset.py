@@ -15,10 +15,13 @@
 
 """Preliminary labels, deterministic checks, exact and semantic deduplication.
 
-The label is recomputed from the case facts. A stored action that disagrees is
-rejected and is not overwritten. A case with no eligible rule, or a quote that is
-not inside its source span, is rejected. Seed and proposal turns must still be
-the source quote; a paraphrase, translation, or actor-swap origin may differ. An allow case marked
+The published label is recomputed from the case facts. A stored action that
+disagrees is rejected and is not overwritten. Configured judges read the
+conversation and propose a label as evidence; a judge disagreement does not
+change gold and is routed to the audit queue. A case with no eligible rule, or a
+quote that is not inside its source span, is rejected. Seed and proposal turns
+must still be the source quote; a paraphrase, translation, or actor-swap origin
+may differ. An allow case marked
 ``surface_required`` whose scored turn is still the source quote is rejected
 with ``unrealized_surface`` and does not break its contrast pair. A required
 case rejected this way is listed in ``unrealized_surfaces`` and blocks Gold. When one
@@ -40,15 +43,26 @@ import json
 import unicodedata
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from nemotron.steps.byob.runtime.benchmark_families.safety.actions import ACTION_ORDER
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_json, write_jsonl
 from nemotron.steps.byob.runtime.benchmark_families.safety.case_facts import case_context
 from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import canonical_text, quote_in_span
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import PolicyRule
+from nemotron.steps.byob.runtime.benchmark_families.safety.labeling import (
+    AGREEMENT_FILE,
+    AUDITED_FILE,
+    DISAGREEMENTS_FILE,
+    LABEL_OUTPUTS,
+    LABELS,
+    PROPOSALS_FILE,
+    apply_judges,
+    build_audit_queue,
+    public_identity,
+)
+from nemotron.steps.byob.runtime.benchmark_families.safety.paraphrase import Completer
 from nemotron.steps.byob.runtime.benchmark_families.safety.scenarios import seed_sentence
 
 LABEL_FILE = "label_checks.jsonl"
@@ -57,7 +71,15 @@ REJECTED_FILE = "rejected_cases.jsonl"
 REPORT_FILE = "validation_report.json"
 DEDUPED_FILE = "deduplicated_cases.jsonl"
 MANIFEST_FILE = "split_manifest.json"
-DATASET_OUTPUTS = (LABEL_FILE, VALIDATED_FILE, REJECTED_FILE, REPORT_FILE, DEDUPED_FILE, MANIFEST_FILE)
+DATASET_OUTPUTS = (
+    LABEL_FILE,
+    VALIDATED_FILE,
+    REJECTED_FILE,
+    REPORT_FILE,
+    DEDUPED_FILE,
+    MANIFEST_FILE,
+    *LABEL_OUTPUTS,
+)
 
 # Variants that repeat a violation. They stay in that violation's split.
 _WITH_VIOLATION = frozenset(
@@ -93,6 +115,10 @@ class DatasetBuild:
     deduplicated: tuple[dict[str, Any], ...]
     report: dict[str, Any]
     manifest: dict[str, Any]
+    proposals: tuple[dict[str, Any], ...] = ()
+    disagreements: tuple[dict[str, Any], ...] = ()
+    audited: tuple[dict[str, Any], ...] = ()
+    judge_agreement: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         splits = self.manifest["splits"]
@@ -107,6 +133,8 @@ class DatasetBuild:
             "split_reason": self.manifest["reason"],
             "quality_gates_passed": gates["passed"],
             "quality_gate_failures": len(gates["failures"]),
+            "judge_disagreements": len(self.disagreements),
+            "audit_items": len(self.audited),
         }
 
 
@@ -136,12 +164,19 @@ def select_dataset(
     semantic_dedup: Mapping[str, Any] | None = None,
     work_dir: Path | None = None,
     semantic_runner: Callable[..., Sequence[str]] | None = None,
+    judges: Sequence[Completer] | None = None,
+    assurance: Mapping[str, Any] | None = None,
+    generator_identity: Mapping[str, Any] | None = None,
+    example_cap: int = 40,
 ) -> DatasetBuild:
     """Check every case, drop exact and near duplicates, and retain it in development.
 
     A damaged list stops the build. A case that fails a check is rejected and the
     other cases continue. A stored label that disagrees with the aggregated action
-    is rejected. The case keeps the label it arrived with.
+    is rejected.     The case keeps the label it arrived with. Configured judges read retained
+    Gold conversations only. A judge disagreement is evidence for the audit
+    queue and does not overwrite gold. Python-rejected rows are not judged;
+    ``novel_action`` still enters the audit queue.
     """
     stored = _cases(cases)
     parsed_families = _families(families)
@@ -157,11 +192,13 @@ def select_dataset(
     pairs = _complete_pairs(parsed_families, stored)
     _close_related(stored, reasons, pairs, eligible, by_id)
     labels = tuple(_label_row(stored[case_id], aggregated[case_id], reasons[case_id]) for case_id in sorted(stored))
+    construction = _construction(generator_identity, judges)
+    cache_dir = work_dir / "stage_cache" if work_dir is not None else None
     validated_rows = []
     for case_id in sorted(stored):
         if reasons[case_id]:
             continue
-        annotated = _annotate(stored[case_id], by_id)
+        annotated = _annotate(stored[case_id], by_id, construction=construction)
         stored[case_id] = annotated
         validated_rows.append(annotated)
     validated = tuple(validated_rows)
@@ -188,8 +225,30 @@ def select_dataset(
     drops = [*drops, *semantic_drops]
     rejected.extend(drops)
     rejected.sort(key=lambda row: str(row["case_id"]))
+    judged = apply_judges(
+        list(deduplicated),
+        aggregated,
+        eligible,
+        judges or (),
+        assurance=assurance,
+        cache_dir=cache_dir,
+        generator_identity=generator_identity,
+    )
+    audit_cases = _audit_cases(deduplicated, stored, judged.disagreements, reasons)
+    audited = build_audit_queue(
+        audit_cases,
+        aggregated,
+        {row["case_id"]: row for row in judged.proposals},
+        eligible,
+        assurance=assurance,
+        reasons=reasons,
+        disagreements=judged.disagreements,
+        rejected=rejected,
+        example_cap=example_cap,
+    )
     manifest = _manifest(deduplicated, drops, pairs, by_id, semantic_report)
     report = _report(reasons, validated, rejected, deduplicated, pairs, drops, semantic_report)
+    report["judge"] = _judge_report(report["judge"], judged.agreement, judged.disagreements)
     gate_result = evaluate_quality_gates(
         deduplicated,
         quality_gates or {},
@@ -199,6 +258,7 @@ def select_dataset(
     manifest["quality_gates"] = gate_result
     manifest["unrealized_surfaces"] = _unrealized_required(stored, reasons)
     report["quality_gates"] = gate_result
+    report["audit_items"] = len(audited)
     return DatasetBuild(
         labels=labels,
         validated=validated,
@@ -206,6 +266,10 @@ def select_dataset(
         deduplicated=tuple(deduplicated),
         report=report,
         manifest=manifest,
+        proposals=judged.proposals,
+        disagreements=judged.disagreements,
+        audited=tuple(audited),
+        judge_agreement=judged.agreement,
     )
 
 
@@ -393,6 +457,10 @@ def write_dataset(stage_cache: Path, build: DatasetBuild) -> dict[str, Any]:
     write_json(stage_cache / REPORT_FILE, build.report)
     write_jsonl(stage_cache / DEDUPED_FILE, build.deduplicated)
     write_json(stage_cache / MANIFEST_FILE, build.manifest)
+    write_jsonl(stage_cache / PROPOSALS_FILE, build.proposals)
+    write_jsonl(stage_cache / DISAGREEMENTS_FILE, build.disagreements)
+    write_jsonl(stage_cache / AUDITED_FILE, build.audited)
+    write_json(stage_cache / AGREEMENT_FILE, build.judge_agreement or {"method": "deterministic", "model": None})
     return build.summary()
 
 
@@ -685,12 +753,12 @@ def _label_reasons(
     if kind == "exception" and list(case.get("exceptions") or []) != list(rule.exceptions):
         reasons.append("facts_mismatch")
     proposed = case.get("expected_action", _MISSING)
-    if proposed is None:
+    if proposed is None or proposed is _MISSING:
         reasons.append("invalid_case")
-    elif proposed is _MISSING or proposed != action:
+    elif not isinstance(proposed, str) or proposed not in LABELS:
+        reasons.append("novel_action")
+    elif proposed != action:
         reasons.append("label_disagreement")
-    elif proposed not in ACTION_ORDER:
-        reasons.append("invalid_case")
     return reasons, action, (expected_present, expected_absent)
 
 
@@ -944,7 +1012,12 @@ def _rule_for(case: Mapping[str, Any], by_id: Mapping[str, PolicyRule]) -> Polic
     return by_id.get(policy_id)
 
 
-def _annotate(case: Mapping[str, Any], by_id: Mapping[str, PolicyRule]) -> dict[str, Any]:
+def _annotate(
+    case: Mapping[str, Any],
+    by_id: Mapping[str, PolicyRule],
+    *,
+    construction: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Copy the case and record the source language when the row does not name one."""
     stored = dict(case)
     rule = _rule_for(stored, by_id)
@@ -953,7 +1026,58 @@ def _annotate(case: Mapping[str, Any], by_id: Mapping[str, PolicyRule]) -> dict[
     has_list = isinstance(listed, list) and bool(listed)
     if language and not has_list and not (isinstance(stored.get("language"), str) and stored["language"].strip()):
         stored["language"] = language
+    if construction:
+        stored["construction"] = dict(construction)
     return stored
+
+
+def _audit_cases(
+    retained: Sequence[Mapping[str, Any]],
+    stored: Mapping[str, Mapping[str, Any]],
+    disagreements: Sequence[Mapping[str, Any]],
+    reasons: Mapping[str, Sequence[str]],
+) -> list[dict[str, Any]]:
+    """Retained rows plus rejected rows that still need an audit card."""
+    rows = [dict(case) for case in retained]
+    seen = {str(case["case_id"]) for case in rows}
+    extra = {str(row.get("case_id") or "") for row in disagreements}
+    extra.update(case_id for case_id, found in reasons.items() if "novel_action" in found)
+    for case_id in sorted(extra):
+        if not case_id or case_id in seen or case_id not in stored:
+            continue
+        rows.append(dict(stored[case_id]))
+        seen.add(case_id)
+    return rows
+
+
+def _construction(
+    generator_identity: Mapping[str, Any] | None, judges: Sequence[Completer] | None
+) -> dict[str, Any] | None:
+    generator = public_identity(generator_identity)
+    judge_ids = [public_identity(getattr(judge, "identity", {}) or {}) for judge in judges or ()]
+    judge_ids = [item for item in judge_ids if item]
+    if not generator and not judge_ids:
+        return None
+    return {"generator": generator, "judges": judge_ids}
+
+
+def _judge_report(
+    python_judge: Mapping[str, Any], agreement: Mapping[str, Any], disagreements: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Keep the Python disagreement count and attach the model-judge summary."""
+    return {
+        "method": agreement.get("method") or python_judge.get("method") or "deterministic",
+        "model": agreement.get("model"),
+        "disagreements": python_judge.get("disagreements", 0),
+        "judge_disagreements": sum(1 for row in disagreements if row.get("reason") == "judge_disagreement"),
+        "skipped_reason": agreement.get("skipped_reason"),
+        "checked": agreement.get("checked", 0),
+        "agreed": agreement.get("agreed", 0),
+        "pairwise_agreement": agreement.get("pairwise_agreement"),
+        "second_invoked": agreement.get("second_invoked", 0),
+        "errors": agreement.get("errors", 0),
+        "models": list(agreement.get("models") or []),
+    }
 
 
 def _duplicate(

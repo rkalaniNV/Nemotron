@@ -38,6 +38,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
     REVIEW_PAGE,
     card_is_pending,
     content_matches,
+    withheld_audit_case_ids,
     withheld_case_ids,
     withheld_policies,
 )
@@ -305,7 +306,7 @@ def _publication_payload(
     source_fingerprint: str,
     packet_sha256: str,
 ) -> tuple[list[dict[str, Any]], set[str], dict[str, list[dict[str, Any]]], dict[str, Any], str, str]:
-    dropped = withheld_case_ids(cases, families, dropped_policies)
+    dropped = withheld_case_ids(cases, families, dropped_policies) | withheld_audit_case_ids(packet)
     development = _split_ids(split_manifest, run_dir)
     indexed: dict[str, Mapping[str, Any]] = {}
     for case in cases:

@@ -18,13 +18,15 @@
 The HTML page is the reading surface: each pending card shows the source quote,
 the extracted meaning, and what approve, reject, or edit does. The CSV is the
 action sheet. Eligible rules start pre-accepted. A rule that still needs a
-decision, and every unresolved conflict, is a card. Representative examples are
-capped. The unresolved lists are not. A reviewer records approve, reject, or
-edit in the CSV. Display columns on the CSV are rebuilt on generate; only
-decision and note are read back. Conflict cards are identified by content, not
-by position. The signed packet binds the decision sheet and the HTML page.
-Reject, or edit with a note, withholds that rule and any contrast family that
-contains it.
+decision, every unresolved conflict, and every material judge disagreement is a
+card. Representative examples and cluster samples are capped. Disagreements,
+undefined actions, missing evidence, and unresolved lists are not. A reviewer
+records approve, reject, or edit in the CSV. Display columns on the CSV are
+rebuilt on generate; only decision and note are read back. Conflict cards are
+identified by content, not by position. The signed packet binds the decision
+sheet and the HTML page. Reject, or edit with a note, withholds that rule and
+any contrast family that contains it. Rejecting an audit card drops that
+cluster from publication.
 """
 
 import csv
@@ -41,6 +43,12 @@ import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_atomic
 from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import DatasetInputError, load_jsonl_objects
+from nemotron.steps.byob.runtime.benchmark_families.safety.labeling import (
+    AUDITED_FILE,
+    PROFILE_REASONS,
+    attach_flagged_items,
+    spot_check_rules,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStatus, abort
 
 PACKET_NAME = "publication_review_packet.yaml"
@@ -159,6 +167,8 @@ def load_review(
             example_cap=example_cap,
             quality_gates=quality_gates,
             unrealized_surfaces=surfaces,
+            audit_queue=_optional_jsonl(cache / AUDITED_FILE, run_dir),
+            rejected_cases=_optional_jsonl(cache / "rejected_cases.jsonl", run_dir),
         )
     except (OSError, ValueError) as exc:
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"review packet cannot be built: {exc}") from exc
@@ -182,6 +192,8 @@ def assemble_review(
     decision_metadata: Mapping[str, Mapping[str, str]] | None = None,
     quality_gates: Mapping[str, Any] | None = None,
     unrealized_surfaces: Sequence[Mapping[str, Any]] = (),
+    audit_queue: Sequence[Mapping[str, Any]] = (),
+    rejected_cases: Sequence[Mapping[str, Any]] = (),
 ) -> ReviewBuild:
     """Build the packet, the page, and the CSV from in-memory rows.
 
@@ -189,12 +201,13 @@ def assemble_review(
     hashes are added here after those files are rendered, so the signed packet
     covers the reviewer's view.
     """
-    if isinstance(example_cap, bool) or not isinstance(example_cap, int) or example_cap < 1:
-        raise ValueError("example_cap must be a positive integer")
+    if isinstance(example_cap, bool) or not isinstance(example_cap, int) or example_cap < 0:
+        raise ValueError("example_cap must be a non-negative integer")
     missing = [key for key in _CONTENT_FILES if key not in _DERIVED_HASHES and key not in content_hashes]
     if missing:
         raise ValueError(f"content hashes missing {', '.join(missing)}")
-    cards = _cards(rules, conflicts, glossary_conflicts, decisions)
+    audit_queue = attach_flagged_items(audit_queue, cases, _flagged_policy_ids(rules, decisions))
+    cards = _cards(rules, conflicts, glossary_conflicts, decisions, audit_queue)
     card_ids = [card["card_id"] for card in cards]
     if len(card_ids) != len(set(card_ids)):
         raise ValueError("review cards are not unique")
@@ -231,6 +244,10 @@ def assemble_review(
         "adversarial_cases": _adversarial_cases(cases),
         "localized_cases": _localized_cases(cases),
         "symmetry_pairs": _symmetry_pairs(cases),
+        "audit_queue": [dict(item) for item in audit_queue if isinstance(item, Mapping)],
+        "spot_check_rules": spot_check_rules(rules),
+        "undefined_actions": _reason_rows(rejected_cases, "novel_action"),
+        "missing_evidence": _reason_rows(rejected_cases, "evidence_missing", "span_missing"),
         "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)],
         "unresolved_rules": _unresolved_rules(rules),
         "excluded_rules": _excluded_rules(rules),
@@ -354,6 +371,7 @@ def render_html(packet: Mapping[str, Any]) -> str:
         *_adversarial_section(packet.get("adversarial_cases") or []),
         *_localized_section(packet.get("localized_cases") or []),
         *_symmetry_section(packet.get("symmetry_pairs") or []),
+        *_audit_sections(packet),
         f"<h2>Minimum dataset quality gates ({len(gate_failures)} unmet)</h2>",
         _quality_gate_table(gate_failures, enabled=gates_enabled, on_failure=on_failure),
         "<details><summary>Generation capacity preflight</summary>",
@@ -585,8 +603,9 @@ def _task_banner(pending: int, kept: int, excluded: int, blocking: int) -> str:
 def _decision_legend() -> str:
     return (
         "<section><h2>What you are deciding</h2>"
-        "<p>Each pending card is one extracted policy rule or one unresolved conflict. "
-        "Compare the source quote with the extracted meaning. Approving a rule that is "
+        "<p>Each pending card is one extracted policy rule, one unresolved conflict, "
+        "or one clustered judge disagreement. Compare the source quote with the extracted "
+        "meaning, or the conversation with the Python gold label. Approving a rule that is "
         "not eligible_for_generation does not generate new cases; it remains a documented "
         "Silver limitation.</p>"
         '<div class="legend">'
@@ -595,10 +614,12 @@ def _decision_legend() -> str:
         "<div><p><strong>reject</strong></p><p>Remove this rule, or the rules named on a "
         "conflict, and any contrast family that contains them.</p></div>"
         "<div><p><strong>edit + note</strong></p><p>Same removal as reject for this run. "
-        "The note records the intended correction. A note is required.</p></div>"
+        "The note records the intended correction. A note is required. On an audit card, "
+        "reject or edit drops that cluster from publication.</p></div>"
         "</div>"
         "<p>Do not change <code>pre_accepted</code> rows unless the extraction is wrong. "
-        "Coverage gaps are not CSV decisions.</p></section>"
+        "Coverage gaps, cluster samples, and spot-checks of auto-accepted rules are not "
+        "CSV decisions.</p></section>"
     )
 
 
@@ -654,6 +675,11 @@ def _decision_card(card: Mapping[str, Any], index: int, total: int) -> str:
         consequence = (
             "Approve keeps this conflict as a documented Silver limitation. Reject or edit withholds the named rules."
         )
+    elif kind == "audit":
+        consequence = (
+            "Approve keeps the Python gold label. Reject or edit with a note drops this "
+            "case and the other members of its cluster from publication."
+        )
     else:
         consequence = (
             "This rule is not eligible for generation. Approve keeps it as a documented "
@@ -708,6 +734,33 @@ def card_is_pending(card: Mapping[str, Any]) -> bool:
         return False
     note = card.get("note")
     return not (decision == "edit" and isinstance(note, str) and note.strip())
+
+
+def withheld_audit_case_ids(packet: Mapping[str, Any]) -> set[str]:
+    """Cases dropped when a reviewer rejects or edits a clustered audit card."""
+    cards = packet.get("cards") if isinstance(packet.get("cards"), list) else []
+    dropped_cards = set()
+    for card in cards:
+        if not isinstance(card, Mapping) or str(card.get("kind") or "") != "audit":
+            continue
+        decision = str(card.get("decision") or "")
+        note = card.get("note")
+        note_text = note.strip() if isinstance(note, str) else ""
+        if decision == "reject" or (decision == "edit" and note_text):
+            dropped_cards.add(str(card.get("card_id") or ""))
+    dropped: set[str] = set()
+    queue = packet.get("audit_queue") if isinstance(packet.get("audit_queue"), list) else []
+    for item in queue:
+        if not isinstance(item, Mapping) or str(item.get("card_id") or "") not in dropped_cards:
+            continue
+        case_id = item.get("case_id")
+        if isinstance(case_id, str) and case_id:
+            dropped.add(case_id)
+        members = item.get("member_ids")
+        if isinstance(members, list):
+            dropped.update(str(member) for member in members if isinstance(member, str) and member)
+    dropped.discard("")
+    return dropped
 
 
 def withheld_case_ids(
@@ -776,10 +829,16 @@ def _cards(
     conflicts: Sequence[Mapping[str, Any]],
     glossary_conflicts: Sequence[Mapping[str, Any]],
     decisions: Mapping[str, tuple[str, str]],
+    audit_queue: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, str]]:
     cards = [_rule_card(row, decisions) for row in rules if _status(row) not in _EXCLUDED and _status(row)]
     cards.extend(_conflict_card(row, decisions) for row in _sorted_conflicts(conflicts))
     cards.extend(_glossary_card(row, decisions) for row in _sorted_glossary(glossary_conflicts))
+    cards.extend(
+        _audit_card(item, decisions)
+        for item in audit_queue
+        if isinstance(item, Mapping) and item.get("needs_decision") is True
+    )
     return sorted(cards, key=lambda card: card["card_id"])
 
 
@@ -833,6 +892,37 @@ def _conflict_card(row: Mapping[str, Any], decisions: Mapping[str, tuple[str, st
         "section": "",
         "conditions": ", ".join(policies),
         "why": detail or "Unresolved conflict.",
+    }
+
+
+def _audit_card(row: Mapping[str, Any], decisions: Mapping[str, tuple[str, str]]) -> dict[str, str]:
+    card_id = str(row.get("card_id") or "")
+    decision, note = _recorded_decision(card_id, "pending", decisions)
+    policy_id = str(row.get("policy_id") or "")
+    reason = str(row.get("reason") or "audit")
+    size = row.get("cluster_size") if isinstance(row.get("cluster_size"), int) else 1
+    python_action = str(row.get("python_action") or "")
+    judge_action = str(row.get("judge_action") or "")
+    why = (
+        f"{reason.replace('_', ' ')}: Python gold {python_action or 'unlabeled'}"
+        + (f", judge proposed {judge_action}" if judge_action else "")
+        + f". Cluster size {size}."
+    )
+    return {
+        "card_id": card_id,
+        "kind": "audit",
+        "policy_id": policy_id,
+        "rule_status": reason,
+        "summary": why,
+        "decision": decision,
+        "note": note,
+        "title": str(row.get("case_id") or card_id),
+        "quote": str(row.get("scored_text") or "")[:_EXAMPLE_TEXT],
+        "expected_action": python_action,
+        "severity": "",
+        "section": "",
+        "conditions": ", ".join(str(item) for item in row.get("policy_ids") or [] if isinstance(item, str)),
+        "why": why,
     }
 
 
@@ -1019,6 +1109,147 @@ def _contrast_pairs(cases: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return sorted(rows, key=lambda row: (bool(row.get("anchored")), str(row.get("case_id") or "")))
+
+
+def _audit_sections(packet: Mapping[str, Any]) -> list[str]:
+    queue = [item for item in packet.get("audit_queue") or [] if isinstance(item, Mapping)]
+    spot = [item for item in packet.get("spot_check_rules") or [] if isinstance(item, str) and item]
+    undefined = [item for item in packet.get("undefined_actions") or [] if isinstance(item, Mapping)]
+    missing = [item for item in packet.get("missing_evidence") or [] if isinstance(item, Mapping)]
+    pending = [
+        item
+        for item in queue
+        if item.get("needs_decision") is True and str(item.get("reason") or "") not in PROFILE_REASONS
+    ]
+    required = [item for item in queue if str(item.get("reason") or "") in PROFILE_REASONS]
+    samples = [
+        item
+        for item in queue
+        if str(item.get("reason") or "") in {"cluster_representative", "review_sample"}
+    ]
+    parts: list[str] = []
+    if pending:
+        parts.extend(
+            [
+                f"<h2>Judge disagreements and novel actions ({len(pending)})</h2>",
+                "<p>These rows are CSV cards. Python gold stays unless you reject or edit the card. "
+                "<code>max_review_items</code> does not hide them.</p>",
+                _audit_table(pending),
+            ]
+        )
+    if required:
+        parts.extend(
+            [
+                f"<h2>Profile-required audit slices ({len(required)})</h2>",
+                "<p>Regulated adds every critical boundary. High Assurance adds critical, legal, "
+                "political, and native-language Gold cases whose conversation language overlaps "
+                "the rule scope. These lists are not truncated. Profile slices that still need a "
+                "decision are CSV cards. Flagged or edited rules are listed here without a second "
+                "card when the rule row already withholds them.</p>",
+                _audit_table(required),
+            ]
+        )
+    if spot:
+        parts.extend(
+            [
+                f"<h2>Spot-check of auto-accepted rules ({len(spot)}, pre-marked approve)</h2>",
+                "<p>At least five eligible rules or five percent, whichever is larger. They stay "
+                "in the benchmark unless the matching <code>rule:</code> CSV row is reject or edit.</p>",
+                "<p>" + ", ".join(_text(item) for item in spot) + "</p>",
+            ]
+        )
+    if samples:
+        parts.extend(
+            [
+                f"<details><summary>Cluster representatives and sample ({len(samples)})</summary>",
+                "<p><code>budget.max_review_items</code> caps this section only. One representative "
+                "per generation cluster, plus a hash-stable sample of the rest.</p>",
+                _audit_table(samples),
+                "</details>",
+            ]
+        )
+    if undefined:
+        parts.extend(
+            [
+                f"<h2>Undefined actions ({len(undefined)})</h2>",
+                "<p>Custom actions outside the decision contract. They are not Gold rows. "
+                "<code>max_review_items</code> does not hide them.</p>",
+                _rejection_table(undefined),
+            ]
+        )
+    if missing:
+        parts.extend(
+            [
+                f"<h2>Missing evidence ({len(missing)})</h2>",
+                "<p>Cases rejected because source evidence is missing or the span is absent. "
+                "<code>max_review_items</code> does not hide them.</p>",
+                _rejection_table(missing),
+            ]
+        )
+    return parts
+
+
+def _audit_table(rows: Sequence[Mapping[str, Any]]) -> str:
+    body = [
+        "<table><thead><tr><th>Case</th><th>Reason</th><th>Policies</th><th>Cluster</th>"
+        "<th>Python</th><th>Judge</th></tr></thead><tbody>"
+    ]
+    for row in rows:
+        policies = ", ".join(str(item) for item in row.get("policy_ids") or [] if isinstance(item, str))
+        body.append(
+            "<tr><td>"
+            + _text(row.get("case_id"))
+            + "</td><td>"
+            + _text(row.get("reason"))
+            + "</td><td>"
+            + _text(policies)
+            + "</td><td>"
+            + _text(row.get("cluster_size"))
+            + "</td><td>"
+            + _text(row.get("python_action"))
+            + "</td><td>"
+            + _text(row.get("judge_action"))
+            + "</td></tr>"
+        )
+    body.append("</tbody></table>")
+    return "\n".join(body)
+
+
+def _rejection_table(rows: Sequence[Mapping[str, Any]]) -> str:
+    body = ["<table><thead><tr><th>Case</th><th>Policy</th><th>Reasons</th></tr></thead><tbody>"]
+    for row in rows:
+        reasons = row.get("reasons")
+        reason_text = ", ".join(str(item) for item in reasons) if isinstance(reasons, list) else str(reasons or "")
+        body.append(
+            "<tr><td>"
+            + _text(row.get("case_id"))
+            + "</td><td>"
+            + _text(row.get("policy_id"))
+            + "</td><td>"
+            + _text(reason_text)
+            + "</td></tr>"
+        )
+    body.append("</tbody></table>")
+    return "\n".join(body)
+
+
+def _reason_rows(rows: Sequence[Mapping[str, Any]], *needles: str) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    wanted = set(needles)
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        reasons = row.get("reasons") if isinstance(row.get("reasons"), list) else []
+        if wanted & {str(item) for item in reasons}:
+            found.append(dict(row))
+    found.sort(key=lambda row: str(row.get("case_id") or ""))
+    return found
+
+
+def _optional_jsonl(path: Path, run_dir: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    return _read_jsonl(path, run_dir)
 
 
 def _scored_text(case: Mapping[str, Any]) -> str:
@@ -1401,6 +1632,23 @@ def _policy_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _flagged_policy_ids(
+    rules: Sequence[Mapping[str, Any]], decisions: Mapping[str, tuple[str, str]]
+) -> list[str]:
+    flagged: list[str] = []
+    for row in rules:
+        policy_id = _policy_id(row)
+        if not policy_id:
+            continue
+        if f"rule:{policy_id}" not in decisions:
+            continue
+        decision, note = decisions[f"rule:{policy_id}"]
+        note_text = note.strip() if isinstance(note, str) else ""
+        if decision == "reject" or (decision == "edit" and note_text):
+            flagged.append(policy_id)
+    return flagged
 
 
 def _withheld(cards: Sequence[Mapping[str, Any]]) -> set[str]:

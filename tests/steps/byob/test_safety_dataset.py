@@ -128,7 +128,11 @@ def test_accepted_cases_point_at_a_rule_and_stay_in_development() -> None:
     assert set(result.manifest["splits"]) == {"development"}
     assert len(result.manifest["splits"]["development"]) == len(result.deduplicated)
     assert again.manifest["splits"] == result.manifest["splits"]
-    assert result.report["judge"] == {"method": "deterministic", "model": None, "disagreements": 0}
+    assert result.report["judge"]["method"] == "deterministic"
+    assert result.report["judge"]["model"] is None
+    assert result.report["judge"]["disagreements"] == 0
+    assert result.report["judge"]["judge_disagreements"] == 0
+    assert result.report["judge"]["skipped_reason"] == "no_judge_model_configs"
     assert result.report["semantic_dedup"] == {"status": "not_configured"}
     assert result.manifest["public_test"] == "not_assigned"
     by_split = result.manifest["balance"]["by_split"]

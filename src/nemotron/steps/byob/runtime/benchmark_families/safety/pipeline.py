@@ -78,6 +78,11 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ingest import (
     rule_input_digests,
     write_artifacts,
 )
+from nemotron.steps.byob.runtime.benchmark_families.safety.labeling import (
+    JudgeUnavailableError,
+    make_judges,
+    require_profile_judges,
+)
 from nemotron.steps.byob.runtime.benchmark_families.safety.localize import (
     LOCALIZE_OUTPUTS,
     apply_localizations,
@@ -454,7 +459,8 @@ def _publication_blocker(
         f"Dataset: {dataset['validated']} validated, {dataset['rejected']} rejected, "
         f"{dataset['duplicates_removed']} duplicates removed, "
         f"{dataset['development']} development "
-        f"({dataset['split_reason']}), {dataset['quality_gate_failures']} minimum quality gates unmet."
+        f"({dataset['split_reason']}), {dataset['quality_gate_failures']} minimum quality gates unmet"
+        f"{_labeling_note(dataset)}."
     )
     if counts["eligible_for_generation"] + counts["needs_decision"] == 0:
         return (
@@ -805,6 +811,18 @@ def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dic
         spans = span_text(json.loads((stage_cache / "source_index.json").read_text(encoding="utf-8")))
         cases = load_jsonl_objects((stage_cache / CASES_FILE).read_text(encoding="utf-8"), CASES_FILE)
         families = load_jsonl_objects((stage_cache / CONTRAST_FILE).read_text(encoding="utf-8"), CONTRAST_FILE)
+        try:
+            judges = make_judges(config, run_dir)
+        except ValueError as exc:
+            raise abort(RunStatus.INVALID_CONFIG, run_dir, str(exc)) from exc
+        generator_identity = None
+        generation_model = config.extras.get("generation_model_config")
+        if isinstance(generation_model, Mapping) and generation_model:
+            generator_identity = extraction.model_identity(generation_model)
+        try:
+            require_profile_judges(str(config.assurance.get("profile") or "standard"), judges, generator_identity)
+        except ValueError as exc:
+            raise abort(RunStatus.INVALID_CONFIG, run_dir, str(exc)) from exc
         summary = write_dataset(
             stage_cache,
             select_dataset(
@@ -815,6 +833,10 @@ def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dic
                 quality_gates=config.extras.get("quality_gates"),
                 semantic_dedup=config.extras.get("semantic_deduplication_config"),
                 work_dir=run_dir,
+                judges=judges,
+                assurance=config.assurance,
+                generator_identity=generator_identity,
+                example_cap=_review_item_cap(config.budget.get("max_review_items")),
             ),
         )
     except Exception as exc:
@@ -825,6 +847,8 @@ def _dataset_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> dic
         _write_json(index_path, index)
         if isinstance(exc, SafetyStatus):
             raise
+        if isinstance(exc, JudgeUnavailableError):
+            raise abort(RunStatus.MODEL_UNAVAILABLE, run_dir, str(exc)) from exc
         raise abort(RunStatus.INVALID_RUN_ARTIFACT, run_dir, f"dataset cannot be built: {exc}") from exc
     index["stages"]["dataset"] = {
         "status": "completed",
@@ -1035,6 +1059,28 @@ def _symmetry_note(scenarios: Mapping[str, Any]) -> str:
     if report.get("status") == "skipped" and isinstance(reason, str) and reason:
         return f", symmetry skipped ({reason})"
     return ""
+
+
+def _labeling_note(dataset: Mapping[str, Any]) -> str:
+    disagreements = dataset.get("judge_disagreements")
+    audit_items = dataset.get("audit_items")
+    parts = []
+    if isinstance(disagreements, int) and not isinstance(disagreements, bool) and disagreements:
+        parts.append(f"{disagreements} judge disagreements")
+    if isinstance(audit_items, int) and not isinstance(audit_items, bool) and audit_items:
+        parts.append(f"{audit_items} audit items")
+    if not parts:
+        return ""
+    return ", " + ", ".join(parts)
+
+
+def _review_item_cap(value: Any) -> int:
+    """``0`` is a valid cap (no extra cluster samples). ``None`` keeps the default 40."""
+    if value is None:
+        return 40
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 40
+    return value
 
 
 def _backfill_note(coverage: Mapping[str, Any]) -> str:
