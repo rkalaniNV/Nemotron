@@ -734,6 +734,7 @@ def _scenario_stage(config: ResolvedConfig, digest: str, fingerprint: str) -> di
             country=country_text,
             planned_rows=rows,
             case_cap=case_cap,
+            language_scripts=config.proposals.get("language_scripts") or {},
         )
         if localization.get("status") == "applied":
             plan_rows = load_plan_rows((stage_cache / PLAN_FILE).read_text(encoding="utf-8"))

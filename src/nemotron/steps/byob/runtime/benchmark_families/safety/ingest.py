@@ -32,7 +32,6 @@ import dataclasses
 import hashlib
 import json
 import re
-import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -42,7 +41,7 @@ import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.safety import documents, privacy
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_atomic, write_json, write_jsonl
-from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import quote_in_span
+from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import fold_latin, quote_in_span
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import _UniqueKeyLoader
 from nemotron.steps.byob.runtime.benchmark_families.safety.documents import (
     STRUCTURED_FORMATS,
@@ -55,7 +54,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import normalize_c
 from nemotron.steps.byob.runtime.benchmark_families.safety.sources import SourceChangedError, SourceError
 from nemotron.steps.byob.runtime.benchmark_families.safety.spans import build_document, link_glossary_terms
 
-INGEST_VERSION = 3
+INGEST_VERSION = 7
 MAX_REDACTED_NAME_CHARS = 120
 EVIDENCE_SELF_AUTHORED = "self_authored"
 EVIDENCE_DOCUMENT_NOT_FOUND = "document_not_found"
@@ -625,9 +624,7 @@ def _id_candidates(path: str) -> list[str]:
 def _slug_path(path: str) -> str:
     parts = []
     for part in path.split("/"):
-        folded = unicodedata.normalize("NFKD", part.replace("đ", "d").replace("Đ", "D"))
-        ascii_part = "".join(char for char in folded if not unicodedata.combining(char))
-        ascii_part = ascii_part.encode("ascii", "ignore").decode().casefold()
+        ascii_part = fold_latin(part).encode("ascii", "ignore").decode().casefold()
         slug = re.sub(r"[^a-z0-9._-]+", "-", ascii_part).strip("-.")
         parts.append(slug or "document")
     return "/".join(parts)

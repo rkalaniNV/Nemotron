@@ -40,7 +40,6 @@ PROFILES = frozenset({"standard", "regulated", "high_assurance"})
 MODULE_STRING_FLAGS = frozenset({"confirm_if_detected", "auto_if_evidence_exists"})
 SECOND_JUDGE_TRIGGERS = frozenset({"disagreement", "critical_boundary", "low_confidence"})
 PRIVACY_LABEL_KINDS = frozenset({"credential", "national_id", "bank_account", "date_of_birth"})
-BUILTIN_PRIVACY_LANGUAGES = frozenset({"de", "en", "es", "fr", "ja", "ko", "vi", "zh"})
 # The same vocabularies Policy Rule IR stores, so a config can name every target and action a rule can.
 MODERATION_TARGETS = frozenset(TARGETS)
 DECISION_ACTIONS = frozenset(ACTIONS)
@@ -75,7 +74,9 @@ DEFAULT_PROPOSALS = {
     "domain": "unspecified",
     "country": "unspecified",
     "jurisdiction": "unspecified",
+    "language_scripts": {},
 }
+_SCRIPT_NAME = re.compile(r"^[A-Za-z]{2,24}$")
 DEFAULT_ASSURANCE = {"profile": "standard"}
 ASSURANCE_KEYS = frozenset({"profile", "review_sample_rate", "second_judge_on"})
 GENERATION_KEYS = frozenset({"decision_mix", "case_family_mix", "turn_mix", "paraphrases_per_cell", "modules"})
@@ -641,7 +642,39 @@ def _proposals(value: Any, messages: list[str]) -> dict[str, Any]:
     _string_list(merged["target_languages"], "proposals.target_languages", messages)
     _string_list(merged["moderation_targets"], "proposals.moderation_targets", messages, MODERATION_TARGETS)
     _string_list(merged["decision_actions"], "proposals.decision_actions", messages, DECISION_ACTIONS)
+    merged["language_scripts"] = _language_scripts(merged.get("language_scripts"), messages)
     return merged
+
+
+def _language_scripts(value: Any, messages: list[str]) -> dict[str, list[str]]:
+    """Optional Unicode script overrides keyed by language prefix. Unknown prefixes stay fail-closed."""
+    if value in (None, {}):
+        return {}
+    supplied = _mapping(value, "proposals.language_scripts", messages)
+    if supplied is None:
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for raw_key, raw_values in supplied.items():
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            messages.append("proposals.language_scripts keys must be language prefixes.")
+            continue
+        prefix = re.split(r"[-_]", raw_key.strip().casefold(), maxsplit=1)[0]
+        _string_list(raw_values, f"proposals.language_scripts.{raw_key}", messages)
+        if not isinstance(raw_values, list) or not all(isinstance(item, str) and item.strip() for item in raw_values):
+            continue
+        scripts: list[str] = []
+        for item in raw_values:
+            name = item.strip().upper()
+            if name == "CJK":
+                name = "HAN"
+            if _SCRIPT_NAME.fullmatch(name) is None:
+                messages.append(f"proposals.language_scripts.{raw_key} has an invalid script {item!r}.")
+                continue
+            if name not in scripts:
+                scripts.append(name)
+        if scripts:
+            normalized[prefix] = scripts
+    return normalized
 
 
 def _reject_model_secrets(value: Any, path: str, messages: list[str]) -> None:
@@ -964,9 +997,6 @@ def _check_privacy_language(
     source = proposals.get("source_language")
     if not isinstance(source, str) or source.strip().casefold() == "unspecified":
         return
-    primary = re.split(r"[-_]", source.strip().casefold(), maxsplit=1)[0]
-    if primary in BUILTIN_PRIVACY_LANGUAGES:
-        return
     privacy = extras.get("privacy")
     labels = privacy.get("additional_labels") if isinstance(privacy, dict) else None
     supplied = (
@@ -977,6 +1007,5 @@ def _check_privacy_language(
     missing = sorted(PRIVACY_LABEL_KINDS - supplied)
     if missing:
         messages.append(
-            f"source language {source!r} has no built-in contextual privacy labels; "
-            "configure privacy.additional_labels for " + ", ".join(missing) + " before ingest."
+            f"source language {source!r} needs privacy.additional_labels for " + ", ".join(missing) + " before ingest."
         )

@@ -19,7 +19,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.pipeline import _run_
 from nemotron.steps.byob.runtime.benchmark_families.safety.status import RunStatus, SafetyStatus
 from nemotron.steps.byob.scripts.runtime import run_byob
 from nemotron.steps.byob.scripts.validate import validate_skill_dir
-from tests.steps.byob.safety_fixtures import scripted_paraphrase_turns
+from tests.steps.byob.safety_fixtures import scripted_complete_answer, scripted_paraphrase_turns
 
 BYOB_DIR = Path(__file__).resolve().parents[3] / "src" / "nemotron" / "steps" / "byob"
 REPO_ROOT = BYOB_DIR.parents[3]
@@ -71,13 +71,17 @@ class _EchoExtractor:
         prefix: str = "",
         inference_parameters: Any = None,
     ) -> dict[str, Any]:
-        del system_prompt, prompt, output_format, prefix, inference_parameters
+        del system_prompt, prompt, inference_parameters
         answers: dict[str, Any] = {}
         for row in rows:
+            request_id = row["request_id"]
+            structured = scripted_complete_answer(row, output_format=output_format, prefix=prefix)
+            if structured is not None:
+                answers[request_id] = structured
+                continue
             payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
             count = payload.get("turn_count") if isinstance(payload.get("turn_count"), int) else 1
             count = max(1, count)
-            request_id = row["request_id"]
             kind = payload.get("kind") or "request"
             answers[request_id] = {"turns": scripted_paraphrase_turns(request_id, kind, count)}
         return answers
@@ -1089,9 +1093,25 @@ def test_per_policy_minimum_is_checked_against_extracted_rule_inventory(tmp_path
         ),
         ({"languages": ["en-US"]}, "languages must be a mapping"),
         (
-            {"languages": {"source_language": "ar"}},
-            "has no built-in contextual privacy labels",
+            {"languages": {"source_language": "vi-VN"}},
+            "needs privacy.additional_labels for",
         ),
+        (
+            {
+                "languages": {"source_language": "vi-VN"},
+                "privacy": {"additional_labels": {"credential": ["mật khẩu"]}},
+            },
+            "needs privacy.additional_labels for",
+        ),
+        (
+            {"languages": {"source_language": "ar"}},
+            "needs privacy.additional_labels for",
+        ),
+        (
+            {"proposals": {"language_scripts": {"vi": ["Latin Extended"]}}},
+            "proposals.language_scripts.vi has an invalid script 'Latin Extended'",
+        ),
+        ({"proposals": {"language_scripts": ["LATIN"]}}, "proposals.language_scripts must be a mapping"),
         ({"generation": {"decision_mix": {"ban": 0.1}}}, "Unknown generation.decision_mix keys: ban"),
     ],
 )
@@ -1104,12 +1124,54 @@ def test_invalid_config_is_reported_without_writing(tmp_path: Path, overrides: d
 
 def test_languages_mapping_sets_source_and_target_languages(tmp_path: Path) -> None:
     languages = {"source_language": "fr-FR", "target_languages": ["fr-FR", "de-DE"]}
-    run_dir = _run(_config(tmp_path, overrides={"languages": languages}), "prepare")
+    run_dir = _run(
+        _config(
+            tmp_path,
+            overrides={
+                "languages": languages,
+                "privacy": {
+                    "additional_labels": {
+                        "credential": ["mot de passe"],
+                        "national_id": ["numéro d'identité"],
+                        "bank_account": ["numéro de compte"],
+                        "date_of_birth": ["date de naissance"],
+                    }
+                },
+            },
+        ),
+        "prepare",
+    )
 
     resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
     assert resolved["proposals"]["source_language"] == "fr-FR"
     assert resolved["proposals"]["target_languages"] == ["fr-FR", "de-DE"]
     assert resolved["languages"] == languages
+
+
+def test_a_named_source_language_requires_privacy_labels(tmp_path: Path) -> None:
+    labels = {
+        "credential": ["mật khẩu"],
+        "national_id": ["CCCD"],
+        "bank_account": ["STK"],
+        "date_of_birth": ["ngày sinh"],
+    }
+    run_dir = _run(
+        _config(
+            tmp_path,
+            files={"policy.md": "CCCD số 001099012345\nKhông tiết lộ dữ liệu khách hàng.\n"},
+            overrides={
+                "languages": {"source_language": "vi-VN", "target_languages": []},
+                "privacy": {"additional_labels": labels},
+            },
+        ),
+        "prepare",
+    )
+
+    resolved = yaml.safe_load((run_dir / "config_resolved.yaml").read_text(encoding="utf-8"))
+    assert resolved["privacy"]["additional_labels"]["credential"] == ["mật khẩu"]
+    redacted = (run_dir / "stage_cache" / "redacted" / "policy.txt").read_text(encoding="utf-8")
+    assert "001099012345" not in redacted
+    assert "REDACTED_NATIONAL_ID_1" in redacted
 
 
 def test_an_unlisted_source_language_accepts_custom_privacy_labels(tmp_path: Path) -> None:

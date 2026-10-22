@@ -143,8 +143,8 @@ def test_all_rejected_files_stop_without_claiming_a_privacy_block(tmp_path: Path
 def test_personal_data_is_redacted_with_stable_placeholders_and_kept_lines(tmp_path: Path) -> None:
     source = (
         "# Contact\n"
-        "Escalate to a.nguyen@example.com or call 0912 345 678.\n"
-        "Again: a.nguyen@example.com, card 4111 1111 1111 1111, CCCD số 001099012345.\n"
+        "Escalate to a.nguyen@example.com or call +84 912 345 678.\n"
+        "Again: a.nguyen@example.com, card 4111 1111 1111 1111.\n"
     )
     run_dir = prepare_safety(_config(tmp_path, {"contact.md": source}))
 
@@ -152,54 +152,69 @@ def test_personal_data_is_redacted_with_stable_placeholders_and_kept_lines(tmp_p
     assert text.count("REDACTED_EMAIL_1") == 2
     assert "REDACTED_PHONE_NUMBER_1" in text
     assert "REDACTED_CARD_NUMBER_1" in text
-    assert "REDACTED_NATIONAL_ID_1" in text
     assert text.count("\n") == source.count("\n")
     assert _files(run_dir)["contact.md"]["redactions"] == {
         "card_number": 1,
         "email": 2,
-        "national_id": 1,
         "phone_number": 1,
     }
     run_text = _run_text(run_dir)
-    for value in ("a.nguyen@example.com", "0912 345 678", "4111 1111 1111 1111", "001099012345"):
+    for value in ("a.nguyen@example.com", "+84 912 345 678", "4111 1111 1111 1111"):
         assert value not in run_text
 
 
-def test_an_unlabeled_ssn_shape_stays_and_a_labeled_one_is_redacted() -> None:
+def test_a_local_national_phone_number_stays() -> None:
+    result = privacy.assess(["Escalate by calling 0912 345 678."])
+
+    assert result.safe is True
+    assert result.redactions == {}
+    assert result.lines == ("Escalate by calling 0912 345 678.",)
+
+
+def test_an_unlabeled_ssn_shape_stays_until_the_operator_lists_the_label() -> None:
     result = privacy.assess(["Order 123-45-6789 is a SKU.", "SSN 123-45-6789"])
 
     assert result.safe is True
-    assert result.lines[0] == "Order 123-45-6789 is a SKU."
-    assert "123-45-6789" not in result.lines[1]
-    assert result.redactions == {"national_id": 1}
+    assert result.lines == ("Order 123-45-6789 is a SKU.", "SSN 123-45-6789")
+    labeled = privacy.assess(["SSN 123-45-6789"], additional_labels={"national_id": ["SSN"]})
+    assert labeled.safe is True
+    assert "123-45-6789" not in labeled.lines[0]
+    assert labeled.redactions == {"national_id": 1}
 
 
-def test_international_iban_and_labeled_birth_date_are_redacted_locally() -> None:
+def test_international_iban_and_e164_phone_are_redacted_locally() -> None:
     result = privacy.assess(
         [
             "IBAN: GB82 WEST 1234 5698 7654 32",
-            "出生日期：1990-12-31",
-            "身份证：001099012345",
-            "账号：123456789012",
             "Call +33 612345678.",
         ]
     )
 
     assert result.safe is True
-    assert result.redactions == {
-        "bank_account": 1,
-        "date_of_birth": 1,
-        "iban": 1,
-        "national_id": 1,
-        "phone_number": 1,
-    }
+    assert result.redactions == {"iban": 1, "phone_number": 1}
     assert result.lines == (
         "IBAN: REDACTED_IBAN_1",
-        "出生日期：REDACTED_DATE_OF_BIRTH_1",
-        "身份证：REDACTED_NATIONAL_ID_1",
-        "账号：REDACTED_BANK_ACCOUNT_1",
         "Call REDACTED_PHONE_NUMBER_1.",
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "kind", "label"),
+    [
+        ("SSN 123-45-6789", "national_id", "SSN"),
+        ("CCCD số 001099012345", "national_id", "CCCD"),
+        ("身份证：001099012345", "national_id", "身份证"),
+        ("STK 123456789012", "bank_account", "STK"),
+        ("账号：123456789012", "bank_account", "账号"),
+        ("ngày sinh: 1990-12-31", "date_of_birth", "ngày sinh"),
+        ("出生日期：1990-12-31", "date_of_birth", "出生日期"),
+    ],
+)
+def test_locale_identity_phrases_need_additional_labels(text: str, kind: str, label: str) -> None:
+    assert privacy.assess([text]).redactions == {}
+    labeled = privacy.assess([text], additional_labels={kind: [label]})
+    assert labeled.safe is True
+    assert labeled.redactions == {kind: 1}
 
 
 def test_customer_privacy_labels_cover_an_unlisted_language() -> None:
@@ -235,15 +250,30 @@ def test_customer_privacy_labels_cover_an_unlisted_language() -> None:
 
 
 @pytest.mark.parametrize(
+    ("text", "label"),
+    [
+        ("mật khẩu: Matkhau2024!", "mật khẩu"),
+        ("mot de passe: Matkhau2024!", "mot de passe"),
+        ("密码：Secret12!", "密码"),
+    ],
+)
+def test_locale_password_phrases_need_additional_labels(text: str, label: str) -> None:
+    assert privacy.assess([text]).safe is True
+    labeled = privacy.assess([text], additional_labels={"credential": [label]})
+    assert labeled.safe is False
+    assert labeled.reason == privacy.SECRET_PATTERN
+    assert [finding.kind for finding in labeled.findings] == ["secret_assignment"]
+
+
+@pytest.mark.parametrize(
     ("text", "kind"),
     [
         ("token: ghp_" + "a" * 36, "access_token"),
         ("AKIAABCDEFGHIJKLMNOP", "cloud_access_key"),
         ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz", "access_token"),
-        ("mật khẩu: Matkhau2024!", "secret_assignment"),
-        ("mot de passe: Matkhau2024!", "secret_assignment"),
-        ("密码：Secret12!", "secret_assignment"),
+        ("password: Matkhau2024!", "secret_assignment"),
         ("api_key: AbCdEfGhIj1234567890", "secret_assignment"),
+        ("secret_key: AbCdEfGhIj1234567890", "secret_assignment"),
         ("nvapi-" + "x" * 30, "api_key"),
     ],
 )
@@ -432,7 +462,7 @@ Applies to every assistant.
 
 ## 1. Definitions
 
-"Card data" means a payment card number or its security code.
+"Card data": a payment card number or its security code.
 
 ## 4. Restricted topics
 
@@ -444,7 +474,7 @@ Block requests for card data. Escalate self-harm.
 
 ## 5. Exceptions
 
-Section 4.3 does not apply to licensed trainers. See section 9 for appeals.
+The exception in § 4.3 does not apply to licensed trainers. See § 9 for appeals.
 """
 
 
@@ -476,6 +506,17 @@ def test_a_cjk_heading_keeps_its_script_in_the_section_label() -> None:
     assert [span["source_span_id"] for span in document.spans] == ["doc#禁止事项#span-01"]
 
 
+def test_cjk_article_citations_resolve() -> None:
+    text = "第4条 禁止事项\n不得协助制作武器。\n第2条 适用范围\n适用第4条。\n"
+    document = build_document("law", _lines(text), markdown_headings=False)
+    referring = next(span for span in document.spans if span["text"] == "适用第4条。")
+
+    [reference] = referring["cross_references"]
+    assert reference["target_section"] == "4"
+    assert reference["resolved"] is True
+    assert reference["target_span_ids"] == ["law#4#span-01"]
+
+
 def test_structural_headings_do_not_need_a_language_word() -> None:
     text = "第4条 禁止事项\n不得协助制作武器。\n§ 2 Scope\nApply this rule.\n"
     document = build_document("law", _lines(text), markdown_headings=False)
@@ -492,34 +533,50 @@ def test_a_quoted_colon_is_a_definition_without_a_verb() -> None:
     assert [(entry["term"], entry["definition"]) for entry in document.glossary] == [("カード", "決済に使う番号")]
 
 
-def test_keyword_headings_are_found_without_an_english_word() -> None:
-    text = "Chapitre 4\nNe jamais répéter un numéro de carte.\nCapítulo 5\nAplica a cada canal.\n"
+def test_dotted_headings_are_found_without_a_language_word() -> None:
+    text = "4.1 Transfers\nNe jamais répéter un numéro de carte.\n5.1 Scope\nAplica a cada canal.\n"
     document = build_document("law", _lines(text), markdown_headings=False)
 
     assert [(span["section"], span["text"]) for span in document.spans] == [
-        ("4", "Ne jamais répéter un numéro de carte."),
-        ("5", "Aplica a cada canal."),
+        ("4.1", "Transfers"),
+        ("4.1", "Ne jamais répéter un numéro de carte."),
+        ("5.1", "Scope"),
+        ("5.1", "Aplica a cada canal."),
     ]
 
 
-def test_keyword_headings_are_found_in_plain_text_and_docx() -> None:
-    text = "Điều 4. Nội dung bị cấm\nKhông cung cấp số thẻ.\nSection 4 applies to every channel.\n"
+def test_markdown_and_docx_headings_keep_a_leading_unlisted_word() -> None:
+    text = "## Điều 4. Nội dung bị cấm\nKhông cung cấp số thẻ.\nThis applies to every channel.\n"
     document = build_document("law", _lines(text), markdown_headings=True)
 
     sections = [(span["section"], span["text"]) for span in document.spans]
     assert sections == [
-        ("4", "Nội dung bị cấm"),
         ("4", "Không cung cấp số thẻ."),
-        ("4", "Section 4 applies to every channel."),
+        ("4", "This applies to every channel."),
     ]
+    docx = build_document(
+        "handbook",
+        [Line("4. Restricted topics", heading_level=1), Line("Never repeat a card number.")],
+        markdown_headings=False,
+    )
+    assert [(span["section"], span["text"]) for span in docx.spans] == [
+        ("4", "Never repeat a card number."),
+    ]
+
+
+def test_a_single_numbered_line_is_a_list_not_a_heading() -> None:
+    document = build_document("doc", _lines("4. Restricted topics\nBlock cards.\n"), markdown_headings=False)
+
+    assert {span["section"] for span in document.spans} == {"preamble"}
+    assert [span["text"] for span in document.spans] == ["Restricted topics", "Block cards."]
 
 
 def test_cross_references_resolve_within_the_same_document() -> None:
     document = build_document("five-topic", _lines(FIVE_TOPIC), markdown_headings=True)
-    references = {span["text"][:11]: span["cross_references"] for span in document.spans}
+    references = {span["text"]: span["cross_references"] for span in document.spans if span["cross_references"]}
 
-    [resolved] = references["Section 4.3"]
-    [unresolved] = references["See section"]
+    [resolved] = references["The exception in § 4.3 does not apply to licensed trainers."]
+    [unresolved] = references["See § 9 for appeals."]
     assert resolved["target_section"] == "4.3"
     assert resolved["resolved"] is True
     assert resolved["target_span_ids"] == ["five-topic#4.3#span-01"]
@@ -538,24 +595,16 @@ def test_glossary_collects_definitions_and_links_terms() -> None:
 
 
 def test_unsegmented_definitions_are_found_and_linked() -> None:
-    text = "## 1. 定义\n\n银行卡是指用于支付的号码。\n\n## 2. 规定\n\n不得重复银行卡。\n"
+    text = "## 1. 定义\n\n「银行卡」：用于支付的号码。\n\n## 2. 规定\n\n不得重复银行卡。\n"
     document = build_document("zh", _lines(text), markdown_headings=True)
 
-    assert [(entry["term"], entry["definition"]) for entry in document.glossary] == [
-        ("银行卡", "用于支付的号码")
-    ]
+    assert [(entry["term"], entry["definition"]) for entry in document.glossary] == [("银行卡", "用于支付的号码")]
     clause = next(span for span in document.spans if span["text"] == "不得重复银行卡。")
     assert clause["glossary_terms"] == ["银行卡"]
 
 
 def test_unsegmented_glossary_prefers_a_compound_and_ignores_one_character_terms() -> None:
-    text = (
-        "## 1. 定义\n\n"
-        "卡是指卡片。\n"
-        "银行卡是指用于支付的号码。\n\n"
-        "## 2. 规定\n\n"
-        "不得重复银行卡。\n"
-    )
+    text = "## 1. 定义\n\n「卡」：卡片。\n「银行卡」：用于支付的号码。\n\n## 2. 规定\n\n不得重复银行卡。\n"
     document = build_document("zh", _lines(text), markdown_headings=True)
 
     clause = next(span for span in document.spans if span["text"] == "不得重复银行卡。")
@@ -565,13 +614,32 @@ def test_unsegmented_glossary_prefers_a_compound_and_ignores_one_character_terms
 def test_vietnamese_definitions_are_found() -> None:
     text = (
         "## 1. Giải thích từ ngữ\n\n"
-        "Dữ liệu thẻ là số thẻ thanh toán.\n"
-        "“Người dùng” được hiểu là người gửi yêu cầu.\n"
+        '"Dữ liệu thẻ": số thẻ thanh toán.\n'
+        "“Người dùng”: người gửi yêu cầu.\n"
         "## 2. Quy định\n\nKhông lặp lại dữ liệu thẻ.\n"
     )
     document = build_document("vn", _lines(text), markdown_headings=True)
 
     assert sorted(entry["key"] for entry in document.glossary) == ["dữ liệu thẻ", "người dùng"]
+
+
+def test_latin_diacritic_terms_match_as_words() -> None:
+    text = (
+        "## 1. Giải thích từ ngữ\n\n"
+        '"Thẻ": số thanh toán.\n'
+        "## 2. Quy định\n\nKhông cung cấp thẻ. Không cung cấp thẻcăn.\n"
+    )
+    document = build_document("vn", _lines(text), markdown_headings=True)
+    spans = {span["text"]: span["glossary_terms"] for span in document.spans}
+
+    assert spans["Không cung cấp thẻ."] == ["thẻ"]
+    assert spans["Không cung cấp thẻcăn."] == []
+
+
+def test_a_definition_verb_is_not_enough_without_punctuation() -> None:
+    document = build_document("doc", _lines('"Card data" means a payment card number.\n'), markdown_headings=False)
+
+    assert document.glossary == []
 
 
 def test_plain_la_outside_a_definition_section_is_not_a_definition() -> None:
@@ -584,8 +652,8 @@ def test_plain_la_outside_a_definition_section_is_not_a_definition() -> None:
 
 def test_conflicting_definitions_across_documents_are_recorded(tmp_path: Path) -> None:
     files = {
-        "a.md": '"Card data" means a card number.\n',
-        "b.md": '"Card data" means any payment detail.\n',
+        "a.md": '"Card data": a card number.\n',
+        "b.md": '"Card data": any payment detail.\n',
     }
     run_dir = prepare_safety(_config(tmp_path, files))
 
@@ -595,10 +663,15 @@ def test_conflicting_definitions_across_documents_are_recorded(tmp_path: Path) -
 
 
 def test_sentence_split_keeps_abbreviations_and_decimals() -> None:
-    text = "Refuse e.g. malware. Version 2.5 applies. Next rule.\n"
+    text = "Refuse e.g. malware. Dùng v.v. khi liệt kê. Version 2.5 applies. Next rule.\n"
     document = build_document("doc", _lines(text), markdown_headings=False)
 
-    assert [span["text"] for span in document.spans] == ["Refuse e.g. malware.", "Version 2.5 applies.", "Next rule."]
+    assert [span["text"] for span in document.spans] == [
+        "Refuse e.g. malware.",
+        "Dùng v.v. khi liệt kê.",
+        "Version 2.5 applies.",
+        "Next rule.",
+    ]
 
 
 def test_sentence_split_supports_lowercase_and_cjk_boundaries() -> None:
@@ -645,7 +718,7 @@ def test_repeated_section_numbers_keep_their_own_heading_path() -> None:
 
 
 def test_a_missing_parent_section_is_not_resolved_through_its_child() -> None:
-    document = build_document("doc", _lines("## 4.3 Weapons\n\nSee section 4.\n"), markdown_headings=True)
+    document = build_document("doc", _lines("## 4.3 Weapons\n\nSee § 4.\n"), markdown_headings=True)
 
     [reference] = document.spans[0]["cross_references"]
     assert reference["target_section"] == "4"
@@ -654,9 +727,9 @@ def test_a_missing_parent_section_is_not_resolved_through_its_child() -> None:
 
 
 def test_a_resolved_reference_does_not_include_the_referring_span() -> None:
-    text = "## 4. Topic\n\nParent rule.\n\n### 4.3 Weapons\n\nSee section 4.\n"
+    text = "## 4. Topic\n\nParent rule.\n\n### 4.3 Weapons\n\nSee § 4.\n"
     document = build_document("doc", _lines(text), markdown_headings=True)
-    referring = next(span for span in document.spans if span["text"].startswith("See section 4"))
+    referring = next(span for span in document.spans if span["text"].startswith("See § 4"))
 
     [reference] = referring["cross_references"]
     assert reference["resolved"] is True
@@ -665,22 +738,21 @@ def test_a_resolved_reference_does_not_include_the_referring_span() -> None:
 
 
 def test_roman_chapter_numbers_are_sections() -> None:
-    text = "Chương I. Quy định chung\nÁp dụng mọi kênh.\nĐiều 1. Phạm vi\nKhông cung cấp số thẻ.\n"
+    text = "# Chương I. Quy định chung\nÁp dụng mọi kênh.\n## Điều 1. Phạm vi\nKhông cung cấp số thẻ.\n"
     document = build_document("law", _lines(text), markdown_headings=True)
     spans = {span["text"]: span for span in document.spans}
 
-    assert spans["Quy định chung"]["section"] == "I"
     assert spans["Áp dụng mọi kênh."]["section"] == "I"
-    assert spans["Phạm vi"]["section"] == "1"
+    assert spans["Không cung cấp số thẻ."]["section"] == "1"
     assert spans["Không cung cấp số thẻ."]["heading_path"] == ["Chương I. Quy định chung", "Điều 1. Phạm vi"]
 
 
-def test_a_long_keyword_heading_is_still_a_section() -> None:
+def test_a_long_dotted_heading_is_still_a_section() -> None:
     sentence = "The assistant must refuse this request."
-    document = build_document("doc", _lines("Section 4. " + " ".join([sentence] * 12)), markdown_headings=False)
+    document = build_document("doc", _lines("4.1 " + " ".join([sentence] * 12)), markdown_headings=False)
 
-    assert len("Section 4. " + " ".join([sentence] * 12)) > 200
-    assert {span["section"] for span in document.spans} == {"4"}
+    assert len("4.1 " + " ".join([sentence] * 12)) > 200
+    assert {span["section"] for span in document.spans} == {"4.1"}
     assert document.spans[0]["text"] == sentence
 
 
@@ -739,7 +811,7 @@ def test_a_list_that_mixes_rules_and_notes_is_read_as_text(tmp_path: Path) -> No
 
 
 def test_a_colon_in_a_definition_section_is_not_a_glossary_term() -> None:
-    text = '## 1. Definitions\n\nNote: this applies to every channel.\n"Card" means a payment card number.\n'
+    text = '## 1. Definitions\n\nNote: this applies to every channel.\n"Card": a payment card number.\n'
     document = build_document("doc", _lines(text), markdown_headings=True)
 
     assert [entry["term"] for entry in document.glossary] == ["Card"]
@@ -836,7 +908,7 @@ def test_preauthored_provenance_is_checked_against_ingested_documents(
 
 def test_glossary_terms_are_linked_across_documents(tmp_path: Path) -> None:
     files = {
-        "policy.md": '## 1. Definitions\n\n"Card data" means a card number.\n',
+        "policy.md": '## 1. Definitions\n\n"Card data": a card number.\n',
         "other.md": "Never repeat card data.\n",
     }
     run_dir = prepare_safety(_config(tmp_path, files))
@@ -891,6 +963,37 @@ def test_docx_tables_and_heading_styles_are_read() -> None:
 
     assert extracted.lines[0] == Line("Section 2 - Payments", 1, None)
     assert Line("| Topic | Action |") in extracted.lines
+
+
+def test_docx_heading_style_id_is_language_independent() -> None:
+    assert documents._heading_level("Heading1") == 1
+    assert documents._heading_level("Title") == 1
+    assert documents._heading_level("Tiêu đề 1") is None
+
+
+def test_docx_builtin_heading_id_survives_a_localized_style_name() -> None:
+    import io
+
+    import docx
+    from docx.oxml.ns import qn
+
+    document = docx.Document()
+    style = document.styles["Heading 1"]
+    style.name = "Tiêu đề 1"
+    paragraph = document.add_paragraph("4. Payments")
+    paragraph.style = style
+    properties = paragraph._p.get_or_add_pPr()
+    outline = properties.find(qn("w:outlineLvl"))
+    if outline is not None:
+        properties.remove(outline)
+    document.add_paragraph("Do not echo card numbers.")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    extracted = documents.extract(buffer.getvalue(), "docx")
+
+    assert extracted.lines[0] == Line("4. Payments", 1, None)
+    assert extracted.lines[1].heading_level is None
 
 
 def test_docx_outline_level_is_a_heading_when_the_style_name_is_not() -> None:

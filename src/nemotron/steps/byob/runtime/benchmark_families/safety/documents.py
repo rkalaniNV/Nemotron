@@ -159,10 +159,10 @@ def _check_docx_archive(data: bytes) -> None:
 
 
 def _paragraph_heading_level(paragraph: object) -> int | None:
-    """Heading depth from the paragraph outline, then from the style name or its outline.
+    """Heading depth from the paragraph outline, then from the style id or name.
 
-    A localized style such as "Tiêu đề 1" still carries ``w:outlineLvl``. The style name
-    remains the fallback for a Heading style that does not repeat the level on each paragraph.
+    A localized style such as "Tiêu đề 1" still carries ``w:outlineLvl`` and the built-in
+    ``Heading1`` style id. The English style name remains a last fallback.
     """
     direct = _outline_level(getattr(paragraph, "_p", None))
     if direct is not None:
@@ -171,6 +171,9 @@ def _paragraph_heading_level(paragraph: object) -> int | None:
     seen: set[int] = set()
     while style is not None and id(style) not in seen:
         seen.add(id(style))
+        by_id = _heading_level(getattr(style, "style_id", "") or "")
+        if by_id is not None:
+            return by_id
         named = _heading_level(getattr(style, "name", "") or "")
         if named is not None:
             return named

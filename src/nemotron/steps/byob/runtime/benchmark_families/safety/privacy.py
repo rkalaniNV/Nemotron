@@ -22,9 +22,11 @@ Two kinds of finding are treated differently:
   credential is never redacted and passed on. An assignment counts only when the value
   looks like a token, so a password-policy sentence stays in the document.
 - Personal data (email, payment card, phone number, identity document, bank account) is
-  replaced by a typed placeholder such as ``REDACTED_EMAIL_1``. The same value keeps the
-  same placeholder inside one document. The redacted text is scanned again, and any
-  remaining finding quarantines the file.
+  replaced by a typed placeholder such as ``REDACTED_EMAIL_1``. Email, Luhn cards, IBAN,
+  and E.164 phones are structural. National ID, bank account, and birth-date phrases are
+  supplied through ``privacy.additional_labels``. The same value keeps the same placeholder
+  inside one document. The redacted text is scanned again, and any remaining finding
+  quarantines the file.
 
 A finding records its kind and line number, never the matched value.
 """
@@ -39,10 +41,11 @@ SECRET_PATTERN = "secret_pattern"
 REDACTION_INCOMPLETE = "redaction_incomplete"
 
 _WORD = r"A-Za-z0-9"
+# Config/env field names, not natural-language password words. Locale phrases such as
+# mật khẩu or 密码 are supplied through privacy.additional_labels.credential.
 _SECRET_ASSIGNMENT = re.compile(
-    r"(?i)(?:\b(?:api[_ -]?key|secret[_ -]?key|client[_ -]?secret|access[_ -]?token|auth[_ -]?token"
-    r"|password|passwd|pwd|mật khẩu|mot de passe|contraseña|passwort|senha)\b|"
-    r"(?:パスワード|비밀번호|密码))"
+    r"(?i)\b(?:api[_ -]?key|secret[_ -]?key|client[_ -]?secret|access[_ -]?token|auth[_ -]?token"
+    r"|password|passwd|pwd)\b"
     r"[ \t]*[:=：][ \t]*[\"']?([^\s\"'<>]{8,})"
 )
 
@@ -126,42 +129,14 @@ _PERSONAL_PATTERNS: tuple[_PersonalPattern, ...] = (
     ),
     _PersonalPattern("card_number", re.compile(r"(?<![\d-])\d(?:[ -]?\d){12,18}(?![\d-])"), accept=_luhn),
     _PersonalPattern(
-        "national_id",
-        re.compile(
-            r"(?i)(?:\b(?:CCCD|CMND|CMT|căn cước(?: công dân)?|chứng minh nhân dân|hộ chiếu|"
-            r"passport(?: number| no\.?)?|national id(?: number)?|SSN|"
-            r"numéro (?:d['’])?identité|dni|cédula|cedula|personalausweis|ausweis)\b|"
-            r"(?:주민등록번호|マイナンバー|身份证|身分證))[^\w\n]{0,5}"
-            r"(?:số[^\w\n]{0,3})?(\d(?:[ \-]?\d){6,14})"
-        ),
-        group=1,
-    ),
-    _PersonalPattern(
-        "bank_account",
-        re.compile(
-            r"(?i)(?:\b(?:số tài khoản|STK|tài khoản số|account (?:number|no\.?)|"
-            r"n[o°º] de compte|numéro de compte|número de cuenta|kontonummer)\b|"
-            r"(?:계좌번호|口座番号|账号|帳號))[^\w\n]{0,5}(\d(?:[ -]?\d){4,22})"
-        ),
-        group=1,
-    ),
-    _PersonalPattern(
         "iban",
         re.compile(r"(?i)(?<![A-Z0-9])[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}(?![A-Z0-9])"),
         accept=_iban,
     ),
-    _PersonalPattern(
-        "date_of_birth",
-        re.compile(
-            r"(?i)(?:date of birth|birth date|DOB|ngày sinh|fecha de nacimiento|date de naissance|geburtsdatum"
-            r"|出生日期|生年月日|생년월일)[ \t]*[:：]?[ \t]*"
-            r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
-        ),
-        group=1,
-    ),
-    _PersonalPattern("phone_number", re.compile(r"(?<![\w+])(?:\+84|0084|0)[ .-]?[35789](?:[ .-]?\d){8}(?!\d)")),
     _PersonalPattern("phone_number", re.compile(r"(?<![\w+])\+[1-9]\d{0,2}(?:[ .-]?\d){7,12}(?!\d)")),
 )
+# One optional intervening word so "CCCD số 001…" works when the configured label is "CCCD".
+_LABEL_VALUE_GAP = r"(?:[^\S\n]{0,3}[^\W\d_]{1,12})?[^\w\n]{0,5}"
 
 
 @dataclass(frozen=True)
@@ -272,9 +247,7 @@ def _additional_personal_patterns(
     definitions = {
         "national_id": r"(\d(?:[ \-]?\d){6,14})",
         "bank_account": r"(\d(?:[ \-]?\d){4,22})",
-        "date_of_birth": (
-            r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
-        ),
+        "date_of_birth": (r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"),
     }
     for kind, value_pattern in definitions.items():
         labels = _labels(additional, kind)
@@ -284,7 +257,7 @@ def _additional_personal_patterns(
         specs.append(
             _PersonalPattern(
                 kind,
-                re.compile(rf"(?i)(?:{label_pattern})[^\w\n]{{0,5}}{value_pattern}"),
+                re.compile(rf"(?i)(?:{label_pattern}){_LABEL_VALUE_GAP}{value_pattern}"),
                 group=1,
             )
         )

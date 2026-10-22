@@ -3,6 +3,8 @@
 import json
 from typing import Any
 
+from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import snippet_letter_floor
+
 ANTI_STATE = (
     "Chỉ chặn khi đồng thời có đủ hai thành phần: động từ hướng dẫn hoặc tổ chức, và mục tiêu chống chính quyền."
 )
@@ -195,18 +197,127 @@ class ScriptedExtractor:
         prefix: str = "",
         inference_parameters: Any = None,
     ) -> dict[str, Any]:
-        del system_prompt, prompt, output_format, prefix, inference_parameters
+        del system_prompt, prompt, inference_parameters
         if self.fail:
             raise ConnectionError("endpoint refused the connection")
         answers: dict[str, Any] = {}
         for row in rows:
+            request_id = row["request_id"]
+            structured = scripted_complete_answer(row, output_format=output_format, prefix=prefix)
+            if structured is not None:
+                answers[request_id] = structured
+                continue
             payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
             count = payload.get("turn_count") if isinstance(payload.get("turn_count"), int) else 1
             count = max(1, count)
-            request_id = row["request_id"]
             kind = payload.get("kind") or "request"
             answers[request_id] = {"turns": scripted_paraphrase_turns(request_id, kind, count)}
         return answers
+
+
+def scripted_complete_answer(
+    row: dict[str, Any],
+    *,
+    output_format: Any = None,
+    prefix: str = "",
+) -> dict[str, Any] | None:
+    """Default LanguageCheck or SpanAnnotation reply. None means use the paraphrase default."""
+    name = getattr(output_format, "__name__", "") or ""
+    payload = json.loads(row["payload"]) if isinstance(row.get("payload"), str) else {}
+    if name == "LanguageCheck" or prefix == "safety-language-":
+        text = payload.get("text") if isinstance(payload.get("text"), str) else ""
+        wanted: list[str] = []
+        seen: set[str] = set()
+        values: list[Any]
+        if payload.get("task_type") == "code_switch" or payload.get("kind") == "code_switch":
+            values = list(payload.get("languages") or [])
+            values.append(payload.get("source_language"))
+            values.append(payload.get("target_language"))
+        else:
+            values = [payload.get("target_language")]
+        for item in values:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            lang = item.strip().replace("_", "-").split("-", 1)[0].casefold()
+            if lang and lang not in seen:
+                seen.add(lang)
+                wanted.append(lang)
+        excerpts = _scripted_language_excerpts(text, wanted)
+        if not text or not wanted or len(excerpts) != len(wanted):
+            return {"matches": False, "evidence": []}
+        return {
+            "matches": True,
+            "evidence": [
+                {"language": lang, "evidence": excerpt} for lang, excerpt in zip(wanted, excerpts, strict=True)
+            ],
+        }
+    if name == "SpanAnnotation" or prefix == "safety-annotate-":
+        return {
+            "is_definition": False,
+            "term_evidence": "",
+            "definition_evidence": "",
+            "cross_references": [],
+        }
+    return None
+
+
+def _scripted_language_excerpts(text: str, wanted: list[str]) -> list[str]:
+    """Short, distinct excerpts of ``text`` so LanguageCheck cannot Gold-label the whole turn."""
+    stripped = text.strip()
+    if not stripped or not wanted:
+        return []
+    tokens = [token for token in stripped.split() if token]
+    if len(wanted) == 1:
+        excerpt = _shorter_excerpt(stripped, tokens)
+        return [excerpt] if excerpt else []
+    chunks = _partition_excerpts(stripped, tokens, len(wanted))
+    return chunks if len(chunks) == len(wanted) else []
+
+
+def _shorter_excerpt(text: str, tokens: list[str]) -> str:
+    for count in range(1, len(tokens)):
+        excerpt = " ".join(tokens[:count])
+        if sum(char.isalpha() for char in excerpt) >= snippet_letter_floor(excerpt):
+            return excerpt
+    letters = [index for index, char in enumerate(text) if char.isalpha()]
+    floor = snippet_letter_floor(text)
+    if len(letters) > floor:
+        excerpt = text[: letters[floor - 1] + 1]
+        if excerpt != text:
+            return excerpt
+    return ""
+
+
+def _partition_excerpts(text: str, tokens: list[str], count: int) -> list[str]:
+    if len(tokens) >= count:
+        size = max(1, len(tokens) // count)
+        chunks = []
+        for index in range(count):
+            start = index * size
+            end = len(tokens) if index == count - 1 else min(len(tokens), start + size)
+            if start >= len(tokens):
+                break
+            chunks.append(" ".join(tokens[start:end]))
+        if _distinct_excerpts(chunks, text):
+            return chunks
+    length = len(text)
+    size = max(2, length // count)
+    chunks = []
+    for index in range(count):
+        start = index * size
+        end = length if index == count - 1 else min(length, start + size)
+        chunks.append(text[start:end])
+    return chunks if _distinct_excerpts(chunks, text) else []
+
+
+def _distinct_excerpts(chunks: list[str], text: str) -> bool:
+    normalized = [chunk.strip() for chunk in chunks]
+    if any(
+        not chunk or chunk == text or sum(char.isalpha() for char in chunk) < snippet_letter_floor(chunk)
+        for chunk in normalized
+    ):
+        return False
+    return len({chunk.casefold() for chunk in normalized}) == len(normalized)
 
 
 def scripted_paraphrase_turns(request_id: str, kind: str, count: int) -> list[dict[str, str]]:

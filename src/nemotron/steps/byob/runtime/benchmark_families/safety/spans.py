@@ -27,96 +27,39 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import fold_latin, latin_token
 from nemotron.steps.byob.runtime.benchmark_families.safety.documents import DocumentError, Line
 
 PREAMBLE = "preamble"
 MAX_SPAN_CHARS = 1200
 MAX_CROSS_REFERENCE_TARGETS = 50
 
-_SECTION_WORDS = (
-    r"section|article|chapter|clause|mục|điều|chương|phần|"
-    r"sección|artículo|capítulo|cláusula|abschnitt|artikel|kapitel|klausel|chapitre"
-)
 # A roman numeral, non-empty. "IIII" does not match; "IV" and "III" do.
 _ROMAN = r"(?=[IVXLCDM])M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})"
 _NUMBER = rf"(?:\d+(?:\.\d+)*|(?:{_ROMAN})(?:\.\d+)*)"
+_DOTTED_NUMBER = r"\d+\.\d+(?:\.\d+)*"
 _ATX = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
-_KEYWORD_HEADING = re.compile(
-    rf"^(?P<word>{_SECTION_WORDS})[ \t]+(?P<number>{_NUMBER})(?:[.):](?=\s|$)|[ \t]+[-–—](?=\s)|$)", re.I
-)
+# Dotted numbers are section labels (`4.3 Title`). A single `1.` stays a list marker.
+_DOTTED_HEADING = re.compile(rf"^(?P<number>{_DOTTED_NUMBER})(?:[.):](?=\s|$)|[ \t]+(?=\S)|[ \t]+[-–—](?=\s)|$)", re.I)
 _STRUCTURAL_HEADING = re.compile(
     r"^(?:第\s*(?P<cjk>\d{1,6})\s*(?P<unit>[条章节編编])|§\s*(?P<section>\d+(?:\.\d+)*))\s*(?P<title>\S.*)?$"
 )
-_NUMBER_PREFIX = re.compile(rf"^(?:(?:{_SECTION_WORDS})[ \t]+)?({_NUMBER})(?=[.):\s]|$)", re.I)
-_CROSS_REFERENCE = re.compile(rf"(?<!\w)(?:{_SECTION_WORDS})[ \t]+({_NUMBER})\b", re.I)
+# Labels of already-detected headings may start with one unlisted word (`Điều 1.`, `4. Restricted`).
+# Arabic numbers may be followed by a space (`4.1 Transfers`). Roman numerals need `.` / `)` / `:`
+# so "Phạm vi áp dụng" is not read as section VI.
+_TITLE_ARABIC = re.compile(r"^(?:[^\W\d_]+[ \t]+)?(\d+(?:\.\d+)*)(?:[.):](?=\s|$)|[ \t]+(?=\S)|$)")
+_TITLE_ROMAN = re.compile(
+    rf"^(?:[^\W\d_]+[ \t]+)?({_ROMAN})(?:\.\d+)*(?:[.):](?=\s|$)|$)",
+    re.I,
+)
+_NUMBERED_LABEL = re.compile(rf"^{_NUMBER}$", re.I)
+_STRUCTURAL_CROSS_REF = re.compile(r"(?:§\s*(?P<section>\d+(?:\.\d+)*)|第\s*(?P<cjk>\d{1,6})\s*[条章节編编])")
 _TABLE_DIVIDER = re.compile(r"^\|?[\s:|-]*-[\s:|-]*\|?$")
 # A single letter marks a list only in lowercase, so "A. Nguyen" and "I. Chương" stay sentences.
 _LIST_MARKER = re.compile(r"(?:[-*+•▪◦]|\d{1,3}[.)]|[a-z][.)]|\((?:\d{1,3}|[A-Za-z])\))[ \t]+")
 _QUOTE_MARKER = re.compile(r"(?:>[ \t]?)+")
 _SENTENCE_END = re.compile(r"(?:[.!?…]+[\"'”’)\]]*(?=\s|$)|[。！？]+[\"'”’）)\]]*)")
-_ABBREVIATIONS = frozenset(
-    {
-        "e.g",
-        "i.e",
-        "etc",
-        "vs",
-        "mr",
-        "mrs",
-        "ms",
-        "dr",
-        "st",
-        "no",
-        "tp",
-        "v.v",
-        "ths",
-        "ts",
-        "cf",
-        "art",
-        "vol",
-        "resp",
-        "bzw",
-        "n.b",
-        "prof",
-        "jr",
-        "sr",
-    }
-)
-_CHAPTER_WORDS = frozenset({"chương", "chapter", "phần", "chapitre", "capítulo", "kapitel"})
-_DEFINITION_HEADINGS = (
-    "definition",
-    "glossary",
-    "định nghĩa",
-    "giải thích từ ngữ",
-    "thuật ngữ",
-    "definiciones",
-    "glosario",
-    "définitions",
-    "glossaire",
-    "definitionen",
-    "glossar",
-    "정의",
-    "용어",
-    "定義",
-    "用語",
-    "释义",
-    "术语",
-    "定义",
-)
-_DEFINE_VERBS = (
-    r"được hiểu là|có nghĩa là|nghĩa là|means|is defined as|refers to|"
-    r"significa|se define como|bedeutet|ist definiert als|"
-    r"désigne|est défini comme|指的是|是指|定义为|とは|を意味する|의미한다|정의된다"
-)
-# Unsegmented scripts do not put spaces around the verb.
-_UNSEGMENTED_VERBS = r"指的是|是指|定义为|とは|を意味する|의미한다|정의된다"
-_QUOTED_TERM = re.compile(
-    rf"^[“\"'‘]([^”\"'’]{{1,80}})[”\"'’]\s*(?:\([^)]*\)\s*)?(?:là|{_DEFINE_VERBS})\s+(.+)$", re.I
-)
 _QUOTED_COLON = re.compile(r"^[“\"'‘「『]([^”\"'’」』]{1,80})[”\"'’」』]\s*[:：]\s*(\S.*)$")
-_BOLD_TERM = re.compile(rf"^\*\*([^*]{{1,80}})\*\*\s*(?:(?:là|{_DEFINE_VERBS})\s+|[:\-–]\s*)(.+)$", re.I)
-_PLAIN_TERM = re.compile(rf"^([^\W\d_][^:.;]{{0,60}}?)\s+({_DEFINE_VERBS})\s+(.+)$", re.I)
-_UNSEGMENTED_TERM = re.compile(rf"^(\S{{1,40}}?)(?:{_UNSEGMENTED_VERBS})(\S.+)$")
-_SECTION_TERM = re.compile(r"^([^\W\d_][^:.;]{0,60}?)\s+là\s+(.+)$", re.I)
 _BOLD_DEFINITION = re.compile(r"^\*\*([^*]{1,80})\*\*\s*[:\-–—]\s+(\S.*)$")
 _MAX_TERM_WORDS = 8
 
@@ -209,12 +152,12 @@ def _heading(line: Line, stripped: str, markdown_headings: bool) -> tuple[int, s
         match = _ATX.match(stripped)
         if match:
             return len(match.group(1)), match.group(2).strip(), None
-    match = _KEYWORD_HEADING.match(stripped)
-    if match:
-        word = match.group("word").casefold()
-        level = 1 if word in _CHAPTER_WORDS else 2 + match.group("number").count(".")
+    dotted = _DOTTED_HEADING.match(stripped)
+    if dotted:
+        number = dotted.group("number")
+        level = 1 + number.count(".")
         lead = len(line.text) - len(line.text.lstrip())
-        return level, stripped, lead + match.end()
+        return level, stripped, lead + dotted.end()
     structural = _STRUCTURAL_HEADING.match(stripped)
     if structural:
         if structural.group("cjk"):
@@ -230,14 +173,22 @@ def _heading(line: Line, stripped: str, markdown_headings: bool) -> tuple[int, s
 
 def _preferred_label(title: str, stack: list[_Heading], line_number: int) -> str:
     """The label this heading would like. A repeated one is disambiguated later."""
-    match = _NUMBER_PREFIX.match(title)
-    if match:
-        return _canonical_number(match.group(1))
+    numbered = _title_number(title)
+    if numbered:
+        return _canonical_number(numbered)
     slug = _slug(title) or f"heading-{line_number}"
     for parent in reversed(stack):
-        if _NUMBER_PREFIX.match(parent.title):
+        if _title_number(parent.title):
             return f"{parent.section}.{slug}"
     return slug
+
+
+def _title_number(title: str) -> str:
+    for pattern in (_TITLE_ARABIC, _TITLE_ROMAN):
+        match = pattern.match(title)
+        if match:
+            return match.group(1)
+    return ""
 
 
 def _allocate_label(preferred: str, parent: str | None, used: set[str]) -> str:
@@ -321,8 +272,8 @@ def _sentences(text: str, begin: int, end: int) -> list[tuple[int, int]]:
         if following >= end:
             break
         word = re.search(r"([\w.]+)$", text[cursor : match.start()])
-        token = word.group(1).casefold().rstrip(".") if word else ""
-        if token in _ABBREVIATIONS or (len(token) == 1 and token.isalpha()):
+        token = word.group(1).rstrip(".") if word else ""
+        if _abbreviation(token):
             continue
         pieces.append((cursor, match.end()))
         cursor = following
@@ -354,45 +305,71 @@ def _link_cross_references(document: StructuredDocument) -> None:
     numbered = [section for section in document.sections if _is_numbered(section["section"])]
     for span in document.spans:
         references = []
-        seen = set()
-        for match in _CROSS_REFERENCE.finditer(span["text"]):
-            target = _canonical_number(match.group(1))
-            if target == span["section"] or target in seen:
+        seen: set[str] = set()
+        for match in _STRUCTURAL_CROSS_REF.finditer(span["text"]):
+            raw = match.group("section") or match.group("cjk")
+            if not raw:
+                continue
+            target = _canonical_number(raw)
+            if target in seen:
                 continue
             seen.add(target)
-            exact = [section for section in numbered if section["section"] == target]
-            # A child such as 4.3 does not prove that section 4 exists.
-            targets = []
-            if exact:
-                targets = [
-                    span_id
-                    for section in numbered
-                    if section["section"] == target or section["section"].startswith(f"{target}.")
-                    for span_id in section["span_ids"]
-                    if span_id != span["source_span_id"]
-                ]
-            references.append(
-                {
-                    "text": match.group(0),
-                    "target_section": target,
-                    "resolved": bool(targets),
-                    "target_span_ids": targets[:MAX_CROSS_REFERENCE_TARGETS],
-                }
-            )
+            ref = cross_reference(span, match.group(0), target, numbered)
+            if ref is not None:
+                references.append(ref)
         span["cross_references"] = references
 
 
+def sections_from_spans(spans: Sequence[Mapping[str, Any]], document_id: str) -> list[dict[str, Any]]:
+    """Numbered sections reconstructed from stored spans, including their span ids."""
+    grouped: dict[str, list[str]] = {}
+    for span in spans:
+        if span.get("document_id") != document_id:
+            continue
+        label = span.get("section")
+        span_id = span.get("source_span_id")
+        if not isinstance(label, str) or not isinstance(span_id, str):
+            continue
+        grouped.setdefault(label, []).append(span_id)
+    return [{"section": label, "span_ids": ids} for label, ids in grouped.items() if _is_numbered(label)]
+
+
+def cross_reference(
+    span: Mapping[str, Any],
+    evidence: str,
+    target_section: str,
+    numbered: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """Resolve one citation onto numbered sections of the same document. Does not change span ids."""
+    target = _canonical_number(target_section)
+    if not target or target == span.get("section"):
+        return None
+    exact = [section for section in numbered if section.get("section") == target]
+    targets = []
+    if exact:
+        targets = [
+            span_id
+            for section in numbered
+            if section.get("section") == target or str(section.get("section")).startswith(f"{target}.")
+            for span_id in section.get("span_ids") or []
+            if span_id != span.get("source_span_id")
+        ]
+    return {
+        "text": evidence,
+        "target_section": target,
+        "resolved": bool(targets),
+        "target_span_ids": targets[:MAX_CROSS_REFERENCE_TARGETS],
+    }
+
+
 def _is_numbered(label: str) -> bool:
-    return _NUMBER_PREFIX.match(label) is not None
+    return _NUMBERED_LABEL.match(label) is not None
 
 
 def _glossary(document: StructuredDocument) -> list[dict[str, Any]]:
     entries = []
     for span in document.spans:
-        in_definitions = any(
-            keyword in title.casefold() for title in span["heading_path"] for keyword in _DEFINITION_HEADINGS
-        )
-        found = _definition(span["text"], in_definitions)
+        found = _definition(span["text"])
         if found is None:
             continue
         term, definition = found
@@ -409,7 +386,7 @@ def _glossary(document: StructuredDocument) -> list[dict[str, Any]]:
 
 
 def structural_definition(span: Mapping[str, Any]) -> tuple[str, str] | None:
-    """A definition recognized by structure, not by a verb such as "means" or "là".
+    """A definition recognized by structure, not by a language-specific verb.
 
     A table row with two or more cells, or a bold term followed by a colon or dash,
     returns ``(term, span text)``. The span text is what evidence grounding searches.
@@ -431,16 +408,15 @@ def structural_definition(span: Mapping[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def _definition(text: str, in_definitions: bool) -> tuple[str, str] | None:
-    candidates = [_QUOTED_COLON, _QUOTED_TERM, _BOLD_TERM, _PLAIN_TERM, _UNSEGMENTED_TERM]
-    if in_definitions:
-        candidates.append(_SECTION_TERM)
-    for pattern in candidates:
-        match = pattern.match(text.strip())
+def _definition(text: str) -> tuple[str, str] | None:
+    """A definition recognized by punctuation, not by a verb in any language."""
+    stripped = text.strip()
+    for pattern in (_QUOTED_COLON, _BOLD_DEFINITION):
+        match = pattern.match(stripped)
         if match is None:
             continue
         term = match.group(1).strip().strip("*").strip()
-        definition = match.group(match.lastindex or 2).strip().rstrip(".;。．").strip()
+        definition = match.group(2).strip().rstrip(".;。．").strip()
         if term and definition and len(term.split()) <= _MAX_TERM_WORDS:
             return term, definition
     return None
@@ -453,7 +429,8 @@ def _link_glossary_terms(document: StructuredDocument) -> None:
 def link_glossary_terms(spans: Sequence[dict[str, Any]], keys: Sequence[str]) -> None:
     """Set ``glossary_terms`` on each span to the defined terms it uses.
 
-    Spaced or Latin terms match as whole tokens. Unsegmented terms match as substrings.
+    Spaced or Latin terms, including diacritics, match as whole tokens. Unsegmented
+    terms match as substrings.
     """
     ordered = list(dict.fromkeys(keys))
     for span in spans:
@@ -464,10 +441,7 @@ def link_glossary_terms(spans: Sequence[dict[str, Any]], keys: Sequence[str]) ->
             key
             for key in matched
             if not any(
-                key != other
-                and _unsegmented_term(key)
-                and _unsegmented_term(other)
-                and key in other
+                key != other and _unsegmented_term(key) and _unsegmented_term(other) and key in other
                 for other in matched
             )
         )
@@ -480,7 +454,7 @@ def term_key(text: str) -> str:
 def _term_in_text(key: str, folded: str) -> bool:
     if not key:
         return False
-    if re.search(r"\s", key) or re.fullmatch(r"[a-z0-9_'-]+", key):
+    if re.search(r"\s", key) or latin_token(key):
         return re.search(rf"(?<!\w){re.escape(key)}(?!\w)", folded) is not None
     if sum(char.isalnum() for char in key) < 2:
         return False
@@ -488,16 +462,22 @@ def _term_in_text(key: str, folded: str) -> bool:
 
 
 def _unsegmented_term(key: str) -> bool:
-    return not re.search(r"\s", key) and re.fullmatch(r"[a-z0-9_'-]+", key) is None
+    return not re.search(r"\s", key) and not latin_token(key)
+
+
+def _abbreviation(token: str) -> bool:
+    """A dotted initialism (`e.g.`, `v.v.`) or a single letter (`A.`) is not a sentence end."""
+    if not token:
+        return False
+    if "." in token and any(char.isalpha() for char in token):
+        return True
+    return len(token) == 1 and token.isalpha()
 
 
 def _slug(text: str) -> str:
     """ASCII-fold Latin letters. Keep letters that have no ASCII form, such as CJK."""
-    folded = unicodedata.normalize("NFKD", text.replace("đ", "d").replace("Đ", "D"))
     chars = []
-    for char in folded:
-        if unicodedata.combining(char):
-            continue
+    for char in fold_latin(text):
         lowered = char.casefold()
         if lowered.isascii() and lowered.isalnum():
             chars.append(lowered)

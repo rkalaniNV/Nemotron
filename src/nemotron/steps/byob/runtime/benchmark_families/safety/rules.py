@@ -35,6 +35,7 @@ from pydantic import ValidationError
 
 from nemotron.steps.byob.runtime.benchmark_families.safety import extract as extraction
 from nemotron.steps.byob.runtime.benchmark_families.safety.actions import ACTION_ORDER
+from nemotron.steps.byob.runtime.benchmark_families.safety.annotate import ANNOTATE_OUTPUTS, apply_annotations
 from nemotron.steps.byob.runtime.benchmark_families.safety.artifacts import write_json, write_jsonl, write_yaml
 from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     CONFIDENCE_WEIGHTS,
@@ -43,6 +44,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     ConfidenceSignals,
     canonical_text,
     compute_confidence,
+    fold_latin,
     operator_explicitness,
     quote_in_span,
     route_rule,
@@ -65,7 +67,6 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
     DEFAULT_TARGETS,
     PolicyRule,
     RuleValidationError,
-    detect_operator,
     normalize_candidate,
     validate_rule,
 )
@@ -166,8 +167,20 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
         *LOCALIZE_OUTPUTS,
         *SYMMETRY_OUTPUTS,
         *DATASET_OUTPUTS,
+        *ANNOTATE_OUTPUTS,
     ):
         (stage_cache / name).unlink(missing_ok=True)
+    extractor = None
+    try:
+        extractor = extraction.make_extractor(config, run_dir)
+    except ValueError:
+        extractor = None
+    spans, terms, glossary_conflicts, annotate_report = apply_annotations(
+        spans, terms, glossary_conflicts, extractor, stage_cache
+    )
+    write_json(stage_cache / ANNOTATE_OUTPUTS[0], annotate_report)
+    write_json(stage_cache / ANNOTATE_OUTPUTS[1], {"terms": terms, "conflicts": glossary_conflicts})
+    _check_glossary_conflicts(glossary_conflicts, run_dir)
     try:
         windows = build_windows(documents, spans, terms)
     except (TypeError, ValueError) as exc:
@@ -179,6 +192,7 @@ def run_rule_stages(config: ResolvedConfig, run_dir: Path) -> RuleStageResult:
     pending = [window for window in windows if window.window_id not in cited]
     extracted, log = _extract(pending, config, run_dir, uncertainties)
     log["cited_windows"] = len(windows) - len(pending)
+    log["annotate"] = annotate_report
     spans_by_id = {span["source_span_id"]: span for span in spans}
     drafts = [_preauthored_draft(row, spans_by_id, config, run_dir) for row in preauthored]
     taken = {draft.rule.policy_id for draft in drafts}
@@ -278,10 +292,7 @@ def _extract(
         if window.window_id in by_window
         and (
             config.assurance["profile"] in SECOND_PASS_PROFILES
-            or any(
-                draft.quote_found and compute_confidence(draft.signals) < ELIGIBLE_THRESHOLD
-                for draft in by_window[window.window_id]
-            )
+            or any(_needs_second_pass(draft) for draft in by_window[window.window_id])
         )
     ]
     if second_windows:
@@ -295,6 +306,15 @@ def _extract(
             other = _window_drafts(window, second.candidates.get(window.window_id, []), config, [])
             _compare_passes(drafts, other, uncertainties, window.window_id)
     return [draft for window in windows for draft in by_window.get(window.window_id, [])], log
+
+
+def _needs_second_pass(draft: Draft) -> bool:
+    """True when a found quote is below 0.90 or stores a model-grounded operator."""
+    if not draft.quote_found:
+        return False
+    if compute_confidence(draft.signals) < ELIGIBLE_THRESHOLD:
+        return True
+    return any(group.operator_source == "model_evidence" for group in draft.rule.rule.conditions().values())
 
 
 def _run_pass(
@@ -534,7 +554,11 @@ def _extracted_operator(
     quote: str,
     flags: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Store a model operator only with exact evidence; keywords may confirm or reject it."""
+    """Store a model operator only when its evidence is an exact part of source_quote.
+
+    Python does not scan the evidence for operator keywords. A missing operator or
+    ungrounded evidence leaves the condition unresolved.
+    """
     if len(legs) == 1 and (proposed is None or proposed.operator != "none_of"):
         if proposed is not None:
             flags.append(_flag("operator_not_needed", f"{name} has one positive condition", f"rule.{name}"))
@@ -558,25 +582,6 @@ def _extracted_operator(
             )
         )
         return None
-    detected = detect_operator(evidence)
-    if detected == "mixed":
-        flags.append(
-            _flag(
-                "operator_keyword_ambiguous",
-                f"{name} evidence contains more than one operator frame",
-                f"rule.{name}",
-            )
-        )
-        return None
-    if detected is not None and detected != proposed.operator:
-        flags.append(
-            _flag(
-                "operator_evidence_conflict",
-                f"{name} proposes {proposed.operator}, while deterministic wording says {detected}",
-                f"rule.{name}",
-            )
-        )
-        return None
     flags.append(
         _flag(
             "operator_from_model_evidence",
@@ -584,14 +589,6 @@ def _extracted_operator(
             f"rule.{name}",
         )
     )
-    if detected == proposed.operator:
-        flags.append(
-            _flag(
-                "operator_keyword_confirmed",
-                f"{name} operator agrees with deterministic wording",
-                f"rule.{name}",
-            )
-        )
     return {proposed.operator: list(legs), "operator_source": "model_evidence"}
 
 
@@ -908,9 +905,7 @@ def _hashed_condition_name(name: str) -> bool:
 
 
 def _ascii_snake(text: str) -> str | None:
-    folded = unicodedata.normalize("NFKD", text.replace("đ", "d").replace("Đ", "D"))
-    ascii_text = "".join(char for char in folded if not unicodedata.combining(char)).encode("ascii", "ignore").decode()
-    name = re.sub(r"[^a-z0-9]+", "_", ascii_text.casefold()).strip("_")[:128].strip("_")
+    name = re.sub(r"[^a-z0-9]+", "_", fold_latin(text).casefold()).strip("_")[:128].strip("_")
     return name or None
 
 
@@ -1010,8 +1005,7 @@ def _turn_count(count: int | None, flags: list[dict[str, Any]]) -> int:
 
 
 def _id_part(text: str) -> str:
-    folded = unicodedata.normalize("NFKD", text.replace("đ", "d").replace("Đ", "D"))
-    ascii_text = "".join(char for char in folded if not unicodedata.combining(char)).encode("ascii", "ignore").decode()
+    ascii_text = fold_latin(text).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^A-Z0-9]+", "-", ascii_text.upper()).strip("-")[:40].strip("-")
     if slug:
         return slug

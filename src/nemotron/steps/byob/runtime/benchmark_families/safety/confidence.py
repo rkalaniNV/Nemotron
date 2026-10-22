@@ -42,7 +42,11 @@ CONFIDENCE_WEIGHTS = {
 # by itself, a reason for review.
 ELIGIBLE_THRESHOLD = 0.90
 DECISION_THRESHOLD = 0.70
+MIN_LATIN_SNIPPET_LETTERS = 6
+MIN_UNSEGMENTED_SNIPPET_LETTERS = 2
 _WHITESPACE = re.compile(r"\s+")
+# đ, ø, ł and similar letters do not decompose under NFKD. The Unicode name still names the base.
+_LATIN_BASE = re.compile(r"^LATIN (SMALL|CAPITAL) LETTER ([A-Z])(?: WITH .+)?$")
 
 
 @dataclass(frozen=True)
@@ -126,10 +130,10 @@ def quote_in_span(quote: str, span_text: str) -> bool:
     """True when the quote appears verbatim in the span.
 
     Unicode NFC, curly quotes, zero-width characters, and runs of whitespace are
-    normalized. In a spaced script the quote must fall on word boundaries, so a short
-    quote does not match inside a longer word. A quote of at least two letters in a
-    script that does not separate words may match as a substring. One changed word,
-    letter, or diacritic is still a mismatch.
+    normalized. Latin text, including diacritics, must fall on word boundaries, so a
+    short quote does not match inside a longer word. A quote of at least two letters
+    in a script that does not separate words may match as a substring. One changed
+    word, letter, or diacritic is still a mismatch.
     """
     if not isinstance(quote, str) or not isinstance(span_text, str):
         raise TypeError("quote and span must be strings")
@@ -139,9 +143,65 @@ def quote_in_span(quote: str, span_text: str) -> bool:
     haystack = canonical_text(span_text)
     if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None:
         return True
-    # Scripts that do not separate words with spaces have no boundary to test.
-    unsegmented = len(needle) >= 2 and any(not char.isascii() and char.isalpha() for char in needle)
-    return unsegmented and needle in haystack
+    if sum(char.isalnum() for char in needle) < 2 or not unsegmented_text(needle):
+        return False
+    return needle in haystack
+
+
+def latin_token(key: str) -> bool:
+    """True when every letter is Latin, so the text uses spaces or word boundaries."""
+    if not key:
+        return False
+    for char in key:
+        if char.isdigit() or char in "'_-":
+            continue
+        if not _latin_letter(char):
+            return False
+    return True
+
+
+def unsegmented_text(text: str) -> bool:
+    """True when the text has letters that do not use spaces as word boundaries."""
+    return bool(text) and not any(char.isspace() for char in text) and not latin_token(text)
+
+
+def snippet_letter_floor(text: str) -> int:
+    """Minimum letters for a LanguageCheck excerpt of this text."""
+    needle = canonical_text(text) if text else ""
+    if unsegmented_text(needle):
+        return MIN_UNSEGMENTED_SNIPPET_LETTERS
+    return MIN_LATIN_SNIPPET_LETTERS
+
+
+def fold_latin(text: str) -> str:
+    """ASCII-fold Latin letters. Combining marks drop; strokes such as đ and ø become d and o."""
+    chars: list[str] = []
+    for char in unicodedata.normalize("NFKD", text):
+        if unicodedata.combining(char):
+            continue
+        chars.append(_latin_base(char))
+    return "".join(chars)
+
+
+def _latin_letter(char: str) -> bool:
+    if not unicodedata.category(char).startswith("L"):
+        return False
+    try:
+        return unicodedata.name(char).startswith("LATIN")
+    except ValueError:
+        return False
+
+
+def _latin_base(char: str) -> str:
+    try:
+        name = unicodedata.name(char)
+    except ValueError:
+        return char
+    match = _LATIN_BASE.fullmatch(name)
+    if match is None:
+        return char
+    letter = match.group(2)
+    return letter.lower() if match.group(1) == "SMALL" else letter
 
 
 def route_rule(

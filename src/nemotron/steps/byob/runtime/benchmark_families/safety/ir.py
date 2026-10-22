@@ -22,8 +22,6 @@ can be stored.
 
 import copy
 import datetime
-import re
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, get_args
@@ -94,60 +92,6 @@ Leg = Annotated[
 Text = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 Sha256 = Annotated[str, BeforeValidator(_lowercase_hex), StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 
-# Clear operator frames only. A bare "or", "hoặc", "ou", "oder", "both", or "either" is too
-# common in a list of objects to choose the operator by itself.
-_ALL_OF_PHRASES = (
-    "đồng thời",
-    "đủ các thành phần",
-    "cùng lúc",
-    "tất cả các thành phần",
-    "tất cả các điều kiện",
-    "all of the following",
-    "both of the following",
-    "toutes les conditions suivantes",
-    "les deux conditions suivantes",
-    "todas las condiciones siguientes",
-    "ambas las condiciones siguientes",
-    "alle folgenden bedingungen",
-    "beide folgenden bedingungen",
-    "同时成立",
-    "同时满足",
-    "以下全部条件",
-    "下列全部条件",
-    "次の条件をすべて",
-    "以下の条件をすべて",
-    "다음 조건을 모두",
-    "아래 조건을 모두",
-)
-_ANY_OF_PHRASES = (
-    "một trong các",
-    "any of the following",
-    "l'une des conditions suivantes",
-    "une des conditions suivantes",
-    "cualquiera de las condiciones siguientes",
-    "una de las siguientes condiciones",
-    "eine der folgenden bedingungen",
-    "以下任一条件",
-    "下列任一",
-    "以下条件之一",
-    "次のいずれかの条件",
-    "以下のいずれ",
-    "다음 조건 중 하나",
-    "아래 조건 중 하나",
-)
-_NONE_OF_PHRASES = (
-    "không có điều kiện nào",
-    "không có thành phần nào",
-    "none of the following",
-    "neither of the following",
-    "aucune des conditions suivantes",
-    "ninguna de las condiciones siguientes",
-    "keine der folgenden bedingungen",
-    "以下条件均不",
-    "下列条件均不",
-    "次の条件のいずれも",
-    "다음 조건이 모두 아님",
-)
 _MISSING = object()
 
 
@@ -378,33 +322,6 @@ def policy_rule_json_schema() -> dict[str, Any]:
     return schema
 
 
-def detect_operator(text: str) -> Literal["all_of", "any_of", "none_of", "mixed"] | None:
-    """Return the operator a source passage states with a clear frame.
-
-    A clear AND frame is wording such as "đồng thời", "tất cả các điều kiện",
-    "all of the following", "toutes les conditions suivantes", or "同时成立".
-    A clear OR frame is "một trong các", "any of the following", or
-    "以下任一条件". Clear NONE frames include "không có điều kiện nào" and
-    "none of the following". A bare "or", "hoặc", "ou", "oder", "both",
-    "either", "cả hai", or "at the same time" does not count: those words
-    usually list objects.
-
-    ``mixed`` means the passage uses both kinds of frame. None means it uses neither.
-    Matching is case-insensitive after Unicode NFC normalization. Spaced phrases use
-    whole-token boundaries; unsegmented phrases match as substrings.
-    """
-    if not isinstance(text, str):
-        raise TypeError("operator text must be a string")
-    normalized = unicodedata.normalize("NFC", text).casefold()
-    says_all = any(_has_phrase(normalized, phrase) for phrase in _ALL_OF_PHRASES)
-    says_any = any(_has_phrase(normalized, phrase) for phrase in _ANY_OF_PHRASES)
-    says_none = any(_has_phrase(normalized, phrase) for phrase in _NONE_OF_PHRASES)
-    stated = [name for name, found in (("all_of", says_all), ("any_of", says_any), ("none_of", says_none)) if found]
-    if len(stated) > 1:
-        return "mixed"
-    return stated[0] if stated else None
-
-
 @dataclass(frozen=True)
 class Flag:
     """One normalization event, recorded for the routing log and the review packet."""
@@ -429,9 +346,9 @@ def normalize_candidate(
     """Turn extractor output into a storable rule.
 
     - A one-condition ``block_if`` list becomes ``any_of`` with ``operator_source: default_any_of``.
-      A longer bare list stays unresolved unless the source states one clear operator frame.
-    - A shared source passage is used only when the rule has one condition. For a rule
-      with several conditions, pass ``operator_text`` as ``{condition_name: evidence}``.
+      A longer bare list stays unresolved. Source wording is not scanned for operator frames.
+    - ``operator_text`` may be a mapping of condition names; unknown keys are refused. A
+      string is ignored. Neither form chooses ``all_of``, ``any_of``, or ``none_of``.
     - A model self-score is dropped. ``jurisdiction: global`` is cleared to unspecified.
     - A reviewer ``rejected`` status is kept. Every other status waits for routing.
 
@@ -458,13 +375,11 @@ def _normalize_candidate(
     _adopt_policy_id(data, flags)
     _coerce_effective_date(data)
 
-    if operator_text is None:
-        provenance = data.get("provenance")
-        operator_text = provenance.get("source_quote") if isinstance(provenance, dict) else None
-
     unresolved = _existing_unresolved(data)
     if isinstance(unresolved, str):
         return NormalizationResult(None, flags, [unresolved])
+    if operator_text is not None and not isinstance(operator_text, (str, Mapping)):
+        raise TypeError("operator_text must be a string or a mapping of condition names")
     body = data.get("rule")
     if isinstance(body, dict):
         _normalize_bare_lists(body, operator_text, unresolved, flags)
@@ -537,6 +452,11 @@ def _normalize_bare_lists(
     unresolved: dict[str, Any],
     flags: list[Flag],
 ) -> None:
+    """Canonicalize one-condition lists. Multi-leg bare lists stay unresolved.
+
+    ``operator_text`` is validated when it is a mapping. It is never scanned for
+    language-specific operator frames.
+    """
     if isinstance(operator_text, Mapping):
         unknown = sorted(set(operator_text) - set(CONDITION_CLASSES))
         if unknown:
@@ -544,11 +464,7 @@ def _normalize_bare_lists(
         invalid = sorted(name for name, text in operator_text.items() if not isinstance(text, str))
         if invalid:
             raise ValueError(f"operator_text values must be strings: {', '.join(invalid)}")
-    bare = [name for name in CONDITION_CLASSES if isinstance(body.get(name), list)]
-    structured = [name for name in CONDITION_CLASSES if isinstance(body.get(name), dict)]
-    only_condition = len(bare) + len(structured) == 1
-    shared_stated = detect_operator(operator_text) if isinstance(operator_text, str) else None
-    for name in bare:
+    for name in [item for item in CONDITION_CLASSES if isinstance(body.get(item), list)]:
         value = body[name]
         if name != "block_if" and len(value) == 1:
             body[name] = {"any_of": value, "operator_source": "single_condition"}
@@ -556,63 +472,20 @@ def _normalize_bare_lists(
                 Flag("single_condition", f"{name} has one condition, so it needs no operator", f"rule.{name}")
             )
             continue
-        if not only_condition and shared_stated is not None and isinstance(operator_text, str):
-            unresolved[name] = body.pop(name)
+        if name == "block_if" and len(value) == 1:
+            body[name] = {"any_of": value, "operator_source": "default_any_of"}
             flags.append(
                 Flag(
-                    "operator_evidence_ambiguous",
-                    f"shared source wording cannot be assigned safely to {name}",
-                    f"rule.{name}",
+                    "default_any_of",
+                    "one block_if condition needs no operator; all_of and any_of mean the same",
+                    "rule.block_if",
                 )
             )
             continue
-        evidence = (
-            operator_text.get(name)
-            if isinstance(operator_text, Mapping)
-            else operator_text
-            if only_condition
-            else None
-        )
-        stated = detect_operator(evidence) if isinstance(evidence, str) else None
-        if name == "block_if" or stated is not None:
-            _store_stated_operator(body, name, value, stated, unresolved, flags)
-            continue
         unresolved[name] = body.pop(name)
         flags.append(
-            Flag(
-                "operator_unresolved",
-                f"{name} has no operator of its own; source wording was not applied to it",
-                f"rule.{name}",
-            )
+            Flag("operator_unresolved", f"{name} has no operator of its own and has no default", f"rule.{name}")
         )
-
-
-def _store_stated_operator(
-    body: dict[str, Any],
-    name: str,
-    value: Any,
-    stated: str | None,
-    unresolved: dict[str, Any],
-    flags: list[Flag],
-) -> None:
-    if stated == "mixed":
-        unresolved[name] = body.pop(name)
-        flags.append(Flag("operator_wording_mixed", f"{name} source uses both AND and OR wording", f"rule.{name}"))
-    elif stated in {"all_of", "any_of", "none_of"}:
-        body[name] = {stated: value, "operator_source": "explicit"}
-        flags.append(Flag("operator_from_source_wording", f"{name} stored as {stated}", f"rule.{name}"))
-    elif name == "block_if" and len(value) == 1:
-        body[name] = {"any_of": value, "operator_source": "default_any_of"}
-        flags.append(
-            Flag(
-                "default_any_of",
-                "one block_if condition needs no operator; all_of and any_of mean the same",
-                "rule.block_if",
-            )
-        )
-    else:
-        unresolved[name] = body.pop(name)
-        flags.append(Flag("operator_unresolved", f"{name} states no operator and has no default", f"rule.{name}"))
 
 
 def _clear_global_jurisdiction(data: dict[str, Any], scope: dict[str, Any], flags: list[Flag]) -> None:
@@ -672,15 +545,6 @@ def _mark_unsupported(data: dict[str, Any], field_name: str, flags: list[Flag]) 
     if field_name not in current:
         current.append(field_name)
     data["unsupported_fields"] = current
-
-
-def _has_phrase(text: str, phrase: str) -> bool:
-    folded = unicodedata.normalize("NFC", phrase).casefold()
-    if not folded:
-        return False
-    if re.search(r"\s", folded) or re.fullmatch(r"[a-z0-9_']+", folded):
-        return re.search(rf"(?<!\w){re.escape(folded)}(?!\w)", text) is not None
-    return folded in text
 
 
 def _messages(exc: ValidationError) -> list[str]:

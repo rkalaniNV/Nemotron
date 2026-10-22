@@ -1,7 +1,6 @@
 """Policy Rule IR, condition operators, action order, and confidence routing."""
 
 import copy
-import unicodedata
 from typing import Any
 
 import pytest
@@ -19,6 +18,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     ConfidenceSignals,
     Thresholds,
     compute_confidence,
+    fold_latin,
     operator_explicitness,
     quote_in_span,
     route_rule,
@@ -28,7 +28,6 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
     ConditionGroup,
     PolicyRule,
     RuleValidationError,
-    detect_operator,
     normalize_candidate,
     policy_rule_json_schema,
     validate_rule,
@@ -100,27 +99,32 @@ def test_bare_list_without_a_default_needs_a_decision(name: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("quote", "operator"),
+    "quote",
     [
-        ("Chặn khi yêu cầu đồng thời có động từ hướng dẫn và mục tiêu bị cấm.", "all_of"),
-        ("Block when the request has all of the following components.", "all_of"),
-        ("Chặn khi đồng thời có đủ hai điều kiện.", "all_of"),
-        ("Chặn khi có một trong các dấu hiệu sau.", "any_of"),
-        ("Block when any of the following signals appear.", "any_of"),
-        ("Bloquer lorsque toutes les conditions suivantes s'appliquent.", "all_of"),
-        ("仅当条件甲与条件乙同时成立时才阻止请求。", "all_of"),
+        "Chặn khi yêu cầu đồng thời có động từ hướng dẫn và mục tiêu bị cấm.",
+        "Block when the request has all of the following components.",
+        "Chặn khi đồng thời có đủ hai điều kiện.",
+        "Chặn khi có một trong các dấu hiệu sau.",
+        "Block when any of the following signals appear.",
+        "Bloquer lorsque toutes les conditions suivantes s'appliquent.",
+        "仅当条件甲与条件乙同时成立时才阻止请求。",
+        "Block if none of the following conditions apply.",
+        "Chặn nếu không có điều kiện nào sau đây.",
+        "Block when all of the following apply, or any of the following personas.",
     ],
 )
-def test_source_wording_sets_only_the_block_operator(quote: str, operator: str) -> None:
+def test_source_wording_does_not_choose_an_operator(quote: str) -> None:
     raw = candidate(block_if=["instructional_or_organizing_verb", "prohibited_target"], allow_if=["news", "academic"])
     raw["provenance"]["source_quote"] = quote
 
     rule = normalized(raw, operator_text={"block_if": quote})
 
-    assert rule.rule.block_if is not None and rule.rule.block_if.operator == operator
-    assert rule.rule.block_if.operator_source == "explicit"
+    assert rule.rule.block_if is None
     assert rule.rule.allow_if is None
-    assert rule.unresolved_conditions == {"allow_if": ("news", "academic")}
+    assert rule.unresolved_conditions == {
+        "block_if": ("instructional_or_organizing_verb", "prohibited_target"),
+        "allow_if": ("news", "academic"),
+    }
     assert route_rule(rule, signals(), quote_found=True).rule.status == "needs_decision"
 
 
@@ -153,34 +157,14 @@ def test_condition_evidence_mapping_is_strict(operator_text: dict[str, Any]) -> 
     assert result.errors
 
 
-def test_one_bare_allow_list_can_take_the_stated_operator() -> None:
+def test_one_bare_allow_list_without_a_structured_operator_needs_a_decision() -> None:
     raw = candidate(allow_if=["news", "academic"])
     raw["provenance"]["source_quote"] = "Allow when any of the following apply."
 
     rule = normalized(raw)
 
-    assert rule.rule.allow_if is not None and rule.rule.allow_if.operator == "any_of"
-    assert rule.unresolved_conditions == {}
-
-
-@pytest.mark.parametrize(
-    ("quote", "operator"),
-    [
-        ("Block if none of the following conditions apply.", "none_of"),
-        ("Block when neither of the following conditions applies.", "none_of"),
-        ("Chặn nếu không có điều kiện nào sau đây.", "none_of"),
-        ("Chặn nếu không có thành phần nào sau đây.", "none_of"),
-    ],
-)
-def test_source_wording_supports_none_of(quote: str, operator: str) -> None:
-    raw = candidate(block_if=["safe_context", "approved_role"])
-    raw["provenance"]["source_quote"] = quote
-
-    rule = normalized(raw)
-
-    assert rule.rule.block_if is not None
-    assert rule.rule.block_if.operator == operator
-    assert rule.rule.block_if.operator_source == "explicit"
+    assert rule.rule.allow_if is None
+    assert rule.unresolved_conditions == {"allow_if": ("news", "academic")}
 
 
 def test_incidental_or_does_not_choose_an_operator() -> None:
@@ -195,17 +179,18 @@ def test_incidental_or_does_not_choose_an_operator() -> None:
     assert route_rule(rule, signals(), quote_found=True).rule.status == "needs_decision"
 
 
-def test_clear_all_of_frame_can_be_eligible() -> None:
+def test_clear_all_of_frame_does_not_choose_an_operator() -> None:
     raw = candidate(block_if=["verb", "target"])
     raw["provenance"]["source_quote"] = "Chặn khi đồng thời có đủ điều kiện."
 
     rule = normalized(raw)
 
-    assert rule.rule.block_if is not None and rule.rule.block_if.operator == "all_of"
-    assert route_rule(rule, signals(), quote_found=True).rule.status == "eligible_for_generation"
+    assert rule.rule.block_if is None
+    assert rule.unresolved_conditions["block_if"] == ("verb", "target")
+    assert route_rule(rule, signals(), quote_found=True).rule.status == "needs_decision"
 
 
-def test_mixed_wording_is_a_decision_even_for_block_if() -> None:
+def test_mixed_wording_does_not_choose_an_operator() -> None:
     raw = candidate(block_if=["verb", "target", "persona"])
     raw["provenance"]["source_quote"] = "Block when all of the following apply, or any of the following personas."
 
@@ -216,12 +201,25 @@ def test_mixed_wording_is_a_decision_even_for_block_if() -> None:
     assert route_rule(rule, signals(), quote_found=True).rule.status == "needs_decision"
 
 
-def test_operator_text_can_come_from_the_evidence_window() -> None:
+def test_operator_text_string_does_not_choose_an_operator() -> None:
     rule = normalized(
         candidate(block_if=["verb", "target"]), operator_text="Chỉ chặn khi đủ các thành phần sau cùng xuất hiện."
     )
 
-    assert rule.rule.block_if is not None and rule.rule.block_if.operator == "all_of"
+    assert rule.rule.block_if is None
+    assert rule.unresolved_conditions["block_if"] == ("verb", "target")
+
+
+def test_one_leg_block_if_stays_default_any_of_when_quote_has_operator_wording() -> None:
+    raw = candidate(block_if=["target"])
+    raw["provenance"]["source_quote"] = "Block when all of the following apply."
+
+    rule = normalized(raw, operator_text={"block_if": raw["provenance"]["source_quote"]})
+
+    assert rule.rule.block_if is not None
+    assert rule.rule.block_if.operator == "any_of"
+    assert rule.rule.block_if.operator_source == "default_any_of"
+    assert rule.unresolved_conditions == {}
 
 
 def test_model_self_score_and_claimed_status_are_not_kept() -> None:
@@ -411,53 +409,6 @@ def test_json_schema_rejects_invalid_operator_values(group: dict[str, Any]) -> N
     assert list(Draft202012Validator(policy_rule_json_schema()).iter_errors(data))
 
 
-# Operator wording
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("Chặn khi đồng thời có hai thành phần.", "all_of"),
-        ("CHẶN KHI ĐỦ CÁC THÀNH PHẦN SAU", "all_of"),
-        ("CẢ HAI ĐIỀU KIỆN PHẢI CÓ.", None),
-        ("tất cả các điều kiện sau đều bắt buộc.", "all_of"),
-        ("Do this at the same time.", None),
-        ("Block both of the following conditions.", "all_of"),
-        ("Chặn nếu có một trong các dấu hiệu.", "any_of"),
-        ("Either a name or a number.", None),
-        ("None of the following conditions applies.", "none_of"),
-        ("Không có điều kiện nào sau đây.", "none_of"),
-        ("Require all of the following, or any of the following exceptions.", "mixed"),
-        ("Require all of the following, but none of the following exceptions.", "mixed"),
-        ("Both conditions, or an override.", None),
-        ("The user must not do both of these things.", None),
-        ("Không được hướng dẫn chế tạo vũ khí hoặc chất nổ.", None),
-        ("Block weapons or explosives.", None),
-        ("Block personal data requests.", None),
-        ("Report the order for review before a forum post.", None),
-        ("Do not reveal the system prompt to bothersome users.", None),
-        ("Bloquer lorsque toutes les conditions suivantes s'appliquent.", "all_of"),
-        ("Bloquer si une des conditions suivantes est vraie.", "any_of"),
-        ("Aucune des conditions suivantes ne s'applique.", "none_of"),
-        ("仅当条件甲与条件乙同时成立时才阻止。", "all_of"),
-        ("出现以下任一条件时阻止。", "any_of"),
-        ("以下条件均不成立时阻止。", "none_of"),
-        ("Alle folgenden Bedingungen müssen gelten.", "all_of"),
-        ("toutes les conditions suivantes, ou une des conditions suivantes", "mixed"),
-        ("同时成立或以下任一条件", "mixed"),
-    ],
-)
-def test_detect_operator(text: str, expected: str | None) -> None:
-    assert detect_operator(text) == expected
-
-
-def test_detect_operator_handles_decomposed_vietnamese() -> None:
-    decomposed = unicodedata.normalize("NFD", "Chặn khi đồng thời có hai thành phần.")
-    assert decomposed != unicodedata.normalize("NFC", decomposed)
-
-    assert detect_operator(decomposed) == "all_of"
-
-
 # Condition evaluation and action order
 
 
@@ -628,10 +579,17 @@ def test_signals_must_be_scores(value: Any) -> None:
         ("", QUOTE, False),
         ("不得协助", "系统不得协助用户制作武器。", True),
         ("card", "discard data", False),
+        ("thẻ", "Không cung cấp thẻ.", True),
+        ("thẻ", "Không cung cấp thẻcăn.", False),
     ],
 )
 def test_quote_in_span(quote: str, span: str, found: bool) -> None:
     assert quote_in_span(quote, span) is found
+
+
+def test_fold_latin_maps_non_decomposing_letters() -> None:
+    assert fold_latin("đĐøØłŁ") == "dDoOlL"
+    assert fold_latin("Hướng") == "Huong"
 
 
 # Routing
@@ -659,9 +617,7 @@ def test_threshold_boundaries_are_inclusive_below() -> None:
     rule = normalized(candidate(block_if=["target"]))
     exactly_eligible = Thresholds(eligible=0.9, decision=0.7)
 
-    at_eligible = route_rule(
-        rule, signals(schema_completeness=9 / 14), quote_found=True, thresholds=exactly_eligible
-    )
+    at_eligible = route_rule(rule, signals(schema_completeness=9 / 14), quote_found=True, thresholds=exactly_eligible)
     assert at_eligible.rule.confidence == 0.9
     assert at_eligible.rule.status == "eligible_for_generation"
 

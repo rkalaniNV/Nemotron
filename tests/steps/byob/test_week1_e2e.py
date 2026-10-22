@@ -169,7 +169,8 @@ def test_structured_transfer_rules_skip_model_extraction(run: Any) -> None:
     eligible = yaml.safe_load(result.eligible)
     assert TRANSFER_IDS <= {rule["policy_id"] for rule in eligible["rules"]}
     [node] = [
-        node for node in result.json("stage_cache/policy_graph.json")["nodes"]
+        node
+        for node in result.json("stage_cache/policy_graph.json")["nodes"]
         if set(node["matched_policy_ids"]) == TRANSFER_IDS
     ]
     assert node["expected_action"] == "escalate"
@@ -203,7 +204,7 @@ def test_unchanged_rerun_and_a_fresh_run_produce_the_same_eligible_file(run: Any
     assert again.status.status is fresh.status.status is RunStatus.REVIEW_REQUIRED
     assert again.extractor.calls == 0
     assert again.eligible == eligible
-    assert fresh.extractor.calls == 1
+    assert fresh.extractor.calls == 2
     assert fresh.eligible == eligible
     assert set(fresh.rules) == set(first.rules)
 

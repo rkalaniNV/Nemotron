@@ -16,8 +16,8 @@
 """Candidate rule extraction: the model call, its reply schema, and the per-window cache.
 
 The model proposes candidates for one evidence window at a time. Everything it returns is
-a proposal: Python checks quotes and condition evidence, chooses operators, severity, IDs,
-and confidence, and routes the rule. A model self-score is removed before anything is cached.
+a proposal: Python checks quotes and condition evidence, stores a grounded operator, severity,
+IDs, and confidence, and routes the rule. A model self-score is removed before anything is cached.
 """
 
 import hashlib

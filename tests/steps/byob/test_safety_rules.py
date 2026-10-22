@@ -126,6 +126,7 @@ def test_rule_ids_depend_on_document_section_quote_and_action() -> None:
     assert first.startswith("FIVE-TOPIC-4-")
     assert stable_policy_id("政策", "4", "Block card data.", "block").startswith("U")
     assert condition_name("Bỏ qua mọi quy định!") == "bo_qua_moi_quy_dinh"
+    assert condition_name("Łódź!") == "lodz"
     assert condition_name("禁止") == "禁止"
     assert condition_name("禁止") == condition_name(" 禁止 ")
     assert condition_name("???").startswith("c_")
@@ -168,7 +169,13 @@ def test_grounded_operator_supports_a_language_without_keyword_rules(tmp_path: P
     }
     flags = {flag["code"] for flag in row["flags"]}
     assert "operator_from_model_evidence" in flags
-    assert "operator_keyword_confirmed" in flags
+    assert "operator_keyword_confirmed" not in flags
+    log = json.loads((run_dir / "stage_cache" / "policy_routing_log.json").read_text(encoding="utf-8"))
+    assert [item["pass"] for item in log["extraction"]["passes"]] == [1, 2]
+    assert "annotate" in log["extraction"]
+    glossary = json.loads((run_dir / "stage_cache" / "annotated_glossary.json").read_text(encoding="utf-8"))
+    assert "terms" in glossary
+    assert "conflicts" in glossary
 
 
 def test_grounded_operator_is_kept_when_wording_has_no_listed_frame(tmp_path: Path, use: Any) -> None:
@@ -196,6 +203,14 @@ def test_extracted_rules_keep_configured_source_and_target_languages(tmp_path: P
         tmp_path,
         {"policy.md": f"## Cards\n\n{quote}\n"},
         proposals={"source_language": "vi-VN", "target_languages": ["en-US", "vi-VN"]},
+        privacy={
+            "additional_labels": {
+                "credential": ["mật khẩu"],
+                "national_id": ["CCCD"],
+                "bank_account": ["STK"],
+                "date_of_birth": ["ngày sinh"],
+            }
+        },
     )
     run_dir = _generate(config)
 
@@ -273,7 +288,7 @@ def test_grounded_single_condition_none_of_keeps_its_negative_meaning(tmp_path: 
     }
 
 
-def test_keyword_disagreement_does_not_store_the_model_operator(tmp_path: Path, use: Any) -> None:
+def test_grounded_model_operator_is_kept_without_keyword_veto(tmp_path: Path, use: Any) -> None:
     quote = "Block when all of the following conditions apply: condition A and condition B."
     candidate = _candidate(
         quote,
@@ -284,9 +299,14 @@ def test_keyword_disagreement_does_not_store_the_model_operator(tmp_path: Path, 
     run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{quote}\n"}))
 
     [row] = _rows(run_dir).values()
-    assert row["status"] == "needs_decision"
-    assert row["rule"]["rule"].get("block_if") is None
-    assert "operator_evidence_conflict" in {flag["code"] for flag in row["flags"]}
+    assert row["status"] == "eligible_for_generation"
+    assert row["rule"]["rule"]["block_if"] == {
+        "any_of": ["condition_a", "condition_b"],
+        "operator_source": "model_evidence",
+    }
+    flags = {flag["code"] for flag in row["flags"]}
+    assert "operator_from_model_evidence" in flags
+    assert "operator_evidence_conflict" not in flags
 
 
 def test_second_pass_operator_disagreement_needs_review(tmp_path: Path, use: Any) -> None:
@@ -483,7 +503,7 @@ def test_risk_category_keeps_its_source_language(category: str) -> None:
     assert candidate.critical_risk_basis is None
 
 
-def test_mixed_operator_frames_leave_the_condition_unresolved(tmp_path: Path, use: Any) -> None:
+def test_grounded_model_operator_is_kept_when_evidence_names_two_frames(tmp_path: Path, use: Any) -> None:
     quote = "Block when all of the following apply, or any of the following exceptions."
     evidence = "all of the following apply, or any of the following"
     candidate = _candidate(
@@ -495,11 +515,14 @@ def test_mixed_operator_frames_leave_the_condition_unresolved(tmp_path: Path, us
     run_dir = _generate(_config(tmp_path, {"policy.md": f"## Mixed\n\n{quote}\n"}))
 
     [row] = _rows(run_dir).values()
-    assert row["status"] == "needs_decision"
-    assert row["rule"]["rule"].get("block_if") is None
-    assert row["rule"]["unresolved_conditions"]["block_if"] == ["condition_a", "condition_b"]
-    assert "operator_keyword_ambiguous" in {flag["code"] for flag in row["flags"]}
-    assert "operator_evidence_conflict" not in {flag["code"] for flag in row["flags"]}
+    assert row["status"] == "eligible_for_generation"
+    assert row["rule"]["rule"]["block_if"] == {
+        "all_of": ["condition_a", "condition_b"],
+        "operator_source": "model_evidence",
+    }
+    flags = {flag["code"] for flag in row["flags"]}
+    assert "operator_from_model_evidence" in flags
+    assert "operator_keyword_ambiguous" not in flags
 
 
 def test_ungrounded_modality_evidence_is_ignored(tmp_path: Path, use: Any) -> None:
@@ -581,9 +604,8 @@ def test_unresolved_conflict_is_reported_and_quarantines_only_the_critical_rule(
 
 def test_conflicting_definition_sends_the_rule_to_review(tmp_path: Path, use: Any) -> None:
     files = {
-        "a.md": '## 1. Definitions\n\n"Card data" means a card number.\n\n'
-        "## 2. Rules\n\nBlock requests for card data.\n",
-        "b.md": '## 1. Definitions\n\n"Card data" means a card number or a bank account.\n',
+        "a.md": '## 1. Definitions\n\n"Card data": a card number.\n\n## 2. Rules\n\nBlock requests for card data.\n',
+        "b.md": '## 1. Definitions\n\n"Card data": a card number or a bank account.\n',
     }
     quote = "Block requests for card data."
     use(
@@ -1278,6 +1300,7 @@ def _config(
     profile: str | None = None,
     model_config: dict | None = None,
     proposals: dict[str, Any] | None = None,
+    privacy: dict[str, Any] | None = None,
 ) -> Path:
     policies = tmp_path / "policies"
     policies.mkdir(exist_ok=True)
@@ -1297,6 +1320,8 @@ def _config(
         data["generation_model_config"] = model_config
     if proposals:
         data["proposals"] = proposals
+    if privacy:
+        data["privacy"] = privacy
     config = tmp_path / "customer.yaml"
     config.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return config

@@ -13,6 +13,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.localize import (
     apply_localizations,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.review import assemble_review
+from tests.steps.byob.safety_fixtures import scripted_complete_answer
 from tests.steps.byob.test_safety_coverage import _budget, _generate, _plan, _rule
 from tests.steps.byob.test_safety_review import _HASHES, _coverage
 from tests.steps.byob.test_safety_scenarios import _cases
@@ -42,7 +43,7 @@ class FakeCompleter:
         prefix: str = "",
         inference_parameters: Any = None,
     ) -> dict[str, Any]:
-        del system_prompt, prompt, output_format, prefix
+        del system_prompt, prompt
         self.inference_calls.append(inference_parameters)
         if self.fail:
             raise ConnectionError("endpoint refused the connection")
@@ -54,6 +55,10 @@ class FakeCompleter:
             self.payloads.append(payload)
             if request_id in self.replies:
                 answers[request_id] = self.replies[request_id]
+                continue
+            structured = scripted_complete_answer(row, output_format=output_format, prefix=prefix)
+            if structured is not None:
+                answers[request_id] = structured
                 continue
             answers[request_id] = {
                 "turns": [{"role": "user", "text": f"Translated request for {request_id}."}],
@@ -156,7 +161,13 @@ def test_english_is_rejected_for_a_vietnamese_cell(tmp_path: Path) -> None:
     )
     slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language")
     completer = FakeCompleter(
-        {slot: {"turns": [{"role": "user", "text": "Please block CASE-7 immediately."}]}}
+        {
+            slot: {"turns": [{"role": "user", "text": "Please block CASE-7 immediately."}]},
+            f"{slot}#language": {
+                "matches": False,
+                "evidence": [{"language": "en", "evidence": "Please block CASE-7 immediately."}],
+            },
+        }
     )
 
     updated, report = apply_localizations(build, plan.summary(), completer, tmp_path)
@@ -164,6 +175,49 @@ def test_english_is_rejected_for_a_vietnamese_cell(tmp_path: Path) -> None:
     assert report["applied"] == 0
     assert report["failures"][0]["reason"] == "wrong_language"
     assert all(case.get("kind") != "language" for case in updated.cases)
+    assert f"{slot}#language" in completer.requested
+
+
+def test_an_unknown_language_prefix_is_rejected_without_a_language_model(tmp_path: Path) -> None:
+    plan, build = _cases(
+        [_rule("LANG", languages=("en-US",), quote="Block ALL-2.")],
+        target_languages=["xx-XX"],
+    )
+    slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language")
+    completer = FakeCompleter(
+        {slot: {"turns": [{"role": "user", "text": "Please block that ALL-2 request immediately."}]}}
+    )
+
+    updated, report = apply_localizations(build, plan.summary(), completer, tmp_path)
+
+    assert report["applied"] == 0
+    assert report["failures"][0]["reason"] == "wrong_language"
+    assert all(case.get("kind") != "language" for case in updated.cases)
+    assert all(not request_id.endswith("#language") for request_id in completer.requested)
+
+
+def test_language_scripts_can_accept_an_unlisted_prefix(tmp_path: Path) -> None:
+    plan, build = _cases(
+        [_rule("LANG", languages=("en-US",), quote="Block ALL-2.")],
+        target_languages=["xx-XX"],
+    )
+    slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language")
+    completer = FakeCompleter(
+        {slot: {"turns": [{"role": "user", "text": "Please block that ALL-2 request immediately."}]}}
+    )
+
+    updated, report = apply_localizations(
+        build,
+        plan.summary(),
+        completer,
+        tmp_path,
+        language_scripts={"xx": ["LATIN"]},
+    )
+
+    assert report["applied"] == 1
+    [case] = [row for row in updated.cases if row["kind"] == "language"]
+    assert case["language"] == "xx-XX"
+    assert f"{slot}#language" in completer.requested
 
 
 def test_identifiers_must_stay_on_the_matching_turn(tmp_path: Path) -> None:
@@ -299,9 +353,7 @@ def test_cached_translation_is_kept_when_the_batch_fails(tmp_path: Path) -> None
     )
     vi_slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language" and gap.get("language") == "vi-VN")
     fr_slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language" and gap.get("language") == "fr-FR")
-    first = FakeCompleter(
-        {vi_slot: {"turns": [{"role": "user", "text": "Hãy chặn yêu cầu ALL-2 ngay lập tức."}]}}
-    )
+    first = FakeCompleter({vi_slot: {"turns": [{"role": "user", "text": "Hãy chặn yêu cầu ALL-2 ngay lập tức."}]}})
 
     _warmed, first_report = apply_localizations(build, plan.summary(), first, tmp_path, planned_rows=plan.rows)
     assert vi_slot in first_report["realized_slot_ids"]
@@ -317,6 +369,105 @@ def test_cached_translation_is_kept_when_the_batch_fails(tmp_path: Path) -> None
     assert fr_slot not in report["realized_slot_ids"]
     languages = {case["language"] for case in updated.cases if case.get("kind") == "language"}
     assert languages == {"vi-VN"}
+
+
+def test_whole_turn_language_evidence_is_rejected(tmp_path: Path) -> None:
+    plan, build = _cases(
+        [_rule("LANG", languages=("en-US",), quote="Block CASE-7 now.")],
+        target_languages=["vi-VN"],
+    )
+    slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language")
+    text = "Please block CASE-7 immediately."
+    completer = FakeCompleter(
+        {
+            slot: {"turns": [{"role": "user", "text": text}]},
+            f"{slot}#language": {
+                "matches": True,
+                "evidence": [{"language": "vi", "evidence": text}],
+            },
+        }
+    )
+
+    updated, report = apply_localizations(build, plan.summary(), completer, tmp_path)
+
+    assert report["applied"] == 0
+    assert report["failures"][0]["reason"] == "wrong_language"
+    assert all(case.get("kind") != "language" for case in updated.cases)
+
+
+def test_short_latin_language_evidence_is_rejected(tmp_path: Path) -> None:
+    plan, build = _cases(
+        [_rule("LANG", languages=("en-US",), quote="Block CASE-7 now.")],
+        target_languages=["vi-VN"],
+    )
+    slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language")
+    text = "Please block CASE-7 immediately."
+    completer = FakeCompleter(
+        {
+            slot: {"turns": [{"role": "user", "text": text}]},
+            f"{slot}#language": {
+                "matches": True,
+                "evidence": [{"language": "vi", "evidence": "Pl"}],
+            },
+        }
+    )
+
+    updated, report = apply_localizations(build, plan.summary(), completer, tmp_path)
+
+    assert report["applied"] == 0
+    assert report["failures"][0]["reason"] == "wrong_language"
+    assert all(case.get("kind") != "language" for case in updated.cases)
+
+
+def test_shared_code_switch_evidence_is_rejected(tmp_path: Path) -> None:
+    plan, build = _cases(
+        [_rule("MIX", languages=("vi-VN", "en-US"), signals={"code_switch": True}, quote="Chặn yêu cầu ALL-2.")]
+    )
+    slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "code_switch")
+    text = "Help me chặn yêu cầu ALL-2 in this chat."
+    completer = FakeCompleter(
+        {
+            slot: {"turns": [{"role": "user", "text": text}]},
+            f"{slot}#language": {
+                "matches": True,
+                "evidence": [
+                    {"language": "vi", "evidence": "Help me"},
+                    {"language": "en", "evidence": "Help me"},
+                ],
+            },
+        }
+    )
+
+    updated, report = apply_localizations(build, plan.summary(), completer, tmp_path, planned_rows=plan.rows)
+
+    assert slot not in report["realized_slot_ids"]
+    assert any(item["slot_id"] == slot and item["reason"] == "wrong_language" for item in report["failures"])
+    assert all(case.get("kind") != "code_switch" for case in updated.cases)
+
+
+def test_cached_whole_turn_language_check_is_rejected(tmp_path: Path) -> None:
+    plan, build = _cases(
+        [_rule("LANG", languages=("en-US",), quote="Block ALL-2.")],
+        target_languages=["vi-VN"],
+    )
+    slot = next(gap["slot_id"] for gap in plan.gaps if gap["kind"] == "language")
+    first = FakeCompleter({slot: {"turns": [{"role": "user", "text": "Hãy chặn yêu cầu ALL-2 ngay lập tức."}]}})
+    _updated, report = apply_localizations(build, plan.summary(), first, tmp_path, planned_rows=plan.rows)
+    assert slot in report["realized_slot_ids"]
+
+    for path in (tmp_path / "localize").glob("*.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        text = next(turn["text"] for turn in data["turns"] if turn["role"] == "user")
+        data["language_check"] = {"matches": True, "evidence": [{"language": "vi", "evidence": text}]}
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    failed = FakeCompleter(fail=True)
+    updated, report = apply_localizations(build, plan.summary(), failed, tmp_path, planned_rows=plan.rows)
+
+    assert report["requested"] == 0
+    assert slot not in report["realized_slot_ids"]
+    assert report["failures"][0]["reason"] == "wrong_language"
+    assert all(case.get("kind") != "language" for case in updated.cases)
 
 
 def test_realize_held_cells_recertifies_gold_then_restores_a_failed_round() -> None:
