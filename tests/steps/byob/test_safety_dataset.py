@@ -218,6 +218,34 @@ def test_quality_gates_count_each_language_tag_on_a_case() -> None:
     assert gates["observed"]["by_action"]["block"] == 1
 
 
+def test_quality_gates_do_not_count_contrast_loose_as_allow() -> None:
+    rows = [
+        {"case_id": "tight", "policy_id": "P-1", "expected_action": "allow", "split": "development"},
+        {
+            "case_id": "loose",
+            "policy_id": "P-1",
+            "expected_action": "allow",
+            "contrast_loose": True,
+            "split": "development",
+        },
+        {"case_id": "block", "policy_id": "P-1", "expected_action": "block", "split": "development"},
+    ]
+
+    gates = evaluate_quality_gates(
+        rows,
+        {"min_total_cases": 3, "min_cases_per_action": {"allow": 2, "block": 1}},
+    )
+
+    assert gates["observed"]["total_cases"] == 3
+    assert gates["observed"]["contrast_loose"] == 1
+    assert gates["observed"]["by_action"]["allow"] == 1
+    assert gates["observed"]["by_action"]["block"] == 1
+    assert gates["passed"] is False
+    assert gates["failures"] == [
+        {"gate": "min_cases_per_action", "required": 2, "actual": 1, "missing": 1, "slice": "allow"}
+    ]
+
+
 def test_quality_gates_reject_damaged_requirement_types() -> None:
     with pytest.raises(DatasetInputError, match="min_total_cases must be a non-negative whole number"):
         evaluate_quality_gates([], {"min_total_cases": True})

@@ -280,7 +280,11 @@ def evaluate_quality_gates(
     policy_ids: Sequence[str] = (),
     split_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate minimum sample gates on final rows, never on raw generated candidates."""
+    """Evaluate minimum sample gates on final rows, never on raw generated candidates.
+
+    ``contrast_loose`` allows still count toward ``min_total_cases``. They do not
+    count toward ``min_cases_per_action``.
+    """
     if not isinstance(requirements, Mapping):
         raise DatasetInputError("quality gate requirements must be a mapping")
     if isinstance(cases, (str, bytes)) or not isinstance(cases, Sequence):
@@ -295,7 +299,8 @@ def evaluate_quality_gates(
         lambda case: case.get("policy_id") if isinstance(case.get("policy_id"), str) else "",
     )
     by_policy.pop("", None)
-    by_action = _tally(rows, _action_name)
+    action_rows = [row for row in rows if row.get("contrast_loose") is not True]
+    by_action = _tally(action_rows, _action_name)
     by_language = _language_tag_counts(rows)
     if split_manifest is None:
         development = sum(case.get("split") == "development" for case in rows)
@@ -355,6 +360,7 @@ def evaluate_quality_gates(
         "observed": {
             "total_cases": len(rows),
             "development_cases": development,
+            "contrast_loose": sum(1 for row in rows if row.get("contrast_loose") is True),
             "by_policy": by_policy,
             "by_action": by_action,
             "by_language": {key: by_language[key] for key in sorted(by_language)},

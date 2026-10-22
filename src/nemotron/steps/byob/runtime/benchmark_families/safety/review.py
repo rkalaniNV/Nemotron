@@ -1102,13 +1102,21 @@ def _contrast_pairs(cases: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                 "case_id": case.get("case_id"),
                 "policy_id": case.get("policy_id"),
                 "anchored": anchor.get("anchored") is not False and bool(anchor.get("text")),
+                "contrast_loose": case.get("contrast_loose") is True,
                 "changed_dimension": anchor.get("changed_dimension"),
                 "block_case_id": anchor.get("case_id"),
                 "block_text": str(anchor.get("text") or "")[:_EXAMPLE_TEXT],
                 "allow_text": _scored_text(case)[:_EXAMPLE_TEXT],
             }
         )
-    return sorted(rows, key=lambda row: (bool(row.get("anchored")), str(row.get("case_id") or "")))
+    return sorted(
+        rows,
+        key=lambda row: (
+            not row.get("contrast_loose"),
+            bool(row.get("anchored")),
+            str(row.get("case_id") or ""),
+        ),
+    )
 
 
 def _audit_sections(packet: Mapping[str, Any]) -> list[str]:
@@ -1300,17 +1308,21 @@ def _contrast_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
     if not rows:
         return []
     unanchored = sum(1 for row in rows if not row.get("anchored"))
+    loose = sum(1 for row in rows if row.get("contrast_loose"))
     body = [
-        f"<details><summary>Contrast pairs to spot-check ({len(rows)}, {unanchored} without anchor)</summary>",
+        f"<details><summary>Contrast pairs to spot-check ({len(rows)}, {unanchored} without anchor, "
+        f"{loose} contrast_loose)</summary>",
         "<p>Each allow was written from its block sibling with one fact removed. Reject the rule "
-        "in the CSV if an allow still states the removed fact. Rows without an anchor are listed "
-        "first: the block sibling kept its seed, so the allow was written without it and needs "
-        "the closest check.</p>",
+        "in the CSV if an allow still states the removed fact. <code>contrast_loose</code> rows "
+        "and rows without an anchor are listed first. A loose allow dropped the topic lock or "
+        "kept a trigger span: it is not an over-refusal probe. Rows without an anchor were "
+        "written without a realized block sibling and need the closest check.</p>",
         "<table><thead><tr><th>Allow case</th><th>Removed</th><th>Block text</th>"
-        "<th>Allow text</th></tr></thead><tbody>",
+        "<th>Allow text</th><th>Lock</th></tr></thead><tbody>",
     ]
     for row in rows:
         block_text = row.get("block_text") if row.get("anchored") else "(no anchor: block kept its seed)"
+        lock = "contrast_loose" if row.get("contrast_loose") else "kept"
         body.append(
             "<tr><td>"
             + _text(row.get("case_id"))
@@ -1320,6 +1332,8 @@ def _contrast_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
             + _text(block_text)
             + "</td><td>"
             + _text(row.get("allow_text"))
+            + "</td><td>"
+            + _text(lock)
             + "</td></tr>"
         )
     body.extend(["</tbody></table>", "</details>"])

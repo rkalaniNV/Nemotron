@@ -42,7 +42,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.windows import EvidenceWindow
 
-PROMPT_VERSION = 7
+PROMPT_VERSION = 8
 CACHE_DIR = "extraction"
 MODEL_CONFIG_KEYS = ("alias", "provider", "model")
 _DROPPED_KEYS = MODEL_ONLY_KEYS | {"confidence"}
@@ -64,6 +64,11 @@ For each rule:
   that need explicit user confirmation under require_confirmation_if, and situations the
   clause explicitly permits or says not to block under allow_if. Each condition carries
   evidence: the exact words of the clause or of a glossary definition that state that condition.
+  When two or more any_of conditions share a triggering frame and vary only in the object
+  (a list such as A, B, or C under the same verb), name each condition by the varying residue.
+  Copy the shared triggering frame into that class's operator evidence. Copy each residue's
+  exact words into that condition's evidence. Do not collapse the shared frame and the residue
+  into one condition name.
 - condition_operators: a list. For every condition class with two or more conditions, append
   one object with condition_class, operator (all_of, any_of, or none_of), and operator evidence
   copied exactly from source_quote. Also append none_of for a single condition when absence of

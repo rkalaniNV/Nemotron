@@ -51,6 +51,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import ResolvedConfig
 from nemotron.steps.byob.runtime.benchmark_families.safety.conflicts import detect_conflicts
+from nemotron.steps.byob.runtime.benchmark_families.safety.contrast import shared_frame_evidence
 from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import COVERAGE_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import DATASET_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.extract import (
@@ -440,20 +441,28 @@ def _candidate_draft(
     body: dict[str, Any] = {name: _text(getattr(candidate, name)) for name in ("actor", "action", "object")}
     unresolved: dict[str, list[str]] = {}
     condition_names: set[str] = set()
+    condition_evidence: dict[str, str] = {}
+    operator_evidence: dict[str, str] = {}
     for name in CONDITION_CLASSES:
-        legs, _, _ = _legs(getattr(candidate.conditions, name), sources, f"rule.{name}", unsupported, flags)
+        legs, _, _, evidence = _legs(getattr(candidate.conditions, name), sources, f"rule.{name}", unsupported, flags)
         if not legs:
             continue
         condition_names.add(name)
-        group = _extracted_operator(name, legs, candidate.operators_by_class.get(name), quote, flags)
+        condition_evidence.update(evidence)
+        proposed = candidate.operators_by_class.get(name)
+        group = _extracted_operator(name, legs, proposed, quote, flags)
         if group is None:
             unresolved[name] = legs
         else:
             body[name] = group
+            if proposed is not None and group.get("operator_source") == "model_evidence":
+                grounded = proposed.evidence.strip()
+                if grounded and quote_in_span(grounded, quote):
+                    operator_evidence[name] = grounded
     for name in sorted(set(candidate.operators_by_class) - condition_names):
         flags.append(_flag("operator_without_conditions", f"the model supplied an operator for empty {name}", name))
         unsupported.append(f"rule.{name}.operator")
-    exceptions, _, _ = _legs(candidate.exceptions, sources, "exceptions", unsupported, flags)
+    exceptions, _, _, _ = _legs(candidate.exceptions, sources, "exceptions", unsupported, flags)
     if not condition_names:
         uncertainties.append(_uncertainty(window.window_id, "no_conditions", quote))
         return None
@@ -503,6 +512,9 @@ def _candidate_draft(
         "testability": candidate.testability,
         "unsupported_fields": unsupported,
     }
+    grounded_evidence = _grounded_evidence_blob(body, condition_evidence, operator_evidence, quote)
+    if grounded_evidence:
+        raw["extensions"] = {"grounded_evidence": grounded_evidence}
     if unresolved:
         raw["unresolved_conditions"] = unresolved
     stored_signals = _grounded_signals(candidate, quote, flags)
@@ -592,11 +604,40 @@ def _extracted_operator(
     return {proposed.operator: list(legs), "operator_source": "model_evidence"}
 
 
+def _grounded_evidence_blob(
+    body: Mapping[str, Any],
+    condition_evidence: Mapping[str, str],
+    operator_evidence: Mapping[str, str],
+    quote: str,
+) -> dict[str, Any]:
+    """Quote-grounded evidence kept for contrast allow. Empty keys are omitted."""
+    stored: dict[str, Any] = {}
+    if operator_evidence:
+        stored["operator"] = dict(operator_evidence)
+    if condition_evidence:
+        stored["conditions"] = dict(condition_evidence)
+    frames: dict[str, str] = {}
+    for name, group in body.items():
+        if name not in CONDITION_CLASSES or not isinstance(group, Mapping):
+            continue
+        legs = group.get("any_of")
+        if not isinstance(legs, Sequence) or isinstance(legs, (str, bytes)) or len(legs) < 2:
+            continue
+        evidences = [condition_evidence[leg] for leg in legs if isinstance(leg, str) and leg in condition_evidence]
+        frame = shared_frame_evidence(evidences, quote)
+        if frame:
+            frames[name] = frame
+    if frames:
+        stored["shared_frame"] = frames
+    return stored
+
+
 def _legs(
     items: Sequence[Any], sources: Sequence[str], where: str, unsupported: list[str], flags: list[dict[str, Any]]
-) -> tuple[list[str], int, int]:
+) -> tuple[list[str], int, int, dict[str, str]]:
     """Condition names, plus how many are stated in the clause, a neighbor, or a structural definition."""
     names: list[str] = []
+    evidence: dict[str, str] = {}
     grounded = 0
     for item in items:
         name = condition_name(item.name)
@@ -637,7 +678,9 @@ def _legs(
             unsupported.append(f"{where}.{name}")
         else:
             grounded += 1
-    return names, grounded, len(names)
+            if item.evidence.strip():
+                evidence[name] = item.evidence.strip()
+    return names, grounded, len(names), evidence
 
 
 def _evidence_in_source(evidence: str, source: str) -> bool:
@@ -839,6 +882,8 @@ def _assign_ids(drafts: Sequence[Draft], uncertainties: list[dict[str, Any]]) ->
             count = suffixes[partner]
             policy_id = f"{partner}{ALLOW_SUFFIX}" + (f"-{count}" if count > 1 else "")
             draft.rule = _replace(draft.rule, policy_id=policy_id, paired_with=partner)
+            if acting[0].rule.paired_with is None:
+                acting[0].rule = _replace(acting[0].rule, paired_with=policy_id)
     return kept
 
 

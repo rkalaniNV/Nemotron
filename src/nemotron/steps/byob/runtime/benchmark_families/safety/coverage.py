@@ -265,7 +265,8 @@ def build_coverage_plan(
     optional.sort(key=_sort_key)
     rows, gaps = _schedule(required, optional, case_cap, budget, generation)
     scheduled = {row["slot_id"] for row in rows}
-    marked = tuple(_with_scheduled(family, scheduled) for family in families)
+    remapped = tuple(_reanchor_unpaired_family(family, by_id, planned, scheduled) for family in families)
+    marked = tuple(_with_scheduled(family, scheduled) for family in remapped)
     blocking = [gap for gap in gaps if gap["blocks_gold"]]
     certification, reason = _certification(len(required), blocking)
     surface_variants = _surface_variants_per_cell(generation, modules)
@@ -933,20 +934,24 @@ def _contrast_families(
         dimension = "paired_rule"
     else:
         dimension = "benign_neighbor"
+    block_slot = _narrow_block_slot(rule, planned) or violation
+    partner_id = planned.get(_slot(rule.policy_id, "clear_allow"), {}).get("paired_policy_id")
+    if not isinstance(partner_id, str):
+        partner_id = rule.paired_with
     return [
         {
             "family_id": _family_id(rule.policy_id),
             "policy_id": rule.policy_id,
             "shared_semantics": {
                 "policy_id": rule.policy_id,
-                **({"paired_policy_id": rule.paired_with} if rule.paired_with else {}),
+                **({"paired_policy_id": partner_id} if partner_id else {}),
             },
             "changed_dimension": dimension,
             "members": [
                 {
-                    "slot_id": violation,
+                    "slot_id": block_slot,
                     "role": "violation",
-                    "expected_action": planned[violation]["expected_action"],
+                    "expected_action": planned[block_slot]["expected_action"],
                 },
                 {
                     "slot_id": _slot(rule.policy_id, "clear_allow"),
@@ -1076,6 +1081,53 @@ def _with_scheduled(family: dict[str, Any], scheduled: set[str]) -> dict[str, An
     return {**family, "members": members}
 
 
+def _narrow_block_slot(
+    rule: PolicyRule,
+    planned: Mapping[str, Mapping[str, Any]],
+    scheduled: Collection[str] | None = None,
+) -> str | None:
+    """The first scheduled any-of path, so an unpaired allow rewrites a minimal sibling."""
+    for name, _group_action, group in acting_groups(rule):
+        if group.operator != "any_of":
+            continue
+        for trigger in group.legs:
+            path = _slot(rule.policy_id, "condition_path", name, trigger)
+            if path not in planned:
+                continue
+            if scheduled is not None and path not in scheduled:
+                continue
+            return path
+    return None
+
+
+def _reanchor_unpaired_family(
+    family: Mapping[str, Any],
+    by_id: Mapping[str, PolicyRule],
+    planned: Mapping[str, Mapping[str, Any]],
+    scheduled: Collection[str],
+) -> dict[str, Any]:
+    """Point an unpaired family at a generated path when the first planned path was omitted."""
+    dimension = family.get("changed_dimension")
+    if dimension not in {"benign_neighbor", "paired_rule", "paired_allow"}:
+        return dict(family)
+    rule = by_id.get(str(family.get("policy_id") or ""))
+    if rule is None or primary_action(rule) is None:
+        return dict(family)
+    block_slot = _narrow_block_slot(rule, planned, scheduled)
+    if block_slot is None:
+        fallback = _slot(rule.policy_id, "clear_violation")
+        block_slot = fallback if fallback in scheduled else None
+    if block_slot is None:
+        return dict(family)
+    cell = planned.get(block_slot) or {}
+    action = cell.get("expected_action")
+    members = [dict(member) if isinstance(member, Mapping) else member for member in family.get("members") or []]
+    if not members or not isinstance(members[0], dict) or action is None:
+        return dict(family)
+    members[0] = {**members[0], "slot_id": block_slot, "expected_action": action}
+    return {**family, "members": members}
+
+
 def _block_slot(rule: PolicyRule, name: str, group: ConditionGroup, group_action: str) -> str:
     """The case that contains exactly this group's legs.
 
@@ -1090,21 +1142,41 @@ def _block_slot(rule: PolicyRule, name: str, group: ConditionGroup, group_action
 
 
 def _allow_case(rule: PolicyRule, by_id: Mapping[str, PolicyRule]) -> tuple[str, str | None, tuple[str, ...]]:
-    partner = by_id.get(rule.paired_with) if rule.paired_with else None
-    if partner is not None and partner.rule.allow_if is not None:
+    partner = _allow_partner(rule, by_id)
+    if partner is not None:
         return "allow", partner.policy_id, ()
     if rule.rule.allow_if is not None:
         return "allow", None, ()
-    if rule.paired_with and partner is None:
+    named = by_id.get(rule.paired_with) if rule.paired_with else None
+    if rule.paired_with and named is None:
         return "allow", rule.paired_with, ("paired_rule_not_eligible",)
-    if partner is not None:
-        return "allow", partner.policy_id, ("paired_rule_not_allow",)
+    if named is not None:
+        return "allow", named.policy_id, ("paired_rule_not_allow",)
     return "allow", None, ("allow_unpaired",)
 
 
+def _allow_partner(rule: PolicyRule, by_id: Mapping[str, PolicyRule]) -> PolicyRule | None:
+    """The eligible allow rule this acting rule is paired with, in either pointer direction."""
+    named = by_id.get(rule.paired_with) if rule.paired_with else None
+    if named is not None and named.rule.allow_if is not None:
+        return named
+    reverse = sorted(
+        (
+            other
+            for other in by_id.values()
+            if other.policy_id != rule.policy_id
+            and other.paired_with == rule.policy_id
+            and other.rule.allow_if is not None
+        ),
+        key=lambda item: item.policy_id,
+    )
+    return reverse[0] if reverse else None
+
+
 def _paired_allow(rule: PolicyRule, by_id: Mapping[str, PolicyRule]) -> bool:
-    partner = by_id.get(rule.paired_with) if rule.paired_with else None
-    return partner is not None and partner.rule.allow_if is not None
+    if rule.rule.allow_if is not None:
+        return True
+    return _allow_partner(rule, by_id) is not None
 
 
 def _declared_languages(rule: PolicyRule) -> list[str]:

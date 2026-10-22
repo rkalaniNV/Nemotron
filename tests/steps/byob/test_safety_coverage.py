@@ -9,6 +9,9 @@ import yaml
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import (
     CoverageInputError,
+    _narrow_block_slot,
+    _reanchor_unpaired_family,
+    _slot,
     apply_backfill,
     build_coverage_plan,
     case_cap_for,
@@ -58,6 +61,7 @@ def _rule(
     status: str = "eligible_for_generation",
     signals: dict[str, Any] | None = None,
     ambiguous_action: str | None = None,
+    extensions: dict[str, Any] | None = None,
 ) -> Any:
     body: dict[str, Any] = {"actor": "assistant", "action": "respond", "object": "request"}
     if block is not None:
@@ -87,6 +91,8 @@ def _rule(
         data["paired_with"] = paired
     if signals:
         data["signals"] = signals
+    if extensions:
+        data["extensions"] = extensions
     return validate_rule(data)
 
 
@@ -202,6 +208,76 @@ def test_a_second_all_of_group_gets_its_own_block_case() -> None:
     assert verb["members"][0]["expected_action"] == "block"
     assert weapon["members"][0]["slot_id"] == violation
     assert weapon["members"][0]["expected_action"] == "escalate"
+
+
+def test_an_any_of_contrast_family_anchors_to_a_condition_path() -> None:
+    rule = _rule("OR", block={"any_of": ["joke", "fiction"], "operator_source": "explicit"})
+    plan = _plan([rule])
+
+    [family] = [row for row in plan.contrast_families if row["policy_id"] == "OR"]
+    paths = {row["trigger_leg"]: row for row in _kinds(plan, "condition_path", "OR")}
+    allow = next(row for row in plan.rows if row["kind"] == "clear_allow" and row["policy_id"] == "OR")
+    assert family["changed_dimension"] == "benign_neighbor"
+    assert family["members"][0]["slot_id"] == paths["joke"]["slot_id"]
+    assert family["members"][1]["slot_id"] == allow["slot_id"]
+
+
+def test_an_unpaired_family_rewrites_the_first_scheduled_condition_path() -> None:
+    rule = _rule("OR", block={"any_of": ["zebra_path", "alpha_path"], "operator_source": "explicit"})
+    zebra = _slot("OR", "condition_path", "block_if", "zebra_path")
+    alpha = _slot("OR", "condition_path", "block_if", "alpha_path")
+    allow = _slot("OR", "clear_allow")
+    planned = {
+        zebra: {"slot_id": zebra, "expected_action": "block"},
+        alpha: {"slot_id": alpha, "expected_action": "block"},
+        allow: {"slot_id": allow, "expected_action": "allow"},
+    }
+    family = {
+        "policy_id": "OR",
+        "changed_dimension": "benign_neighbor",
+        "members": [
+            {"slot_id": zebra, "role": "violation", "expected_action": "block"},
+            {"slot_id": allow, "role": "allow", "expected_action": "allow"},
+        ],
+    }
+
+    assert _narrow_block_slot(rule, planned) == zebra
+    assert _narrow_block_slot(rule, planned, {alpha, allow}) == alpha
+    remapped = _reanchor_unpaired_family(family, {"OR": rule}, planned, {alpha, allow})
+    assert remapped["members"][0]["slot_id"] == alpha
+    assert remapped["members"][0]["expected_action"] == "block"
+
+
+def test_an_allow_only_partner_is_found_from_the_reverse_pointer() -> None:
+    block = _rule("OR", block={"any_of": ["leak_prompt"], "operator_source": "single_condition"})
+    allow = _rule(
+        "OR-ALLOW",
+        allow={"any_of": ["cpu_question"], "operator_source": "single_condition"},
+        paired="OR",
+        span="doc#1#span-02",
+    )
+    plan = _plan([block, allow])
+
+    [family] = [row for row in plan.contrast_families if row["policy_id"] == "OR"]
+    cell = next(row for row in plan.rows if row["kind"] == "clear_allow" and row["policy_id"] == "OR")
+    assert family["changed_dimension"] == "paired_allow"
+    assert cell["paired_policy_id"] == "OR-ALLOW"
+    assert "allow_unpaired" not in (cell.get("flags") or [])
+
+
+def test_a_rule_with_own_allow_if_is_a_paired_allow_family() -> None:
+    rule = _rule(
+        "BOTH",
+        block={"any_of": ["leak_prompt"], "operator_source": "single_condition"},
+        allow={"any_of": ["cpu_question"], "operator_source": "single_condition"},
+    )
+    plan = _plan([rule])
+
+    [family] = [row for row in plan.contrast_families if row["policy_id"] == "BOTH"]
+    assert family["changed_dimension"] == "paired_allow"
+    allow = next(row for row in plan.rows if row["kind"] == "clear_allow" and row["policy_id"] == "BOTH")
+    assert allow["present_legs"] == ["cpu_question"]
+    assert "allow_unpaired" not in (allow.get("flags") or [])
 
 
 def test_a_default_any_of_rule_gets_no_missing_leg_case() -> None:

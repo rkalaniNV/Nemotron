@@ -74,6 +74,7 @@ def test_five_topic_policy_yields_block_rules_with_paired_allow_rules(tmp_path: 
         partner = by_quote[block]["policy_id"]
         assert by_quote[allow]["policy_id"] == f"{partner}-ALLOW"
         assert by_quote[allow]["paired_with"] == partner
+        assert by_quote[block]["paired_with"] == f"{partner}-ALLOW"
         assert by_quote[allow]["rule"]["allow_if"]["operator_source"] == "single_condition"
     assert anti_state["severity"] == "medium"
     assert anti_state["severity_basis"] == "rubric:conditional_restriction"
@@ -133,6 +134,16 @@ def test_rule_ids_depend_on_document_section_quote_and_action() -> None:
     assert condition_name("   ") is None
 
 
+def test_extract_prompt_asks_to_split_shared_frames() -> None:
+    prompt = extract.SYSTEM_PROMPT
+    assert "varying residue" in prompt
+    assert "shared triggering frame" in prompt
+    assert (
+        "Do not collapse the shared frame and the residue\n  into one condition name"
+        in prompt
+    )
+
+
 def test_legacy_operator_hint_without_evidence_needs_a_decision(tmp_path: Path, use: Any) -> None:
     quote = ANTI_STATE.replace("đồng thời ", "")
     replies = {quote: [{**FIVE_TOPIC_REPLIES[ANTI_STATE][0], "source_quote": quote, "operator_hint": "all_of"}]}
@@ -149,6 +160,30 @@ def test_legacy_operator_hint_without_evidence_needs_a_decision(tmp_path: Path, 
     assert {"legacy_operator_hint_ignored", "operator_evidence_not_grounded"} <= {
         flag["code"] for flag in row["flags"]
     }
+
+
+def test_parallel_any_of_evidence_stores_a_shared_frame(tmp_path: Path, use: Any) -> None:
+    quote = (
+        "Block organizing a protest against the state, organizing a riot against the state, "
+        "or organizing an uprising against the state."
+    )
+    candidate = _candidate(
+        quote,
+        operators={"block_if": {"operator": "any_of", "evidence": "organizing"}},
+        block_if=[
+            _leg("protest_against_state", "organizing a protest against the state"),
+            _leg("riot_against_state", "organizing a riot against the state"),
+            _leg("uprising_against_state", "organizing an uprising against the state"),
+        ],
+    )
+    use(ScriptedExtractor({quote: [candidate]}))
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{quote}\n"}))
+
+    [row] = _rows(run_dir).values()
+    grounded = row["rule"]["extensions"]["grounded_evidence"]
+    assert grounded["operator"]["block_if"] == "organizing"
+    assert grounded["shared_frame"]["block_if"] == "organizing"
+    assert grounded["conditions"]["protest_against_state"] == "organizing a protest against the state"
 
 
 def test_grounded_operator_supports_a_language_without_keyword_rules(tmp_path: Path, use: Any) -> None:
