@@ -54,7 +54,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import normalize_c
 from nemotron.steps.byob.runtime.benchmark_families.safety.sources import SourceChangedError, SourceError
 from nemotron.steps.byob.runtime.benchmark_families.safety.spans import build_document, link_glossary_terms
 
-INGEST_VERSION = 7
+INGEST_VERSION = 8
 MAX_REDACTED_NAME_CHARS = 120
 EVIDENCE_SELF_AUTHORED = "self_authored"
 EVIDENCE_DOCUMENT_NOT_FOUND = "document_not_found"

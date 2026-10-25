@@ -945,6 +945,43 @@ def test_an_allow_rule_with_multiple_possible_partners_waits_for_review(tmp_path
     assert any("possible acting partners" in reason for reason in row["reasons"])
 
 
+def test_a_sibling_allow_pairs_when_the_parent_has_one_acting_rule(tmp_path: Path, use: Any) -> None:
+    block = "Never share customer card data."
+    allow = "Marketing one-pagers may be shared externally."
+    replies = {
+        block: [_candidate(block, block_if=[_leg("card_data", "card data")])],
+        allow: [_candidate(allow, "allow", allow_if=[_leg("marketing_one_pager", "Marketing one-pagers")])],
+    }
+    use(ScriptedExtractor(replies))
+    policy = f"## Payments\n\n### Must block:\n\n{block}\n\n### Do not block:\n\n{allow}\n"
+    run_dir = _generate(_config(tmp_path, {"policy.md": policy}))
+
+    by_quote = {row["rule"]["provenance"]["source_quote"]: row["rule"] for row in _rows(run_dir).values()}
+    partner = by_quote[block]["policy_id"]
+    assert by_quote[allow]["policy_id"] == f"{partner}-ALLOW"
+    assert by_quote[allow]["paired_with"] == partner
+    assert by_quote[block]["paired_with"] == f"{partner}-ALLOW"
+
+
+def test_a_sibling_allow_stays_unpaired_when_the_parent_has_several_acting_rules(tmp_path: Path, use: Any) -> None:
+    allowed = "Marketing one-pagers may be shared externally."
+    pii = "Never share customer PII."
+    roadmap = "Never share unreleased product roadmaps."
+    replies = {
+        allowed: [_candidate(allowed, "allow", allow_if=[_leg("marketing_one_pager", "Marketing one-pagers")])],
+        pii: [_candidate(pii, block_if=[_leg("customer_pii", "customer PII")])],
+        roadmap: [_candidate(roadmap, block_if=[_leg("unreleased_roadmap", "unreleased product roadmaps")])],
+    }
+    use(ScriptedExtractor(replies))
+    policy = f"## Sharing\n\n### Must block:\n\n{pii}\n\n{roadmap}\n\n### Do not block:\n\n{allowed}\n"
+    run_dir = _generate(_config(tmp_path, {"policy.md": policy}))
+
+    row = next(item for item in _rows(run_dir).values() if item["rule"]["provenance"]["source_quote"] == allowed)
+    assert row["status"] == "eligible_for_generation"
+    assert row["rule"].get("paired_with") is None
+    assert not any("possible acting partners" in reason for reason in row["reasons"])
+
+
 def test_a_non_latin_condition_name_is_kept(tmp_path: Path, use: Any) -> None:
     quote = "Block requests for card data."
     use(ScriptedExtractor({quote: [_candidate(quote, block_if=[_leg("禁止", "card data")])]}))
@@ -1057,6 +1094,95 @@ def test_none_of_allow_and_block_on_the_same_absence_is_unresolved() -> None:
     assert result.conflicts[0]["type"] == "contradictory_rules"
     assert result.graph[0]["case_context"] == []
     assert result.graph[0]["resolution"] == "unresolved"
+
+
+def test_none_of_allow_does_not_contradict_an_unrelated_block_trigger() -> None:
+    def rule(policy_id: str, field: str, group: dict[str, Any], quote: str) -> Any:
+        return validate_rule(
+            {
+                "policy_id": policy_id,
+                "rule": {
+                    "actor": "assistant",
+                    "action": "respond",
+                    "object": "user_request",
+                    field: group,
+                },
+                "severity": "low" if field == "allow_if" else "high",
+                "provenance": {
+                    "document_id": "policy",
+                    "section": policy_id,
+                    "source_quote": quote,
+                },
+            }
+        )
+
+    allow = rule("ALLOW-1", "allow_if", {"none_of": ["action_verb"]}, "Allow when the action verb is missing.")
+    block = rule("BLOCK-1", "block_if", {"any_of": ["riot_guide"]}, "Block a riot guide.")
+    result = detect_conflicts([allow, block])
+
+    assert result.conflicts == []
+    [node] = [item for item in result.graph if item["case_context"] == ["riot_guide"]]
+    assert node["resolution"] == "action_order"
+    assert node["expected_action"] == "block"
+    assert set(node["matched_policy_ids"]) == {"ALLOW-1", "BLOCK-1"}
+
+
+def test_none_of_allow_does_not_contradict_a_different_none_of_block() -> None:
+    def rule(policy_id: str, field: str, leg: str) -> Any:
+        return validate_rule(
+            {
+                "policy_id": policy_id,
+                "rule": {
+                    "actor": "assistant",
+                    "action": "respond",
+                    "object": "user_request",
+                    field: {"none_of": [leg]},
+                },
+                "severity": "low" if field == "allow_if" else "high",
+                "provenance": {
+                    "document_id": "policy",
+                    "section": policy_id,
+                    "source_quote": f"Handle {leg}.",
+                },
+            }
+        )
+
+    result = detect_conflicts(
+        [rule("ALLOW-1", "allow_if", "action_verb"), rule("BLOCK-1", "block_if", "user_consent")]
+    )
+
+    assert result.conflicts == []
+    [node] = [item for item in result.graph if item["case_context"] == []]
+    assert node["resolution"] == "action_order"
+    assert node["expected_action"] == "block"
+
+
+def test_none_of_allow_and_block_on_the_same_absent_legs_are_unresolved() -> None:
+    def rule(policy_id: str, field: str) -> Any:
+        return validate_rule(
+            {
+                "policy_id": policy_id,
+                "rule": {
+                    "actor": "assistant",
+                    "action": "respond",
+                    "object": "user_request",
+                    field: {"none_of": ["user_consent"]},
+                },
+                "severity": "low" if field == "allow_if" else "high",
+                "provenance": {
+                    "document_id": "policy",
+                    "section": policy_id,
+                    "source_quote": "Handle user_consent.",
+                },
+            }
+        )
+
+    result = detect_conflicts([rule("ALLOW-1", "allow_if"), rule("BLOCK-1", "block_if")])
+
+    assert result.conflicts[0]["type"] == "contradictory_rules"
+    assert set(result.conflicts[0]["policy_ids"]) == {"ALLOW-1", "BLOCK-1"}
+    [node] = [item for item in result.graph if item["case_context"] == []]
+    assert node["resolution"] == "unresolved"
 
 
 def test_disjoint_targets_are_not_treated_as_one_situation() -> None:

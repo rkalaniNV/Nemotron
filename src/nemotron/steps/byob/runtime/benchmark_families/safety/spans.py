@@ -33,6 +33,9 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.documents import Docu
 PREAMBLE = "preamble"
 MAX_SPAN_CHARS = 1200
 MAX_CROSS_REFERENCE_TARGETS = 50
+MAX_LABEL_HEADING_CHARS = 80
+MAX_COLON_SUFFIX_CHARS = 40
+MAX_UNSTYLED_HEADING_TOKENS = 8
 
 # A roman numeral, non-empty. "IIII" does not match; "IV" and "III" do.
 _ROMAN = r"(?=[IVXLCDM])M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})"
@@ -61,6 +64,8 @@ _QUOTE_MARKER = re.compile(r"(?:>[ \t]?)+")
 _SENTENCE_END = re.compile(r"(?:[.!?…]+[\"'”’)\]]*(?=\s|$)|[。！？]+[\"'”’）)\]]*)")
 _QUOTED_COLON = re.compile(r"^[“\"'‘「『]([^”\"'’」』]{1,80})[”\"'’」』]\s*[:：]\s*(\S.*)$")
 _BOLD_DEFINITION = re.compile(r"^\*\*([^*]{1,80})\*\*\s*[:\-–—]\s+(\S.*)$")
+_SENTENCE_TAIL = re.compile(r"[.!?…。！？][\"'”’)\]]*$")
+_IDENTIFIER_TOKEN = re.compile(r"(?<!\w)[\w]*_[\w]+", re.UNICODE)
 _MAX_TERM_WORDS = 8
 
 
@@ -98,7 +103,7 @@ def build_document(document_id: str, lines: Sequence[Line], *, markdown_headings
             continue
         if in_fence:
             continue
-        heading = _heading(line, stripped, markdown_headings)
+        heading = _heading(line, stripped, markdown_headings, _next_stripped(lines, number))
         if heading is not None:
             level, title, body_start = heading
             while stack and stack[-1].level >= level:
@@ -142,7 +147,9 @@ def build_document(document_id: str, lines: Sequence[Line], *, markdown_headings
     return document
 
 
-def _heading(line: Line, stripped: str, markdown_headings: bool) -> tuple[int, str, int | None] | None:
+def _heading(
+    line: Line, stripped: str, markdown_headings: bool, following: str = ""
+) -> tuple[int, str, int | None] | None:
     """Return (level, title, start of body text on the same line or None)."""
     if not stripped:
         return None
@@ -168,6 +175,68 @@ def _heading(line: Line, stripped: str, markdown_headings: bool) -> tuple[int, s
             level = 1 + number.count(".")
         title = f"{number} {(structural.group('title') or '').strip()}".strip()
         return level, title, None
+    unstyled = _unstyled_heading(stripped, following)
+    if unstyled is not None:
+        return unstyled[0], unstyled[1], None
+    return None
+
+
+def _next_stripped(lines: Sequence[Line], after: int) -> str:
+    """The next visible line after ``after`` (1-based), skipping blanks and fences."""
+    in_fence = False
+    for line in lines[after:]:
+        stripped = line.text.strip()
+        if stripped.startswith(("```", "~~~")):
+            in_fence = not in_fence
+            continue
+        if in_fence or not stripped:
+            continue
+        return stripped
+    return ""
+
+
+def _unstyled_heading(stripped: str, following: str) -> tuple[int, str] | None:
+    """A short label line that is not a sentence, list, table, or glossary definition.
+
+    Colon labels (``Must block:``, ``Topic: slug``) and identifier slugs that contain
+    ``_`` are headings when body text follows. A short imperative without those
+    markers stays a span. No language keyword list.
+    """
+    if not following or len(stripped) > MAX_LABEL_HEADING_CHARS:
+        return None
+    if stripped.startswith("|") or _LIST_MARKER.match(stripped) or _TABLE_DIVIDER.match(stripped):
+        return None
+    if _QUOTED_COLON.match(stripped) or _BOLD_DEFINITION.match(stripped):
+        return None
+    if _SENTENCE_TAIL.search(stripped):
+        return None
+    colon = _colon_heading(stripped)
+    if colon is not None:
+        return colon
+    tokens = stripped.split()
+    if len(tokens) > MAX_UNSTYLED_HEADING_TOKENS:
+        return None
+    if _IDENTIFIER_TOKEN.search(stripped) or _colon_heading(following) is not None:
+        return 1, stripped
+    return None
+
+
+def _colon_heading(stripped: str) -> tuple[int, str] | None:
+    """Level 2 when the line is a trailing-colon label; level 1 when a short suffix follows."""
+    if _QUOTED_COLON.match(stripped) or _BOLD_DEFINITION.match(stripped):
+        return None
+    if stripped.endswith((":", "：")) and len(stripped) > 1:
+        return 2, stripped
+    for separator in (":", "："):
+        if separator not in stripped:
+            continue
+        prefix, suffix = stripped.rsplit(separator, 1)
+        if not prefix.strip():
+            continue
+        tail = suffix.strip()
+        if not tail or len(tail) > MAX_COLON_SUFFIX_CHARS or _SENTENCE_TAIL.search(tail):
+            continue
+        return 1, stripped
     return None
 
 
@@ -180,6 +249,8 @@ def _preferred_label(title: str, stack: list[_Heading], line_number: int) -> str
     for parent in reversed(stack):
         if _title_number(parent.title):
             return f"{parent.section}.{slug}"
+    if stack:
+        return f"{stack[-1].section}/{slug}"
     return slug
 
 

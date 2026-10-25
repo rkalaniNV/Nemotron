@@ -118,6 +118,7 @@ class Draft:
     quarantine_reasons: list[str] = field(default_factory=list)
     glossary_terms: tuple[str, ...] = ()
     window_id: str | None = None
+    heading_path: tuple[str, ...] = ()
     order: int = 0
     passes: int = 1
 
@@ -556,6 +557,7 @@ def _candidate_draft(
         decision_reasons=decision_reasons,
         glossary_terms=_term_list(window.target.get("glossary_terms")),
         window_id=window.window_id,
+        heading_path=tuple(window.heading_path),
     )
 
 
@@ -771,6 +773,7 @@ def _preauthored_draft(
         quarantine_reasons=provenance_reasons,
         glossary_terms=tuple(sorted({term for span in spans for term in span.get("glossary_terms", [])})),
         window_id=rule.provenance.source_span_id,
+        heading_path=_heading_path(spans[0] if spans else None),
     )
 
 
@@ -864,27 +867,64 @@ def _assign_ids(drafts: Sequence[Draft], uncertainties: list[dict[str, Any]]) ->
         draft.rule = _replace(draft.rule, policy_id=policy_id)
         by_id[policy_id] = draft
         kept.append(draft)
-    sections: dict[tuple[str, str], list[Draft]] = {}
+    leaves: dict[tuple[str, str], list[Draft]] = {}
     for draft in kept:
-        sections.setdefault((draft.rule.provenance.document_id, draft.rule.provenance.section or ""), []).append(draft)
+        leaves.setdefault((draft.rule.provenance.document_id, draft.rule.provenance.section or ""), []).append(draft)
     suffixes: dict[str, int] = {}
-    for group in sections.values():
+    for group in leaves.values():
         group.sort(key=lambda item: item.order)
         acting = [draft for draft in group if not _is_allow_only(draft)]
         for draft in group:
-            if not acting or not _is_allow_only(draft):
+            if not _is_allow_only(draft):
+                continue
+            if not acting:
                 continue
             if len(acting) != 1:
                 draft.decision_reasons.append(f"allow rule has {len(acting)} possible acting partners in its section")
                 continue
-            partner = acting[0].rule.policy_id
-            suffixes[partner] = suffixes.get(partner, 0) + 1
-            count = suffixes[partner]
-            policy_id = f"{partner}{ALLOW_SUFFIX}" + (f"-{count}" if count > 1 else "")
-            draft.rule = _replace(draft.rule, policy_id=policy_id, paired_with=partner)
-            if acting[0].rule.paired_with is None:
-                acting[0].rule = _replace(acting[0].rule, paired_with=policy_id)
+            _pair_allow(draft, acting[0], suffixes)
+    acting_by_parent: dict[tuple[str, tuple[str, ...]], list[Draft]] = {}
+    for draft in kept:
+        if _is_allow_only(draft):
+            continue
+        acting_by_parent.setdefault(_parent_key(draft), []).append(draft)
+    for draft in kept:
+        if not _is_allow_only(draft) or draft.rule.paired_with is not None:
+            continue
+        if any("possible acting partners" in reason for reason in draft.decision_reasons):
+            continue
+        acting = acting_by_parent.get(_parent_key(draft), [])
+        if len(acting) == 1:
+            _pair_allow(draft, acting[0], suffixes)
     return kept
+
+
+def _pair_allow(draft: Draft, partner: Draft, suffixes: dict[str, int]) -> None:
+    partner_id = partner.rule.policy_id
+    suffixes[partner_id] = suffixes.get(partner_id, 0) + 1
+    count = suffixes[partner_id]
+    policy_id = f"{partner_id}{ALLOW_SUFFIX}" + (f"-{count}" if count > 1 else "")
+    draft.rule = _replace(draft.rule, policy_id=policy_id, paired_with=partner_id)
+    if partner.rule.paired_with is None:
+        partner.rule = _replace(partner.rule, paired_with=policy_id)
+
+
+def _parent_key(draft: Draft) -> tuple[str, tuple[str, ...]]:
+    """Group sibling leaves under the same heading parent. A mixed leaf still pairs first."""
+    document = draft.rule.provenance.document_id
+    path = tuple(draft.heading_path)
+    if len(path) >= 2:
+        return document, path[:-1]
+    if path:
+        return document, path
+    return document, (draft.rule.provenance.section or "",)
+
+
+def _heading_path(span: Mapping[str, Any] | None) -> tuple[str, ...]:
+    path = span.get("heading_path") if isinstance(span, Mapping) else None
+    if isinstance(path, (list, tuple)) and all(isinstance(item, str) for item in path):
+        return tuple(path)
+    return ()
 
 
 def _is_allow_only(draft: Draft) -> bool:

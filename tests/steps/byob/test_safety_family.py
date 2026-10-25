@@ -964,7 +964,11 @@ def test_per_policy_minimum_is_checked_against_extracted_rule_inventory(tmp_path
         ({"generation": {"turn_mix": {"multi_turn": 0.5}}}, "shares must add up to 1"),
         (
             {"generation": {"paraphrases_per_cell": 0}},
-            "generation.paraphrases_per_cell must be a whole number from 1 through 5",
+            "generation.paraphrases_per_cell must be a whole number from 1 through 7",
+        ),
+        (
+            {"generation": {"paraphrases_per_cell": 8}},
+            "generation.paraphrases_per_cell must be a whole number from 1 through 7",
         ),
         ({"proposals": {"jurisdicton": "VN"}}, "Unknown proposals keys: jurisdicton"),
         ({"proposals": {"target_languages": "en"}}, "proposals.target_languages must be a list"),

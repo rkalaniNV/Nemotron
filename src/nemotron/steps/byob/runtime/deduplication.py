@@ -18,6 +18,7 @@ import glob
 import logging
 import os
 import shutil
+import sys
 from abc import ABC, abstractmethod
 
 import pandas as pd
@@ -25,6 +26,11 @@ import pandas as pd
 from nemotron.steps.byob.runtime.config import ByobConfig
 
 logger = logging.getLogger(__name__)
+
+
+def curator_semantic_backend_available() -> bool:
+    """Curator's RAPIDS semantic stage runs on Linux. Other hosts use the CPU backend."""
+    return sys.platform.startswith("linux")
 
 
 class TextSemanticDeduplication(ABC):
@@ -153,11 +159,17 @@ class TextSemanticDeduplication(ABC):
         dataset_temp = self.prepare_input_data(dataset)
         input_file = os.path.join(self.input_path, "questions.parquet")
         dataset_temp.to_parquet(input_file)
-        try:
-            self._run_curator(input_file)
-        except (ImportError, ModuleNotFoundError) as exc:
-            logger.warning("Curator GPU semantic backend is unavailable; using the CPU backend: %s", exc)
+        if not curator_semantic_backend_available():
+            logger.warning(
+                "Curator GPU semantic backend is unavailable on %s; using the CPU backend", sys.platform
+            )
             self._run_cpu(dataset_temp)
+        else:
+            try:
+                self._run_curator(input_file)
+            except (ImportError, ModuleNotFoundError) as exc:
+                logger.warning("Curator GPU semantic backend is unavailable; using the CPU backend: %s", exc)
+                self._run_cpu(dataset_temp)
         dataset_dedup = self._mark_duplicates(dataset)
         num_duplicates = dataset_dedup["is_duplicate"].sum()
         logger.info(f"Found {num_duplicates}/{len(dataset_dedup)} duplicate questions")

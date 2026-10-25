@@ -80,6 +80,7 @@ _SCRIPT_NAME = re.compile(r"^[A-Za-z]{2,24}$")
 DEFAULT_ASSURANCE = {"profile": "standard"}
 ASSURANCE_KEYS = frozenset({"profile", "review_sample_rate", "second_judge_on"})
 GENERATION_KEYS = frozenset({"decision_mix", "case_family_mix", "turn_mix", "paraphrases_per_cell", "modules"})
+MAX_PARAPHRASES_PER_CELL = 7
 # Same Curator knobs the MCQ family uses. Safety drops marked near-dups by default.
 DEFAULT_SEMANTIC_DEDUP = {
     "enabled": True,
@@ -484,9 +485,11 @@ def _generation(value: Any, messages: list[str]) -> dict[str, Any]:
                 f"{', '.join(sorted(MODULE_STRING_FLAGS))}; received {flag!r}."
             )
     variants = supplied.get("paraphrases_per_cell", DEFAULT_GENERATION["paraphrases_per_cell"])
-    if isinstance(variants, bool) or not isinstance(variants, int) or not 1 <= variants <= 5:
-        messages.append("generation.paraphrases_per_cell must be a whole number from 1 through 5.")
-        variants = DEFAULT_GENERATION["paraphrases_per_cell"]
+    if isinstance(variants, bool) or not isinstance(variants, int) or not 1 <= variants <= MAX_PARAPHRASES_PER_CELL:
+        messages.append(
+            "generation.paraphrases_per_cell must be a whole number from 1 through "
+            f"{MAX_PARAPHRASES_PER_CELL}."
+        )
     mixes = {
         key: _mix(
             f"generation.{key}",

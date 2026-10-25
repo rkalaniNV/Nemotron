@@ -245,20 +245,38 @@ def _contradiction(
         }
         - set(allowing)
     )
-    if allowing and acting:
-        return allowing[0], acting
-    return None
+    if not allowing or not acting:
+        return None
+    allow_group = by_id[allowing[0]].rule.conditions().get("allow_if")
+    if allow_group is not None and allow_group.operator == "none_of":
+        allow_legs = frozenset(allow_group.legs)
+        acting = [policy_id for policy_id in acting if _none_of_acting_legs(by_id[policy_id]) == allow_legs]
+        if not acting:
+            return None
+    return allowing[0], acting
+
+
+def _none_of_acting_legs(rule: PolicyRule) -> frozenset[str] | None:
+    """The none_of legs an acting condition uses, when every such group names the same set."""
+    found: frozenset[str] | None = None
+    for name in ("block_if", "escalate_if", "require_confirmation_if"):
+        group = rule.rule.conditions().get(name)
+        if group is None or group.operator != "none_of":
+            continue
+        legs = frozenset(group.legs)
+        if found is not None and found != legs:
+            return None
+        found = legs
+    return found
 
 
 def _has_exact_trigger(rule: PolicyRule, name: str, facts: frozenset[str]) -> bool:
-    group = rule.rule.conditions().get(name)
-    if group is None:
-        return False
-    if group.operator == "none_of":
-        return not set(group.legs) & facts
-    return facts in (
-        [frozenset(group.legs)] if group.operator == "all_of" else [frozenset([leg]) for leg in group.legs]
-    )
+    """True when ``facts`` is that group's own minimal witness, not merely a firing event.
+
+    ``none_of`` fires on any facts that omit its legs, including another rule's unrelated
+    trigger. The exact witness is the empty set ``_trigger_sets`` already records.
+    """
+    return facts in _trigger_sets(rule, (name,))
 
 
 def _exact_acting_trigger(rule: PolicyRule, facts: frozenset[str]) -> bool:
