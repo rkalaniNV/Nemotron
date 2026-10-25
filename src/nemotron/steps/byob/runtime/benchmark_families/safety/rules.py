@@ -52,6 +52,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import ResolvedConfig
 from nemotron.steps.byob.runtime.benchmark_families.safety.conflicts import detect_conflicts
 from nemotron.steps.byob.runtime.benchmark_families.safety.contrast import shared_frame_evidence
+from nemotron.steps.byob.runtime.benchmark_families.safety.shape import flattened_condition_reason
 from nemotron.steps.byob.runtime.benchmark_families.safety.coverage import COVERAGE_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.dataset import DATASET_OUTPUTS
 from nemotron.steps.byob.runtime.benchmark_families.safety.extract import (
@@ -542,6 +543,10 @@ def _candidate_draft(
         candidate.critical_risk_basis,
     )
     rule = _replace(rule, severity=severity, severity_basis=basis)
+    flatten = flattened_condition_reason(rule)
+    if flatten:
+        decision_reasons.append(flatten)
+        flags.append(_flag("flattened_cross_slot_conditions", flatten))
     signals = ConfidenceSignals(
         quote_match=1.0 if found else 0.0,
         schema_completeness=_completeness(rule, expected in actions),
@@ -995,10 +1000,13 @@ def _ascii_snake(text: str) -> str | None:
 
 
 def _completeness(rule: PolicyRule, action_produced: bool) -> float:
+    """Share of schema facts that are present.
+
+    Unspecified actor, action, and object are IR wildcards, not missing fields.
+    The extract prompt already forbids guessing them when the clause does not
+    name them. Flattened operators are a routing reason, not a completeness hole.
+    """
     checks = [
-        rule.rule.actor != "unspecified",
-        rule.rule.action != "unspecified",
-        rule.rule.object != "unspecified",
         bool(rule.rule.conditions()),
         rule.testability is not None,
         action_produced,

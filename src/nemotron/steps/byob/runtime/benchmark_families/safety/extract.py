@@ -42,7 +42,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import (
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.windows import EvidenceWindow
 
-PROMPT_VERSION = 8
+PROMPT_VERSION = 9
 CACHE_DIR = "extraction"
 MODEL_CONFIG_KEYS = ("alias", "provider", "model")
 _DROPPED_KEYS = MODEL_ONLY_KEYS | {"confidence"}
@@ -69,6 +69,11 @@ For each rule:
   Copy the shared triggering frame into that class's operator evidence. Copy each residue's
   exact words into that condition's evidence. Do not collapse the shared frame and the residue
   into one condition name.
+  Slash- or comma-separated alternatives in the same grammatical slot (A/B/C, or a quoted
+  list of synonyms) are one any_of group: one named condition for the whole slot, or one
+  condition per alternative under a shared frame. Two slots combined (a list of verbs with a
+  list of objects, or quoted slash-groups joined by another marker) are all_of of
+  one named condition per slot. Do not store every slash or comma token as its own any_of or all_of leg.
 - condition_operators: a list. For every condition class with two or more conditions, append
   one object with condition_class, operator (all_of, any_of, or none_of), and operator evidence
   copied exactly from source_quote. Also append none_of for a single condition when absence of

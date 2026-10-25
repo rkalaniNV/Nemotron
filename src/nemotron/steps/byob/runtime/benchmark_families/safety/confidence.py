@@ -221,7 +221,8 @@ def route_rule(
     - needs_decision: confidence is between the thresholds, or an operator is
       unresolved, a field is unsupported, a conflict exists, the rule is only
       partially testable, or the caller passes a decision reason. A ``block_if``
-      stored as default ``any_of`` is not a reason.
+      stored as default ``any_of`` is not a reason. A caller may also pass a
+      flatten reason when a multi-leg operator mixes slash-list slots.
     - eligible_for_generation: everything else.
 
     A rejected rule stays rejected; routing does not revive a reviewer's decision.

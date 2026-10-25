@@ -142,6 +142,10 @@ def test_extract_prompt_asks_to_split_shared_frames() -> None:
         "Do not collapse the shared frame and the residue\n  into one condition name"
         in prompt
     )
+    assert "same grammatical slot" in prompt
+    assert "one named condition per slot" in prompt
+    assert "Do not store every slash or comma token as its own any_of or all_of leg." in prompt
+    assert extract.PROMPT_VERSION == 9
 
 
 def test_legacy_operator_hint_without_evidence_needs_a_decision(tmp_path: Path, use: Any) -> None:
