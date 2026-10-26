@@ -17,10 +17,13 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     CONFIDENCE_WEIGHTS,
     ConfidenceSignals,
     Thresholds,
+    canonical_text,
+    comma_or_semicolon,
     compute_confidence,
     fold_latin,
     operator_explicitness,
     quote_in_span,
+    quote_match_key,
     route_rule,
     route_rule_from_span,
 )
@@ -585,6 +588,53 @@ def test_signals_must_be_scores(value: Any) -> None:
 )
 def test_quote_in_span(quote: str, span: str, found: bool) -> None:
     assert quote_in_span(quote, span) is found
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "same"),
+    [
+        ("hướng dẫn hoạt động khủng bố.", "hướng dẫn hoạt động khủng bố", True),
+        ("foo.", "foo。", True),
+        ("禁止。", "禁止", True),
+        ("Block it!", "Block it", True),
+        ("Block it?", "Block it", True),
+        ("Block it…", "Block it", True),
+        ("Block it！", "Block it", True),
+        ("Block it？", "Block it", True),
+        ("Block it．", "Block it", True),
+        ("Block it?!", "Block it", True),
+        ("هل هذا؟", "هل هذا", True),
+        ("တားမြစ်၊", "တားမြစ်", True),
+        ("བཀག།", "བཀག", True),
+        ("A. Nguyen", "A. Nguyen", True),
+        ("hướng dẫn hoạt động khủng bố.", "hướng dẫn bạo loạn vũ trang", False),
+        ("redis, kafka,", "redis, kafka", False),
+        ("list (a)", "list (a", False),
+        ("...", "???", False),
+    ],
+)
+def test_quote_match_key_ignores_trailing_other_punctuation(left: str, right: str, same: bool) -> None:
+    assert (quote_match_key(left) == quote_match_key(right)) is same
+
+
+def test_canonical_text_keeps_a_trailing_period() -> None:
+    assert canonical_text("hướng dẫn hoạt động khủng bố.").endswith(".")
+
+
+@pytest.mark.parametrize(
+    ("char", "listed"),
+    [
+        (",", True),
+        ("，", True),
+        (";", True),
+        ("；", True),
+        (".", False),
+        ("。", False),
+        (")", False),
+    ],
+)
+def test_comma_or_semicolon_uses_unicode_name_tokens(char: str, listed: bool) -> None:
+    assert comma_or_semicolon(char) is listed
 
 
 def test_fold_latin_maps_non_decomposing_letters() -> None:

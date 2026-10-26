@@ -296,3 +296,40 @@ def canonical_text(text: str) -> str:
     """NFC, straight quotes, no zero-width characters, single spaces."""
     text = unicodedata.normalize("NFC", text).translate(_QUOTES).translate(_INVISIBLE)
     return _WHITESPACE.sub(" ", text).strip()
+
+
+def quote_match_key(text: str) -> str:
+    """Pair extraction-pass quotes that differ only by trailing Other-punctuation.
+
+    A terminator the model copied from the span is the same clause as the span
+    without it. Category ``Po`` covers Latin/CJK/Arabic stops and script-specific
+    section marks; commas and semicolons stay so a list is not merged with its
+    prefix. Closing brackets (``Pe``) are not stripped. Stored ``source_quote``
+    and evidence grounding still use ``canonical_text``. A punctuation-only quote
+    keeps its folded form so ``...`` does not collide with ``???``.
+    """
+    folded = canonical_text(text).casefold()
+    stripped = folded.rstrip()
+    while stripped and (stripped[-1].isspace() or _pairing_trailer(stripped[-1])):
+        stripped = stripped[:-1].rstrip()
+    return stripped or folded
+
+
+def comma_or_semicolon(char: str) -> bool:
+    """True when Unicode names the character as a comma or semicolon token."""
+    return _name_has_token(char, "COMMA", "SEMICOLON")
+
+
+def _pairing_trailer(char: str) -> bool:
+    """Trailing Other-punctuation except list separators, for pass pairing only."""
+    if comma_or_semicolon(char):
+        return False
+    return unicodedata.category(char) == "Po"
+
+
+def _name_has_token(char: str, *tokens: str) -> bool:
+    name = unicodedata.name(char, "")
+    if not name:
+        return False
+    padded = f" {name} "
+    return any(f" {token} " in padded for token in tokens)

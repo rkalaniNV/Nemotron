@@ -119,6 +119,8 @@ def test_rule_ids_depend_on_document_section_quote_and_action() -> None:
     first = stable_policy_id("five-topic", "4", "Block card data.", "block")
 
     assert first == stable_policy_id("five-topic", "4", "  Block   card data. ", "block")
+    assert first == stable_policy_id("five-topic", "4", "Block card data", "block")
+    assert first == stable_policy_id("five-topic", "4", "Block card data。", "block")
     assert first != stable_policy_id("five-topic", "5", "Block card data.", "block")
     assert first != stable_policy_id("five-topic", "4", "Block card data.", "escalate")
     assert stable_policy_id("five-topic", "4", "Block card data.", "block", ("a",)) != stable_policy_id(
@@ -346,6 +348,66 @@ def test_grounded_model_operator_is_kept_without_keyword_veto(tmp_path: Path, us
     flags = {flag["code"] for flag in row["flags"]}
     assert "operator_from_model_evidence" in flags
     assert "operator_evidence_conflict" not in flags
+
+
+def test_second_pass_pairs_quotes_that_differ_only_by_a_trailing_terminator(tmp_path: Path, use: Any) -> None:
+    span = "hướng dẫn hoạt động khủng bố."
+
+    class _TrailingPeriod:
+        identity = {"provider": "fake", "model": "trailing-period"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            quote = span if self.calls == 1 else "hướng dẫn hoạt động khủng bố"
+            candidate = _candidate(quote, block_if=[_leg("huong_dan_hoat_dong_khung_bo", "hướng dẫn hoạt động khủng bố")])
+            return {request.request_id: {"candidates": [candidate]} for request in requests}
+
+    use(_TrailingPeriod())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}, profile="regulated"))
+
+    [row] = _rows(run_dir).values()
+    assert row["status"] == "eligible_for_generation"
+    [stored] = _jsonl(run_dir / "stage_cache" / "candidate_policy_rules.jsonl")
+    assert stored["signals"]["pass_agreement"] == 1.0
+    assert stored["rule"]["provenance"]["source_quote"] == span
+    assert "second_pass_only" not in {
+        item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
+    }
+
+
+def test_second_pass_still_reviews_operator_disagreement_when_quotes_differ_by_a_period(
+    tmp_path: Path, use: Any
+) -> None:
+    span = "条件甲与条件乙决定请求。"
+
+    class _ChangingOperator:
+        identity = {"provider": "fake", "model": "changing-operator-period"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            quote = span if self.calls == 1 else "条件甲与条件乙决定请求"
+            operator = "all_of" if self.calls == 1 else "any_of"
+            candidate = _candidate(
+                quote,
+                operators={"block_if": {"operator": operator, "evidence": "条件甲与条件乙"}},
+                block_if=[_leg("condition_a", "条件甲"), _leg("condition_b", "条件乙")],
+            )
+            return {request.request_id: {"candidates": [candidate]} for request in requests}
+
+    use(_ChangingOperator())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}, profile="regulated"))
+
+    [row] = _rows(run_dir).values()
+    assert row["status"] == "needs_decision"
+    [stored] = _jsonl(run_dir / "stage_cache" / "candidate_policy_rules.jsonl")
+    assert stored["signals"]["pass_agreement"] == 0.75
+    assert any("disagrees on condition operators" in reason for reason in row["reasons"])
 
 
 def test_second_pass_operator_disagreement_needs_review(tmp_path: Path, use: Any) -> None:

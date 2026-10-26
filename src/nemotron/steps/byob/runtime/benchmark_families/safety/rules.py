@@ -47,6 +47,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     fold_latin,
     operator_explicitness,
     quote_in_span,
+    quote_match_key,
     route_rule,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import ResolvedConfig
@@ -125,7 +126,7 @@ class Draft:
 
     @property
     def quote_key(self) -> str:
-        return canonical_text(self.rule.provenance.source_quote).casefold()
+        return quote_match_key(self.rule.provenance.source_quote)
 
     @property
     def shape(self) -> tuple[Any, ...]:
@@ -831,7 +832,7 @@ def stable_policy_id(
     shape: Sequence[Any] | None = None,
 ) -> str:
     """Same source and canonical rule shape give the same ID on every run."""
-    parts = [document_id, section, canonical_text(quote).casefold(), action]
+    parts = [document_id, section, quote_match_key(quote), action]
     if shape is not None:
         parts.append(json.dumps(shape, ensure_ascii=False, separators=(",", ":")))
     material = "\x1f".join(parts)

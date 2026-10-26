@@ -41,6 +41,7 @@ from typing import Any
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     canonical_text,
+    comma_or_semicolon,
     quote_in_span,
     unsegmented_text,
 )
@@ -438,7 +439,7 @@ def _comma_alternatives(span: str) -> tuple[str, ...]:
     pieces: list[str] = []
     current: list[str] = []
     for char in span:
-        if _comma_or_semicolon(char):
+        if comma_or_semicolon(char):
             piece = "".join(current).strip()
             if piece:
                 pieces.append(piece)
@@ -456,14 +457,6 @@ def _comma_alternatives(span: str) -> tuple[str, ...]:
         if letter_count(piece) > SHORT_TRIGGER_LETTERS:
             return ()
     return tuple(pieces)
-
-
-def _comma_or_semicolon(char: str) -> bool:
-    try:
-        name = unicodedata.name(char)
-    except ValueError:
-        return False
-    return "COMMA" in name or "SEMICOLON" in name
 
 
 def _short_trigger_span(span: str) -> bool:

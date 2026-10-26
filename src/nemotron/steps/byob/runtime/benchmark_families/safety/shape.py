@@ -25,11 +25,10 @@ source-language keyword lists.
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import canonical_text
+from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import canonical_text, comma_or_semicolon
 from nemotron.steps.byob.runtime.benchmark_families.safety.contrast import letter_count
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import PolicyRule
 
@@ -190,17 +189,9 @@ def _gap_breaks_run(gap: str) -> bool:
     for char in gap:
         if char in _SLOT_QUOTES or char == "+":
             return True
-        if _comma_or_semicolon(char):
+        if comma_or_semicolon(char):
             return True
     return False
-
-
-def _comma_or_semicolon(char: str) -> bool:
-    try:
-        name = unicodedata.name(char)
-    except ValueError:
-        return False
-    return "COMMA" in name or "SEMICOLON" in name
 
 
 def _run_alternatives(text: str, slashes: Sequence[int]) -> tuple[str, ...]:
