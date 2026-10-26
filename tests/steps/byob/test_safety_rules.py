@@ -720,8 +720,61 @@ def test_same_quote_keeps_all_of_versus_one_leg_disagreement_in_review(tmp_path:
 
     [row] = _rows(run_dir).values()
     assert row["status"] == "needs_decision"
-    assert any("disagrees on condition decomposition" in reason for reason in row["reasons"])
+    assert any("disagrees on condition operators" in reason for reason in row["reasons"])
+    assert not any("disagrees on condition decomposition" in reason for reason in row["reasons"])
+    assert {"operator_disagreement", "condition_disagreement"} <= {
+        item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
+    }
+
+
+def test_same_operator_leg_cuts_stay_eligible(tmp_path: Path, use: Any) -> None:
+    quote = "Block when condition A, condition B, and condition C apply."
+
+    class _SameOperatorCuts:
+        identity = {"provider": "fake", "model": "same-operator-cuts"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            operators = {
+                "block_if": {"operator": "all_of", "evidence": "condition A, condition B, and condition C"}
+            }
+            if self.calls == 1:
+                candidate = _candidate(
+                    quote,
+                    operators=operators,
+                    block_if=[
+                        _leg("condition_a", "condition A"),
+                        _leg("condition_b", "condition B"),
+                        _leg("condition_c", "condition C"),
+                    ],
+                )
+            else:
+                candidate = _candidate(
+                    quote,
+                    operators=operators,
+                    block_if=[
+                        _leg("condition_a", "condition A"),
+                        _leg("condition_b_and_c", "condition B, and condition C"),
+                    ],
+                )
+            return {request.request_id: {"candidates": [candidate]} for request in requests}
+
+    use(_SameOperatorCuts())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{quote}\n"}, profile="regulated"))
+
+    [row] = _rows(run_dir).values()
+    assert row["status"] == "eligible_for_generation"
+    assert row["confidence"] == 0.93
+    assert not any("disagrees on condition" in reason for reason in row["reasons"])
+    [stored] = _jsonl(run_dir / "stage_cache" / "candidate_policy_rules.jsonl")
+    assert stored["signals"]["pass_agreement"] == 0.75
     assert "condition_disagreement" in {
+        item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
+    }
+    assert "operator_disagreement" not in {
         item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
     }
 

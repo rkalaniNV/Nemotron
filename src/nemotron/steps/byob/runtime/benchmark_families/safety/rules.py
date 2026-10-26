@@ -419,12 +419,12 @@ def _compare_passes(
 def _record_pass_disagreement(
     kept: Draft, other: Draft, uncertainties: list[dict[str, Any]], window_id: str
 ) -> None:
+    """Operator mismatch forces review. Same-operator leg cuts only lower pass_agreement."""
     quote = kept.rule.provenance.source_quote
     if _operator_map(kept) != _operator_map(other):
         kept.decision_reasons.append("the second extraction pass disagrees on condition operators")
         uncertainties.append(_uncertainty(window_id, "operator_disagreement", quote))
     if _condition_map(kept) != _condition_map(other):
-        kept.decision_reasons.append("the second extraction pass disagrees on condition decomposition")
         uncertainties.append(_uncertainty(window_id, "condition_disagreement", quote))
 
 
