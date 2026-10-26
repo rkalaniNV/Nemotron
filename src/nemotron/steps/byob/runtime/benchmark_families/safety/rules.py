@@ -23,6 +23,7 @@ one published confidence, and decides which rules may generate cases.
 
 import dataclasses
 import hashlib
+import itertools
 import json
 import re
 import unicodedata
@@ -49,6 +50,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.confidence import (
     quote_in_span,
     quote_match_key,
     route_rule,
+    unsegmented_text,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.config import ResolvedConfig
 from nemotron.steps.byob.runtime.benchmark_families.safety.conflicts import detect_conflicts
@@ -104,6 +106,7 @@ SECOND_PASS_PROFILES = frozenset({"regulated", "high_assurance"})
 ALLOW_SUFFIX = "-ALLOW"
 _VIOLATION_ACTIONS = frozenset({"block", "caution", "rewrite", "redact"})
 _HASHED_CONDITION = re.compile(r"^c_[0-9a-f]{8}$")
+_COVER_COMBINATION_LIMIT = 4096
 
 
 @dataclass
@@ -313,9 +316,9 @@ def _extract(
 
 
 def _needs_second_pass(draft: Draft) -> bool:
-    """True when a found quote is below 0.90 or stores a model-grounded operator."""
+    """True when the first-pass quote is unverified, below 0.90, or stores a model-grounded operator."""
     if not draft.quote_found:
-        return False
+        return True
     if compute_confidence(draft.signals) < ELIGIBLE_THRESHOLD:
         return True
     return any(group.operator_source == "model_evidence" for group in draft.rule.rule.conditions().values())
@@ -359,20 +362,70 @@ def _pass_log(index: int, outcome: Any) -> dict[str, Any]:
 def _compare_passes(
     first: list[Draft], second: list[Draft], uncertainties: list[dict[str, Any]], window_id: str
 ) -> None:
-    """Score pass agreement per rule. Pass two never saw pass one's answer."""
-    remaining = list(second)
-    for draft in first:
-        match = next((other for other in remaining if other.quote_key == draft.quote_key), None)
-        if match is not None:
-            remaining.remove(match)
-        agreement = 0.0 if match is None else _agreement(draft, match)
-        draft.signals = dataclasses.replace(draft.signals, pass_agreement=agreement)
+    """Score pass agreement per rule. Pass two never saw pass one's answer.
+
+    A first-pass draft whose quote is still not in the span does not consume its
+    partner. The grounded second-pass IR is stored instead, with the scored
+    agreement, so a valid citation is not dropped.
+    """
+    matched_second: set[int] = set()
+    promoted: list[Draft] = []
+    for draft, match in _pair_pass_drafts(first, second):
+        if match is not None and _should_adopt_second_pass_quote(draft, match):
+            _adopt_confirmed_quote(draft, match)
+        paired = match is not None and draft.quote_found
         draft.passes = 2
-        if match is not None and _operator_map(draft) != _operator_map(match):
-            draft.decision_reasons.append("the second extraction pass disagrees on condition operators")
-            uncertainties.append(_uncertainty(window_id, "operator_disagreement", draft.rule.provenance.source_quote))
-    for other in remaining:
-        uncertainties.append(_uncertainty(window_id, "second_pass_only", other.rule.provenance.source_quote))
+        if paired:
+            matched_second.add(id(match))
+            agreement = _agreement(draft, match)
+            draft.signals = dataclasses.replace(draft.signals, pass_agreement=agreement)
+            _record_pass_disagreement(draft, match, uncertainties, window_id)
+            continue
+        draft.signals = dataclasses.replace(draft.signals, pass_agreement=0.0)
+        if match is None or not match.quote_found:
+            continue
+        matched_second.add(id(match))
+        agreement = _agreement(draft, match)
+        match.signals = dataclasses.replace(match.signals, pass_agreement=agreement)
+        match.passes = 2
+        match.flags.append(
+            _flag(
+                "first_pass_quote_ungrounded",
+                "kept the grounded second-pass IR because the first-pass quote was not in the span",
+                "provenance.source_quote",
+            )
+        )
+        _record_pass_disagreement(match, draft, uncertainties, window_id)
+        promoted.append(match)
+    next_order = max((draft.order for draft in first), default=-1) + 1
+    for extra in promoted:
+        extra.order = next_order
+        next_order += 1
+        first.append(extra)
+    for extra in second:
+        if id(extra) in matched_second:
+            continue
+        uncertainties.append(_uncertainty(window_id, "second_pass_only", extra.rule.provenance.source_quote))
+        if not extra.quote_found:
+            continue
+        extra.signals = dataclasses.replace(extra.signals, pass_agreement=0.0)
+        extra.passes = 2
+        extra.order = next_order
+        next_order += 1
+        extra.decision_reasons.append("the second extraction pass found this rule and the first pass did not")
+        first.append(extra)
+
+
+def _record_pass_disagreement(
+    kept: Draft, other: Draft, uncertainties: list[dict[str, Any]], window_id: str
+) -> None:
+    quote = kept.rule.provenance.source_quote
+    if _operator_map(kept) != _operator_map(other):
+        kept.decision_reasons.append("the second extraction pass disagrees on condition operators")
+        uncertainties.append(_uncertainty(window_id, "operator_disagreement", quote))
+    if _condition_map(kept) != _condition_map(other):
+        kept.decision_reasons.append("the second extraction pass disagrees on condition decomposition")
+        uncertainties.append(_uncertainty(window_id, "condition_disagreement", quote))
 
 
 def _condition_map(draft: Draft) -> dict[str, frozenset[str]]:
@@ -398,6 +451,190 @@ def _agreement(first: Draft, second: Draft) -> float:
         _operator_map(first) == _operator_map(second),
     )
     return round(sum(checks) / len(checks), 4)
+
+
+def _pair_pass_drafts(first: Sequence[Draft], second: Sequence[Draft]) -> list[tuple[Draft, Draft | None]]:
+    """1-1 matches. Fingerprint first, then unique quote key. Ties stay unpaired."""
+    matched_first: dict[int, int] = {}
+    matched_second: dict[int, int] = {}
+    _assign_unique_pairs(matched_first, matched_second, _fingerprint_groups(first), _fingerprint_groups(second))
+    _assign_unique_pairs(
+        matched_first,
+        matched_second,
+        _quote_key_groups(first, matched_first),
+        _quote_key_groups(second, matched_second),
+    )
+    return [
+        (draft, second[matched_first[index]] if index in matched_first else None)
+        for index, draft in enumerate(first)
+    ]
+
+
+def _assign_unique_pairs(
+    matched_first: dict[int, int],
+    matched_second: dict[int, int],
+    first_groups: Mapping[Any, Sequence[int]],
+    second_groups: Mapping[Any, Sequence[int]],
+) -> None:
+    for key, lefts in first_groups.items():
+        rights = [index for index in second_groups.get(key, ()) if index not in matched_second]
+        pending = [index for index in lefts if index not in matched_first]
+        if len(pending) == 1 and len(rights) == 1:
+            matched_first[pending[0]] = rights[0]
+            matched_second[rights[0]] = pending[0]
+
+
+def _fingerprint_groups(drafts: Sequence[Draft]) -> dict[tuple[Any, ...], list[int]]:
+    grouped: dict[tuple[Any, ...], list[int]] = {}
+    for index, draft in enumerate(drafts):
+        grouped.setdefault(_pairing_fingerprint(draft), []).append(index)
+    return grouped
+
+
+def _quote_key_groups(drafts: Sequence[Draft], taken: Mapping[int, int]) -> dict[str, list[int]]:
+    grouped: dict[str, list[int]] = {}
+    for index, draft in enumerate(drafts):
+        if index in taken:
+            continue
+        grouped.setdefault(draft.quote_key, []).append(index)
+    return grouped
+
+
+def _pairing_fingerprint(draft: Draft) -> tuple[Any, ...]:
+    """Expected action plus per-class operator and grounded evidence, or names when evidence is incomplete."""
+    grounded = _grounded_conditions(draft)
+    classes = tuple(sorted(set(draft.rule.rule.conditions()) | set(draft.rule.unresolved_conditions)))
+    operators = _operator_map(draft)
+    parts: list[tuple[Any, ...]] = []
+    for name in classes:
+        legs = draft._legs(name)
+        texts = [quote_match_key(grounded[leg]) for leg in legs if leg in grounded]
+        kind = "evidence" if legs and len(texts) == len(legs) else "names"
+        payload = tuple(sorted(texts if kind == "evidence" else legs))
+        parts.append((name, operators.get(name), kind, payload))
+    return (draft.expected_action, tuple(parts))
+
+
+def _grounded_conditions(draft: Draft) -> dict[str, str]:
+    blob = draft.rule.extensions.get("grounded_evidence") if isinstance(draft.rule.extensions, Mapping) else None
+    conditions = blob.get("conditions") if isinstance(blob, Mapping) else None
+    if not isinstance(conditions, Mapping):
+        return {}
+    return {
+        name: text for name, text in conditions.items() if isinstance(name, str) and isinstance(text, str) and text
+    }
+
+
+def _should_adopt_second_pass_quote(first: Draft, second: Draft) -> bool:
+    """True when pass two uniquely confirms the same IR with a quote that is actually in the span."""
+    if first.quote_found or not second.quote_found:
+        return False
+    if _agreement(first, second) != 1.0:
+        return False
+    return _quote_covers_draft_evidence(first, second.rule.provenance.source_quote)
+
+
+def _quote_covers_draft_evidence(draft: Draft, quote: str) -> bool:
+    """True when every quote-bound field of the first-pass IR appears in ``quote``."""
+    grounded = _grounded_conditions(draft)
+    if not grounded or not all(quote_in_span(text, quote) for text in grounded.values()):
+        return False
+    blob = draft.rule.extensions.get("grounded_evidence") if isinstance(draft.rule.extensions, Mapping) else None
+    if isinstance(blob, Mapping):
+        for key in ("operator", "shared_frame"):
+            values = blob.get(key)
+            if isinstance(values, Mapping) and not all(
+                isinstance(text, str) and text and quote_in_span(text, quote) for text in values.values()
+            ):
+                return False
+    signals = draft.rule.signals
+    for field_name in ("binding_evidence", "conditional_evidence"):
+        value = getattr(signals, field_name, None)
+        if isinstance(value, str) and value and not quote_in_span(value, quote):
+            return False
+    return True
+
+
+def _adopt_confirmed_quote(draft: Draft, confirmed: Draft) -> None:
+    """Keep first-pass conditions; take quote-bound provenance from the grounded second pass."""
+    quote = confirmed.rule.provenance.source_quote
+    provenance = draft.rule.provenance.model_copy(update={"source_quote": quote})
+    draft.rule = _replace(
+        draft.rule,
+        provenance=provenance,
+        scope=confirmed.rule.scope,
+        signals=confirmed.rule.signals,
+    )
+    draft.quote_found = True
+    draft.signals = dataclasses.replace(draft.signals, quote_match=1.0)
+    draft.flags.append(
+        _flag(
+            "quote_from_second_pass",
+            "first-pass quote was not in the span; stored quote is the unique second-pass quote",
+            "provenance.source_quote",
+        )
+    )
+
+
+def _unique_covering_quote(needles: Sequence[str], text: str) -> str | None:
+    """Unique shortest clause slice that contains every needle. None if ambiguous or missing."""
+    haystack = canonical_text(text)
+    groups: list[list[tuple[int, int]]] = []
+    seen: set[str] = set()
+    combinations = 1
+    for needle in needles:
+        key = canonical_text(needle)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        spans = _canonical_occurrences(needle, haystack)
+        if not spans:
+            return None
+        combinations *= len(spans)
+        if combinations > _COVER_COMBINATION_LIMIT:
+            return None
+        groups.append(spans)
+    if not groups:
+        return None
+    best_length: int | None = None
+    covers: list[tuple[int, int]] = []
+    for combo in itertools.product(*groups):
+        start = min(span[0] for span in combo)
+        end = max(span[1] for span in combo)
+        length = end - start
+        bound = (start, end)
+        if best_length is None or length < best_length:
+            best_length = length
+            covers = [bound]
+        elif length == best_length and bound not in covers:
+            covers.append(bound)
+    if len(covers) != 1:
+        return None
+    start, end = covers[0]
+    piece = haystack[start:end]
+    if not piece or not quote_in_span(piece, text):
+        return None
+    return piece
+
+
+def _canonical_occurrences(needle: str, haystack: str) -> list[tuple[int, int]]:
+    """Offsets in an already-canonical haystack, using the same match rules as quote_in_span."""
+    ned = canonical_text(needle)
+    if not ned or not haystack:
+        return []
+    spans = [(match.start(), match.end()) for match in re.finditer(rf"(?<!\w){re.escape(ned)}(?!\w)", haystack)]
+    if spans:
+        return spans
+    if sum(char.isalnum() for char in ned) < 2 or not unsegmented_text(ned):
+        return []
+    spans = []
+    start = 0
+    while True:
+        index = haystack.find(ned, start)
+        if index < 0:
+            return spans
+        spans.append((index, index + len(ned)))
+        start = index + 1
 
 
 def _window_drafts(
@@ -469,6 +706,18 @@ def _candidate_draft(
     if not condition_names:
         uncertainties.append(_uncertainty(window.window_id, "no_conditions", quote))
         return None
+    if not found:
+        repaired = _unique_covering_quote([*condition_evidence.values(), *operator_evidence.values()], clause)
+        if repaired:
+            quote = repaired
+            found = True
+            flags.append(
+                _flag(
+                    "quote_from_clause_cover",
+                    "source_quote was not in the span; stored quote is the unique clause span covering grounded evidence",
+                    "provenance.source_quote",
+                )
+            )
     expected = candidate.expected_action
     produced = {
         "block_if": expected if expected in _VIOLATION_ACTIONS else "block",
@@ -1006,9 +1255,11 @@ def _completeness(rule: PolicyRule, action_produced: bool) -> float:
     Unspecified actor, action, and object are IR wildcards, not missing fields.
     The extract prompt already forbids guessing them when the clause does not
     name them. Flattened operators are a routing reason, not a completeness hole.
+    Unresolved condition classes still count: the legs were read, and missing
+    operators are scored by ``operator_explicitness`` and routing, not twice.
     """
     checks = [
-        bool(rule.rule.conditions()),
+        bool(rule.rule.conditions() or rule.unresolved_conditions),
         rule.testability is not None,
         action_produced,
     ]

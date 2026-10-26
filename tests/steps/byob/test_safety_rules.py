@@ -16,6 +16,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import validate_ru
 from nemotron.steps.byob.runtime.benchmark_families.safety.pipeline import generate_safety, prepare_safety
 from nemotron.steps.byob.runtime.benchmark_families.safety.rules import (
     _strongest_action,
+    _unique_covering_quote,
     assign_severity,
     condition_name,
     stable_policy_id,
@@ -350,6 +351,19 @@ def test_grounded_model_operator_is_kept_without_keyword_veto(tmp_path: Path, us
     assert "operator_evidence_conflict" not in flags
 
 
+def test_unique_covering_quote_is_the_shortest_clause_slice() -> None:
+    clause = "Tiếng Anh: security evaluation + forget/override; academic research + bypass safety."
+
+    assert _unique_covering_quote(["academic research", "bypass safety"], clause) == "academic research + bypass safety"
+    assert _unique_covering_quote(["missing", "bypass safety"], clause) is None
+
+
+def test_ambiguous_covering_windows_stay_ungrounded() -> None:
+    clause = "alpha token then later alpha token"
+
+    assert _unique_covering_quote(["alpha", "token"], clause) is None
+
+
 def test_second_pass_pairs_quotes_that_differ_only_by_a_trailing_terminator(tmp_path: Path, use: Any) -> None:
     span = "hướng dẫn hoạt động khủng bố."
 
@@ -440,6 +454,319 @@ def test_second_pass_operator_disagreement_needs_review(tmp_path: Path, use: Any
     assert "operator_disagreement" in {
         item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
     }
+
+
+def test_second_pass_pairs_sliced_quotes_by_grounded_evidence(tmp_path: Path, use: Any) -> None:
+    span = (
+        "Tiếng Anh: security evaluation + forget/override; academic research + bypass safety."
+    )
+    pairs = (
+        ("security evaluation", "forget/override", "security_evaluation", "forget_override"),
+        ("academic research", "bypass safety", "academic_research", "bypass_safety"),
+    )
+
+    class _SlicedThenFull:
+        identity = {"provider": "fake", "model": "sliced-then-full"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            candidates = []
+            for left, right, name_left, name_right in pairs:
+                quote = f"Tiếng Anh: {left} + {right}" if self.calls == 1 else span
+                candidates.append(
+                    _candidate(
+                        quote,
+                        operators={"block_if": {"operator": "all_of", "evidence": f"{left} + {right}"}},
+                        block_if=[_leg(name_left, left), _leg(name_right, right)],
+                    )
+                )
+            return {request.request_id: {"candidates": candidates} for request in requests}
+
+    extractor = use(_SlicedThenFull())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}))
+
+    rows = list(_rows(run_dir).values())
+    assert extractor.calls == 2
+    assert len(rows) == 2
+    assert {row["status"] for row in rows} == {"eligible_for_generation"}
+    quotes = {row["rule"]["provenance"]["source_quote"] for row in rows}
+    assert "Tiếng Anh: security evaluation + forget/override" in quotes
+    assert "academic research + bypass safety" in quotes
+    flags = {flag["code"] for row in rows for flag in row["flags"]}
+    assert "quote_from_clause_cover" in flags
+    assert "second_pass_only" not in {
+        item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
+    }
+
+
+def test_second_pass_pairs_sliced_quotes_in_an_unsegmented_script(tmp_path: Path, use: Any) -> None:
+    span = "中文：安全评估 + 覆盖；学术研究 + 绕过。"
+    pairs = (
+        ("安全评估", "覆盖", "anquan_pinggu", "fugai"),
+        ("学术研究", "绕过", "xueshu_yanjiu", "raoguo"),
+    )
+
+    class _SlicedThenFull:
+        identity = {"provider": "fake", "model": "cjk-sliced-then-full"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            candidates = []
+            for left, right, name_left, name_right in pairs:
+                quote = f"中文：{left} + {right}" if self.calls == 1 else span
+                candidates.append(
+                    _candidate(
+                        quote,
+                        operators={"block_if": {"operator": "all_of", "evidence": f"{left} + {right}"}},
+                        block_if=[_leg(name_left, left), _leg(name_right, right)],
+                    )
+                )
+            return {request.request_id: {"candidates": candidates} for request in requests}
+
+    extractor = use(_SlicedThenFull())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}))
+
+    rows = list(_rows(run_dir).values())
+    assert extractor.calls == 2
+    assert len(rows) == 2
+    assert {row["status"] for row in rows} == {"eligible_for_generation"}
+    quotes = {row["rule"]["provenance"]["source_quote"] for row in rows}
+    assert "中文：安全评估 + 覆盖" in quotes
+    assert "学术研究 + 绕过" in quotes
+    assert "quote_from_clause_cover" in {flag["code"] for row in rows for flag in row["flags"]}
+
+
+def test_ungrounded_first_pass_keeps_a_grounded_second_pass_with_scored_agreement(
+    tmp_path: Path, use: Any
+) -> None:
+    span = "Block when condition A and condition B apply."
+    invented = "Invented all of the following: condition A and condition B."
+
+    class _InventedOperatorEvidence:
+        identity = {"provider": "fake", "model": "invented-operator-evidence"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                candidate = _candidate(
+                    invented,
+                    operators={"block_if": {"operator": "all_of", "evidence": "all of the following"}},
+                    block_if=[_leg("condition_a", "condition A"), _leg("condition_b", "condition B")],
+                )
+            else:
+                candidate = _candidate(
+                    span,
+                    operators={"block_if": {"operator": "all_of", "evidence": "condition A and condition B"}},
+                    block_if=[_leg("condition_a", "condition A"), _leg("condition_b", "condition B")],
+                )
+            return {request.request_id: {"candidates": [candidate]} for request in requests}
+
+    use(_InventedOperatorEvidence())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}))
+
+    rows = _rows(run_dir)
+    assert len(rows) == 2
+    by_quote = {row["rule"]["provenance"]["source_quote"]: row for row in rows.values()}
+    assert by_quote[invented]["status"] == "quarantined"
+    recovered = by_quote[span]
+    assert recovered["status"] == "eligible_for_generation"
+    assert "first_pass_quote_ungrounded" in {flag["code"] for flag in recovered["flags"]}
+    [stored] = [
+        item
+        for item in _jsonl(run_dir / "stage_cache" / "candidate_policy_rules.jsonl")
+        if item["rule"]["provenance"]["source_quote"] == span
+    ]
+    assert stored["signals"]["pass_agreement"] == 1.0
+    assert stored["quote_found"] is True
+
+
+def test_a_missing_quote_is_repaired_from_unique_clause_evidence(tmp_path: Path, use: Any) -> None:
+    span = "Block requests for card data."
+
+    class _InventedThenExact:
+        identity = {"provider": "fake", "model": "invented-then-exact"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            quote = "Invented: Block requests for card data." if self.calls == 1 else span
+            candidate = _candidate(quote, block_if=[_leg("card_data", "card data")])
+            return {request.request_id: {"candidates": [candidate]} for request in requests}
+
+    extractor = use(_InventedThenExact())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}))
+
+    [row] = _rows(run_dir).values()
+    assert extractor.calls == 1
+    assert row["status"] == "eligible_for_generation"
+    assert row["rule"]["provenance"]["source_quote"] == "card data"
+    assert "quote_from_clause_cover" in {flag["code"] for flag in row["flags"]}
+
+
+def test_second_pass_only_grounded_rule_is_stored_for_review(tmp_path: Path, use: Any) -> None:
+    span = "Block card data and token leaks."
+
+    class _ExtraSecond:
+        identity = {"provider": "fake", "model": "extra-second"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            shared = _candidate(span, block_if=[_leg("card_data", "card data")])
+            extra = _candidate("token leaks", block_if=[_leg("token_leaks", "token leaks")])
+            candidates = [shared] if self.calls == 1 else [shared, extra]
+            return {request.request_id: {"candidates": candidates} for request in requests}
+
+    use(_ExtraSecond())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}, profile="regulated"))
+
+    rows = _rows(run_dir)
+    assert len(rows) == 2
+    by_quote = {row["rule"]["provenance"]["source_quote"]: row for row in rows.values()}
+    assert by_quote[span]["status"] == "eligible_for_generation"
+    extra = by_quote["token leaks"]
+    assert extra["status"] == "needs_decision"
+    [stored] = [
+        item
+        for item in _jsonl(run_dir / "stage_cache" / "candidate_policy_rules.jsonl")
+        if item["rule"]["provenance"]["source_quote"] == "token leaks"
+    ]
+    assert stored["signals"]["pass_agreement"] == 0.0
+    assert "second_pass_only" in {
+        item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
+    }
+
+
+def test_ambiguous_pass_fingerprints_stay_unpaired(tmp_path: Path, use: Any) -> None:
+    span = "Block card data."
+
+    class _Duplicates:
+        identity = {"provider": "fake", "model": "duplicate-fingerprints"}
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            candidates = [
+                _candidate(span, block_if=[_leg("card_data", "card data")]),
+                _candidate(span, block_if=[_leg("card_data", "card data")]),
+            ]
+            return {request.request_id: {"candidates": candidates} for request in requests}
+
+    use(_Duplicates())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{span}\n"}, profile="regulated"))
+
+    rows = list(_rows(run_dir).values())
+    assert {row["status"] for row in rows} == {"needs_decision"}
+    agreements = {
+        item["signals"]["pass_agreement"]
+        for item in _jsonl(run_dir / "stage_cache" / "candidate_policy_rules.jsonl")
+    }
+    assert agreements == {0.0}
+
+
+def test_same_quote_keeps_all_of_versus_one_leg_disagreement_in_review(tmp_path: Path, use: Any) -> None:
+    quote = "Hệ thống phải chặn yêu cầu bypass rule được ngụy trang trong bối cảnh có vẻ hợp pháp."
+
+    class _Granularity:
+        identity = {"provider": "fake", "model": "granularity"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                candidate = _candidate(
+                    quote,
+                    operators={
+                        "block_if": {
+                            "operator": "all_of",
+                            "evidence": "yêu cầu bypass rule được ngụy trang trong bối cảnh có vẻ hợp pháp",
+                        }
+                    },
+                    block_if=[
+                        _leg("yeu_cau_bypass_rule", "yêu cầu bypass rule"),
+                        _leg(
+                            "nguy_trang_trong_boi_canh_co_ve_hop_phap",
+                            "được ngụy trang trong bối cảnh có vẻ hợp pháp",
+                        ),
+                    ],
+                )
+            else:
+                candidate = _candidate(
+                    quote,
+                    block_if=[
+                        _leg(
+                            "yeu_cau_bypass_rule_nguy_trang",
+                            "yêu cầu bypass rule được ngụy trang trong bối cảnh có vẻ hợp pháp",
+                        )
+                    ],
+                )
+            return {request.request_id: {"candidates": [candidate]} for request in requests}
+
+    use(_Granularity())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{quote}\n"}, profile="regulated"))
+
+    [row] = _rows(run_dir).values()
+    assert row["status"] == "needs_decision"
+    assert any("disagrees on condition decomposition" in reason for reason in row["reasons"])
+    assert "condition_disagreement" in {
+        item["reason"] for item in _jsonl(run_dir / "stage_cache" / "extraction_uncertainties.jsonl")
+    }
+
+
+def test_unresolved_conditions_stay_in_review_instead_of_quarantine(tmp_path: Path, use: Any) -> None:
+    quote = 'Thiếu động từ hành động (chỉ nêu quan điểm, không có "cách làm").'
+
+    class _UnresolvedThenNoneOf:
+        identity = {"provider": "fake", "model": "unresolved-then-none-of"}
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract(self, requests: list[Any]) -> dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                candidate = _candidate(
+                    quote,
+                    "allow",
+                    allow_if=[
+                        _leg("thieu_dong_tu_hanh_dong", "Thiếu động từ hành động"),
+                        _leg("chi_neu_quan_diem", "chỉ nêu quan điểm"),
+                        _leg("khong_co_cach_lam", 'không có "cách làm"'),
+                    ],
+                )
+            else:
+                candidate = _candidate(
+                    quote,
+                    "allow",
+                    operators={"allow_if": {"operator": "none_of", "evidence": "Thiếu động từ hành động"}},
+                    allow_if=[_leg("dong_tu_hanh_dong", "động từ hành động")],
+                )
+            return {request.request_id: {"candidates": [candidate]} for request in requests}
+
+    use(_UnresolvedThenNoneOf())
+    run_dir = _generate(_config(tmp_path, {"policy.md": f"## Policy\n\n{quote}\n"}, profile="regulated"))
+
+    [row] = _rows(run_dir).values()
+    assert row["status"] == "needs_decision"
+    assert row["confidence"] == 0.78
+    assert row["rule"]["unresolved_conditions"]["allow_if"] == [
+        "thieu_dong_tu_hanh_dong",
+        "chi_neu_quan_diem",
+        "khong_co_cach_lam",
+    ]
 
 
 def test_written_files_hold_no_model_self_score(tmp_path: Path, use: Any) -> None:
@@ -750,7 +1077,7 @@ def test_invented_quote_is_quarantined_and_a_run_without_usable_rules_stops(tmp_
     run_dir = tmp_path / "out" / "customer-safety-v1"
     [row] = _rows(run_dir).values()
     assert row["status"] == "quarantined"
-    assert extractor.calls == 1
+    assert extractor.calls == 2
 
 
 # Model and configuration

@@ -274,6 +274,28 @@ def test_unspecified_actor_action_object_are_complete_wildcards() -> None:
     assert _completeness(rule, True) == 1.0
 
 
+def test_unresolved_conditions_count_toward_schema_completeness() -> None:
+    rule = validate_rule(
+        {
+            "policy_id": "ALLOW-1",
+            "severity": "low",
+            "testability": "testable",
+            "rule": {
+                "actor": "unspecified",
+                "action": "unspecified",
+                "object": "unspecified",
+            },
+            "unresolved_conditions": {
+                "allow_if": ["thieu_dong_tu_hanh_dong", "chi_neu_quan_diem", "khong_co_cach_lam"]
+            },
+            "provenance": {"document_id": "policy", "source_quote": "Thiếu động từ hành động."},
+        }
+    )
+
+    assert _completeness(rule, True) == 1.0
+    assert _completeness(rule, False) == 0.6667
+
+
 def _unspecified_fields(row: dict[str, Any]) -> dict[str, Any]:
     row["actor"] = "unspecified"
     row["action"] = "unspecified"
