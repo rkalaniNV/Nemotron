@@ -1314,8 +1314,8 @@ def _contrast_section(rows: Sequence[Mapping[str, Any]]) -> list[str]:
         f"{loose} contrast_loose)</summary>",
         "<p>Each allow was written from its block sibling with one fact removed. Reject the rule "
         "in the CSV if an allow still states the removed fact. <code>contrast_loose</code> rows "
-        "and rows without an anchor are listed first. A loose allow dropped the topic lock or "
-        "kept a trigger span: it is not an over-refusal probe. Rows without an anchor were "
+        "and rows without an anchor are listed first. A loose allow dropped the topic or "
+        "setting lock or kept a trigger span: it is not an over-refusal probe. Rows without an anchor were "
         "written without a realized block sibling and need the closest check.</p>",
         "<table><thead><tr><th>Allow case</th><th>Removed</th><th>Block text</th>"
         "<th>Allow text</th><th>Lock</th></tr></thead><tbody>",
