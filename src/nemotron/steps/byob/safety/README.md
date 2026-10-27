@@ -4,11 +4,6 @@ The `safety` benchmark family compiles a customer content-safety policy into a
 private guardrail benchmark, then scores a guard model or a Guardrails
 configuration against that benchmark.
 
-It is a sibling of `mcq` and `bfcl`. It does **not** generate function-calling
-rows, it does **not** read a BFCL oracle pack, and it does **not** produce a
-public test split. Gold labels come from the policy rules Python stores, not
-from a model agreeing with itself.
-
 This file is the operator guide. The normative contract — ingest rules, Policy
 Rule IR, coverage cells, review packet, and eval metrics — lives in
 [`../references/safety-family.md`](../references/safety-family.md).
