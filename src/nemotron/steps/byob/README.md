@@ -95,6 +95,42 @@ For local Python, reviewed HTTP, and MCP assisted authoring, start with the
 [assisted-authoring user guide](references/bfcl-authoring-user-guide.md) and
 [support matrix](references/bfcl-authoring-support-matrix.md).
 
+## Safety / Guardrail Benchmarks
+
+The `safety` family compiles a customer content-safety policy into a private
+guardrail benchmark and scores a guard model or a Guardrails configuration
+against it. It does not generate function-calling rows and it does not read an
+oracle pack. If you want to *run* the family, start from
+[safety/README.md](safety/README.md). The normative contract is
+[references/safety-family.md](references/safety-family.md).
+
+The flow is:
+
+```text
+policy files (Markdown / text / DOCX / PDF / YAML / JSON)
+  -> byob/safety stage=prepare     local ingest + privacy; no model
+  -> byob/safety stage=generate    extract, cover, write the review packet (exit 3)
+  -> review.html + review_decisions.csv
+  -> approve_safety_review         sign and publish
+  -> byob/safety stage=eval        path1 guard + path2 Guardrails metrics
+```
+
+Sixteen internal stages run inside those commands. Operators do not invoke them
+one by one; see [safety/README.md](safety/README.md#internal-stages) for the
+map and a one-line description of each stage.
+
+- Copy [safety/config/default.yaml](safety/config/default.yaml), point `input_dir`
+  at the policy folder, and keep `family: safety`. Relative paths resolve from
+  `src/nemotron/steps/byob`, so use absolute paths for customer folders.
+- `stage=prepare` never calls a model. `stage=generate` exits 3 when the review
+  packet is ready; that is not a failure. Sign with
+  `python -m nemotron.steps.byob.scripts.approve_safety_review --config <CONFIG>`.
+- `stage=eval` scores a published `benchmark.jsonl`. It does not publish, and it
+  does not use the Gold or Silver exit codes.
+- `stage=translate` is not implemented for safety. The hook exits 1 so it cannot
+  be mistaken for a Silver publication.
+- Do not put API keys in the YAML. Name an environment variable with `api_key_env`.
+
 ## CLI And Config Knobs
 
 ### MCQ
@@ -153,6 +189,30 @@ refuse it. A resumed generation run recursively verifies
 the predecessor checkpoint and revalidates the current pack, endpoint, config,
 task order, artifacts, and pipeline identity before continuing.
 
+### Safety
+
+Start from `safety/config/tiny.yaml` for a prepare-only smoke run, or copy
+`safety/config/default.yaml` for a customer run. Safety supports:
+
+- `stage`: `prepare`, `generate`, `eval`, or `all`. `translate` exits 1.
+- `input_dir`: policy documents or pre-authored Policy Rule IR.
+- `assurance.profile`: `standard`, `regulated`, or `high_assurance`.
+- `generation_model_config`: extraction / paraphrase model. Credentials stay in
+  the environment named by `api_key_env`.
+- `evaluation.path1` / `evaluation.path2`: live or scripted scoring of a
+  published benchmark.
+- `skip_until` is not a resume API for safety yet. Rerun `generate`; cached
+  windows under `stage_cache/` already skip unchanged model calls.
+
+Example shape:
+
+```bash
+uv run python -m nemotron.steps.byob.scripts.run \
+  --config src/nemotron/steps/byob/safety/config/default.yaml \
+  --family safety \
+  --stage prepare
+```
+
 ## Change Points
 
 - Add new benchmark families under `runtime/benchmark_families/<family>/`.
@@ -174,13 +234,16 @@ task order, artifacts, and pipeline identity before continuing.
 - Keep semantic dedup as a two-step flow: compute embeddings first, then run KMeans, pairwise similarity, and duplicate identification.
 - For MCQ, resume with `--skip-until` only when the expected cached parquet for the previous stage already exists. BFCL resume additionally requires an intact verified checkpoint chain.
 - Use deterministic seeds for sampling and distractor shuffling when comparing benchmark runs.
+- Every safety config must set `family: safety`. Without it the shared dispatcher defaults to `mcq`.
 
 ## Validate
 
 - Run `python -m nemotron.steps.byob.scripts.validate`.
 - Run `python -m nemotron.steps.byob.scripts.run --list-families`.
-- Confirm final generation outputs `benchmark_raw.parquet` and `benchmark.parquet`.
-- Confirm translated outputs preserve row count unless `remove_low_quality` is intentionally enabled.
+- Confirm the listed families include `bfcl`, `mcq`, and `safety`.
+- Confirm final MCQ generation outputs `benchmark_raw.parquet` and `benchmark.parquet`.
+- Confirm translated MCQ outputs preserve row count unless `remove_low_quality` is intentionally enabled.
+- Confirm a published safety run writes `benchmark.jsonl` and `run_manifest.json` under `output_dir/expt_name/`.
 
 ## Further Reading
 
@@ -189,4 +252,6 @@ task order, artifacts, and pipeline identity before continuing.
 - [references/bfcl-oracle-pack.md](references/bfcl-oracle-pack.md) for the BFCL oracle-pack contract
 - [references/new-family-checklist.md](references/new-family-checklist.md) for GSM8K-style or non-MCQ extensions
 - [references/quality-and-filtering.md](references/quality-and-filtering.md) for quality gates
+- [safety/README.md](safety/README.md) for the safety-family operator guide
+- [references/safety-family.md](references/safety-family.md) for the safety-family contract
 - [patterns/index.yaml](patterns/index.yaml) for BYOB-local routing hints
