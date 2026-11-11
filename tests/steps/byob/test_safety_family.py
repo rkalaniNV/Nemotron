@@ -486,6 +486,26 @@ def test_approve_script_waits_for_other_roles_and_can_sign_only(tmp_path: Path) 
     assert "invalid choice" in wrong_role.stderr
 
 
+def test_signed_current_packet_publishes_without_re_extracting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import nemotron.steps.byob.runtime.benchmark_families.safety.pipeline as pipeline
+
+    config, run_dir, _, _ = _prepared(tmp_path)
+    _expect(config, "generate", RunStatus.REVIEW_REQUIRED)
+    packet = run_dir / "publication_review_packet.yaml"
+    signed = _sha256(packet)
+    sign_safety_packet(config, approved_by="Lan")
+
+    def _must_not_rebuild(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("signed packet must not re-run rule extraction")
+
+    monkeypatch.setattr(pipeline, "run_rule_stages", _must_not_rebuild)
+    published = _expect(config, "generate", RunStatus.GOLD_COMPLETED)
+
+    assert published.cli_exit_code == 0
+    assert _sha256(packet) == signed
+    assert _record(run_dir)["publication_commit"] is True
+
+
 def test_signed_complete_benchmark_publishes_gold_and_a_later_edit_is_refused(tmp_path: Path) -> None:
     config, run_dir, _, _ = _prepared(tmp_path)
     _expect(config, "generate", RunStatus.REVIEW_REQUIRED)

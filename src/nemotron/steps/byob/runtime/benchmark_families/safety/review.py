@@ -211,9 +211,7 @@ def assemble_review(
     card_ids = [card["card_id"] for card in cards]
     if len(card_ids) != len(set(card_ids)):
         raise ValueError("review cards are not unique")
-    unknown_decisions = sorted(set(decisions) - set(card_ids))
-    if unknown_decisions:
-        raise ValueError(f"review decisions name unknown cards: {', '.join(unknown_decisions)}")
+    decisions = _decisions_for_current_cards(decisions, card_ids)
     _check_decision_metadata(cards, decision_metadata)
     csv_text = _csv_text(cards)
     blocking = [dict(gap) for gap in gaps if isinstance(gap, Mapping) and gap.get("blocks_gold") is True]
@@ -977,6 +975,26 @@ def _recorded_decision(card_id: str, default: str, decisions: Mapping[str, tuple
     if decision not in _REVIEWER_DECISIONS:
         raise ValueError(f"{card_id} has an unknown decision {decision!r}.")
     return decision, note
+
+
+def _decisions_for_current_cards(
+    decisions: Mapping[str, tuple[str, str]], card_ids: Sequence[str]
+) -> dict[str, tuple[str, str]]:
+    """Keep reviewer rows. Drop leftover auto-kept rows whose rule id changed."""
+    current = set(card_ids)
+    kept: dict[str, tuple[str, str]] = {}
+    unknown: list[str] = []
+    for card_id, value in decisions.items():
+        if card_id in current:
+            kept[card_id] = value
+            continue
+        decision, _note = value
+        if decision == "pre_accepted":
+            continue
+        unknown.append(card_id)
+    if unknown:
+        raise ValueError(f"review decisions name unknown cards: {', '.join(sorted(unknown))}")
+    return kept
 
 
 def _check_decision_metadata(

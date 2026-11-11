@@ -24,6 +24,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yaml
@@ -106,10 +107,12 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.publish import (
 from nemotron.steps.byob.runtime.benchmark_families.safety.review import (
     DECISIONS_NAME,
     REVIEW_PAGE,
+    card_is_pending,
     content_matches,
     install_review,
     load_review,
     pending_detail,
+    withheld_policies,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.rules import POLICY_RULES_FILE, run_rule_stages
 from nemotron.steps.byob.runtime.benchmark_families.safety.scenarios import (
@@ -424,6 +427,11 @@ def _publication_blocker(
                     run_dir,
                     f"{mismatched} changed after the review packet was signed.",
                 )
+            # Paraphrase is not deterministic. Re-extracting after a matching
+            # signature would rewrite the packet and drop the signoff.
+            return _publish_signed_packet(
+                config, digest, fingerprint, record, signoff, packet_sha256
+            )
     counts = _rule_stages(config, digest, fingerprint)
     coverage = _coverage_stage(config, digest, fingerprint)
     record["coverage"] = coverage
@@ -511,6 +519,64 @@ def _publication_blocker(
         install_review(run_dir, build)
         clear_published(run_dir)
         record["review"] = _review_record(build)
+    return _publish_reviewed(
+        config,
+        digest,
+        fingerprint,
+        record,
+        build,
+        counts,
+        signoff,
+    )
+
+
+def _publish_signed_packet(
+    config: ResolvedConfig,
+    digest: str,
+    fingerprint: str,
+    record: dict[str, Any],
+    signoff: dict[str, Any],
+    packet_sha256: str,
+) -> tuple[RunStatus, str, dict[str, int] | None, dict[str, Any] | None]:
+    """Compile the signed packet without re-running extraction or paraphrase."""
+    run_dir = config.run_dir
+    counts = record.get("rules") if isinstance(record.get("rules"), dict) else None
+    packet = _read_packet(run_dir / PACKET_NAME, run_dir)
+    cards = packet.get("cards") if isinstance(packet, Mapping) else None
+    if packet is None or not isinstance(cards, list):
+        return (
+            RunStatus.REVIEW_REQUIRED,
+            f"{SIGNOFF_NAME} does not match the current review packet, so it was not accepted. "
+            "Sign the current packet again.",
+            counts,
+            None,
+        )
+    pending = tuple(
+        str(card["card_id"])
+        for card in cards
+        if isinstance(card, Mapping) and card.get("card_id") and card_is_pending(card)
+    )
+    build = SimpleNamespace(
+        packet=packet,
+        digest=packet_sha256,
+        pending=pending,
+        withheld_policies=withheld_policies(cards),
+    )
+    record["review"] = _review_record(build)
+    return _publish_reviewed(config, digest, fingerprint, record, build, counts, signoff)
+
+
+def _publish_reviewed(
+    config: ResolvedConfig,
+    digest: str,
+    fingerprint: str,
+    record: dict[str, Any],
+    build: Any,
+    counts: dict[str, int] | None,
+    signoff: dict[str, Any] | None,
+) -> tuple[RunStatus, str, dict[str, int] | None, dict[str, Any] | None]:
+    """Publish when the review packet is current, signed, and has no pending cards."""
+    run_dir = config.run_dir
     if signoff is None and config.mode != "preview":
         return RunStatus.REVIEW_REQUIRED, "", counts, None
     if signoff is not None and not _signs_packet(signoff, digest, fingerprint, build.digest):
@@ -527,6 +593,7 @@ def _publication_blocker(
             return RunStatus.REVIEW_REQUIRED, gaps, counts, None
     if build.pending:
         return RunStatus.REVIEW_REQUIRED, pending_detail(build.pending), counts, None
+    clear_published(run_dir)
     stage_cache = run_dir / "stage_cache"
     try:
         cases = load_jsonl_objects(

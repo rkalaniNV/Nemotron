@@ -211,6 +211,10 @@ def test_example_cap_is_configurable_and_unknown_decision_cards_are_refused() ->
     else:
         raise AssertionError("a stale decision card was accepted")
 
+    rebuilt = assemble_review(**values, decisions={"rule:REMOVED": ("pre_accepted", "")})
+    assert "rule:REMOVED" not in rebuilt.csv_text
+    assert "rule:OK-1" in rebuilt.csv_text
+
 
 def test_publication_tier_follows_coverage_review_and_preview() -> None:
     complete = dict(
