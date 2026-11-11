@@ -569,6 +569,40 @@ def test_system_prompt_can_be_omitted_for_native_templates() -> None:
     assert adapter.public_identity["system_prompt_sha256"] is None
 
 
+def test_openai_compatible_adapter_reads_user_safety_json() -> None:
+    adapter = OpenAICompatibleAdapter(
+        {
+            "endpoint": "https://guard.example/v1/chat/completions",
+            "model": "customer-guard",
+            "evaluation_mode": "native_guard",
+            "system_prompt": None,
+            "decision_map": {"safe": "allow", "unsafe": "block"},
+            "retry_backoff_seconds": 0,
+        },
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"User Safety": "unsafe", "Safety Categories": "S1"}',
+                            }
+                        }
+                    ]
+                },
+            )
+        ),
+    )
+    try:
+        reply = adapter.decide({"messages": [{"role": "user", "content": "hello"}], "targets": ["user_input"]})
+    finally:
+        adapter.close()
+
+    assert reply["parse_status"] == "ok"
+    assert reply["decision"] == "block"
+
+
 def test_fixed_system_prompt_mode_records_only_prompt_digest() -> None:
     prompt = "Apply the customer policy consistently."
 

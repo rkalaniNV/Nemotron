@@ -24,6 +24,14 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS
 
 _ACTIONS = frozenset(ACTIONS)
 _RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+# Content-safety guards often name the user-turn verdict instead of "decision".
+_SAFETY_DECISION_KEYS = (
+    "decision",
+    "User Safety",
+    "user_safety",
+    "Prompt harm",
+    "prompt_harm",
+)
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _MAX_RETRY_AFTER = 60.0
 _RESERVED_OPENAI_FIELDS = frozenset({"model", "messages"})
@@ -378,7 +386,7 @@ def _parse_decision(value: Any, mapping: Mapping[str, str], *, first_line: bool)
         return direct
     parsed = _parse_json_value(text)
     if isinstance(parsed, Mapping):
-        nested = parsed.get("decision")
+        nested = _safety_decision_field(parsed)
         if nested is None:
             return None
         return _parse_decision(nested, mapping, first_line=False)
@@ -393,12 +401,22 @@ def _parse_decision(value: Any, mapping: Mapping[str, str], *, first_line: bool)
     return mapping.get(_fold(text))
 
 
+def _safety_decision_field(parsed: Mapping[str, Any]) -> Any:
+    """Pick the user-turn verdict from a guard JSON object."""
+    folded = {_fold(key): value for key, value in parsed.items() if isinstance(key, str)}
+    for key in _SAFETY_DECISION_KEYS:
+        if _fold(key) in folded:
+            return folded[_fold(key)]
+    return None
+
+
 def _unwrap_value(value: Any) -> Any:
     if isinstance(value, list) and value:
         value = value[-1]
     if isinstance(value, Mapping):
-        if "decision" in value:
-            return value.get("decision")
+        nested = _safety_decision_field(value)
+        if nested is not None:
+            return nested
         if "content" in value:
             return value.get("content")
     return value
