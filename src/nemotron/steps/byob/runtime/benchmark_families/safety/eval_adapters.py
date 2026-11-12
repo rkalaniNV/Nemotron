@@ -18,6 +18,7 @@ import httpx
 
 from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import (
     PATH1_EVALUATION_MODES,
+    PATH2_SCORE_TARGETS,
     EvalInputError,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS
@@ -229,6 +230,12 @@ class NemoGuardrailsAdapter(EndpointAdapter):
         self.options = dict(options)
         self.decision_path = _path_setting(config, "decision_path", "output_data.decision")
         self.rails_path = _path_setting(config, "rails_path", "log.activated_rails")
+        score_target = config.get("score_target") or "request_policy"
+        if score_target not in PATH2_SCORE_TARGETS:
+            raise EvalInputError(
+                "evaluation.path2.score_target must be one of " + ", ".join(sorted(PATH2_SCORE_TARGETS)) + "."
+            )
+        self.score_target = str(score_target)
 
     @property
     def public_identity(self) -> dict[str, Any]:
@@ -238,6 +245,7 @@ class NemoGuardrailsAdapter(EndpointAdapter):
             "model": self.model,
             "api_format": self.api_format,
             "evaluation_mode": self.evaluation_mode,
+            "score_target": self.score_target,
         }
 
     def decide(self, request: Mapping[str, Any]) -> Mapping[str, Any]:

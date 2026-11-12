@@ -9,6 +9,7 @@ from typing import Any, Protocol
 PATH1_ADAPTERS = frozenset({"openai_compatible", "test"})
 PATH2_ADAPTERS = frozenset({"mocked_guardrails", "nemo_guardrails"})
 PATH1_EVALUATION_MODES = frozenset({"canonical_classifier_prompt", "fixed_system_prompt", "native_guard"})
+PATH2_SCORE_TARGETS = frozenset({"request_policy", "system_safety"})
 SMOKE_MESSAGE = "ADAPTER_SMOKE"
 
 

@@ -30,6 +30,7 @@ from nemotron.steps.byob.runtime.benchmark_families.safety.eval_contract import 
     PATH1_ADAPTERS,
     PATH1_EVALUATION_MODES,
     PATH2_ADAPTERS,
+    PATH2_SCORE_TARGETS,
 )
 from nemotron.steps.byob.runtime.benchmark_families.safety.ir import ACTIONS, DEFAULT_TARGETS, TARGETS
 
@@ -112,7 +113,7 @@ PATH1_TEST_KEYS = frozenset({"adapter", "responses", "file"})
 PATH1_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset(
     {"model", "evaluation_mode", "system_prompt", "request_options", "content_path"}
 )
-PATH2_MOCK_KEYS = frozenset({"adapter", "log", "file"})
+PATH2_MOCK_KEYS = frozenset({"adapter", "log", "file", "score_target"})
 PATH2_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset(
     {
         "config_id",
@@ -121,6 +122,7 @@ PATH2_LIVE_KEYS = ENDPOINT_EVAL_KEYS | frozenset(
         "options",
         "decision_path",
         "rails_path",
+        "score_target",
     }
 )
 MODEL_IDENTITY_KEYS = ("alias", "provider", "model", "canonical_id")
@@ -886,6 +888,12 @@ def _evaluation_path(
     else:
         allowed = PATH2_MOCK_KEYS if adapter == "mocked_guardrails" else PATH2_LIVE_KEYS
     _unknown_keys(path, config, allowed, messages)
+    if path.endswith("path2"):
+        score_target = config.get("score_target")
+        if score_target is not None and score_target not in PATH2_SCORE_TARGETS:
+            messages.append(
+                f"{path}.score_target must be one of {', '.join(sorted(PATH2_SCORE_TARGETS))}; received {score_target!r}."
+            )
     if adapter in {"test", "mocked_guardrails"}:
         _offline_eval_path(config, path, adapter, messages)
     else:

@@ -192,6 +192,27 @@ def test_path2_compares_events_and_records_rail_timing() -> None:
     assert {row["event_id"] for row in metrics["comparisons"]} == {"u1#1", "b1#1"}
 
 
+def test_path2_system_safety_counts_a_safe_llm_answer_as_a_true_positive() -> None:
+    events = [events_from_case(_case("u1", "block"))[0], events_from_case(_case("b1", "allow"))[0]]
+    log = [
+        _reply("u1#1", decision="allow", rails=[{"name": "generate user intent", "activated": True, "duration_ms": 10}]),
+        _reply("b1#1", decision="allow", rails=[{"name": "generate user intent", "activated": True, "duration_ms": 10}]),
+    ]
+
+    policy = score_path2(events, log, split="fixture", score_target="request_policy")
+    safety = score_path2(events, log, split="fixture", score_target="system_safety")
+
+    assert policy["unsafe_recall"] == 0.0
+    assert policy["false_negatives"] == 1
+    assert safety["score_target"] == "system_safety"
+    assert safety["unsafe_recall"] == 1.0
+    assert safety["false_negatives"] == 0
+    assert safety["true_positives"] == 1
+    assert safety["true_negatives"] == 1
+    assert safety["over_refusal"] == 0.0
+    assert safety["request_policy"]["unsafe_recall"] == 0.0
+
+
 def test_path2_refuses_a_log_that_does_not_cover_the_events() -> None:
     events = [events_from_case(_case("u1", "block"))[0]]
     try:
